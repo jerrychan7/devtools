@@ -15,6 +15,7 @@ const RECORDED = [
   'mousedown',
   'mouseup',
   'click',
+  'auxclick',
   'dblclick',
   'contextmenu',
   'wheel',
@@ -144,6 +145,64 @@ test('typing into a field', async () => {
   });
   assert.equal(result.value, 'h');
   assert.equal(result.focused, 'field');
+});
+
+test('a keyDown with text (Puppeteer style) fires keypress and types', async () => {
+  const result = await same(async side => {
+    await click(side, 100, 85);
+    await side.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'h',
+      code: 'KeyH',
+      text: 'h',
+      windowsVirtualKeyCode: 72,
+    });
+    await side.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'h', code: 'KeyH', windowsVirtualKeyCode: 72 });
+  });
+  assert.ok(result.events.includes('keypress:field'));
+  assert.equal(result.value, 'h');
+});
+
+test('a middle click fires auxclick', async () => {
+  const result = await same(async side => {
+    await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 50, y: 30 });
+    await side.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: 50,
+      y: 30,
+      button: 'middle',
+      buttons: 4,
+      clickCount: 1,
+    });
+    await side.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: 50,
+      y: 30,
+      button: 'middle',
+      buttons: 0,
+      clickCount: 1,
+    });
+  });
+  assert.ok(result.events.includes('auxclick:btn'));
+});
+
+// Chrome sends the off-page release to the document (and clicks it); ours only has elements to
+// dispatch to, so it is checked alone: the press ends on the pressed element, without a click.
+test('a release outside the page still ends the press', async () => {
+  const result = await run(t.ours, async side => {
+    await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 50, y: 30 });
+    await side.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 50, y: 30, button: 'left', clickCount: 1 });
+    await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: -10, y: -10, button: 'left', buttons: 1 });
+    await side.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: -10,
+      y: -10,
+      button: 'left',
+      clickCount: 1,
+    });
+  });
+  assert.ok(result.events.includes('pointerup:btn'));
+  assert.ok(!result.events.includes('click:btn'));
 });
 
 test('Enter submits the form', async () => {

@@ -87,3 +87,39 @@ test('inspect mode swallows the click and requests the clicked node', async () =
   assert.equal(await clicks(), '1');
   assert.equal((await t.ours.events('Overlay.inspectNodeRequested')).length, 1);
 });
+
+test('highlightNode shows the info label only when showInfo is true', async () => {
+  const { root } = await t.ours.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await t.ours.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.box' });
+  await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: {} });
+  assert.equal((await highlightBoxes()).length, 4);
+  await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: { showInfo: true } });
+  assert.equal((await highlightBoxes()).length, 5);
+  await t.ours.send('Overlay.hideHighlight');
+});
+
+test('inspect mode requests the hovered node and swallows touches', async () => {
+  const { root } = await t.ours.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await t.ours.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#app' });
+  await t.ours.clear();
+  await t.ours.send('Overlay.setInspectMode', { mode: 'searchForNode', highlightConfig: {} });
+  await t.page.hover('#app');
+  let requested: unknown[] = [];
+  for (let i = 0; i < 20 && !requested.length; i++) {
+    await new Promise(r => setTimeout(r, 50));
+    requested = await t.ours.events('Overlay.nodeHighlightRequested');
+  }
+  assert.deepEqual(requested, [{ nodeId }]);
+  const touch = () =>
+    t.page.evaluate(() =>
+      ['touchstart', 'touchmove', 'touchend'].map(type => {
+        const app = document.getElementById('app');
+        const event = new TouchEvent(type, { bubbles: true, cancelable: true });
+        app?.dispatchEvent(event);
+        return event.defaultPrevented;
+      })
+    );
+  assert.deepEqual(await touch(), [true, true, true]);
+  await t.ours.send('Overlay.setInspectMode', { mode: 'none' });
+  assert.deepEqual(await touch(), [false, false, false]);
+});
