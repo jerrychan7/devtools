@@ -12,6 +12,9 @@
 //   --latest     build the tip of origin/main instead of REVISION, and pin it on success
 //   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout)
 //   --copy-only  also skip the build: only copy the last build's output to dist/
+//
+// locales/<locale>.json translates anywhere_app's own UI strings (keys of its UIStrings),
+// which upstream's translations do not have; other locales show them in English.
 
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import fs from 'node:fs';
@@ -105,6 +108,8 @@ const inModule = (file: string) => {
 const LOCALES = 'core/i18n/locales/';
 /** UI strings anywhere_app borrows from modules it does not include. */
 const BORROWED_STRINGS = ['panels/browser_debugger/browser_debugger-meta.ts'];
+/** The file anywhere_app's own UI strings are registered under. */
+const OWN_STRINGS = 'entrypoints/anywhere_app/anywhere_app.ts';
 const keep = (file: string) => {
   if (file.endsWith('.js')) return reachable.has(file);
   if (file.endsWith('.html')) return file === 'anywhere_app.html';
@@ -134,6 +139,13 @@ for (const name of fs.readdirSync(path.join(gen, LOCALES)).filter(f => f.endsWit
       return inModule(file) || BORROWED_STRINGS.includes(file);
     })
   );
+  // anywhere_app's own strings, which upstream does not translate (locales/<locale>.json).
+  const own = path.join(pkg, 'locales', name);
+  if (fs.existsSync(own)) {
+    for (const [key, message] of Object.entries(JSON.parse(fs.readFileSync(own, 'utf8')))) {
+      used[`${OWN_STRINGS} | ${key}`] = { message };
+    }
+  }
   const target = BUNDLED_LOCALES.includes(name.slice(0, -'.json'.length)) ? dist : localesDist;
   fs.mkdirSync(path.join(target, LOCALES), { recursive: true });
   fs.writeFileSync(path.join(target, LOCALES, name), JSON.stringify(used));

@@ -132,6 +132,7 @@ pnpm typecheck                                # builds, then checks packages, bu
 - `REVISION`: the pinned upstream commit.
 - `src/anywhere_app/`: our entrypoint, copied into `front_end/entrypoints/` before each build.
 - `patches/*.patch`: changes to upstream files, applied in order. Keep them as few and as small as possible.
+- `locales/<locale>.json`: translations of anywhere_app's own UI strings (keys of its `UIStrings`), which upstream's translations do not have; merged into that locale's file by the build. Other locales show them in English.
 - `scripts/build.ts`: the build.
 
 ```bash

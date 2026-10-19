@@ -132,6 +132,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 - `REVISION`：钉住的上游提交。
 - `src/anywhere_app/`：我们自己的入口，每次构建前复制到 `front_end/entrypoints/`。
 - `patches/*.patch`：对上游文件的修改，按顺序打上。数量和改动都尽量少。
+- `locales/<语言>.json`：`anywhere_app` 自己的界面文字（其 `UIStrings` 的键）的翻译。上游的翻译里没有这些文字，构建时合并进对应语言的文件；其他语言显示英文。
 - `scripts/build.ts`：构建脚本。
 
 ```bash
