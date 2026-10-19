@@ -4,5 +4,6 @@
     "rootDir": "src",
     "declarationDir": "dist/types"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/sw.ts"]
 }

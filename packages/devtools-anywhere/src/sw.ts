@@ -13,38 +13,20 @@
 // A Service Worker needs a secure context (HTTPS or localhost), and its scope must cover
 // the pages: serve this file from the site root or with `Service-Worker-Allowed: /`.
 
-// The DOM typings in this package do not include the Service Worker global scope: just
-// what this file uses.
-interface ExtendableEvent extends Event {
-  waitUntil(promise: Promise<unknown>): void;
-}
-interface FetchEvent extends ExtendableEvent {
-  request: Request;
-  clientId: string;
-  respondWith(response: Promise<Response>): void;
-}
-interface ServiceWorkerScope {
-  location: Location;
-  skipWaiting(): Promise<void>;
-  clients: {
-    claim(): Promise<void>;
-    get(id: string): Promise<{ postMessage(message: unknown): void } | undefined>;
-  };
-  addEventListener(type: 'fetch', listener: (event: FetchEvent) => void): void;
-  addEventListener(type: 'install' | 'activate', listener: (event: ExtendableEvent) => void): void;
-}
-const scope = globalThis as unknown as ServiceWorkerScope;
+// Type-checked with the WebWorker library (tsconfig.sw.json), separately from the DOM code.
+declare const self: ServiceWorkerGlobalScope;
+export {};
 
-const probe = new URL(scope.location.href).searchParams.get('probe');
+const probe = new URL(self.location.href).searchParams.get('probe');
 const SNIFF_LIMIT = 64 * 1024;
 /** Message type the probe listens for; keep in sync with cdp-server's probe. */
 const DETAILS = 'devtools-anywhere:response';
 const DESTINATIONS = new Set(['style', 'script', 'image', 'font']);
 
-scope.addEventListener('install', () => scope.skipWaiting());
-scope.addEventListener('activate', event => event.waitUntil(scope.clients.claim()));
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 
-scope.addEventListener('fetch', event => {
+self.addEventListener('fetch', event => {
   const request = event.request;
   if (!probe) return;
   if (request.mode === 'navigate') {
@@ -54,7 +36,7 @@ scope.addEventListener('fetch', event => {
     DESTINATIONS.has(request.destination) &&
     request.method === 'GET' &&
     !request.headers.has('range') &&
-    new URL(request.url).origin === scope.location.origin
+    new URL(request.url).origin === self.location.origin
   ) {
     event.respondWith(report(request, event.clientId));
   }
@@ -69,7 +51,7 @@ const headersToObject = (headers: Headers) => Object.fromEntries(headers.entries
  */
 async function report(request: Request, clientId: string): Promise<Response> {
   const response = await fetch(request);
-  const client = await scope.clients.get(clientId);
+  const client = await self.clients.get(clientId);
   client?.postMessage({
     type: DETAILS,
     url: request.url,
