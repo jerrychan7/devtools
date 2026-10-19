@@ -1,0 +1,14 @@
+diff --git a/front_end/ui/legacy/TabbedPane.ts b/front_end/ui/legacy/TabbedPane.ts
+index bd25a85692..ffb7ed3f01 100644
+--- a/front_end/ui/legacy/TabbedPane.ts
++++ b/front_end/ui/legacy/TabbedPane.ts
+@@ -1887,6 +1887,9 @@ export class TabbedPaneElement extends WidgetElement<TabbedPane> {
+       const view = Widget.getOrCreateWidget(child as HTMLElement);
+       view.setHideOnDetach();
+       if (widget.selectedTabId !== id) {
++        // Hide through the widget too: one that is still marked visible ignores show() when its
++        // tab is selected later, and its content stays hidden.
++        view.hideWidget();
+         child.classList.add('hidden');
+       }
+       tabs.push({
