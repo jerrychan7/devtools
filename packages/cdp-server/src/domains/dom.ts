@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol'
 import { FRAME_ID, type Context } from '../core/context'
-import { PseudoElement, truncateNodeValue } from '../core/nodes'
+import { FORCE_ATTRIBUTE, PseudoElement, truncateNodeValue, visibleAttributes } from '../core/nodes'
 import { CdpError } from '../core/server'
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string }
@@ -174,6 +174,7 @@ export function registerDom(ctx: Context) {
         })
       } else if (record.type === 'attributes' && targetId !== undefined && target instanceof Element) {
         const name = record.attributeName!
+        if (name === FORCE_ATTRIBUTE) continue
         const value = target.getAttribute(name)
         if (value === null) server.emit('DOM.attributeRemoved', { nodeId: targetId, name })
         else server.emit('DOM.attributeModified', { nodeId: targetId, name, value })
@@ -256,7 +257,7 @@ export function registerDom(ctx: Context) {
     },
 
     getAttributes: (params: Protocol.DOM.GetAttributesRequest): Protocol.DOM.GetAttributesResponse => ({
-      attributes: Array.from(element(params).attributes).flatMap(a => [a.name, a.value]),
+      attributes: visibleAttributes(element(params)),
     }),
 
     setAttributeValue(params: Protocol.DOM.SetAttributeValueRequest) {
@@ -282,7 +283,13 @@ export function registerDom(ctx: Context) {
 
     getOuterHTML(params: Protocol.DOM.GetOuterHTMLRequest): Protocol.DOM.GetOuterHTMLResponse {
       const node = resolveNode(ctx, params)
-      if (node instanceof Element) return { outerHTML: node.outerHTML }
+      if (node instanceof Element) {
+        if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`)) return { outerHTML: node.outerHTML }
+        // Leave out forced pseudo-class markers.
+        const copy = node.cloneNode(true) as Element
+        for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))]) el.removeAttribute(FORCE_ATTRIBUTE)
+        return { outerHTML: copy.outerHTML }
+      }
       if (node instanceof Document) return { outerHTML: node.documentElement.outerHTML }
       return { outerHTML: new XMLSerializer().serializeToString(node) }
     },

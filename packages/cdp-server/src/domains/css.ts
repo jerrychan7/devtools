@@ -4,6 +4,7 @@ import { OWN_ATTRIBUTE, PSEUDO_TYPES, PseudoElement, type PseudoType } from '../
 import { compareSpecificity, specificity, splitTopLevel } from '../core/selectors'
 import { CdpError } from '../core/server'
 import { resolveNode } from './dom'
+import { ForcedPseudoClasses } from './forced-pseudo'
 
 type CSSStyle = Protocol.CSS.CSSStyle
 type CSSProperty = Protocol.CSS.CSSProperty
@@ -112,6 +113,9 @@ class SheetRegistry {
   all(): CSSStyleSheet[] {
     const result: CSSStyleSheet[] = []
     const visit = (sheet: CSSStyleSheet) => {
+      // devtools-anywhere's own sheets (e.g. forced pseudo-class companions) are not the page's.
+      const owner = sheet.ownerNode
+      if (owner instanceof Element && owner.hasAttribute(OWN_ATTRIBUTE) && sheet !== this.inspectorSheet) return
       result.push(sheet)
       for (const rule of this.rulesOf(sheet)) if (rule instanceof CSSImportRule && rule.styleSheet) visit(rule.styleSheet)
     }
@@ -247,6 +251,16 @@ class SheetRegistry {
 export function registerCss(ctx: Context) {
   const { server, nodes } = ctx
   const sheets = new SheetRegistry()
+  const forced = new ForcedPseudoClasses(
+    () => sheets.all(),
+    sheet => sheets.rulesOf(sheet)
+  )
+
+  /** After the page's styles changed: keep forced states and pseudo-elements in sync. */
+  function stylesChanged() {
+    if (forced.isActive) forced.rebuild()
+    ctx.refreshPseudoElements?.()
+  }
   let enabled = false
   let known = new Set<CSSStyleSheet>()
   let observer: MutationObserver | null = null
@@ -265,6 +279,7 @@ export function registerCss(ctx: Context) {
     for (const sheet of current) if (!known.has(sheet)) server.emit('CSS.styleSheetAdded', { header: header(sheet) })
     for (const sheet of known) if (!current.has(sheet)) server.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) })
     known = current
+    if (forced.isActive) forced.rebuild()
     return loadCopies()
   }
 
@@ -322,7 +337,7 @@ export function registerCss(ctx: Context) {
             const split = splitPseudoElement(selector)
             if (split.pseudo !== pseudo) return -1
             try {
-              return el.matches(split.host) ? index : -1
+              return el.matches(split.host) || el.matches(forced.rewrite(split.host)) ? index : -1
             } catch {
               return -1 // Unsupported selector.
             }
@@ -391,7 +406,7 @@ export function registerCss(ctx: Context) {
       observer = new MutationObserver(records => {
         const touchesSheets = records.some(r =>
           [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(
-            n => n instanceof HTMLStyleElement || n instanceof HTMLLinkElement
+            n => (n instanceof HTMLStyleElement || n instanceof HTMLLinkElement) && !n.hasAttribute(OWN_ATTRIBUTE)
           )
         )
         if (touchesSheets) syncSheets()
@@ -403,6 +418,7 @@ export function registerCss(ctx: Context) {
 
     disable() {
       enabled = false
+      forced.clear()
       observer?.disconnect()
       document.removeEventListener('load', syncSheets, true)
     },
@@ -464,12 +480,13 @@ export function registerCss(ctx: Context) {
       assertEditable(sheets.get(params.styleSheetId))
       if (!(owner instanceof HTMLStyleElement)) throw new CdpError('Style sheet is not editable')
       owner.textContent = params.text
+      stylesChanged()
       return {}
     },
 
     setStyleTexts(params: Protocol.CSS.SetStyleTextsRequest): Protocol.CSS.SetStyleTextsResponse {
       const styles = params.edits.map(applyEdit)
-      ctx.refreshPseudoElements?.()
+      stylesChanged()
       return { styles }
     },
 
@@ -478,7 +495,7 @@ export function registerCss(ctx: Context) {
       assertEditable(sheet)
       const rule = sheets.findRule(sheet, params.range.startLine)
       rule.selectorText = params.selector
-      ctx.refreshPseudoElements?.()
+      stylesChanged()
       return { selectorList: selectorList(sheet, rule) }
     },
 
@@ -499,7 +516,7 @@ export function registerCss(ctx: Context) {
       assertEditable(sheet)
       const index = sheet.insertRule(params.ruleText, sheet.cssRules.length)
       const rule = sheet.cssRules[index] as CSSStyleRule
-      ctx.refreshPseudoElements?.()
+      stylesChanged()
       return { rule: cssRule(sheet, { rule, media: [] }) }
     },
 
@@ -513,7 +530,10 @@ export function registerCss(ctx: Context) {
 
     getPlatformFontsForNode: (): Protocol.CSS.GetPlatformFontsForNodeResponse => ({ fonts: [] }),
     getMediaQueries: (): Protocol.CSS.GetMediaQueriesResponse => ({ medias: [] }),
-    forcePseudoState: () => {},
+    forcePseudoState(params: Protocol.CSS.ForcePseudoStateRequest) {
+      forced.set(element(params.nodeId), params.forcedPseudoClasses)
+      ctx.refreshPseudoElements?.()
+    },
     trackComputedStyleUpdates: () => {},
     takeComputedStyleUpdates: (): Protocol.CSS.TakeComputedStyleUpdatesResponse => ({ nodeIds: [] }),
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {

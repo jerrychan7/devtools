@@ -4,6 +4,14 @@ type DomNode = Protocol.DOM.Node
 
 /** Elements of devtools-anywhere itself (the element, overlays) are hidden from the page's DOM. */
 export const OWN_ATTRIBUTE = 'data-devtools-anywhere'
+/** Pseudo-classes forced on an element (CSS.forcePseudoState); hidden from the client. */
+export const FORCE_ATTRIBUTE = 'data-devtools-anywhere-force'
+
+/** An element's attributes as sent to the client, without devtools-anywhere's own. */
+export const visibleAttributes = (el: Element) =>
+  Array.from(el.attributes)
+    .filter(a => a.name !== FORCE_ATTRIBUTE)
+    .flatMap(a => [a.name, a.value])
 
 /** Text children up to this length are sent along with their element, like Chrome does. */
 const MAX_INLINE_TEXT = 500
@@ -163,7 +171,7 @@ export class NodeRegistry {
     if (node.parentNode) result.parentId = this.idOf(node.parentNode)
 
     if (node instanceof Element) {
-      result.attributes = Array.from(node.attributes).flatMap(a => [a.name, a.value])
+      result.attributes = visibleAttributes(node)
       const shadowRoot = this.shadowRootOf(node)
       if (shadowRoot) result.shadowRoots = [this.serializeShadowRoot(shadowRoot, pierce ? depth : 0, pierce)]
       const pseudoTypes = this.activePseudoTypes(node)
