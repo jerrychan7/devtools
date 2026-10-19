@@ -144,4 +144,39 @@ describe('Network', () => {
     );
     assert.ok(urls.some(u => u.includes('n=js')));
   });
+
+  test('resource content: text as is, binary as base64 (Sources panel)', async () => {
+    await t.chrome.send('Page.enable');
+    const { frameTree } = await t.chrome.send('Page.getFrameTree');
+    const origin = new URL(t.page.url()).origin;
+    // Chrome only knows the content of style sheets loaded while Page is enabled.
+    await t.page.evaluate(
+      () =>
+        new Promise(resolve =>
+          document.head.append(
+            Object.assign(document.createElement('link'), {
+              rel: 'stylesheet',
+              onload: resolve,
+              href: '/tests/conformance/assets/cross.css?n=content',
+            })
+          )
+        )
+    );
+    const css = `${origin}/tests/conformance/assets/cross.css?n=content`;
+    const [ours, chrome] = await Promise.all([
+      t.ours.send('Page.getResourceContent', { frameId: 'any', url: css }),
+      t.chrome.send('Page.getResourceContent', { frameId: frameTree.frame.id, url: css }),
+    ]);
+    assert.deepEqual(ours, chrome);
+
+    // Headless Chrome does not keep image content for Page.getResourceContent; its response
+    // body is the same data.
+    const { chrome: image } = await request(
+      "(() => { const i = new Image(); i.src = '/tests/conformance/assets/pixel.png?n=content' })()",
+      'n=content'
+    );
+    const body = await t.chrome.send('Network.getResponseBody', { requestId: image.sent.requestId });
+    const content = await t.ours.send('Page.getResourceContent', { frameId: 'any', url: image.sent.request.url });
+    assert.deepEqual(content, { content: body.body, base64Encoded: true });
+  });
 });

@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { readBody } from '../core/body';
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
 import { isOwnRequest } from './network';
 
@@ -42,7 +43,8 @@ export function registerPage({ server, probe }: Context) {
     ): Promise<Protocol.Page.GetResourceContentResponse> {
       const res = await probe.fetch(params.url, { cache: 'force-cache' });
       if (!res.ok) throw new Error(`Failed to load ${params.url}: ${res.status}`);
-      return { content: await res.text(), base64Encoded: false };
+      const { body, base64Encoded } = await readBody(res);
+      return { content: body, base64Encoded };
     },
 
     getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({

@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
+import { readBody } from '../core/body';
 import { CdpError } from '../core/server';
 import { parseStack } from '../core/stack';
 import type { RequestRecord } from '../probe/types';
@@ -37,14 +38,6 @@ export const isOwnUrl = (probe: Context['probe'], url: string) => {
   return false;
 };
 export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => isOwnUrl(probe, rec.url);
-
-/** Base64 of a binary response body. */
-async function base64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
 
 export function registerNetwork({ server, probe }: Context) {
   let unsubscribe: (() => void) | null = null;
@@ -155,11 +148,7 @@ export function registerNetwork({ server, probe }: Context) {
       // possible (unhooked, so it does not show up as a new request).
       if (rec?.initiatorType && rec.method === 'GET') {
         const res = await probe.fetch(rec.url, { cache: 'force-cache', credentials: 'include' }).catch(() => null);
-        if (res?.ok) {
-          const type = res.headers.get('content-type') || '';
-          if (/^text\/|json|javascript|xml|svg/.test(type)) return { body: await res.text(), base64Encoded: false };
-          return { body: await base64(await res.blob()), base64Encoded: true };
-        }
+        if (res?.ok) return readBody(res);
       }
       throw new CdpError('No data found for resource with given identifier');
     },
