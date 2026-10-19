@@ -1,10 +1,13 @@
 // Bundles the plugin for Node with esbuild. Type declarations are emitted separately by tsc.
-import { build } from 'esbuild'
+// `--watch` rebuilds on every change (`pnpm dev`).
+import { context, type BuildOptions } from 'esbuild'
 import { rmSync } from 'node:fs'
 
-rmSync('dist', { recursive: true, force: true })
+const watch = process.argv.includes('--watch')
+// In watch mode the other packages' watchers read this dist/: keep it in place.
+if (!watch) rmSync('dist', { recursive: true, force: true })
 
-await build({
+const builds: BuildOptions[] = [{
   entryPoints: ['src/index.ts'],
   bundle: true,
   platform: 'node',
@@ -13,4 +16,12 @@ await build({
   outdir: 'dist',
   packages: 'external',
   logLevel: 'info',
-})
+}]
+
+const contexts = await Promise.all(builds.map(options => context(options)))
+if (watch) {
+  await Promise.all(contexts.map(ctx => ctx.watch()))
+} else {
+  await Promise.all(contexts.map(ctx => ctx.rebuild()))
+  await Promise.all(contexts.map(ctx => ctx.dispose()))
+}

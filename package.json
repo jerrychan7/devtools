@@ -5,6 +5,7 @@
   "packageManager": "pnpm@12.11.2",
   "scripts": {
     "build": "pnpm -r run build",
+    "dev": "pnpm run build && pnpm -r --parallel run dev",
     "typecheck": "pnpm -r run typecheck && tsc -p tsconfig.scripts.json",
     "test": "pnpm run build && node --test \"tests/**/*.test.mjs\"",
     "playground": "node playground/server.mjs"
