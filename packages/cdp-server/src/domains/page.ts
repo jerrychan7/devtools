@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol'
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context'
 
-export function registerPage({ server }: Context) {
+export function registerPage({ server, probe }: Context) {
   server.register('Page', {
     enable: () => {},
 
@@ -21,6 +21,13 @@ export function registerPage({ server }: Context) {
         resources: [],
       },
     }),
+
+    /** Re-fetches the resource, from the HTTP cache when possible; not recorded by the probe. */
+    async getResourceContent(params: Protocol.Page.GetResourceContentRequest): Promise<Protocol.Page.GetResourceContentResponse> {
+      const res = await probe.fetch(params.url, { cache: 'force-cache' })
+      if (!res.ok) throw new Error(`Failed to load ${params.url}: ${res.status}`)
+      return { content: await res.text(), base64Encoded: false }
+    },
 
     getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({
       currentIndex: 0,

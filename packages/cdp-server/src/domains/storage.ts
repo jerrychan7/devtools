@@ -330,6 +330,7 @@ export function registerStorage(ctx: Context) {
 
   server.register('Storage', {
     getStorageKeyForFrame: (): Protocol.Storage.GetStorageKeyForFrameResponse => ({ storageKey: storageKey() }),
+    getStorageKey: (): Protocol.Storage.GetStorageKeyResponse => ({ storageKey: storageKey() }),
 
     async getUsageAndQuota(): Promise<Protocol.Storage.GetUsageAndQuotaResponse> {
       const estimate = (await navigator.storage?.estimate?.()) ?? {}

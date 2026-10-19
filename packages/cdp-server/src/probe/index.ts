@@ -49,6 +49,7 @@ export function installProbe(): Probe {
     },
     shadowRoots: new WeakMap(),
     listeners: new WeakMap(),
+    fetch: w.fetch?.bind(w),
   }
   Object.defineProperty(w, PROBE_KEY, { value: probe })
 

@@ -1,3 +1,4 @@
+import type { Protocol } from 'devtools-protocol'
 import type { CdpServer } from '../core/server'
 
 /**
@@ -5,9 +6,12 @@ import type { CdpServer } from '../core/server'
  * implemented yet). Answering them with an empty result keeps the frontend happy.
  */
 const NOOPS: Record<string, string[]> = {
+  Accessibility: ['enable'],
+  Animation: ['enable'],
   Audits: ['enable'],
   Autofill: ['enable', 'setAddresses'],
   BackgroundService: ['startObserving'],
+  CSS: ['trackComputedStyleUpdatesForNode'],
   Database: ['enable'],
   Emulation: [
     'setEmulatedMedia',
@@ -30,9 +34,18 @@ const NOOPS: Record<string, string[]> = {
     'setShowIsolatedElements',
     'setShowViewportSizeOnResize',
   ],
+  Network: ['overrideNetworkState'],
+  Preload: ['enable'],
   Profiler: ['enable'],
   ServiceWorker: ['enable'],
-  Storage: ['trackCacheStorageForOrigin', 'trackIndexedDBForOrigin', 'trackIndexedDBForStorageKey'],
+  Storage: [
+    'trackCacheStorageForOrigin',
+    'trackIndexedDBForOrigin',
+    'trackIndexedDBForStorageKey',
+    'setInterestGroupTracking',
+    'setSharedStorageTracking',
+    'setStorageBucketTracking',
+  ],
   Target: ['setAutoAttach', 'setDiscoverTargets', 'setRemoteLocations'],
 }
 
@@ -40,6 +53,14 @@ export function registerStubs(server: CdpServer) {
   for (const [domain, methods] of Object.entries(NOOPS)) {
     server.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])))
   }
+  // Throttling cannot be emulated in the page: the rules are accepted but never applied.
+  server.register('Network', {
+    emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({
+      ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`),
+    }),
+  })
+  // env() values are not readable from the page.
+  server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) })
   server.register('Debugger', {
     enable: () => ({ debuggerId: 'devtools-anywhere' }),
     disable: () => {},

@@ -94,4 +94,6 @@ export interface Probe {
   shadowRoots: WeakMap<Element, ShadowRoot>
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>
+  /** The page's fetch before it was hooked: DevTools' own requests stay out of the Network panel. */
+  fetch: typeof fetch
 }

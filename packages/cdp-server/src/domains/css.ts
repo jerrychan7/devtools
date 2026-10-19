@@ -93,6 +93,8 @@ class SheetRegistry {
   private seq = 0
   inspectorSheet: CSSStyleSheet | null = null
 
+  constructor(private fetch: typeof window.fetch) {}
+
   idOf(sheet: CSSStyleSheet): string {
     let id = this.sheetIds.get(sheet)
     if (!id) {
@@ -159,7 +161,7 @@ class SheetRegistry {
       } catch {
         // Cross-origin: load a copy below.
       }
-      const load = fetch(sheet.href, { credentials: 'omit' })
+      const load = this.fetch(sheet.href, { credentials: 'omit' })
         .then(res => (res.ok ? res.text() : Promise.reject(new Error(res.statusText))))
         .then(text => {
           const copy = new CSSStyleSheet()
@@ -250,7 +252,7 @@ class SheetRegistry {
 
 export function registerCss(ctx: Context) {
   const { server, nodes } = ctx
-  const sheets = new SheetRegistry()
+  const sheets = new SheetRegistry(ctx.probe.fetch)
   const forced = new ForcedPseudoClasses(
     () => sheets.all(),
     sheet => sheets.rulesOf(sheet)
