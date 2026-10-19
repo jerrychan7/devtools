@@ -28,14 +28,14 @@
 | 部分 | 选择 | 理由 |
 |---|---|---|
 | CDP 实现 | 在本项目中自行实现，参考 [chobitsu](https://github.com/liriliri/chobitsu) | 在页面内调试只能通过 JS API 采集数据，所以只能用 JS/TS 实现。自行实现可以让探针和各个 CDP 域共用同一套 hook（不再需要回放技巧），修掉 chobitsu 的已知问题，并通过 [`devtools-protocol`](https://github.com/ChromeDevTools/devtools-protocol) 的类型跟进最新协议 |
-| 前端 | 原型阶段：Chii 已构建好的 `front_end`；正式阶段：官方 devtools-frontend 加本项目的补丁集 | Chii 的版本可以直接使用，适合快速验证。正式版本钉住官方的某个版本，补丁以 `.patch` 文件维护，升级时逐个重放，不维护长期 fork 分支 |
+| 前端 | 官方 devtools-frontend，从源码构建，加一个很小的补丁集 | 构建时钉住官方的某个版本，补丁以 `.patch` 文件维护，升级时逐个重放，不维护长期 fork 分支。补丁只负责注册我们自己的入口（`anywhere_app`），其余定制都不改上游代码（见[前端](#前端)） |
 | 隔离 | iframe | 隔离 devtools 自身的 DOM、日志和请求，避免它们出现在被调试页面中，也避免与页面的全局环境互相干扰 |
 
 本项目不依赖 Chii 和 chobitsu。遇到边界情况时会阅读它们的源码作为参考，但不复制代码；以真实 Chrome 的 CDP 输出和协议定义为准。
 
 ### 能力边界
 
-- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板应该隐藏，而不是展示给用户后再让他发现不能用。
+- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。源代码面板暂时还不列出页面的脚本（代码段可以用）。
 - 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
   - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
@@ -105,10 +105,10 @@
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
 
 - 探针不单独成包：Runtime 和 Network 域直接读取它的缓冲，两者必须严格匹配。放在 cdp-server 中可以共用类型，也不会出现版本不匹配。
-- 前端单独成包，因为它体积大（约 14 MB），更新节奏跟随 Chrome 版本。
+- 前端单独成包，因为它体积大（代码约 15 MB，翻译约 43 MB，gzip 打包后约 11 MB），更新节奏跟随 Chrome 版本。
 - 所有包使用同一个版本号、一起发布，版本号相同的包一定能配合使用。
 
-### 目录结构（规划）
+### 目录结构
 
 ```
 packages/
@@ -146,18 +146,18 @@ experiments/      验证记录
 4. ✅ **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
 5. ✅ **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
 6. ✅ **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
-7. **前端定制**：基于官方 devtools-frontend 维护补丁集并定期升级；隐藏用不了的面板，适配小屏。
+7. ✅ **前端定制**：从官方 devtools-frontend 自己构建，维护补丁集，一条命令升级；只包含页面内能用的面板。
 
 ## 用法（预览）
 
-各个包尚未发布，下面的路径指本仓库构建出的文件。在 `@devtools-anywhere/devtools-frontend` 发布之前，`data-frontend` 请指向一个已构建的前端，例如 Chii 的 `public/front_end/chii_app.html`。
+各个包尚未发布，下面的路径指本仓库构建出的文件。`data-frontend` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。
 
 ### 一行 script
 
 ```html
 <head>
   <!-- 第一个同步脚本：从最开始捕获输出。 -->
-  <script src="/path/to/devtools-anywhere/dist/probe.iife.js" data-frontend="/path/to/front_end/chii_app.html"></script>
+  <script src="/path/to/devtools-anywhere/dist/probe.iife.js" data-frontend="/path/to/devtools-frontend/dist/anywhere_app.html"></script>
   ...
 </head>
 ```
@@ -171,11 +171,11 @@ experiments/      验证记录
 import devtoolsAnywhere from '@devtools-anywhere/vite-plugin'
 
 export default {
-  plugins: [devtoolsAnywhere({ frontendDir: 'path/to/front_end' })],
+  plugins: [devtoolsAnywhere()],
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。选项：`frontendDir`、`frontendEntry`（默认 `chii_app.html`）、`frontendUrl`、`open`、`serviceWorker`。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`open`、`serviceWorker`。
 
 ### 组件
 
@@ -183,7 +183,7 @@ export default {
 
 ## 开发
 
-需要 Node.js、pnpm 和本机安装的 Google Chrome（如果不在 macOS 的默认位置，请设置 `CHROME_PATH`）。
+需要 Node.js 22.18 及以上（构建脚本是 TypeScript，由 Node 直接运行）、pnpm 和本机安装的 Google Chrome（如果不在 macOS 的默认位置，请设置 `CHROME_PATH`）。
 
 ```bash
 pnpm install
@@ -191,7 +191,25 @@ pnpm test          # 构建后运行对比真实 Chrome 的一致性测试
 pnpm playground    # http://localhost:8788/playground/
 ```
 
-在本项目自己构建前端之前，playground 从本地 Chii 构建产物 `chii.ignore/public/front_end` 加载前端。
+playground 和真实前端测试使用 `packages/devtools-frontend/dist` 里的前端（未构建时这些测试会跳过）。
+
+### 前端
+
+`packages/devtools-frontend` 按 `REVISION` 里钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)：
+
+```bash
+fetch devtools-frontend   # 只需一次，depot_tools 需在 PATH 上；默认检出到 ./devtools-frontend.ignore
+pnpm --filter @devtools-anywhere/devtools-frontend build:frontend   # 构建钉住的版本
+pnpm --filter @devtools-anywhere/devtools-frontend update           # 构建上游最新版，成功后钉住
+```
+
+`DEVTOOLS_FRONTEND_SRC` 和 `DEPOT_TOOLS` 可以覆盖默认位置（`devtools-frontend.ignore/devtools-frontend`、`depot_tools.ignore`）。脚本会检出指定版本、运行 `gclient sync`、打上 `patches/*.patch`、把 `src/` 复制到 `front_end/entrypoints/`、用 gn 和 autoninja 构建，再只把入口能加载到的文件复制到 `dist/`：经 import 可达的模块、它们的资源，以及这些模块在各语言下的界面文案。
+
+为了尽量少改上游：
+
+- **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用），其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
+- **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
+- **小屏**：沿用上游自带的响应式布局（元素面板窄屏时上下分栏、标签页溢出折叠）。
 
 ## 参考
 
