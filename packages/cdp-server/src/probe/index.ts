@@ -1,0 +1,327 @@
+// Early-capture probe.
+//
+// Load it as the first synchronous script of a page (probe.iife.js). It hooks console,
+// uncaught errors and fetch/XHR once, keeps recent events in ring buffers, and the CDP
+// server reads those buffers later. The CDP server installs it itself when no earlier
+// probe exists, so every API is hooked exactly once either way.
+import {
+  PROBE_KEY,
+  type ConsoleEntry,
+  type ConsoleType,
+  type LogEntry,
+  type Probe,
+  type RequestRecord,
+} from './types'
+
+export * from './types'
+
+const MAX_LOGS = 1000
+const MAX_REQUESTS = 300
+const MAX_BODY_LENGTH = 5 * 1024 * 1024
+
+export function installProbe(): Probe {
+  const w = window as any
+  if (w[PROBE_KEY]) return w[PROBE_KEY]
+
+  const logs: LogEntry[] = []
+  const requests: RequestRecord[] = []
+  const logListeners = new Set<(entry: LogEntry) => void>()
+  const requestListeners = new Set<(record: RequestRecord) => void>()
+
+  const probe: Probe = {
+    version: 1,
+    logs,
+    requests,
+    onLog(listener) {
+      logListeners.add(listener)
+      return () => logListeners.delete(listener)
+    },
+    onRequest(listener) {
+      requestListeners.add(listener)
+      return () => requestListeners.delete(listener)
+    },
+    clearLogs() {
+      logs.length = 0
+    },
+  }
+  Object.defineProperty(w, PROBE_KEY, { value: probe })
+
+  const now = () => performance.timeOrigin + performance.now()
+
+  function addLog(entry: LogEntry) {
+    if (logs.push(entry) > MAX_LOGS) logs.shift()
+    logListeners.forEach(fn => fn(entry))
+  }
+
+  hookConsole(addLog, now)
+  hookErrors(addLog, now)
+
+  let seq = 0
+  function track(record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>): RequestRecord {
+    const rec = record as RequestRecord
+    rec.requestId = 'probe.' + ++seq
+    rec.startTime = performance.now()
+    rec.wallTime = Date.now()
+    rec.state = 'pending'
+    if (requests.push(rec) > MAX_REQUESTS) requests.shift()
+    requestListeners.forEach(fn => fn(rec))
+    return rec
+  }
+  function update(rec: RequestRecord, patch: Partial<RequestRecord>) {
+    Object.assign(rec, patch)
+    requestListeners.forEach(fn => fn(rec))
+  }
+  hookFetch(track, update)
+  hookXhr(track, update)
+
+  return probe
+}
+
+// ---- console ----
+
+function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
+  const c = console as any
+  const counts: Record<string, number> = {}
+  const timers: Record<string, number> = {}
+
+  const wrap = (name: string, capture: (args: any[]) => Pick<ConsoleEntry, 'type' | 'args'> | null) => {
+    const orig = c[name]
+    if (typeof orig !== 'function') return
+    c[name] = function (...args: any[]) {
+      const captured = capture(args)
+      if (captured) {
+        addLog({ kind: 'console', type: captured.type, args: captured.args, time: now(), stack: new Error().stack })
+      }
+      return orig.apply(this, args)
+    }
+  }
+
+  const plain: [string, ConsoleType][] = [
+    ['log', 'log'],
+    ['debug', 'debug'],
+    ['info', 'info'],
+    ['error', 'error'],
+    ['warn', 'warning'],
+    ['dir', 'dir'],
+    ['dirxml', 'dirxml'],
+    ['table', 'table'],
+    ['trace', 'trace'],
+    ['group', 'startGroup'],
+    ['groupCollapsed', 'startGroupCollapsed'],
+    ['groupEnd', 'endGroup'],
+  ]
+  // Like V8: calls without arguments are dropped, except for these, which log their own name.
+  const namedWhenEmpty = new Set(['group', 'groupCollapsed', 'groupEnd', 'trace'])
+  for (const [name, type] of plain) {
+    wrap(name, args => {
+      if (args.length) return { type, args }
+      return namedWhenEmpty.has(name) ? { type, args: ['console.' + name] } : null
+    })
+  }
+
+  wrap('clear', () => ({ type: 'clear', args: [] }))
+  wrap('assert', ([condition, ...rest]) =>
+    condition ? null : { type: 'assert', args: rest.length ? rest : ['console.assert'] }
+  )
+  wrap('count', ([label = 'default']) => {
+    counts[label] = (counts[label] || 0) + 1
+    return { type: 'count', args: [`${label}: ${counts[label]}`] }
+  })
+  wrap('countReset', ([label = 'default']) => {
+    counts[label] = 0
+    return null
+  })
+  wrap('time', ([label = 'default']) => {
+    timers[label] = performance.now()
+    return null
+  })
+  const elapsed = (label: string) => `${label}: ${performance.now() - timers[label]} ms`
+  wrap('timeLog', ([label = 'default', ...rest]) =>
+    label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : null
+  )
+  wrap('timeEnd', ([label = 'default']) => {
+    if (!(label in timers)) return null
+    const args = [elapsed(label)]
+    delete timers[label]
+    return { type: 'timeEnd', args }
+  })
+}
+
+// ---- uncaught errors ----
+
+function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
+  window.addEventListener('error', e => {
+    if (!(e instanceof ErrorEvent)) return
+    addLog({
+      kind: 'exception',
+      text: 'Uncaught',
+      error: e.error !== undefined ? e.error : e.message,
+      time: now(),
+      stack: e.error?.stack,
+      url: e.filename,
+      line: e.lineno,
+      column: e.colno,
+    })
+  })
+  window.addEventListener('unhandledrejection', e => {
+    addLog({
+      kind: 'exception',
+      text: 'Uncaught (in promise)',
+      error: e.reason,
+      time: now(),
+      stack: e.reason?.stack,
+    })
+  })
+}
+
+// ---- network ----
+
+type Track = (record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>) => RequestRecord
+type Update = (rec: RequestRecord, patch: Partial<RequestRecord>) => void
+
+function headersToObject(headers: Headers): Record<string, string> {
+  const obj: Record<string, string> = {}
+  headers.forEach((v, k) => (obj[k] = v))
+  return obj
+}
+
+function bodyToString(body: unknown): string | undefined {
+  if (typeof body === 'string') return body
+  if (body instanceof URLSearchParams) return body.toString()
+  return undefined
+}
+
+function mimeTypeOf(contentType: string | null | undefined) {
+  return (contentType || '').split(';')[0].trim()
+}
+
+function hookFetch(track: Track, update: Update) {
+  const origFetch = window.fetch
+  if (!origFetch) return
+  window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+    const req = input instanceof Request ? input : null
+    const headers = init?.headers || req?.headers
+    const rec = track({
+      type: 'Fetch',
+      method: String(init?.method || req?.method || 'GET').toUpperCase(),
+      url: new URL(req ? req.url : String(input), location.href).href,
+      requestHeaders: headers ? headersToObject(new Headers(headers)) : {},
+      postData: bodyToString(init?.body),
+      stack: new Error().stack,
+    })
+    const promise = origFetch.call(this, input as any, init)
+    promise.then(
+      res => {
+        const contentType = res.headers.get('content-type')
+        update(rec, {
+          state: 'headers',
+          responseTime: performance.now(),
+          status: res.status,
+          statusText: res.statusText,
+          responseHeaders: headersToObject(res.headers),
+          mimeType: mimeTypeOf(contentType),
+        })
+        const length = Number(res.headers.get('content-length'))
+        // Never read streams that may not end, or bodies that are too large to keep.
+        if (!res.body || mimeTypeOf(contentType) === 'text/event-stream' || length > MAX_BODY_LENGTH) {
+          update(rec, { state: 'done', endTime: performance.now(), encodedDataLength: length || 0 })
+          return
+        }
+        res
+          .clone()
+          .text()
+          .then(
+            text =>
+              update(rec, {
+                state: 'done',
+                body: text.length > MAX_BODY_LENGTH ? undefined : text,
+                encodedDataLength: length || text.length,
+                endTime: performance.now(),
+              }),
+            err => update(rec, { state: 'failed', errorText: String(err?.message || err), endTime: performance.now() })
+          )
+      },
+      err => update(rec, { state: 'failed', errorText: String(err?.message || err), endTime: performance.now() })
+    )
+    return promise
+  }
+}
+
+function parseRawHeaders(raw: string): Record<string, string> {
+  const obj: Record<string, string> = {}
+  for (const line of raw.trim().split(/[\r\n]+/)) {
+    const i = line.indexOf(':')
+    if (i > 0) obj[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim()
+  }
+  return obj
+}
+
+interface XhrInfo {
+  method: string
+  url: string
+  headers: Record<string, string>
+}
+
+function hookXhr(track: Track, update: Update) {
+  const proto = XMLHttpRequest.prototype
+  const origOpen = proto.open
+  const origSend = proto.send
+  const origSetRequestHeader = proto.setRequestHeader
+  const infos = new WeakMap<XMLHttpRequest, XhrInfo>()
+
+  proto.open = function (this: XMLHttpRequest, method: string, url: string | URL) {
+    infos.set(this, { method: String(method).toUpperCase(), url: new URL(String(url), location.href).href, headers: {} })
+    return origOpen.apply(this, arguments as any)
+  } as typeof proto.open
+
+  proto.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
+    const info = infos.get(this)
+    if (info) info.headers[name] = value
+    return origSetRequestHeader.call(this, name, value)
+  }
+
+  proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
+    const info = infos.get(this)
+    if (info) {
+      const xhr = this
+      const rec = track({
+        type: 'XHR',
+        method: info.method,
+        url: info.url,
+        requestHeaders: info.headers,
+        postData: bodyToString(body),
+        stack: new Error().stack,
+      })
+      const responseMeta = () => {
+        const responseHeaders = parseRawHeaders(xhr.getAllResponseHeaders())
+        return {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          responseHeaders,
+          mimeType: mimeTypeOf(responseHeaders['content-type']),
+        }
+      }
+      xhr.addEventListener('readystatechange', () => {
+        if (xhr.readyState === 2) {
+          update(rec, { state: 'headers', responseTime: performance.now(), ...responseMeta() })
+        } else if (xhr.readyState === 4) {
+          if (!xhr.status) {
+            update(rec, { state: 'failed', errorText: 'net::ERR_FAILED', endTime: performance.now() })
+            return
+          }
+          let text: string | undefined
+          if (xhr.responseType === '' || xhr.responseType === 'text') text = xhr.responseText
+          else if (xhr.responseType === 'json') text = JSON.stringify(xhr.response)
+          update(rec, {
+            state: 'done',
+            ...responseMeta(),
+            body: text,
+            encodedDataLength: text?.length || 0,
+            endTime: performance.now(),
+          })
+        }
+      })
+    }
+    return origSend.call(this, body)
+  }
+}

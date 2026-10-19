@@ -1,0 +1,32 @@
+{
+  "name": "@devtools-anywhere/cdp-server",
+  "version": "0.0.0",
+  "description": "In-page Chrome DevTools Protocol server with an early-capture probe",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./probe": {
+      "types": "./dist/types/probe/index.d.ts",
+      "import": "./dist/probe.js"
+    },
+    "./probe.iife.js": "./dist/probe.iife.js",
+    "./cdp-server.iife.js": "./dist/cdp-server.iife.js"
+  },
+  "files": ["dist"],
+  "sideEffects": ["./dist/*.iife.js"],
+  "scripts": {
+    "build": "node build.mjs && tsc -p tsconfig.json --emitDeclarationOnly",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "devtools-protocol": "^0.0.1721318",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}
