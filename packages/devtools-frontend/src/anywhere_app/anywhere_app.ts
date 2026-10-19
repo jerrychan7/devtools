@@ -73,10 +73,31 @@ Common.Settings.registerSettingExtension({
 // in place of Chrome's native DevToolsHost bindings. Every other host method keeps the
 // hosted-mode stub implementation (preferences in localStorage, no file system, …).
 // The embedder passes its origin as `#?embedded=<origin>`; messages go only there.
-const embedder = new URLSearchParams(location.hash.replace(/^#\??/, '')).get('embedded') ?? '*';
+const params = new URLSearchParams(location.hash.replace(/^#\??/, ''));
+const embedder = params.get('embedded') ?? '*';
 const host = Host.InspectorFrontendHost.InspectorFrontendHostInstance;
 host.isHostedMode = () => false;
 host.sendMessageToBackend = (message: string) => window.parent.postMessage(message, embedder);
+
+// Docking: the main menu's "Dock side" moves the panel in the embedding page, which owns the
+// side (`#?dock=`, the side it shows the panel on now). Requests to the embedder are objects,
+// so they never mix with CDP messages, which are strings.
+const notifyEmbedder = (request: {type: 'dock', side: string}|{type: 'close'}) =>
+    window.parent.postMessage({devtoolsAnywhere: request}, embedder);
+Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
+const dock = params.get('dock');
+if (dock) {
+  const getPreferences = host.getPreferences.bind(host);
+  host.getPreferences = callback => getPreferences(prefs => callback({...prefs, currentDockState: JSON.stringify(dock)}));
+}
+host.setIsDocked = (_isDocked: boolean, callback: () => void) => {
+  const side = UI.DockController.DockController.instance().dockSide();
+  if (side) {
+    notifyEmbedder({type: 'dock', side});
+  }
+  setTimeout(callback, 0);
+};
+host.closeWindow = () => notifyEmbedder({type: 'close'});
 window.addEventListener('message', event => {
   if (event.source !== window.parent || typeof event.data !== 'string' ||
       (embedder !== '*' && event.origin !== embedder)) {
