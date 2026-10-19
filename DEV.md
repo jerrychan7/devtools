@@ -83,7 +83,7 @@ The playground server serves the repository root, so any page in it can be opene
 ```bash
 pnpm test                                     # build + all tests
 node --test tests/conformance/css.test.ts     # one file (after a build or with pnpm dev running)
-pnpm typecheck                                # all packages and build scripts
+pnpm typecheck                                # builds, then checks packages, build scripts, tests and playground
 ```
 
 - `tests/conformance/`: the same page is inspected through real Chrome's CDP and through ours, and the outputs are compared. When implementing or changing a CDP method, add a test here: real Chrome is the reference, not the protocol documentation.

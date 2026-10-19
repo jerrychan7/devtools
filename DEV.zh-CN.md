@@ -83,7 +83,7 @@ playground 的服务器以仓库根目录为根，所以仓库里任何页面都
 ```bash
 pnpm test                                     # 构建并运行全部测试
 node --test tests/conformance/css.test.ts     # 只跑一个文件（需先构建，或 pnpm dev 正在运行）
-pnpm typecheck                                # 所有包和构建脚本的类型检查
+pnpm typecheck                                # 先构建，再检查所有包、构建脚本、测试和 playground 的类型
 ```
 
 - `tests/conformance/`：同一个页面分别通过真实 Chrome 的 CDP 和我们的实现来检查，对比两边的输出。实现或修改 CDP 方法时请在这里加测试：以真实 Chrome 的行为为准，而不是协议文档。
