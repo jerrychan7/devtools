@@ -11,10 +11,10 @@ import { installProbe, readShellConfig } from '@devtools-anywhere/cdp-server/pro
 const script = document.currentScript as HTMLScriptElement | null;
 const probe = installProbe();
 
-const frontend = script?.dataset.frontend;
+const frontend = script?.dataset['frontend'];
 // In the shell's top window the probe has replaced the document with the shell already.
 if (script && frontend && !(readShellConfig() && window === top)) {
-  const bundle = new URL(script.dataset.bundle || 'devtools-anywhere.iife.js', script.src).href;
+  const bundle = new URL(script.dataset['bundle'] || 'devtools-anywhere.iife.js', script.src).href;
   const open = script.hasAttribute('data-open');
   probe.ownUrls.add(bundle);
 
@@ -26,7 +26,7 @@ if (script && frontend && !(readShellConfig() && window === top)) {
       const element = document.createElement('devtools-anywhere');
       element.setAttribute('frontend', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');
-      if (script.dataset.sw !== undefined) element.setAttribute('sw', script.dataset.sw);
+      if (script.dataset['sw'] !== undefined) element.setAttribute('sw', script.dataset['sw']);
       document.body.appendChild(element);
     };
     document.head.appendChild(loader);

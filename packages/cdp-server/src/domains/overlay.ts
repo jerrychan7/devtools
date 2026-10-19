@@ -3,6 +3,12 @@ import type { Context } from '../core/context';
 import { OWN_ATTRIBUTE } from '../core/nodes';
 import { boxModel, resolveNode } from './dom';
 
+/** Bounds of a CDP quad (x1 y1 … x4 y4, clockwise from the top left). */
+function bounds(quad: number[]) {
+  const [left = 0, top = 0, , , right = 0, bottom = 0] = quad;
+  return { left, top, right, bottom };
+}
+
 type RGBA = Protocol.DOM.RGBA;
 
 const color = (c: RGBA | undefined, fallback: string) => (c ? `rgba(${c.r},${c.g},${c.b},${c.a ?? 1})` : fallback);
@@ -36,15 +42,19 @@ class Highlighter {
       [model.padding, color(config.paddingColor, 'rgba(147,196,125,.55)')],
       [model.content, color(config.contentColor, 'rgba(111,168,220,.66)')],
     ];
-    for (const [q, fill] of boxes) layer.appendChild(this.rect(q[0], q[1], q[2] - q[0], q[5] - q[1], fill));
+    for (const [q, fill] of boxes) {
+      const { left, top, right, bottom } = bounds(q);
+      layer.appendChild(this.rect(left, top, right - left, bottom - top, fill));
+    }
 
     if (config.showInfo !== false) {
       const label = document.createElement('div');
       const id = el.id ? `#${el.id}` : '';
       const cls = el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
       label.textContent = `${el.localName}${id}${cls}  ${model.width} × ${model.height}`;
-      const top = model.border[1] > 24 ? model.border[1] - 22 : model.border[5] + 2;
-      label.style.cssText = `position:absolute;left:${Math.max(model.border[0], 0)}px;top:${top}px;padding:2px 6px;
+      const border = bounds(model.border);
+      const top = border.top > 24 ? border.top - 22 : border.bottom + 2;
+      label.style.cssText = `position:absolute;left:${Math.max(border.left, 0)}px;top:${top}px;padding:2px 6px;
         background:#fff;color:#222;font:11px/16px system-ui,sans-serif;border-radius:2px;
         box-shadow:0 1px 4px rgba(0,0,0,.3);white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis`;
       layer.appendChild(label);
@@ -137,8 +147,15 @@ export function registerOverlay(ctx: Context) {
     },
 
     highlightQuad(params: Protocol.Overlay.HighlightQuadRequest) {
-      const [x1, y1, , , x3, y3] = params.quad;
-      highlighter.area(x1, y1, x3 - x1, y3 - y1, color(params.color, 'transparent'), color(params.outlineColor, ''));
+      const { left, top, right, bottom } = bounds(params.quad);
+      highlighter.area(
+        left,
+        top,
+        right - left,
+        bottom - top,
+        color(params.color, 'transparent'),
+        color(params.outlineColor, '')
+      );
     },
 
     hideHighlight: () => highlighter.hide(),

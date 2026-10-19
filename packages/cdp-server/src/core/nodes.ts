@@ -197,10 +197,12 @@ export class NodeRegistry {
       node.nodeType === Node.DOCUMENT_FRAGMENT_NODE
     ) {
       result.childNodeCount = children.length;
+      const [only] = children;
       const inlineText =
         children.length === 1 &&
-        children[0].nodeType === Node.TEXT_NODE &&
-        (children[0].nodeValue?.length ?? 0) <= MAX_INLINE_TEXT;
+        only !== undefined &&
+        only.nodeType === Node.TEXT_NODE &&
+        (only.nodeValue?.length ?? 0) <= MAX_INLINE_TEXT;
       if (depth !== 0 || inlineText) {
         result.children = children.map(child => this.serialize(child, depth > 0 ? depth - 1 : depth, pierce));
         this.childrenSent.add(node);

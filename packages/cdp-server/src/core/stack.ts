@@ -16,7 +16,7 @@ export function parseStack(stack: string | undefined, skip = 0): Protocol.Runtim
     frames.push({
       functionName: (m[1] || '').replace(/^async /, ''),
       scriptId: '',
-      url: m[2],
+      url: m[2] ?? '',
       lineNumber: Number(m[3]) - 1,
       columnNumber: Number(m[4]) - 1,
     });

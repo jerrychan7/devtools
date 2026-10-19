@@ -152,6 +152,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
     }
     const frames = parseStack(entry.stack);
     const top = frames[0];
+    const url = entry.url || top?.url;
     server.emit('Runtime.exceptionThrown', {
       timestamp: entry.time,
       exceptionDetails: {
@@ -159,7 +160,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
         text: entry.text,
         lineNumber: entry.line ? entry.line - 1 : (top?.lineNumber ?? 0),
         columnNumber: entry.column ? entry.column - 1 : (top?.columnNumber ?? 0),
-        url: entry.url || top?.url,
+        ...(url ? { url } : {}),
         scriptId: '',
         exception: objects.wrap(entry.error, { generatePreview: true, group: 'console' }),
         executionContextId: EXECUTION_CONTEXT_ID,

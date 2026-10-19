@@ -89,7 +89,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
 
     configureServer(server) {
       server.middlewares.use(BASE, (req, res, next) => {
-        const file = resolveFile((req.url ?? '').split('?')[0].replace(/^\//, ''));
+        const file = resolveFile(((req.url ?? '').split('?')[0] ?? '').replace(/^\//, ''));
         if (!file) return next();
         res.setHeader('content-type', TYPES[path.extname(file)] ?? 'application/octet-stream');
         // Lets the Service Worker control the whole site from under BASE.

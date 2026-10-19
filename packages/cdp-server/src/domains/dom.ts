@@ -389,7 +389,8 @@ export function registerDom(ctx: Context) {
     getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
       const el = document.elementFromPoint(params.x, params.y);
       if (!el || !nodes.isVisible(el)) throw new CdpError('No node found at given location');
-      return { backendNodeId: nodes.backendIdOf(el), frameId: FRAME_ID, nodeId: nodes.knownId(el) };
+      const nodeId = nodes.knownId(el);
+      return { backendNodeId: nodes.backendIdOf(el), frameId: FRAME_ID, ...(nodeId !== undefined && { nodeId }) };
     },
 
     collectClassNamesFromSubtree(params: Protocol.DOM.CollectClassNamesFromSubtreeRequest) {

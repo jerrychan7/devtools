@@ -53,7 +53,7 @@ export class CdpServer {
 
   /** Calls a method directly and returns its result, without going through listeners. */
   async call(method: string, params: object = {}): Promise<unknown> {
-    const [domain, name] = method.split('.');
+    const [domain = '', name = ''] = method.split('.');
     const handler = this.domains.get(domain)?.[name];
     if (!handler) throw new CdpError(`'${method}' wasn't found`, -32601);
     return (await (handler as (params: object) => unknown)(params ?? {})) ?? {};

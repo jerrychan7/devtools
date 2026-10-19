@@ -159,10 +159,11 @@ function describe(v: unknown, subtype: Subtype): string {
   }
 }
 
+/** Options straight from CDP params, where each may be absent. */
 export interface WrapOptions {
-  generatePreview?: boolean;
-  returnByValue?: boolean;
-  group?: string;
+  generatePreview?: boolean | undefined;
+  returnByValue?: boolean | undefined;
+  group?: string | undefined;
 }
 
 /** Turns page values into CDP RemoteObjects and keeps the objects alive by id. */
@@ -196,7 +197,7 @@ export class ObjectRegistry {
     if (options.returnByValue && type === 'object') return { type, value: cloneByValue(value) };
 
     const result: RemoteObject = { type, description: describe(value, subtype) };
-    if (subtype) result.subtype = subtype as RemoteObject['subtype'];
+    if (subtype) result.subtype = subtype as NonNullable<RemoteObject['subtype']>;
     if (type === 'function') result.className = 'Function';
     else if (type === 'object')
       result.className = subtype === 'error' ? (value as Error).name || className(value) : className(value);
@@ -348,7 +349,7 @@ export class ObjectRegistry {
       overflow: false,
       properties: [],
     };
-    if (subtype) preview.subtype = subtype as ObjectPreview['subtype'];
+    if (subtype) preview.subtype = subtype as NonNullable<ObjectPreview['subtype']>;
     if (subtype === 'internal#entry') return preview;
 
     const isArrayLike = subtype === 'array' || subtype === 'typedarray';
@@ -436,7 +437,7 @@ export class ObjectRegistry {
 function propertyPreview(name: string, value: unknown): PropertyPreview {
   const { type, subtype } = classify(value);
   const preview: PropertyPreview = { name, type, value: '' };
-  if (subtype) preview.subtype = subtype as PropertyPreview['subtype'];
+  if (subtype) preview.subtype = subtype as NonNullable<PropertyPreview['subtype']>;
   if (type === 'function') return preview;
   if (type === 'object' && subtype === 'error') {
     const err = value as Error;
@@ -450,7 +451,7 @@ function propertyPreview(name: string, value: unknown): PropertyPreview {
 function entryPreview(value: unknown): ObjectPreview {
   const { type, subtype } = classify(value);
   const preview: ObjectPreview = { type, description: describe(value, subtype), overflow: false, properties: [] };
-  if (subtype) preview.subtype = subtype as ObjectPreview['subtype'];
+  if (subtype) preview.subtype = subtype as NonNullable<ObjectPreview['subtype']>;
   return preview;
 }
 

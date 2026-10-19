@@ -21,9 +21,9 @@ import { fileURLToPath } from 'node:url';
 const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(pkg, '../..');
 const src = path.resolve(
-  process.env.DEVTOOLS_FRONTEND_SRC ?? path.join(repo, 'devtools-frontend.ignore/devtools-frontend')
+  process.env['DEVTOOLS_FRONTEND_SRC'] ?? path.join(repo, 'devtools-frontend.ignore/devtools-frontend')
 );
-const depotTools = path.resolve(process.env.DEPOT_TOOLS ?? path.join(repo, 'depot_tools.ignore'));
+const depotTools = path.resolve(process.env['DEPOT_TOOLS'] ?? path.join(repo, 'depot_tools.ignore'));
 const out = path.join(src, 'out/Anywhere');
 const dist = path.join(pkg, 'dist');
 /** The locales Chrome bundles stay in this package; the others go to the locales package. */
@@ -32,7 +32,7 @@ const BUNDLED_LOCALES = ['en-US', 'zh'];
 const revisionFile = path.join(pkg, 'REVISION');
 
 const args = new Set(process.argv.slice(2));
-const env = { ...process.env, PATH: `${depotTools}${path.delimiter}${process.env.PATH}`, DEPOT_TOOLS_UPDATE: '0' };
+const env = { ...process.env, PATH: `${depotTools}${path.delimiter}${process.env['PATH']}`, DEPOT_TOOLS_UPDATE: '0' };
 const run = (cmd: string, argv: string[], opts: ExecFileSyncOptions = {}) =>
   execFileSync(cmd, argv, { cwd: src, env, stdio: 'inherit', ...opts });
 const read = (cmd: string, argv: string[]) => execFileSync(cmd, argv, { cwd: src, env, encoding: 'utf8' }).trim();
@@ -81,7 +81,7 @@ if (!args.has('--copy-only')) {
 const gen = path.join(out, 'gen/front_end');
 const grd = fs.readFileSync(path.join(gen, 'devtools_resources.grd'), 'utf8');
 const files = [...grd.matchAll(/<include [^>]*file="([^"]+)"/g)]
-  .map(m => m[1].replace(/\.compressed$/, ''))
+  .flatMap(([, file]) => (file ? [file.replace(/\.compressed$/, '')] : []))
   .filter(file => fs.existsSync(path.join(gen, file)));
 const released = new Set(files);
 
@@ -92,7 +92,7 @@ for (let file; (file = queue.pop());) {
   reachable.add(file);
   const code = fs.readFileSync(path.join(gen, file), 'utf8');
   for (const [, spec] of code.matchAll(/["'`](\.{1,2}\/[^"'`\s]*?\.js)["'`]/g)) {
-    queue.push(path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)));
+    if (spec) queue.push(path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)));
   }
 }
 const moduleDirs = new Set([...reachable].map(file => path.posix.dirname(file)));
@@ -130,7 +130,7 @@ for (const name of fs.readdirSync(path.join(gen, LOCALES)).filter(f => f.endsWit
   const strings = JSON.parse(fs.readFileSync(path.join(gen, LOCALES, name), 'utf8'));
   const used = Object.fromEntries(
     Object.entries(strings).filter(([key]) => {
-      const file = key.split(' | ')[0];
+      const file = key.split(' | ')[0] ?? '';
       return inModule(file) || BORROWED_STRINGS.includes(file);
     })
   );

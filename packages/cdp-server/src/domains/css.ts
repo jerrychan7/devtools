@@ -21,7 +21,7 @@ function splitPseudoElement(selector: string): { host: string; pseudo: string | 
   const m = PSEUDO_SUFFIX.exec(selector);
   if (!m) return { host: selector, pseudo: null };
   const host = selector.slice(0, m.index).trim();
-  return { host: host && !/[\s>+~]$/.test(host) ? host : `${host}*`, pseudo: (m[1] || m[2]).toLowerCase() };
+  return { host: host && !/[\s>+~]$/.test(host) ? host : `${host}*`, pseudo: (m[1] || m[2] || '').toLowerCase() };
 }
 
 /**
@@ -57,7 +57,7 @@ function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: numbe
     });
     // Expand shorthands into their longhands, like Chrome does.
     probe.cssText = `${name}: ${value}`;
-    const longhands = Array.from({ length: probe.length }, (_, i) => probe[i]);
+    const longhands = Array.from(probe);
     if (longhands.length > 1 || (longhands.length === 1 && longhands[0] !== name)) {
       shorthandEntries.push({ name, value, important });
       for (const longhand of longhands) {
@@ -249,7 +249,7 @@ class SheetRegistry {
       startColumn: 0,
       length: text.length,
       endLine: lines.length - 1,
-      endColumn: lines[lines.length - 1].length,
+      endColumn: lines.at(-1)?.length ?? 0,
     };
   }
 }
@@ -343,21 +343,18 @@ export function registerCss(ctx: Context) {
       for (const entry of sheets.entries(sheet, true)) {
         order++;
         const selectors = splitTopLevel(entry.rule.selectorText, ',').map(s => s.trim());
-        const matching = selectors
-          .map((selector, index) => {
-            const split = splitPseudoElement(selector);
-            if (split.pseudo !== pseudo) return -1;
-            try {
-              return el.matches(split.host) || el.matches(forced.rewrite(split.host)) ? index : -1;
-            } catch {
-              return -1; // Unsupported selector.
-            }
-          })
-          .filter(index => index >= 0);
-        if (!matching.length) continue;
-        const spec = matching
-          .map(i => specificity(selectors[i]))
-          .reduce((m, s) => (compareSpecificity(s, m) > 0 ? s : m));
+        const matched = selectors.flatMap((selector, index) => {
+          const split = splitPseudoElement(selector);
+          if (split.pseudo !== pseudo) return [];
+          try {
+            return el.matches(split.host) || el.matches(forced.rewrite(split.host)) ? [{ selector, index }] : [];
+          } catch {
+            return []; // Unsupported selector.
+          }
+        });
+        if (!matched.length) continue;
+        const matching = matched.map(m => m.index);
+        const spec = matched.map(m => specificity(m.selector)).reduce((m, s) => (compareSpecificity(s, m) > 0 ? s : m));
         matches.push({ match: { rule: cssRule(sheet, entry), matchingSelectors: matching }, spec, order });
       }
     }
@@ -545,7 +542,7 @@ export function registerCss(ctx: Context) {
     collectClassNames(params: Protocol.CSS.CollectClassNamesRequest): Protocol.CSS.CollectClassNamesResponse {
       const names = new Set<string>();
       for (const { rule } of sheets.entries(sheets.get(params.styleSheetId))) {
-        for (const m of rule.selectorText.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) names.add(m[1]);
+        for (const [, name] of rule.selectorText.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) if (name) names.add(name);
       }
       return { classNames: Array.from(names) };
     },

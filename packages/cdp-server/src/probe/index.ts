@@ -166,7 +166,7 @@ function observeResources(add: (rec: RequestRecord) => void, update: Update, req
     // fetch() and XHR are hooked, with more detail; DevTools' own fetches are unhooked.
     if (entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') return;
     // The browser's own favicon request is not the page's, and Chrome does not report it.
-    if (entry.initiatorType === 'other' && entry.name.split(/[?#]/)[0].endsWith('/favicon.ico')) return;
+    if (entry.initiatorType === 'other' && (entry.name.split(/[?#]/)[0] ?? '').endsWith('/favicon.ico')) return;
     // Not in TypeScript's DOM types yet (Chrome 129+).
     const mimeType = (entry as PerformanceResourceTiming & { contentType?: string }).contentType || '';
     const status = entry.responseStatus || 0;
@@ -260,7 +260,7 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
     timers[String(label)] = performance.now();
     return null;
   });
-  const elapsed = (label: string) => `${label}: ${performance.now() - timers[label]} ms`;
+  const elapsed = (label: string) => `${label}: ${performance.now() - (timers[label] ?? 0)} ms`;
   wrap('timeLog', ([value = 'default', ...rest]) => {
     const label = String(value);
     return label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : null;
@@ -379,7 +379,7 @@ function bodyToString(body: unknown): string | undefined {
 }
 
 function mimeTypeOf(contentType: string | null | undefined) {
-  return (contentType || '').split(';')[0].trim();
+  return ((contentType || '').split(';')[0] ?? '').trim();
 }
 
 function hookFetch(track: Track, update: Update) {

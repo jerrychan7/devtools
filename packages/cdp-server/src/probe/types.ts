@@ -27,7 +27,7 @@ export interface ConsoleEntry {
   /** Milliseconds since epoch. */
   time: number;
   /** Raw `Error().stack` taken inside the console wrapper. */
-  stack?: string;
+  stack?: string | undefined;
 }
 
 export interface ExceptionEntry {
@@ -35,7 +35,7 @@ export interface ExceptionEntry {
   text: string;
   error: unknown;
   time: number;
-  stack?: string;
+  stack?: string | undefined;
   url?: string;
   line?: number;
   column?: number;
@@ -68,9 +68,9 @@ export interface RequestRecord {
   method: string;
   url: string;
   requestHeaders: Record<string, string>;
-  postData?: string;
+  postData?: string | undefined;
   /** Stack of the code that started the request. */
-  stack?: string;
+  stack?: string | undefined;
   /** `performance.now()` at start, in milliseconds. */
   startTime: number;
   /** `Date.now()` at start. */
@@ -83,7 +83,7 @@ export interface RequestRecord {
   responseHeaders?: Record<string, string>;
   mimeType?: string;
   /** Response text; absent when it was not captured (binary, streaming or too large). */
-  body?: string;
+  body?: string | undefined;
   encodedDataLength?: number;
   /** `performance.now()` when the response finished or failed. */
   endTime?: number;
