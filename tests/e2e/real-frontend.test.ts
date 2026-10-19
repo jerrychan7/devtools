@@ -126,10 +126,11 @@ test('every panel opens without uncaught errors', { skip }, async () => {
 
 test('the Network panel lists the document and its resources, but not DevTools itself', { skip }, async () => {
   await showPanel('network');
-  await waitFor(async () => (await text()).includes('probe.iife.js'));
+  await waitFor(async () => (await text()).includes('real-frontend.css'));
   const all = await text();
   assert.ok(all.includes('real-frontend.html'), 'the document');
   assert.ok(!all.includes('devtools-anywhere.iife.js'), "the bundle is DevTools' own");
+  assert.ok(!all.includes('probe.iife.js'), "the probe is DevTools' own");
 });
 
 test("the Sources panel lists the page's scripts and style sheets, but not DevTools itself", { skip }, async () => {

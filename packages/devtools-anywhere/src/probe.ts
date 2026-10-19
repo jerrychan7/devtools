@@ -10,6 +10,8 @@ import { installProbe, readShellConfig } from '@devtools-anywhere/cdp-server/pro
 
 const script = document.currentScript as HTMLScriptElement | null;
 const probe = installProbe();
+// The probe's own request is DevTools', not the page's: left out of the Network panel.
+if (script?.src) probe.ownUrls.add(script.src);
 
 const frontend = script?.dataset['frontend'];
 // In the shell's top window the probe has replaced the document with the shell already.
