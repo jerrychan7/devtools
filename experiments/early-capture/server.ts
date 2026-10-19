@@ -53,8 +53,18 @@ http
       return;
     }
 
-    const file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) {
+    let pathname: string;
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      // Malformed percent-encoding (e.g. /%E0%A4).
+      res.writeHead(400).end();
+      return;
+    }
+    const file = path.join(root, pathname);
+    // A bare prefix check would let /..%2fdevtools-x/ reach a sibling directory.
+    const rel = path.relative(root, file);
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
       res.writeHead(403).end();
       return;
     }
