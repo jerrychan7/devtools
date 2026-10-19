@@ -150,4 +150,16 @@ export interface Probe {
   ownUrls: Set<string>;
   /** The page's fetch before it was hooked: DevTools' own requests stay out of the Network panel. */
   fetch: typeof fetch;
+  /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
+  tools: Map<string, ToolRecord>;
+}
+
+export interface ToolRecord {
+  /** Raw `Error().stack` taken inside the registerTool wrapper. */
+  stack?: string | undefined;
+  /**
+   * What the tool's `execute` last returned or threw: the browser's `executeTool` gives
+   * results as JSON text, and errors only as the fact that the tool failed.
+   */
+  outcome?: { threw: boolean; value: unknown } | undefined;
 }

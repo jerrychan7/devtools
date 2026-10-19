@@ -14,6 +14,7 @@ import { registerRuntime } from './domains/runtime';
 import { registerScreencast, type SnapdomLoader } from './domains/screencast';
 import { registerStorage } from './domains/storage';
 import { registerStubs } from './domains/stubs';
+import { registerWebMcp } from './domains/webmcp';
 import { installProbe } from './probe';
 
 export { CdpError, CdpServer } from './core/server';
@@ -55,5 +56,6 @@ export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
   registerDebugger(ctx);
   registerScreencast(ctx, options.loadSnapdom);
   registerInput(ctx);
+  registerWebMcp(ctx);
   return ctx.server;
 }

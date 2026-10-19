@@ -51,9 +51,10 @@ export interface TestPage {
   ours: Side;
 }
 
-export async function launch(): Promise<Env> {
+/** `args` are extra Chrome flags, e.g. to turn on an experimental feature. */
+export async function launch(args: string[] = []): Promise<Env> {
   const server = await startServer(0);
-  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args });
   return {
     baseUrl: server.url,
     browser,

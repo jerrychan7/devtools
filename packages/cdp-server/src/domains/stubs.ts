@@ -43,7 +43,6 @@ const NOOPS: Record<string, string[]> = {
     'untrackIndexedDBForStorageKey',
   ],
   Target: ['setAutoAttach', 'setDiscoverTargets', 'setRemoteLocations'],
-  WebMCP: ['enable'],
 };
 
 export function registerStubs(server: CdpServer) {

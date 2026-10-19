@@ -14,6 +14,7 @@ import {
   type RequestRecord,
   type RequestType,
   type SocketRecord,
+  type ToolRecord,
 } from './types';
 
 import { isShellPage, readShellConfig, writeShellDocument } from './shell';
@@ -62,6 +63,7 @@ export function installProbe(): Probe {
     listeners: new WeakMap(),
     ownUrls: new Set(),
     fetch: w.fetch?.bind(w),
+    tools: new Map(),
   };
   Object.defineProperty(w, PROBE_KEY, { value: probe });
 
@@ -85,6 +87,7 @@ export function installProbe(): Probe {
   hookErrors(addLog, now);
   hookShadowRoots(probe.shadowRoots);
   hookListeners(probe.listeners);
+  hookModelContext(probe.tools);
 
   function add(rec: RequestRecord) {
     rec.requestId = 'probe.' + ++seq;
@@ -350,6 +353,47 @@ function hookShadowRoots(roots: WeakMap<Element, ShadowRoot>) {
     roots.set(this, root);
     return root;
   };
+}
+
+// ---- WebMCP ----
+
+/**
+ * Records where each WebMCP tool was registered, and what its `execute` returns or throws:
+ * the browser's `executeTool` gives only JSON text, or the fact that the tool failed.
+ */
+function hookModelContext(tools: Probe['tools']) {
+  const ctor: unknown = Reflect.get(window, 'ModelContext');
+  const proto: unknown = typeof ctor === 'function' ? ctor.prototype : undefined;
+  const registerTool: unknown = proto && Reflect.get(proto, 'registerTool');
+  if (!proto || typeof registerTool !== 'function') return;
+  Reflect.set(proto, 'registerTool', function (this: unknown, tool: unknown, ...rest: unknown[]) {
+    const execute: unknown = tool && typeof tool === 'object' ? Reflect.get(tool, 'execute') : undefined;
+    if (tool && typeof tool === 'object' && typeof execute === 'function') {
+      const record: ToolRecord = { stack: new Error().stack };
+      tools.set(String(Reflect.get(tool, 'name')), record);
+      const done = (value: unknown) => {
+        record.outcome = { threw: false, value };
+        return value;
+      };
+      const fail = (value: unknown) => {
+        record.outcome = { threw: true, value };
+        throw value;
+      };
+      tool = {
+        ...tool,
+        execute(this: unknown, ...args: unknown[]) {
+          record.outcome = undefined;
+          try {
+            const result: unknown = Reflect.apply(execute, this, args);
+            return result instanceof Promise ? result.then(done, fail) : done(result);
+          } catch (error) {
+            return fail(error);
+          }
+        },
+      };
+    }
+    return Reflect.apply(registerTool, this, [tool, ...rest]);
+  });
 }
 
 // ---- event listeners ----
