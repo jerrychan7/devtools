@@ -9,6 +9,8 @@ import { installProbe } from './probe'
 
 export { CdpError, CdpServer } from './core/server'
 export { installProbe } from './probe'
+export { SHELL_KEY, SHELL_PAGE_ID, isShellPage, readShellConfig, type ShellConfig } from './probe/shell'
+export { FRAME_ID, LOADER_ID } from './core/context'
 export type { Probe } from './probe/types'
 
 /**

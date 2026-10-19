@@ -13,7 +13,10 @@ import {
   type RequestRecord,
 } from './types'
 
+import { isShellPage, readShellConfig, writeShellDocument } from './shell'
+
 export * from './types'
+export * from './shell'
 
 const MAX_LOGS = 1000
 const MAX_REQUESTS = 300
@@ -73,6 +76,16 @@ export function installProbe(): Probe {
   }
   hookFetch(track, update)
   hookXhr(track, update)
+
+  const shell = readShellConfig()
+  if (shell && window === top) {
+    writeShellDocument(shell)
+  } else if (shell && isShellPage()) {
+    // Load the bundle that connects this page to the shell; capture continues meanwhile.
+    const script = document.createElement('script')
+    script.src = shell.bundle
+    document.documentElement.appendChild(script)
+  }
 
   return probe
 }

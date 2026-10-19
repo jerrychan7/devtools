@@ -69,12 +69,11 @@ This approach has been validated: see [experiments/early-capture/RESULTS.md](exp
 
 No standalone `devtools.html` is hosted, and there is no navigation to a blob URL, since blob URLs break on reload and cannot be shared. Instead:
 
-1. Enabling f12 writes a flag to `sessionStorage` and reloads the page.
-2. When the probe runs, sees the flag and is not inside an iframe, it calls `window.stop()` to halt loading of the original page, then writes the shell with `document.open()` / `document.write()`. The shell's page iframe points to `location.href`.
-3. The probe runs again inside the iframe, recognizes that it is inside the shell, and works normally.
-4. Disabling f12 clears the flag and reloads the page.
-
-The address bar always shows the real URL, so reloading and sharing work as expected, and DevTools stay put when the page inside reloads.
+1. The ⟳ button on the DevTools bar (`element.enterShell()`) stores the frontend and bundle URLs in `sessionStorage` and reloads the page.
+2. The probe, being the first script, sees the config in the top-level window. It writes an unclosed `<plaintext>` so the rest of the page becomes inert text (none of its scripts run), then replaces the document with the shell via `document.open()` / `document.write()`. The shell contains the page iframe (pointing to `location.href`) and `<devtools-anywhere shell>`. (Chrome ignores `document.open()` after `window.stop()`, hence `<plaintext>`.)
+3. Inside the iframe, the probe captures as usual and loads the bundle, which connects the page's CDP server to the shell. The shell relays messages between the page and the frontend.
+4. When the page reloads or navigates, the new page says hello; the shell tells the frontend the page navigated and re-sends every `enable` command the frontend has sent, so the new page replays its own earliest output. The address bar and title follow the page.
+5. The × button (`element.exitShell()`) clears the config and reloads the page on its own.
 
 Shell mode is **optional**: inside an iframe, `viewport`, `100vh`, `position: fixed`, `window.top`, `X-Frame-Options` and others may behave differently from a top-level page. The default mode embeds DevTools directly in the page.
 
@@ -138,7 +137,7 @@ experiments/      validation records
 1. ✅ **Validate early capture**: probe, buffering and replay ([results](experiments/early-capture/RESULTS.md)).
 2. ✅ **Project skeleton and CDP core**: workspace, TypeScript, latest `devtools-protocol`; shared core state; Runtime, Network and Page domains backed by the probe; conformance tests against real Chrome.
 3. ✅ **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
-4. **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
+4. ✅ **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
 5. **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
 6. **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
 7. **Frontend customization**: patch set on top of the official devtools-frontend with regular upgrades; hide unsupported panels and adapt to small screens.

@@ -1,5 +1,15 @@
-import { createCdpServer, type CdpServer } from '@devtools-anywhere/cdp-server'
-import { connectFrontend } from './connection'
+import { SHELL_KEY, SHELL_PAGE_ID, createCdpServer, isShellPage, type CdpServer } from '@devtools-anywhere/cdp-server'
+import { connectFrontend, relayShell } from './connection'
+
+let bundleUrl = ''
+
+/**
+ * Tells the element where devtools-anywhere.iife.js lives, which shell mode needs to load
+ * it inside the page iframe. The IIFE build sets this itself.
+ */
+export function setBundleUrl(url: string) {
+  bundleUrl = url
+}
 
 const HEIGHT_KEY = 'devtools-anywhere:height'
 const MIN_HEIGHT = 80
@@ -27,10 +37,16 @@ const STYLE = `
   content: ''; position: absolute; left: 50%; top: 6px; width: 32px; height: 4px;
   margin-left: -16px; border-radius: 2px; background: #bdc1c6;
 }
-.close {
-  position: absolute; right: 4px; top: 0; width: 24px; height: 16px; padding: 0; border: 0;
+.bar button {
+  position: absolute; top: 0; width: 24px; height: 16px; padding: 0; border: 0;
   background: none; color: #5f6368; font: 14px/16px system-ui, sans-serif; cursor: pointer;
 }
+.close { right: 4px; }
+.keep { right: 32px; }
+:host(:not([data-can-keep])) .keep { display: none; }
+:host([shell]) { display: block; flex: none; }
+:host([shell]) .panel { position: static; display: flex; }
+:host([data-shell-page]) { display: none !important; }
 iframe { flex: 1; width: 100%; border: 0; }
 .dragging iframe { pointer-events: none; }
 `
@@ -44,6 +60,7 @@ iframe { flex: 1; width: 100%; border: 0; }
  * - `height`: panel height as a CSS length (default `50vh`). Dragging the top edge
  *   overrides it and is remembered in localStorage.
  * - `no-launcher`: hides the launcher button.
+ * - `shell`: set by shell mode on the element inside the shell document.
  *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
  */
@@ -64,13 +81,17 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     root.innerHTML = `<style>${STYLE}</style>
 <button class="launcher" part="launcher" aria-label="Open DevTools">F12</button>
 <div class="panel" part="panel">
-  <div class="bar"><button class="close" aria-label="Close DevTools">×</button></div>
+  <div class="bar">
+    <button class="keep" aria-label="Keep DevTools open across reloads" title="Keep DevTools open across reloads">⟳</button>
+    <button class="close" aria-label="Close DevTools" title="Close DevTools">×</button>
+  </div>
   <iframe title="DevTools"></iframe>
 </div>`
     this.panel = root.querySelector('.panel')!
     this.frame = root.querySelector('iframe')!
     root.querySelector('.launcher')!.addEventListener('click', () => this.show())
-    root.querySelector('.close')!.addEventListener('click', () => this.hide())
+    root.querySelector('.close')!.addEventListener('click', () => (this.hasAttribute('shell') ? this.exitShell() : this.hide()))
+    root.querySelector('.keep')!.addEventListener('click', () => this.enterShell())
     this.setupResizer(root.querySelector('.bar')!)
   }
 
@@ -91,10 +112,35 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.open = !this.open
   }
 
+  /**
+   * Switches to shell mode: the page reloads inside an iframe next to DevTools, which then
+   * stays open across reloads and navigations of the page. Needs the bundle URL.
+   */
+  enterShell() {
+    const frontend = this.getAttribute('frontend')
+    if (!bundleUrl || !frontend) return
+    sessionStorage.setItem(SHELL_KEY, JSON.stringify({ frontend: new URL(frontend, location.href).href, bundle: bundleUrl }))
+    location.reload()
+  }
+
+  /** Leaves shell mode and reloads the page on its own. */
+  exitShell() {
+    sessionStorage.removeItem(SHELL_KEY)
+    location.reload()
+  }
+
   connectedCallback() {
     // Marks the element so the DOM domain can hide it from the Elements panel.
     this.setAttribute('data-devtools-anywhere', '')
-    this.server ??= createCdpServer()
+    if (isShellPage()) {
+      // Inside the shell's page iframe the shell shows DevTools; the IIFE connects the page.
+      this.setAttribute('data-shell-page', '')
+      return
+    }
+    if (!this.hasAttribute('shell')) {
+      this.server ??= createCdpServer()
+      this.toggleAttribute('data-can-keep', !!bundleUrl)
+    }
     this.update()
   }
 
@@ -106,7 +152,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   attributeChangedCallback() {
-    if (this.isConnected) this.update()
+    if (this.isConnected && !this.hasAttribute('data-shell-page')) this.update()
   }
 
   private update() {
@@ -118,12 +164,15 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   private loadFrontend() {
     const frontend = this.getAttribute('frontend')
-    if (!frontend || !this.server) return
+    const page = document.getElementById(SHELL_PAGE_ID) as HTMLIFrameElement | null
+    if (!frontend || (!this.server && !(this.hasAttribute('shell') && page))) return
     const url = new URL(frontend, location.href)
     if (url.href === this.loadedUrl) return
     this.loadedUrl = url.href
     this.disconnect?.()
-    this.disconnect = connectFrontend(this.server, this.frame, url.origin)
+    this.disconnect = this.server
+      ? connectFrontend(this.server, this.frame, url.origin)
+      : relayShell(page!, this.frame, url.origin)
     this.frame.src = `${url.href.split('#')[0]}#?embedded=${encodeURIComponent(location.origin)}`
   }
 

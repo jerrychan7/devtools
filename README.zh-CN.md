@@ -69,12 +69,11 @@
 
 不托管独立的 `devtools.html`，也不跳转到 blob URL，因为 blob 会导致刷新失效、地址无法分享。做法是：
 
-1. 开启 f12 时，在 `sessionStorage` 中写入标记，然后刷新页面。
-2. 探针执行时检测到标记，并且自身不在 iframe 中：调用 `window.stop()` 停止加载原页面，再用 `document.open()` / `document.write()` 写入外壳。外壳中的用户页面 iframe 指向 `location.href`。
-3. 探针在 iframe 中再次执行，识别到自己处于外壳内，开始正常工作。
-4. 关闭 f12 时，清除标记并刷新页面。
-
-这样地址栏始终是真实地址，刷新和分享都正常；用户页面刷新时，devtools 保留不动。
+1. 点击 devtools 顶部横条上的 ⟳ 按钮（`element.enterShell()`），把前端地址和 bundle 地址写入 `sessionStorage`，然后刷新页面。
+2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere shell>`。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
+3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 服务端连接到外壳。外壳在页面和前端之间转发消息。
+4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化。
+5. 点击 × 按钮（`element.exitShell()`）会清除配置，并在普通模式下重新加载页面。
 
 外壳模式是**可选**的：页面放进 iframe 后，`viewport`、`100vh`、`position: fixed`、`window.top`、`X-Frame-Options` 等的行为可能和直接打开时不同。默认模式是把 devtools 直接嵌在页面中。
 
@@ -138,7 +137,7 @@ experiments/      验证记录
 1. ✅ **验证早期捕获**：探针、缓冲和回放（[结果](experiments/early-capture/RESULTS.md)）。
 2. ✅ **项目骨架和 CDP 核心**：workspace、TypeScript、最新的 `devtools-protocol`；跨域共享的核心状态；基于探针的 Runtime、Network 和 Page 域；对比真实 Chrome 的一致性测试。
 3. ✅ **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
-4. **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
+4. ✅ **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
 5. **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
 6. **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
 7. **前端定制**：基于官方 devtools-frontend 维护补丁集并定期升级；隐藏用不了的面板，适配小屏。
