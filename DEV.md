@@ -22,11 +22,11 @@ How to set up a development environment, work on the packages with live rebuilds
 ```bash
 git clone https://github.com/jerrychan7/devtools.git
 cd devtools
-pnpm install     # also enables the pre-commit hook (core.hooksPath = .githooks)
+pnpm install     # also enables the pre-commit hook (husky)
 pnpm test        # builds all packages, then runs every test against real Chrome
 ```
 
-If the hook is not active (`git config core.hooksPath` prints nothing), run `pnpm run prepare`.
+If the hook is not active (`git config core.hooksPath` prints nothing), run `pnpm run prepare`. `HUSKY=0` disables it, for example in scripts.
 
 Tests that need the DevTools frontend are skipped until it is built (next step).
 
@@ -130,7 +130,7 @@ pnpm typecheck
 pnpm test        # with the frontend built, so the real-frontend tests run
 ```
 
-The pre-commit hook runs `pnpm lint` and `pnpm fmt:check` and stops the commit if either fails; `git commit --no-verify` skips it once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
+The pre-commit hook (husky + lint-staged) runs on the staged files only: it formats them with oxfmt and adds the result to the commit, then lints them with oxlint and stops the commit on any error. `git commit --no-verify` skips it once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
 
 Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change.
 
