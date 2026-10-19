@@ -1,9 +1,14 @@
 import type { Context } from './core/context'
+import { NodeRegistry } from './core/nodes'
 import { ObjectRegistry } from './core/objects'
 import { CdpServer } from './core/server'
+import { registerCss } from './domains/css'
+import { registerDom } from './domains/dom'
 import { registerNetwork } from './domains/network'
+import { registerOverlay } from './domains/overlay'
 import { registerPage } from './domains/page'
 import { registerRuntime } from './domains/runtime'
+import { registerStorage } from './domains/storage'
 import { registerStubs } from './domains/stubs'
 import { installProbe } from './probe'
 
@@ -18,10 +23,19 @@ export type { Probe } from './probe/types'
  * otherwise installs it now, so output from this point on is captured.
  */
 export function createCdpServer(): CdpServer {
-  const ctx: Context = { server: new CdpServer(), objects: new ObjectRegistry(), probe: installProbe() }
+  const ctx: Context = {
+    server: new CdpServer(),
+    objects: new ObjectRegistry(),
+    nodes: new NodeRegistry(),
+    probe: installProbe(),
+  }
   registerStubs(ctx.server)
   registerRuntime(ctx)
   registerNetwork(ctx)
   registerPage(ctx)
+  registerDom(ctx)
+  registerOverlay(ctx)
+  registerCss(ctx)
+  registerStorage(ctx)
   return ctx.server
 }

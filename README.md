@@ -36,6 +36,8 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 ### Limitations
 
 - An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels should be hidden rather than shown and found broken.
+- Known gaps of the in-page implementation: user-agent styles, pseudo-elements and forced pseudo-classes (`:hover` in the Styles pane) are not shown; event listeners cannot be listed; mutations inside shadow roots are not tracked; cross-origin style sheets cannot be read.
+- Host the frontend on a different origin from the page. On the same origin, DevTools' own settings share the page's `localStorage` and show up in the Application panel.
 - The page side uses only standard web APIs and works in any modern browser. The DevTools UI is developed and tested by Google for Chrome; Firefox and Safari are not verified yet, and newer frontend versions may need extra compatibility patches.
 
 ### Architecture
@@ -139,7 +141,7 @@ experiments/      validation records
 3. ✅ **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
 4. ✅ **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
 5. ✅ **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
-6. **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
+6. ✅ **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
 7. **Frontend customization**: patch set on top of the official devtools-frontend with regular upgrades; hide unsupported panels and adapt to small screens.
 
 ## Usage (preview)

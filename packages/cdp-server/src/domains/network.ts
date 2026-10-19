@@ -4,7 +4,7 @@ import { CdpError } from '../core/server'
 import { parseStack } from '../core/stack'
 import type { RequestRecord } from '../probe/types'
 
-function parseCookies(): Protocol.Network.Cookie[] {
+export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return []
   return document.cookie.split(';').map(pair => {
     const i = pair.indexOf('=')

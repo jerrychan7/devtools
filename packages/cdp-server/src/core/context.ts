@@ -1,4 +1,5 @@
 import type { Probe } from '../probe/types'
+import type { NodeRegistry } from './nodes'
 import type { ObjectRegistry } from './objects'
 import type { CdpServer } from './server'
 
@@ -6,6 +7,7 @@ import type { CdpServer } from './server'
 export interface Context {
   server: CdpServer
   objects: ObjectRegistry
+  nodes: NodeRegistry
   probe: Probe
 }
 

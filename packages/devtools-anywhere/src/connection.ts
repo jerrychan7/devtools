@@ -158,6 +158,8 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
     for (const [method, params] of enabled) {
       postPage(JSON.stringify({ id: SHELL_ID_PREFIX + ++seq, method, params }))
     }
+    // The Elements panel requests the new page's document.
+    postFrontend(JSON.stringify({ method: 'DOM.documentUpdated', params: {} }))
   }
 
   const onMessage = (event: MessageEvent) => {

@@ -36,6 +36,8 @@
 ### 能力边界
 
 - 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板应该隐藏，而不是展示给用户后再让他发现不能用。
+- 页面内实现目前的已知缺口：不显示浏览器默认样式（user-agent styles）、伪元素，也不支持在样式面板中强制伪类状态（如 `:hover`）；无法列出事件监听器；不跟踪 shadow root 内部的 DOM 变化；无法读取跨域样式表。
+- 前端要部署在和页面不同的源上。如果同源，devtools 自己的设置会写进页面的 `localStorage`，并出现在 Application 面板里。
 - 被调试页面一侧只用标准 Web API，可以运行在任何现代浏览器中。devtools 界面由 Google 针对 Chrome 开发和测试，Firefox 和 Safari 尚未验证；新版前端可能需要额外的兼容补丁。
 
 ### 架构
@@ -139,7 +141,7 @@ experiments/      验证记录
 3. ✅ **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
 4. ✅ **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
 5. ✅ **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
-6. **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
+6. ✅ **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
 7. **前端定制**：基于官方 devtools-frontend 维护补丁集并定期升级；隐藏用不了的面板，适配小屏。
 
 ## 用法（预览）

@@ -85,14 +85,16 @@ function fallbackCopy(text: string) {
   textarea.remove()
 }
 
-export function registerRuntime({ server, objects, probe }: Context) {
+export function registerRuntime({ server, objects, nodes, probe }: Context) {
   let unsubscribe: (() => void) | null = null
   let exceptionId = 0
   let lastResult: unknown
 
   /** Console utilities, available only while console input is evaluated. */
   function commandLineApi(): Record<string, unknown> {
+    const inspected = Object.fromEntries(nodes.inspected.map((node, i) => [`$${i}`, node]))
     return {
+      ...inspected,
       $_: lastResult,
       $: (selector: string) => document.querySelector(selector),
       $$: (selector: string) => Array.from(document.querySelectorAll(selector)),

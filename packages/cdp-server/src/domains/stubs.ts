@@ -8,11 +8,8 @@ const NOOPS: Record<string, string[]> = {
   Audits: ['enable'],
   Autofill: ['enable', 'setAddresses'],
   BackgroundService: ['startObserving'],
-  CSS: ['enable'],
   Database: ['enable'],
-  DOM: ['enable'],
   DOMDebugger: ['setBreakOnCSPViolation'],
-  DOMStorage: ['enable'],
   Emulation: [
     'setEmulatedMedia',
     'setAutoDarkModeOverride',
@@ -22,12 +19,9 @@ const NOOPS: Record<string, string[]> = {
     'setEmitTouchEventsForMouse',
   ],
   HeapProfiler: ['enable'],
-  IndexedDB: ['enable'],
   Inspector: ['enable'],
   Log: ['enable', 'clear', 'startViolationsReport'],
   Overlay: [
-    'enable',
-    'hideHighlight',
     'highlightFrame',
     'setPausedInDebuggerMessage',
     'setShowGridOverlays',
@@ -47,13 +41,6 @@ export function registerStubs(server: CdpServer) {
   for (const [domain, methods] of Object.entries(NOOPS)) {
     server.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])))
   }
-  server.register('Storage', {
-    getStorageKeyForFrame: () => ({ storageKey: location.origin + '/' }),
-  })
-  server.register('CSS', {
-    trackComputedStyleUpdates: () => {},
-    takeComputedStyleUpdates: () => ({ nodeIds: [] }),
-  })
   server.register('Debugger', {
     enable: () => ({ debuggerId: 'devtools-anywhere' }),
     disable: () => {},
