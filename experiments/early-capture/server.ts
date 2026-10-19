@@ -35,6 +35,11 @@ http
     const delay = Number(url.searchParams.get('delay')) || 0;
     if (delay) await sleep(delay);
 
+    if (url.pathname === '/') {
+      res.writeHead(302, { location: '/experiments/early-capture/' }).end();
+      return;
+    }
+
     if (url.pathname === '/api/echo') {
       let body = '';
       for await (const chunk of req) body += chunk;
