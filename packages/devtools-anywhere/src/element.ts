@@ -80,10 +80,7 @@ const STYLE = `
 }
 /* DevTools' own toolbar has a close button, except when undocked: then the bar has one. */
 .close { right: 4px; display: none; }
-.keep { right: 4px; }
 :host([dock=undocked]) .close { display: block; }
-:host([dock=undocked]) .keep { right: 32px; }
-:host(:not([data-can-keep])) .keep { display: none; }
 iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 .dragging iframe { pointer-events: none; }
 
@@ -149,7 +146,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 <button class="launcher" part="launcher" aria-label="Open DevTools">F12</button>
 <div class="panel" part="panel">
   <div class="bar">
-    <button class="keep" aria-label="Keep DevTools open across reloads" title="Keep DevTools open across reloads">⟳</button>
     <button class="close" aria-label="Close DevTools" title="Close DevTools">×</button>
   </div>
   <iframe title="DevTools"></iframe>
@@ -164,7 +160,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.frame = part<HTMLIFrameElement>('iframe');
     part('.launcher').addEventListener('click', () => this.show());
     part('.close').addEventListener('click', () => (this.hasAttribute('shell') ? this.exitShell() : this.hide()));
-    part('.keep').addEventListener('click', () => this.enterShell());
     this.setupResizer(part<HTMLElement>('.bar'));
     // The undocked panel is resized by the browser (CSS resize): remember its size.
     new ResizeObserver(() => {
@@ -189,6 +184,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (request.type === 'dock' && 'side' in request && isDockSide(request.side)) {
       localStorage.setItem(DOCK_KEY, request.side);
       this.dock = request.side;
+    } else if (request.type === 'keep-open' && 'keep' in request) {
+      if (request.keep) this.enterShell();
+      else this.exitShell();
     } else if (request.type === 'close') {
       if (this.hasAttribute('shell')) this.exitShell();
       else this.hide();
@@ -266,7 +264,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       this.registerShellWorker();
     } else {
       this.server ??= createPageServer();
-      this.toggleAttribute('data-can-keep', !!bundleUrl);
     }
     this.update();
   }
@@ -349,7 +346,14 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.frontendOrigin = url.origin;
     if (this.server) this.disconnect = connectFrontend(this.server, this.frame, url.origin);
     else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
-    const hash = new URLSearchParams({ embedded: location.origin, dock: this.dock });
+    // Whether shell mode is available (it needs the bundle URL) and whether it is on.
+    const shell = this.hasAttribute('shell');
+    const hash = new URLSearchParams({
+      embedded: location.origin,
+      dock: this.dock,
+      keep: !shell && bundleUrl ? '1' : '0',
+      shell: shell ? '1' : '0',
+    });
     this.frame.src = `${url.href.split('#')[0]}#?${hash}`;
   }
 

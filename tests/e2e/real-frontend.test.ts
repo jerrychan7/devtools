@@ -230,3 +230,41 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
   assert.equal(Math.round(rect.y + rect.height), height);
   assert.equal(rect.width, width);
 });
+
+// Last: it reloads the page into shell mode and back.
+test('the toolbar keeps DevTools open across reloads, and reloads the page', { skip }, async () => {
+  /** A button of the frontend whose label starts with `label`, and the frontend currently shown. */
+  const button = async (label: string) => {
+    const current = await waitFor(() => page.frames().find(f => f.url().includes('anywhere_app.html')));
+    const handle = await current.evaluateHandle(label => {
+      const find = (root: Document | ShadowRoot): Element | null => {
+        const found =
+          root.querySelector(`[aria-label^="${label}"]`) ??
+          Array.from(root.querySelectorAll('devtools-button')).find(b => b.textContent?.trim() === label);
+        if (found) return found;
+        for (const el of root.querySelectorAll('*')) {
+          const inShadow = el.shadowRoot && find(el.shadowRoot);
+          if (inShadow) return inShadow;
+        }
+        return null;
+      };
+      return find(document);
+    }, label);
+    // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+    return handle.asElement() as ElementHandle<Element> | null;
+  };
+  const inShell = () => page.evaluate(() => !!document.getElementById('devtools-anywhere-page'));
+
+  assert.ok(await button('Reload page'), 'the reload button');
+  // A dialog explains the mode first (no tooltip: touch screens have no hover).
+  await (await waitFor(() => button('Keep DevTools open'))).click();
+  await (await waitFor(() => button('Reload and keep open'))).click();
+  await waitFor(inShell);
+  // While it is on, an info bar says so.
+  await waitFor(async () => {
+    frontend = await waitFor(() => page.frames().find(f => f.url().includes('anywhere_app.html')));
+    return (await text()).includes('DevTools stays open across reloads');
+  });
+  await (await waitFor(() => button('Stop keeping DevTools open'))).click();
+  await waitFor(async () => !(await inShell()));
+});

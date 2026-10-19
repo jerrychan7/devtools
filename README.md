@@ -79,11 +79,11 @@ This approach has been validated: see [experiments/early-capture/RESULTS.md](exp
 
 No standalone `devtools.html` is hosted, and there is no navigation to a blob URL, since blob URLs break on reload and cannot be shared. Instead:
 
-1. The ⟳ button on the DevTools bar (`element.enterShell()`) stores the frontend and bundle URLs in `sessionStorage` and reloads the page.
+1. The lock button in DevTools' toolbar, "Keep DevTools open across reloads" (`element.enterShell()`), stores the frontend and bundle URLs in `sessionStorage` and reloads the page.
 2. The probe, being the first script, sees the config in the top-level window. It writes an unclosed `<plaintext>` so the rest of the page becomes inert text (none of its scripts run), then replaces the document with the shell via `document.open()` / `document.write()`. The shell contains the page iframe (pointing to `location.href`) and `<devtools-anywhere shell>`. (Chrome ignores `document.open()` after `window.stop()`, hence `<plaintext>`.)
 3. Inside the iframe, the probe captures as usual and loads the bundle, which connects the page's CDP server to the shell. The shell relays messages between the page and the frontend.
 4. When the page reloads or navigates, the new page says hello; the shell tells the frontend the page navigated and re-sends every `enable` command the frontend has sent, so the new page replays its own earliest output. The address bar and title follow the page.
-5. The × button (`element.exitShell()`) clears the config and reloads the page on its own.
+5. The lock button again, or the toolbar's × (`element.exitShell()`), clears the config and reloads the page on its own.
 
 Shell mode is **optional**: inside an iframe, `viewport`, `100vh`, `position: fixed`, `window.top`, `X-Frame-Options` and others may behave differently from a top-level page. The default mode embeds DevTools directly in the page.
 
@@ -144,7 +144,7 @@ Only `vite serve` is affected: the probe is injected as the first script of ever
 
 ### The element
 
-A floating F12 button opens the panel; drag its bar to resize, ⟳ switches to shell mode and × closes. DevTools' main menu (⋮) has "Dock side": bottom (the default), right, left, or undocked, a window over the page moved by its bar and resized from its corner. In shell mode the page shrinks to make room, as in Chrome; otherwise the panel covers the page. The side and sizes are remembered in localStorage. Attributes: `frontend`, `open`, `dock`, `height`, `width`, `no-launcher`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
+A floating F12 button opens the panel; drag its bar to resize. Left of DevTools' settings button, the lock button switches shell mode on and off (a dialog explains it first, and an info bar shows while it is on) and the refresh button reloads the page; the toolbar's × closes the panel. DevTools' main menu (⋮) has "Dock side": bottom (the default), right, left, or undocked, a window over the page moved by its bar and resized from its corner. In shell mode the page shrinks to make room, as in Chrome; otherwise the panel covers the page. The side and sizes are remembered in localStorage. Attributes: `frontend`, `open`, `dock`, `height`, `width`, `no-launcher`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
 
 ## Development
 

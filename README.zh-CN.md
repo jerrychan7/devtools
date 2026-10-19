@@ -79,11 +79,11 @@
 
 不托管独立的 `devtools.html`，也不跳转到 blob URL，因为 blob 会导致刷新失效、地址无法分享。做法是：
 
-1. 点击 devtools 顶部横条上的 ⟳ 按钮（`element.enterShell()`），把前端地址和 bundle 地址写入 `sessionStorage`，然后刷新页面。
+1. 点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”（`element.enterShell()`），把前端地址和 bundle 地址写入 `sessionStorage`，然后刷新页面。
 2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere shell>`。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
 3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 服务端连接到外壳。外壳在页面和前端之间转发消息。
 4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化。
-5. 点击 × 按钮（`element.exitShell()`）会清除配置，并在普通模式下重新加载页面。
+5. 再点一次锁形按钮，或点工具栏上的 ×（`element.exitShell()`），会清除配置，并在普通模式下重新加载页面。
 
 外壳模式是**可选**的：页面放进 iframe 后，`viewport`、`100vh`、`position: fixed`、`window.top`、`X-Frame-Options` 等的行为可能和直接打开时不同。默认模式是把 devtools 直接嵌在页面中。
 
@@ -144,7 +144,7 @@ export default {
 
 ### 组件
 
-点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小，⟳ 切换到外壳模式，× 关闭。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里。属性：`frontend`、`open`、`dock`、`height`、`width`、`no-launcher`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里。属性：`frontend`、`open`、`dock`、`height`、`width`、`no-launcher`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 ## 开发
 
