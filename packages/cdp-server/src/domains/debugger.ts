@@ -2,13 +2,14 @@ import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../core/server';
 import { EXECUTION_CONTEXT_ID, type Context } from '../core/context';
 import type { RequestRecord } from '../probe/types';
-import { isOwnUrl } from './network';
 
 /**
  * Lists the page's script files in the Sources panel. Page scripts cannot see the scripts
  * V8 compiled, so this reports the external scripts the page loaded: `<script src>`
  * elements and the scripts Resource Timing recorded (modules, dynamically added scripts).
  * Inline scripts are left out: their position in the document is not known.
+ * devtools-anywhere's own scripts (the probe, the bundle) are listed too: they hook globals the
+ * page uses and show in stack traces. The frontend ignore-lists them.
  * There are no breakpoints: the breakpoint commands are accepted and resolve to nothing.
  */
 export function registerDebugger({ server, probe }: Context) {
@@ -21,7 +22,7 @@ export function registerDebugger({ server, probe }: Context) {
   const isScript = (rec: RequestRecord) => rec.type === 'Script' && rec.state === 'done';
 
   function report(url: string, isModule: boolean) {
-    if (!/^https?:/.test(url) || ids.has(url) || isOwnUrl(probe, url)) return;
+    if (!/^https?:/.test(url) || ids.has(url)) return;
     const scriptId = String(ids.size + 1);
     ids.set(url, scriptId);
     server.emit('Debugger.scriptParsed', {

@@ -133,31 +133,41 @@ test('the Network panel lists the document and its resources, but not DevTools i
   assert.ok(!all.includes('probe.iife.js'), "the probe is DevTools' own");
 });
 
-test("the Sources panel lists the page's scripts and style sheets, but not DevTools itself", { skip }, async () => {
-  await showPanel('sources');
-  const files = () =>
-    frontend.evaluate(async () => {
-      // The frontend's own module, loaded from its location: its workspace backs the Sources panel.
-      // The built frontend has no type declarations; only this much of it is used.
-      const {
-        Workspace,
-      }: {
-        Workspace: { WorkspaceImpl: { instance(): { uiSourceCodes(): { url(): string }[] } } };
-      } = await import(new URL('models/workspace/workspace.js', location.href).href);
-      return Workspace.WorkspaceImpl.instance()
-        .uiSourceCodes()
-        .map(code => code.url());
+test(
+  "the Sources panel lists the page's scripts and style sheets, and ignore-lists DevTools' own",
+  { skip },
+  async () => {
+    await showPanel('sources');
+    const files = () =>
+      frontend.evaluate(async () => {
+        // The frontend's own module, loaded from its location: its workspace backs the Sources panel.
+        // The built frontend has no type declarations; only this much of it is used.
+        const {
+          Workspace,
+          IgnoreListManager,
+        }: {
+          Workspace: { WorkspaceImpl: { instance(): { uiSourceCodes(): { url(): string }[] } } };
+          IgnoreListManager: { IgnoreListManager: { instance(): { isUserIgnoreListedURL(url: string): boolean } } };
+        } = await import(new URL('models/workspace/workspace.js', location.href).href);
+        const ignoreList = IgnoreListManager.IgnoreListManager.instance();
+        return Workspace.WorkspaceImpl.instance()
+          .uiSourceCodes()
+          .map(code => ({ url: code.url(), ignored: ignoreList.isUserIgnoreListedURL(code.url()) }));
+      });
+    const sources = await waitFor(async () => {
+      const list = await files();
+      return list.some(file => file.url.endsWith('real-frontend.js')) &&
+        list.some(file => file.url.endsWith('devtools-anywhere.iife.js'))
+        ? list
+        : null;
     });
-  const urls = await waitFor(async () => {
-    const urls = await files();
-    return urls.some(url => url.endsWith('real-frontend.js')) ? urls : null;
-  });
-  assert.ok(
-    urls.some(url => url.endsWith('/assets/real-frontend.css')),
-    'the style sheet'
-  );
-  assert.ok(!urls.some(url => url.endsWith('devtools-anywhere.iife.js')), "the bundle is DevTools' own");
-});
+    // The network resources, not the debugger's per-script `debugger:///VM… name` entries.
+    const find = (suffix: string) => sources.find(file => file.url.startsWith('http') && file.url.endsWith(suffix));
+    assert.ok(find('/assets/real-frontend.css'), 'the style sheet');
+    assert.equal(find('real-frontend.js')?.ignored, false, "the page's script");
+    assert.equal(find('devtools-anywhere.iife.js')?.ignored, true, "the bundle is DevTools' own");
+  }
+);
 
 test('the screencast is off by default and shows the page when turned on', { skip }, async () => {
   await frontend.evaluate(() => {

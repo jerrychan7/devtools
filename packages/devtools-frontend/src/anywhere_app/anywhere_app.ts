@@ -121,10 +121,36 @@ const notifyEmbedder = (request: {type: 'dock', side: string}|{type: 'close'}|{t
     window.parent.postMessage({devtoolsAnywhere: request}, embedder);
 Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
 const dock = params.get('dock');
-if (dock) {
-  const getPreferences = host.getPreferences.bind(host);
-  host.getPreferences = callback => getPreferences(prefs => callback({...prefs, currentDockState: JSON.stringify(dock)}));
+
+// devtools-anywhere's own scripts (the probe, the bundle, snapDOM) are listed in Sources, since
+// they hook globals the page uses, but ignore-listed like extension scripts in Chrome: their stack
+// frames collapse, and "Hide ignore-listed sources" hides them. The rule is added once, so the
+// user can still remove it.
+const IGNORE_LIST = 'skip-stack-frames-pattern';
+const IGNORE_LIST_SEEDED = 'devtools-anywhere-ignore-list-seeded';
+const OWN_SCRIPTS = '/(probe|devtools-anywhere|cdp-server)\\.iife\\.js$|/snapdom\\.js$';
+function withOwnScriptsIgnored(prefs: Record<string, string>): Record<string, string> {
+  if (prefs[IGNORE_LIST_SEEDED]) {
+    return prefs;
+  }
+  let rules: unknown;
+  try {
+    rules = JSON.parse(prefs[IGNORE_LIST] ?? '');
+  } catch {
+    // Never set: the setting's default.
+    rules = [{pattern: '/node_modules/|^node:'}];
+  }
+  const value = JSON.stringify([...(Array.isArray(rules) ? rules : []), {pattern: OWN_SCRIPTS, disabled: false}]);
+  host.setPreference(IGNORE_LIST, value);
+  host.setPreference(IGNORE_LIST_SEEDED, 'true');
+  return {...prefs, [IGNORE_LIST]: value, [IGNORE_LIST_SEEDED]: 'true'};
 }
+
+const getPreferences = host.getPreferences.bind(host);
+host.getPreferences = callback => getPreferences(prefs => {
+  const seeded = withOwnScriptsIgnored(prefs);
+  callback(dock ? {...seeded, currentDockState: JSON.stringify(dock)} : seeded);
+});
 host.setIsDocked = (_isDocked: boolean, callback: () => void) => {
   const side = UI.DockController.DockController.instance().dockSide();
   if (side) {
