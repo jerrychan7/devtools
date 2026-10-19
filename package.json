@@ -11,15 +11,26 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "puppeteer-core": "^24.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.7"
+  },
+  "lint-staged": {
+    "*.{ts,mts,cts,js,mjs,cjs}": [
+      "oxfmt --no-error-on-unmatched-pattern",
+      "oxlint"
+    ],
+    "*.{json,html,css,yaml,yml}": [
+      "oxfmt --no-error-on-unmatched-pattern"
+    ]
   },
   "engines": {
     "node": ">=22.18"

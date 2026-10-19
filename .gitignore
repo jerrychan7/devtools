@@ -1,8 +1,8 @@
 
 # 忽略根目录下所有.开头的目录
 /.*/
-# 例外：提交钩子要进仓库
-!/.githooks/
+# 例外：husky 的提交钩子要进仓库
+!/.husky/
 
 # System Files
 .DS_Store
