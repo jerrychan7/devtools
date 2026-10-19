@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol'
 import { FRAME_ID, type Context } from '../core/context'
-import { truncateNodeValue } from '../core/nodes'
+import { PseudoElement, truncateNodeValue } from '../core/nodes'
 import { CdpError } from '../core/server'
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string }
@@ -11,6 +11,7 @@ export function resolveNode({ nodes, objects }: Context, ref: NodeRef): Node {
   if (ref.nodeId) node = nodes.get(ref.nodeId)
   else if (ref.backendNodeId) node = nodes.getByBackendId(ref.backendNodeId)
   else if (ref.objectId) node = objects.get(ref.objectId)
+  if (node instanceof PseudoElement) throw new CdpError('Not supported for pseudo-elements')
   if (!(node instanceof Node)) throw new CdpError('Could not find node with given id')
   return node
 }
@@ -111,8 +112,44 @@ export function registerDom(ctx: Context) {
     return null
   }
 
+  /** Reports pseudo-elements that appeared or disappeared on hosts within `roots`. */
+  function refreshPseudoElements(roots?: Node[]) {
+    for (const [host, sent] of nodes.pseudoSent) {
+      if (!host.isConnected) {
+        nodes.pseudoSent.delete(host)
+        continue
+      }
+      if (roots && !roots.some(root => root === host || root.contains(host))) continue
+      const hostId = nodes.knownId(host)
+      if (hostId === undefined) continue
+      const current = new Set(nodes.activePseudoTypes(host))
+      for (const type of current) {
+        if (sent.has(type)) continue
+        server.emit('DOM.pseudoElementAdded', {
+          parentId: hostId,
+          pseudoElement: nodes.serializePseudo(nodes.pseudoOf(host, type)),
+        } satisfies Protocol.DOM.PseudoElementAddedEvent)
+      }
+      for (const type of sent) {
+        if (current.has(type)) continue
+        server.emit('DOM.pseudoElementRemoved', {
+          parentId: hostId,
+          pseudoElementId: nodes.idOf(nodes.pseudoOf(host, type)),
+        } satisfies Protocol.DOM.PseudoElementRemovedEvent)
+      }
+      nodes.pseudoSent.set(host, current)
+    }
+  }
+  ctx.refreshPseudoElements = refreshPseudoElements
+
   /** Reports DOM changes for the parts of the tree the client has received. */
   function onMutations(records: MutationRecord[]) {
+    reportMutations(records)
+    // Attribute and tree changes can make selectors such as `.x::before` start or stop matching.
+    refreshPseudoElements(records.map(r => r.target))
+  }
+
+  function reportMutations(records: MutationRecord[]) {
     for (const record of records) {
       const target = record.target
       const targetId = nodes.knownId(target)

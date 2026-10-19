@@ -13,6 +13,28 @@ const MAX_NODE_VALUE = 10000
 export const truncateNodeValue = (value: string) =>
   value.length > MAX_NODE_VALUE ? value.slice(0, MAX_NODE_VALUE) + '…' : value
 
+export type PseudoType = 'marker' | 'before' | 'after'
+/** Pseudo-elements shown in the DOM tree, in Chrome's order. */
+export const PSEUDO_TYPES: PseudoType[] = ['marker', 'before', 'after']
+
+/** A generated pseudo-element of `host`. Not a DOM node, but the client treats it as one. */
+export class PseudoElement {
+  constructor(
+    readonly host: Element,
+    readonly pseudoType: PseudoType
+  ) {}
+}
+
+/** Anything that has a node id: DOM nodes and pseudo-elements. */
+export type Inspectable = Node | PseudoElement
+
+/** Whether `host` currently generates the pseudo-element. */
+export function hasPseudoElement(host: Element, type: PseudoType): boolean {
+  if (type === 'marker') return getComputedStyle(host).display.includes('list-item')
+  const content = getComputedStyle(host, `::${type}`).content
+  return content !== 'none' && content !== 'normal' && content !== ''
+}
+
 /**
  * Maps page nodes to CDP node ids and serializes them.
  *
@@ -21,11 +43,14 @@ export const truncateNodeValue = (value: string) =>
  * client has received, which decides how DOM mutations are reported.
  */
 export class NodeRegistry {
-  private ids = new Map<Node, number>()
-  private nodes = new Map<number, Node>()
+  private ids = new Map<Inspectable, number>()
+  private nodes = new Map<number, Inspectable>()
   private seq = 0
-  private backendIds = new WeakMap<Node, number>()
-  private byBackendId = new Map<number, WeakRef<Node>>()
+  private backendIds = new WeakMap<Inspectable, number>()
+  private byBackendId = new Map<number, WeakRef<Inspectable>>()
+  private pseudos = new WeakMap<Element, Map<PseudoType, PseudoElement>>()
+  /** Pseudo-elements sent to the client, per host, to report later additions and removals. */
+  pseudoSent = new Map<Element, Set<PseudoType>>()
   private backendSeq = 0
   /** Nodes whose children the client has received. */
   childrenSent = new WeakSet<Node>()
@@ -43,9 +68,10 @@ export class NodeRegistry {
     this.nodes.clear()
     // Children sent in the old session must be sent again.
     this.childrenSent = new WeakSet()
+    this.pseudoSent.clear()
   }
 
-  idOf(node: Node): number {
+  idOf(node: Inspectable): number {
     let id = this.ids.get(node)
     if (!id) {
       id = ++this.seq
@@ -56,15 +82,15 @@ export class NodeRegistry {
   }
 
   /** The node id if the client knows the node, else undefined. */
-  knownId(node: Node): number | undefined {
+  knownId(node: Inspectable): number | undefined {
     return this.ids.get(node)
   }
 
-  get(nodeId: number): Node | undefined {
+  get(nodeId: number): Inspectable | undefined {
     return this.nodes.get(nodeId)
   }
 
-  backendIdOf(node: Node): number {
+  backendIdOf(node: Inspectable): number {
     let id = this.backendIds.get(node)
     if (!id) {
       id = ++this.backendSeq
@@ -74,8 +100,37 @@ export class NodeRegistry {
     return id
   }
 
-  getByBackendId(backendNodeId: number): Node | undefined {
+  getByBackendId(backendNodeId: number): Inspectable | undefined {
     return this.byBackendId.get(backendNodeId)?.deref()
+  }
+
+  /** The (cached) pseudo-element object of `host`. */
+  pseudoOf(host: Element, type: PseudoType): PseudoElement {
+    let byType = this.pseudos.get(host)
+    if (!byType) this.pseudos.set(host, (byType = new Map()))
+    let pseudo = byType.get(type)
+    if (!pseudo) byType.set(type, (pseudo = new PseudoElement(host, type)))
+    return pseudo
+  }
+
+  /** Pseudo-elements `host` currently generates. */
+  activePseudoTypes(host: Element): PseudoType[] {
+    return PSEUDO_TYPES.filter(type => hasPseudoElement(host, type))
+  }
+
+  serializePseudo(pseudo: PseudoElement): DomNode {
+    const name = `::${pseudo.pseudoType}`
+    return {
+      nodeId: this.idOf(pseudo),
+      backendNodeId: this.backendIdOf(pseudo),
+      nodeType: Node.ELEMENT_NODE,
+      nodeName: name,
+      localName: name,
+      nodeValue: '',
+      childNodeCount: 0,
+      attributes: [],
+      pseudoType: pseudo.pseudoType,
+    }
   }
 
   /** Whether a node is shown to the client at all. */
@@ -111,6 +166,11 @@ export class NodeRegistry {
       result.attributes = Array.from(node.attributes).flatMap(a => [a.name, a.value])
       const shadowRoot = this.shadowRootOf(node)
       if (shadowRoot) result.shadowRoots = [this.serializeShadowRoot(shadowRoot, pierce ? depth : 0, pierce)]
+      const pseudoTypes = this.activePseudoTypes(node)
+      if (pseudoTypes.length) {
+        result.pseudoElements = pseudoTypes.map(type => this.serializePseudo(this.pseudoOf(node, type)))
+      }
+      this.pseudoSent.set(node, new Set(pseudoTypes))
     } else if (node instanceof Document) {
       result.documentURL = node.URL
       result.baseURL = node.baseURI
@@ -146,7 +206,12 @@ export class NodeRegistry {
    * Makes sure the client knows `node`: sends the children of every ancestor it has not
    * received yet, from the top down, via `emitChildren`. Returns the node id.
    */
-  push(node: Node, emitChildren: (parent: Node) => void): number {
+  push(node: Inspectable, emitChildren: (parent: Node) => void): number {
+    // A pseudo-element is sent along with its host.
+    if (node instanceof PseudoElement) {
+      this.push(node.host, emitChildren)
+      return this.idOf(node)
+    }
     const path: Node[] = []
     for (let n: Node | null = node; n; n = n.parentNode ?? (n instanceof ShadowRoot ? n.host : null)) path.unshift(n)
     for (const ancestor of path.slice(0, -1)) {

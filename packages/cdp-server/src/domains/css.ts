@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol'
 import { FRAME_ID, type Context } from '../core/context'
-import { OWN_ATTRIBUTE } from '../core/nodes'
+import { OWN_ATTRIBUTE, PSEUDO_TYPES, PseudoElement, type PseudoType } from '../core/nodes'
 import { compareSpecificity, specificity, splitTopLevel } from '../core/selectors'
 import { CdpError } from '../core/server'
 import { resolveNode } from './dom'
@@ -10,6 +10,18 @@ type CSSProperty = Protocol.CSS.CSSProperty
 type StyleOrigin = Protocol.CSS.StyleSheetOrigin
 
 const INLINE_PREFIX = 'inline:'
+
+/** A pseudo-element at the end of a selector: `a::before`, legacy `a:after`, `::marker`. */
+const PSEUDO_SUFFIX =
+  /(?:::(before|after|marker|first-line|first-letter|placeholder|selection|backdrop|file-selector-button|cue|(?:part|slotted|highlight|view-transition[\w-]*)\([^)]*\))|:(before|after|first-line|first-letter))$/i
+
+/** Splits `a.b::before` into the host selector `a.b` and the pseudo-element `before`. */
+function splitPseudoElement(selector: string): { host: string; pseudo: string | null } {
+  const m = PSEUDO_SUFFIX.exec(selector)
+  if (!m) return { host: selector, pseudo: null }
+  const host = selector.slice(0, m.index).trim()
+  return { host: host && !/[\s>+~]$/.test(host) ? host : `${host}*`, pseudo: (m[1] || m[2]).toLowerCase() }
+}
 
 /**
  * Serializes declarations as `name: value;` separated by spaces, the text the client edits.
@@ -240,8 +252,11 @@ export function registerCss(ctx: Context) {
     return rule
   }
 
-  /** Author rules matching `el`, in cascade order (lowest priority first). */
-  function matchedRules(el: Element): Protocol.CSS.RuleMatch[] {
+  /**
+   * Rules matching `el`, or with `pseudo`, its pseudo-element, in cascade order (lowest
+   * priority first). Selectors ending in a pseudo-element only match that pseudo-element.
+   */
+  function matchedRules(el: Element, pseudo: PseudoType | null = null): Protocol.CSS.RuleMatch[] {
     const matches: { match: Protocol.CSS.RuleMatch; spec: Protocol.CSS.Specificity; order: number }[] = []
     let order = 0
     for (const sheet of sheets.all()) {
@@ -251,10 +266,12 @@ export function registerCss(ctx: Context) {
         const selectors = splitTopLevel(entry.rule.selectorText, ',').map(s => s.trim())
         const matching = selectors
           .map((selector, index) => {
+            const split = splitPseudoElement(selector)
+            if (split.pseudo !== pseudo) return -1
             try {
-              return el.matches(selector) ? index : -1
+              return el.matches(split.host) ? index : -1
             } catch {
-              return -1 // Pseudo-elements and unsupported selectors.
+              return -1 // Unsupported selector.
             }
           })
           .filter(index => index >= 0)
@@ -278,6 +295,24 @@ export function registerCss(ctx: Context) {
     const node = resolveNode(ctx, { nodeId })
     if (!(node instanceof Element)) throw new CdpError('Node is not an Element')
     return node
+  }
+
+  /** An element or a pseudo-element, as its host and pseudo type. */
+  const target = (nodeId: number): { el: Element; pseudo: PseudoType | null } => {
+    const node = nodes.get(nodeId)
+    if (node instanceof PseudoElement) return { el: node.host, pseudo: node.pseudoType }
+    return { el: element(nodeId), pseudo: null }
+  }
+
+  function inheritedEntries(from: Element | null): Protocol.CSS.InheritedStyleEntry[] {
+    const inherited: Protocol.CSS.InheritedStyleEntry[] = []
+    for (let parent = from; parent; parent = parent.parentElement) {
+      const entry: Protocol.CSS.InheritedStyleEntry = { matchedCSSRules: matchedRules(parent) }
+      const style = inlineStyle(parent)
+      if (style) entry.inlineStyle = style
+      inherited.push(entry)
+    }
+    return inherited
   }
 
   function applyEdit(edit: Protocol.CSS.StyleDeclarationEdit): CSSStyle {
@@ -319,18 +354,18 @@ export function registerCss(ctx: Context) {
     },
 
     getMatchedStylesForNode(params: Protocol.CSS.GetMatchedStylesForNodeRequest): Protocol.CSS.GetMatchedStylesForNodeResponse {
-      const el = element(params.nodeId)
-      const inherited: Protocol.CSS.InheritedStyleEntry[] = []
-      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-        const entry: Protocol.CSS.InheritedStyleEntry = { matchedCSSRules: matchedRules(parent) }
-        const style = inlineStyle(parent)
-        if (style) entry.inlineStyle = style
-        inherited.push(entry)
+      const { el, pseudo } = target(params.nodeId)
+      // For a pseudo-element, its host is the first element it inherits from.
+      if (pseudo) {
+        return { matchedCSSRules: matchedRules(el, pseudo), pseudoElements: [], inherited: inheritedEntries(el), cssKeyframesRules: [] }
       }
+      const pseudoElements = PSEUDO_TYPES.map(type => ({ pseudoType: type, matches: matchedRules(el, type) })).filter(
+        p => p.matches.length
+      )
       const result: Protocol.CSS.GetMatchedStylesForNodeResponse = {
         matchedCSSRules: matchedRules(el),
-        pseudoElements: [],
-        inherited,
+        pseudoElements,
+        inherited: inheritedEntries(el.parentElement),
         cssKeyframesRules: [],
       }
       const style = inlineStyle(el)
@@ -339,12 +374,14 @@ export function registerCss(ctx: Context) {
     },
 
     getInlineStylesForNode(params: Protocol.CSS.GetInlineStylesForNodeRequest): Protocol.CSS.GetInlineStylesForNodeResponse {
-      const style = inlineStyle(element(params.nodeId))
+      const { el, pseudo } = target(params.nodeId)
+      const style = pseudo ? undefined : inlineStyle(el)
       return style ? { inlineStyle: style } : {}
     },
 
     getComputedStyleForNode(params: Protocol.CSS.GetComputedStyleForNodeRequest): Protocol.CSS.GetComputedStyleForNodeResponse {
-      const style = getComputedStyle(element(params.nodeId))
+      const { el, pseudo } = target(params.nodeId)
+      const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null)
       return {
         computedStyle: Array.from(style, name => ({ name, value: style.getPropertyValue(name) })),
         extraFields: { isAppearanceBase: false, isTableSetVisuallyTable: false },
@@ -352,7 +389,8 @@ export function registerCss(ctx: Context) {
     },
 
     getBackgroundColors(params: Protocol.CSS.GetBackgroundColorsRequest): Protocol.CSS.GetBackgroundColorsResponse {
-      const style = getComputedStyle(element(params.nodeId))
+      const { el, pseudo } = target(params.nodeId)
+      const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null)
       return {
         backgroundColors: [style.backgroundColor],
         computedFontSize: style.fontSize,
@@ -371,14 +409,17 @@ export function registerCss(ctx: Context) {
       return {}
     },
 
-    setStyleTexts: (params: Protocol.CSS.SetStyleTextsRequest): Protocol.CSS.SetStyleTextsResponse => ({
-      styles: params.edits.map(applyEdit),
-    }),
+    setStyleTexts(params: Protocol.CSS.SetStyleTextsRequest): Protocol.CSS.SetStyleTextsResponse {
+      const styles = params.edits.map(applyEdit)
+      ctx.refreshPseudoElements?.()
+      return { styles }
+    },
 
     setRuleSelector(params: Protocol.CSS.SetRuleSelectorRequest): Protocol.CSS.SetRuleSelectorResponse {
       const sheet = sheets.get(params.styleSheetId)
       const rule = sheets.findRule(sheet, params.range.startLine)
       rule.selectorText = params.selector
+      ctx.refreshPseudoElements?.()
       return { selectorList: selectorList(sheet, rule) }
     },
 
@@ -398,6 +439,7 @@ export function registerCss(ctx: Context) {
       const sheet = sheets.get(params.styleSheetId)
       const index = sheet.insertRule(params.ruleText, sheet.cssRules.length)
       const rule = sheet.cssRules[index] as CSSStyleRule
+      ctx.refreshPseudoElements?.()
       return { rule: cssRule(sheet, { rule, media: [] }) }
     },
 

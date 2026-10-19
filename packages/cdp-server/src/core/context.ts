@@ -9,6 +9,8 @@ export interface Context {
   objects: ObjectRegistry
   nodes: NodeRegistry
   probe: Probe
+  /** Re-checks which pseudo-elements exist, e.g. after a style edit. Set by the DOM domain. */
+  refreshPseudoElements?: (roots?: Node[]) => void
 }
 
 /** The page is exposed as a single frame with a single execution context. */
