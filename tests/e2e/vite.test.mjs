@@ -1,6 +1,7 @@
 // The Vite plugin injects the probe first in <head> and serves everything it needs.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
@@ -55,4 +56,15 @@ test('DevTools mounts and receives output from before any app code ran', async (
   }
   assert.ok(values.includes('vite early'), JSON.stringify(values))
   assert.ok(values.includes('vite module'), JSON.stringify(values))
+})
+
+test('locales from @devtools-anywhere/devtools-frontend-locales are served with the frontend', {
+  skip: existsSync(path.join(here, '../../packages/devtools-frontend-locales/dist/core/i18n/locales/ja.json'))
+    ? false
+    : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first',
+}, async () => {
+  const base = server.resolvedUrls.local[0].replace(/\/$/, '')
+  const res = await fetch(base + '/@devtools-anywhere/front_end/core/i18n/locales/ja.json')
+  assert.equal(res.status, 200)
+  assert.equal(typeof (await res.json()), 'object')
 })

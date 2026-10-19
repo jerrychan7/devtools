@@ -101,11 +101,12 @@
 |---|---|
 | `devtools-anywhere` | 总包：`<devtools-anywhere>` 组件、`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js` 和 `devtools-anywhere-sw.js` |
 | `@devtools-anywhere/cdp-server` | 页面内的 CDP 服务端。探针通过子路径 `@devtools-anywhere/cdp-server/probe` 导出，单独构建成一个很小的文件，供 `<script>` 引入和插件注入使用 |
-| `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，可以自托管，也可以从 CDN 引用 |
+| `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
+| `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
 
 - 探针不单独成包：Runtime 和 Network 域直接读取它的缓冲，两者必须严格匹配。放在 cdp-server 中可以共用类型，也不会出现版本不匹配。
-- 前端单独成包，因为它体积大（代码约 15 MB，翻译约 43 MB，gzip 打包后约 11 MB），更新节奏跟随 Chrome 版本。
+- 前端单独成包，因为它体积大（约 16 MB），更新节奏跟随 Chrome 版本。其他语言（约 42 MB）再拆成一个包，需要的人才装。
 - 所有包使用同一个版本号、一起发布，版本号相同的包一定能配合使用。
 
 ### 目录结构
@@ -203,7 +204,7 @@ pnpm --filter @devtools-anywhere/devtools-frontend build:frontend   # 构建钉�
 pnpm --filter @devtools-anywhere/devtools-frontend update           # 构建上游最新版，成功后钉住
 ```
 
-`DEVTOOLS_FRONTEND_SRC` 和 `DEPOT_TOOLS` 可以覆盖默认位置（`devtools-frontend.ignore/devtools-frontend`、`depot_tools.ignore`）。脚本会检出指定版本、运行 `gclient sync`、打上 `patches/*.patch`、把 `src/` 复制到 `front_end/entrypoints/`、用 gn 和 autoninja 构建，再只把入口能加载到的文件复制到 `dist/`：经 import 可达的模块、它们的资源，以及这些模块在各语言下的界面文案。
+`DEVTOOLS_FRONTEND_SRC` 和 `DEPOT_TOOLS` 可以覆盖默认位置（`devtools-frontend.ignore/devtools-frontend`、`depot_tools.ignore`）。脚本会检出指定版本、运行 `gclient sync`、打上 `patches/*.patch`、把 `src/` 复制到 `front_end/entrypoints/`、用 gn 和 autoninja 构建，再只把入口能加载到的文件复制到 `dist/`：经 import 可达的模块、它们的资源，以及这些模块的界面文案：英文和中文放在 `dist/`，其他语言放在 `packages/devtools-frontend-locales/dist/`。
 
 为了尽量少改上游：
 

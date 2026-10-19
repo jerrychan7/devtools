@@ -24,12 +24,19 @@
     "@devtools-anywhere/devtools-frontend": "workspace:*"
   },
   "peerDependencies": {
-    "vite": ">=5"
+    "vite": ">=5",
+    "@devtools-anywhere/devtools-frontend-locales": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "@devtools-anywhere/devtools-frontend-locales": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@devtools-anywhere/devtools-frontend-locales": {
+      "optional": true
+    }
   }
 }

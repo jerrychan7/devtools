@@ -210,6 +210,8 @@ importers:
         specifier: ^22.18.0
         version: 22.20.5
 
+  packages/devtools-frontend-locales: {}
+
   packages/vite-plugin:
     dependencies:
       '@devtools-anywhere/devtools-frontend':
@@ -219,6 +221,9 @@ importers:
         specifier: workspace:*
         version: link:../devtools-anywhere
     devDependencies:
+      '@devtools-anywhere/devtools-frontend-locales':
+        specifier: workspace:*
+        version: link:../devtools-frontend-locales
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.5

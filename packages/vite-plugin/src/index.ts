@@ -33,9 +33,10 @@ const TYPES: Record<string, string> = {
   '.wasm': 'application/wasm',
 }
 
-function defaultFrontendDir(require: NodeJS.Require): string | undefined {
+/** Directory of an installed package's file, or undefined if the package is not installed. */
+function packageDir(require: NodeJS.Require, file: string): string | undefined {
   try {
-    return path.dirname(require.resolve('@devtools-anywhere/devtools-frontend/anywhere_app.html'))
+    return path.dirname(require.resolve(file))
   } catch {
     return undefined
   }
@@ -49,17 +50,26 @@ function defaultFrontendDir(require: NodeJS.Require): string | undefined {
 export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}): Plugin {
   const require = createRequire(import.meta.url)
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'))
-  const dir = options.frontendUrl ? undefined : (options.frontendDir ?? defaultFrontendDir(require))
+  const dir = options.frontendUrl ? undefined : (options.frontendDir ?? packageDir(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'))
   const frontendDir = dir && path.resolve(dir)
   const frontend = options.frontendUrl ?? (frontendDir ? `${BASE}front_end/${options.frontendEntry ?? 'anywhere_app.html'}` : undefined)
 
-  /** Maps a request path under BASE to a file on disk, or null. */
-  function resolveFile(urlPath: string): string | null {
-    const [dir, rel] = urlPath.startsWith('front_end/') ? [frontendDir, urlPath.slice('front_end/'.length)] : [dist, urlPath]
+  // Optional: translations beyond English and Chinese, laid out like the frontend.
+  const localesDir = frontendDir && packageDir(require, '@devtools-anywhere/devtools-frontend-locales/REVISION')
+
+  /** `rel` inside `dir`, if it is a file there. */
+  function fileIn(dir: string | undefined, rel: string): string | null {
     if (!dir) return null
     const file = path.resolve(dir, decodeURIComponent(rel))
     if (!file.startsWith(dir + path.sep) || !existsSync(file) || !statSync(file).isFile()) return null
     return file
+  }
+
+  /** Maps a request path under BASE to a file on disk, or null. */
+  function resolveFile(urlPath: string): string | null {
+    if (!urlPath.startsWith('front_end/')) return fileIn(dist, urlPath)
+    const rel = urlPath.slice('front_end/'.length)
+    return fileIn(frontendDir, rel) ?? fileIn(localesDir, rel)
   }
 
   return {

@@ -101,11 +101,12 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 |---|---|
 | `devtools-anywhere` | Umbrella package: the `<devtools-anywhere>` element, `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js` and `devtools-anywhere-sw.js` |
 | `@devtools-anywhere/cdp-server` | In-page CDP server. The probe ships as the `@devtools-anywhere/cdp-server/probe` subpath export, built as a separate tiny file for `<script>` tags and injection |
-| `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets, self-hostable or served from a CDN |
+| `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets with English and Chinese UI, self-hostable or served from a CDN |
+| `@devtools-anywhere/devtools-frontend-locales` | Optional: the other 80 UI languages, at the same paths as in the frontend package. Serve both from one directory (the Vite plugin does this when it is installed); a missing language falls back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
 
 - The probe is not a separate package: the Runtime and Network domains read its buffer directly, so the two must always match. Keeping it in cdp-server lets them share types and rules out version mismatches.
-- The frontend is separate because it is large (about 15 MB of code plus 43 MB of translations, about 11 MB as a gzipped tarball) and follows Chrome's release cadence.
+- The frontend is separate because it is large (about 16 MB) and follows Chrome's release cadence. Its other languages (about 42 MB) are another package, so that only those who need them install them.
 - All packages share one version number and are released together, so matching versions always work together.
 
 ### Repository layout
@@ -203,7 +204,7 @@ pnpm --filter @devtools-anywhere/devtools-frontend build:frontend   # pinned rev
 pnpm --filter @devtools-anywhere/devtools-frontend update           # latest upstream, pins it on success
 ```
 
-`DEVTOOLS_FRONTEND_SRC` and `DEPOT_TOOLS` override the default locations (`devtools-frontend.ignore/devtools-frontend`, `depot_tools.ignore`). The script checks out the revision, runs `gclient sync`, applies `patches/*.patch`, copies `src/` into `front_end/entrypoints/`, builds with gn and autoninja, and copies to `dist/` only what the entrypoint can load (modules reachable through imports, their assets, and the UI strings of those modules in every locale).
+`DEVTOOLS_FRONTEND_SRC` and `DEPOT_TOOLS` override the default locations (`devtools-frontend.ignore/devtools-frontend`, `depot_tools.ignore`). The script checks out the revision, runs `gclient sync`, applies `patches/*.patch`, copies `src/` into `front_end/entrypoints/`, builds with gn and autoninja, and copies to `dist/` only what the entrypoint can load (modules reachable through imports, their assets, and the UI strings of those modules: English and Chinese in `dist/`, the other locales in `packages/devtools-frontend-locales/dist/`).
 
 How it fits into upstream with as few patches as possible:
 

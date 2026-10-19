@@ -1,6 +1,7 @@
 // Builds the DevTools frontend from the official devtools-frontend sources:
 //   checks out the pinned revision, applies the patches, adds the anywhere_app entrypoint,
-//   builds with gn + autoninja and copies the release files to dist/.
+//   builds with gn + autoninja and copies the release files to dist/ (and the locales
+//   beyond en-US and zh to ../devtools-frontend-locales/dist/).
 //
 // Environment:
 //   DEVTOOLS_FRONTEND_SRC  checkout of devtools-frontend (`fetch devtools-frontend`)
@@ -23,6 +24,9 @@ const src = path.resolve(process.env.DEVTOOLS_FRONTEND_SRC ?? path.join(repo, 'd
 const depotTools = path.resolve(process.env.DEPOT_TOOLS ?? path.join(repo, 'depot_tools.ignore'))
 const out = path.join(src, 'out/Anywhere')
 const dist = path.join(pkg, 'dist')
+/** The locales Chrome bundles stay in this package; the others go to the locales package. */
+const localesDist = path.join(pkg, '../devtools-frontend-locales/dist')
+const BUNDLED_LOCALES = ['en-US', 'zh']
 const revisionFile = path.join(pkg, 'REVISION')
 
 const args = new Set(process.argv.slice(2))
@@ -108,13 +112,19 @@ const copy = (file: string, content?: string) => {
 const kept = files.filter(keep)
 kept.forEach(file => copy(file))
 
-// Every translated locale (Chrome only bundles a few and fetches the rest from its own
-// servers), minus the strings of modules that are not included.
+// Every translated locale, minus the strings of modules that are not included. Chrome bundles
+// en-US and zh and fetches the others from its own servers; here the others go to
+// @devtools-anywhere/devtools-frontend-locales, at the same paths, so that the two packages
+// can be served from one directory. A missing locale falls back to en-US.
+fs.rmSync(localesDist, { recursive: true, force: true })
 for (const name of fs.readdirSync(path.join(gen, LOCALES)).filter(f => f.endsWith('.json'))) {
   const strings = JSON.parse(fs.readFileSync(path.join(gen, LOCALES, name), 'utf8'))
   const used = Object.fromEntries(Object.entries(strings).filter(([key]) => inModule(key.split(' | ')[0])))
-  copy(LOCALES + name, JSON.stringify(used))
+  const target = BUNDLED_LOCALES.includes(name.slice(0, -'.json'.length)) ? dist : localesDist
+  fs.mkdirSync(path.join(target, LOCALES), { recursive: true })
+  fs.writeFileSync(path.join(target, LOCALES, name), JSON.stringify(used))
 }
+fs.writeFileSync(path.join(localesDist, 'REVISION'), revision + '\n')
 
 fs.writeFileSync(path.join(dist, 'REVISION'), revision + '\n')
 if (args.has('--latest')) fs.writeFileSync(revisionFile, revision + '\n')
