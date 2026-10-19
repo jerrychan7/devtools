@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>A: sync chobitsu</title>
+  <!-- Variant A: chobitsu itself is the first synchronous script. -->
+  <script src="/chii.ignore/node_modules/chobitsu/dist/chobitsu.js"></script>
+  <script>window.__firstUserScriptAt = performance.now();</script>
+  <script src="./scenario-early.js"></script>
+  <script src="./scenario-throw.js"></script>
+  <script src="./embed.js"></script>
+</head>
+<body>
+  <h1>Variant A: sync chobitsu</h1>
+  <script src="./late.js"></script>
+  <script>
+    window.addEventListener('load', function () {
+      console.log('[body] load');
+      window.__embedDevtools();
+      window.__afterAttach();
+    });
+  </script>
+</body>
+</html>

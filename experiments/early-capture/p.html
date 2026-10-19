@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>P: probe + lazy chobitsu</title>
+  <!-- Variant P: tiny probe first, chobitsu loaded lazily after load + delay, then replay. -->
+  <script src="./probe.js"></script>
+  <script>window.__firstUserScriptAt = performance.now();</script>
+  <script src="./scenario-early.js"></script>
+  <script src="./scenario-throw.js"></script>
+  <script src="./embed.js"></script>
+</head>
+<body>
+  <h1>Variant P: probe + lazy chobitsu</h1>
+  <script src="./late.js"></script>
+  <script>
+    window.addEventListener('load', function () {
+      console.log('[body] load');
+      setTimeout(function () {
+        var s = document.createElement('script');
+        s.src = '/chii.ignore/node_modules/chobitsu/dist/chobitsu.js';
+        // onload runs in the same task as the script's evaluation: nothing can log in between.
+        s.onload = function () {
+          var replayed = window.__earlyProbe.handoff();
+          window.__embedDevtools({ replayed: replayed, probe: window.__earlyProbe });
+          window.__afterAttach();
+        };
+        document.head.appendChild(s);
+      }, 1000);
+    });
+  </script>
+</body>
+</html>
