@@ -389,3 +389,83 @@ test('disable takes the attachShadow wrapper off', async () => {
   );
   assert.ok(restored);
 });
+
+test('DOM.setAttributesAsText keeps the place of an attribute set again', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="reorder-ours" class="a" data-b="1"></div><div id="reorder-chrome" class="a" data-b="1"></div>'
+    )
+  );
+  const html = await Promise.all(
+    (
+      [
+        [t.ours, 'reorder-ours'],
+        [t.chrome, 'reorder-chrome'],
+      ] as const
+    ).map(async ([side, id]) => {
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = byId(root, id);
+      await side.send('DOM.setAttributesAsText', { nodeId, name: 'class', text: 'class="b"' });
+      return t.page.evaluate(id => document.getElementById(id)?.outerHTML.replace(id, ''), id);
+    })
+  );
+  assert.equal(html[0], '<div id="" class="b" data-b="1"></div>');
+  assert.equal(html[0], html[1]);
+});
+
+test('DOM.getContentQuads of a text node', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML('beforeend', '<p id="quads-text" style="width: 40px">some words to wrap</p>')
+  );
+  const quads = await Promise.all(
+    [t.ours, t.chrome].map(async side => {
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const text = byId(root, 'quads-text').children?.[0];
+      assert.ok(text);
+      return (await side.send('DOM.getContentQuads', { nodeId: text.nodeId })).quads;
+    })
+  );
+  const [ours, chrome] = quads;
+  assert.ok(ours && ours.length > 1);
+  assert.deepEqual(ours, chrome);
+});
+
+test('CSS.getBackgroundColors blends translucent backgrounds of the ancestors and shadow hosts, none for a pseudo-element', async () => {
+  await t.page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'afterbegin',
+      `<style>#bg-pseudo::before { content: "x"; background: rgba(0, 0, 255, 0.5) }</style>
+      <div style="background: rgb(200, 0, 0)">
+        <div style="background: rgba(0, 200, 0, 0.5)"><span id="bg-plain">a</span><span id="bg-pseudo">b</span></div>
+        <div id="bg-host" style="background: rgba(0, 0, 200, 0.5)"></div>
+      </div>`
+    );
+    // A transparent child of a shadow root: the host and its ancestors are behind it.
+    document.getElementById('bg-host')?.attachShadow({ mode: 'open' }).append(document.createElement('span'));
+    document.querySelector('#bg-host')?.shadowRoot?.firstElementChild?.append('c');
+  });
+  // Chrome looks at what is painted under the element: it has to be on screen and painted.
+  await t.page.evaluate(async () => {
+    window.scrollTo(0, 0);
+    for (let i = 0; i < 2; i++) await new Promise(resolve => requestAnimationFrame(resolve));
+  });
+  const colors = await Promise.all(
+    [t.ours, t.chrome].map(async side => {
+      await side.send('CSS.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+      const result: (string[] | undefined)[] = [];
+      const colorsOf = async (nodeId: number) =>
+        (await side.send('CSS.getBackgroundColors', { nodeId })).backgroundColors;
+      result.push(await colorsOf(byId(root, 'bg-plain').nodeId));
+      const inShadow = byId(root, 'bg-host').shadowRoots?.[0]?.children?.[0];
+      assert.ok(inShadow);
+      result.push(await colorsOf(inShadow.nodeId));
+      const before = byId(root, 'bg-pseudo').pseudoElements?.[0];
+      assert.ok(before);
+      result.push(await colorsOf(before.nodeId));
+      return result;
+    })
+  );
+  assert.deepEqual(colors[0], colors[1]);
+});

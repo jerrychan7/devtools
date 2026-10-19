@@ -617,7 +617,8 @@ export function registerCss(ctx: Context) {
     getBackgroundColors(params: Protocol.CSS.GetBackgroundColorsRequest): Protocol.CSS.GetBackgroundColorsResponse {
       const { el, pseudo } = target(params.nodeId);
       const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
-      const background = backgroundBehind(el, style);
+      // Chrome reports no background for a pseudo-element.
+      const background = pseudo ? null : backgroundBehind(el, style);
       return {
         ...(background && { backgroundColors: [background] }),
         computedFontSize: style.fontSize,
