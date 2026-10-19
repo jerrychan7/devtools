@@ -47,14 +47,20 @@ function keyPath(path: string | string[] | null): Protocol.IndexedDB.KeyPath {
   return { type: 'string', string: path };
 }
 
+/** A field the protocol requires for this kind of value. */
+function required<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new CdpError(`Missing ${what}`);
+  return value;
+}
+
 function toKey(key: Protocol.IndexedDB.Key): IDBValidKey {
   switch (key.type) {
     case 'number':
-      return key.number!;
+      return required(key.number, 'key.number');
     case 'string':
-      return key.string!;
+      return required(key.string, 'key.string');
     case 'date':
-      return new Date(key.date!);
+      return new Date(required(key.date, 'key.date'));
     case 'array':
       return (key.array ?? []).map(toKey);
   }
@@ -157,10 +163,9 @@ export function registerStorage(ctx: Context) {
     ): Protocol.DOMStorage.GetDOMStorageItemsResponse {
       const storage = storageOf(params.storageId);
       return {
-        entries: Array.from({ length: storage.length }, (_, i) => {
-          const key = storage.key(i)!;
-          return [key, storage.getItem(key) ?? ''];
-        }),
+        entries: Array.from({ length: storage.length }, (_, i) => storage.key(i))
+          .filter(key => key !== null)
+          .map(key => [key, storage.getItem(key) ?? '']),
       };
     },
     setDOMStorageItem(params: Protocol.DOMStorage.SetDOMStorageItemRequest) {
@@ -182,7 +187,7 @@ export function registerStorage(ctx: Context) {
 
     async requestDatabaseNames(): Promise<Protocol.IndexedDB.RequestDatabaseNamesResponse> {
       const databases = await indexedDB.databases();
-      return { databaseNames: databases.map(d => d.name!).filter(Boolean) };
+      return { databaseNames: databases.flatMap(d => (d.name ? [d.name] : [])) };
     },
 
     async requestDatabase(
@@ -260,7 +265,7 @@ export function registerStorage(ctx: Context) {
 
     async deleteObjectStoreEntries(params: Protocol.IndexedDB.DeleteObjectStoreEntriesRequest) {
       await withStore(params.databaseName, params.objectStoreName, 'readwrite', store =>
-        request(store.delete(toKeyRange(params.keyRange)!))
+        request(store.delete(required(toKeyRange(params.keyRange), 'keyRange')))
       );
     },
 
@@ -289,7 +294,8 @@ export function registerStorage(ctx: Context) {
     ): Promise<Protocol.CacheStorage.RequestEntriesResponse> {
       const cache = await cacheStorage().open(cacheNameOf(params.cacheId));
       let requests = await cache.keys();
-      if (params.pathFilter) requests = requests.filter(r => new URL(r.url).pathname.includes(params.pathFilter!));
+      const filter = params.pathFilter;
+      if (filter) requests = requests.filter(r => new URL(r.url).pathname.includes(filter));
       const page = requests.slice(
         params.skipCount ?? 0,
         (params.skipCount ?? 0) + (params.pageSize ?? requests.length)

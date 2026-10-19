@@ -99,14 +99,18 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   </div>
   <iframe title="DevTools"></iframe>
 </div>`;
-    this.panel = root.querySelector('.panel')!;
-    this.frame = root.querySelector('iframe')!;
-    root.querySelector('.launcher')!.addEventListener('click', () => this.show());
-    root
-      .querySelector('.close')!
-      .addEventListener('click', () => (this.hasAttribute('shell') ? this.exitShell() : this.hide()));
-    root.querySelector('.keep')!.addEventListener('click', () => this.enterShell());
-    this.setupResizer(root.querySelector('.bar')!);
+    /** An element of the template above. */
+    const part = <T extends Element>(selector: string) => {
+      const el = root.querySelector<T>(selector);
+      if (!el) throw new Error(`devtools-anywhere: missing ${selector}`);
+      return el;
+    };
+    this.panel = part<HTMLDivElement>('.panel');
+    this.frame = part<HTMLIFrameElement>('iframe');
+    part('.launcher').addEventListener('click', () => this.show());
+    part('.close').addEventListener('click', () => (this.hasAttribute('shell') ? this.exitShell() : this.hide()));
+    part('.keep').addEventListener('click', () => this.enterShell());
+    this.setupResizer(part<HTMLElement>('.bar'));
   }
 
   get open() {
@@ -210,9 +214,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // The frontend's document is not one of the page's requests.
     installProbe().ownUrls.add(url.href);
     this.disconnect?.();
-    this.disconnect = this.server
-      ? connectFrontend(this.server, this.frame, url.origin)
-      : relayShell(page!, this.frame, url.origin);
+    if (this.server) this.disconnect = connectFrontend(this.server, this.frame, url.origin);
+    else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
     this.frame.src = `${url.href.split('#')[0]}#?embedded=${encodeURIComponent(location.origin)}`;
   }
 

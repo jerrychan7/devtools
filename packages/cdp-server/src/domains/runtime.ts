@@ -4,9 +4,11 @@ import { parseStack } from '../core/stack';
 import type { LogEntry } from '../probe/types';
 
 // Indirect eval runs in the global scope, like code typed into the console.
+// oxlint-disable-next-line no-eval -- evaluating console input is the point.
 const globalEval = eval;
 
-const isThenable = (v: any): v is PromiseLike<unknown> => v != null && typeof v.then === 'function';
+const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+  v !== null && (typeof v === 'object' || typeof v === 'function') && typeof Reflect.get(v, 'then') === 'function';
 
 /**
  * Evaluates console input like V8 does: as a script, so `{a: 1}` is a block (the frontend
@@ -110,13 +112,12 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
   }
 
   function withCommandLineApi<T>(fn: () => T): T {
-    const w = window as any;
-    const added = Object.entries(commandLineApi()).filter(([name]) => !(name in w));
-    for (const [name, value] of added) w[name] = value;
+    const added = Object.entries(commandLineApi()).filter(([name]) => !(name in window));
+    for (const [name, value] of added) Reflect.set(window, name, value);
     try {
       return fn();
     } finally {
-      for (const [name] of added) delete w[name];
+      for (const [name] of added) Reflect.deleteProperty(window, name);
     }
   }
 
@@ -263,7 +264,9 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
     globalLexicalScopeNames: () => ({ names: [] }),
     getIsolateId: () => ({ id: 'devtools-anywhere' }),
     getHeapUsage: () => {
-      const memory = (performance as any).memory;
+      // Chrome-only, non-standard.
+      const memory = (performance as Performance & { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } })
+        .memory;
       return { usedSize: memory?.usedJSHeapSize ?? 0, totalSize: memory?.totalJSHeapSize ?? 0 };
     },
     runIfWaitingForDebugger: () => {},

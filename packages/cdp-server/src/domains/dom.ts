@@ -188,8 +188,8 @@ export function registerDom(ctx: Context) {
           } satisfies Protocol.DOM.ChildNodeInsertedEvent);
         });
       } else if (record.type === 'attributes' && targetId !== undefined && target instanceof Element) {
-        const name = record.attributeName!;
-        if (name === FORCE_ATTRIBUTE) continue;
+        const name = record.attributeName;
+        if (name === null || name === FORCE_ATTRIBUTE) continue;
         const value = target.getAttribute(name);
         if (value === null) server.emit('DOM.attributeRemoved', { nodeId: targetId, name });
         else server.emit('DOM.attributeModified', { nodeId: targetId, name, value });
@@ -286,9 +286,9 @@ export function registerDom(ctx: Context) {
       const el = element(params);
       const parsed = document.createElement('template');
       parsed.innerHTML = `<div ${params.text}></div>`;
-      const source = parsed.content.firstElementChild!;
+      const source = parsed.content.firstElementChild;
       if (params.name) el.removeAttribute(params.name);
-      for (const attr of Array.from(source.attributes)) el.setAttribute(attr.name, attr.value);
+      for (const attr of Array.from(source?.attributes ?? [])) el.setAttribute(attr.name, attr.value);
     },
 
     removeAttribute(params: Protocol.DOM.RemoveAttributeRequest) {
@@ -417,6 +417,6 @@ export function registerDom(ctx: Context) {
     undo: () => {},
     redo: () => {},
     hideHighlight: () => server.call('Overlay.hideHighlight'),
-    highlightNode: (params: unknown) => server.call('Overlay.highlightNode', params),
+    highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => server.call('Overlay.highlightNode', params),
   });
 }

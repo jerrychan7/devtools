@@ -23,7 +23,12 @@ class InternalEntry {
 
 const TypedArray = Object.getPrototypeOf(Int8Array);
 const toTag = (v: unknown) => Object.prototype.toString.call(v).slice(8, -1);
-const getter = (proto: object, key: PropertyKey) => Object.getOwnPropertyDescriptor(proto, key)!.get!;
+/** The native getter `proto[key]`; only used inside brand checks, where throwing means "no". */
+const getter = (proto: object, key: PropertyKey) => {
+  const get = Object.getOwnPropertyDescriptor(proto, key)?.get;
+  if (!get) throw new TypeError();
+  return get;
+};
 
 /** Returns true if `check` runs on `v` without throwing. */
 function brand(v: unknown, check: (v: unknown) => unknown): boolean {
@@ -79,7 +84,7 @@ function abbreviate(s: string): string {
 const isNativeFunction = (fn: unknown) =>
   typeof fn === 'function' && /\{\s*\[native code\]\s*\}$/.test(Function.prototype.toString.call(fn));
 
-function className(v: any): string {
+function className(v: unknown): string {
   try {
     const ctor = Object.getPrototypeOf(v)?.constructor;
     return (typeof ctor === 'function' && ctor.name) || 'Object';
@@ -103,7 +108,7 @@ function shortValue(v: unknown): string {
   return typeof v === 'string' ? JSON.stringify(v) : describe(v, classify(v).subtype);
 }
 
-function describe(v: any, subtype: Subtype): string {
+function describe(v: unknown, subtype: Subtype): string {
   try {
     switch (typeof v) {
       case 'string':
@@ -124,25 +129,29 @@ function describe(v: any, subtype: Subtype): string {
       case 'null':
         return 'null';
       case 'array':
-        return `Array(${v.length})`;
+        return `Array(${(v as unknown[]).length})`;
       case 'typedarray':
-        return `${className(v)}(${v.length})`;
+        return `${className(v)}(${(v as ArrayLike<unknown>).length})`;
       case 'map':
       case 'set':
-        return `${className(v)}(${v.size})`;
+        return `${className(v)}(${(v as Map<unknown, unknown> | Set<unknown>).size})`;
       case 'arraybuffer':
       case 'dataview':
-        return `${className(v)}(${v.byteLength})`;
+        return `${className(v)}(${(v as ArrayBuffer | DataView).byteLength})`;
       case 'date':
         return Date.prototype.toString.call(v);
       case 'regexp':
         return RegExp.prototype.toString.call(v);
-      case 'error':
-        return typeof v.stack === 'string' && v.stack ? v.stack : `${v.name}: ${v.message}`;
+      case 'error': {
+        const e = v as Error;
+        return typeof e.stack === 'string' && e.stack ? e.stack : `${e.name}: ${e.message}`;
+      }
       case 'node':
-        return describeNode(v);
-      case 'internal#entry':
-        return v.hasKey ? `{${shortValue(v.key)} => ${shortValue(v.value)}}` : shortValue(v.value);
+        return describeNode(v as Node);
+      case 'internal#entry': {
+        const entry = v as InternalEntry;
+        return entry.hasKey ? `{${shortValue(entry.key)} => ${shortValue(entry.value)}}` : shortValue(entry.value);
+      }
     }
     return className(v);
   } catch {
@@ -166,7 +175,7 @@ export class ObjectRegistry {
   /** Arrays created for `[[Entries]]`; like Chrome, they have no visible prototype. */
   private entryLists = new WeakSet<object>();
 
-  wrap(value: any, options: WrapOptions = {}): RemoteObject {
+  wrap(value: unknown, options: WrapOptions = {}): RemoteObject {
     const { type, subtype } = classify(value);
     switch (type) {
       case 'undefined':
@@ -175,13 +184,13 @@ export class ObjectRegistry {
       case 'boolean':
         return { type, value };
       case 'number':
-        if (Number.isNaN(value) || !Number.isFinite(value) || Object.is(value, -0)) {
+        if (Number.isNaN(value) || !Number.isFinite(value as number) || Object.is(value, -0)) {
           const s = Object.is(value, -0) ? '-0' : String(value);
           return { type, unserializableValue: s, description: s };
         }
         return { type, value, description: String(value) };
       case 'bigint':
-        return { type, unserializableValue: value + 'n', description: value + 'n' };
+        return { type, unserializableValue: String(value) + 'n', description: String(value) + 'n' };
     }
     if (subtype === 'null') return { type, subtype, value: null };
     if (options.returnByValue && type === 'object') return { type, value: cloneByValue(value) };
@@ -190,13 +199,13 @@ export class ObjectRegistry {
     if (subtype) result.subtype = subtype as RemoteObject['subtype'];
     if (type === 'function') result.className = 'Function';
     else if (type === 'object')
-      result.className = subtype === 'error' ? value.name || className(value) : className(value);
-    if (options.generatePreview && type === 'object') result.preview = this.preview(value, subtype);
+      result.className = subtype === 'error' ? (value as Error).name || className(value) : className(value);
+    if (options.generatePreview && type === 'object') result.preview = this.preview(value as object, subtype);
     result.objectId = this.idOf(value, options.group);
     return result;
   }
 
-  get(objectId: string): any {
+  get(objectId: string): unknown {
     if (!this.byId.has(objectId)) throw new CdpError('Could not find object with given id');
     return this.byId.get(objectId);
   }
@@ -229,13 +238,13 @@ export class ObjectRegistry {
     }
 
     if (params.accessorPropertiesOnly) {
-      return { result: this.accessorProperties(obj) };
+      return { result: this.accessorProperties(obj as object) };
     }
 
     const result: PropertyDescriptor[] = [];
     const seen = new Set<PropertyKey>();
     const isArrayLike = Array.isArray(obj) || obj instanceof TypedArray;
-    let target = obj;
+    let target = obj as object | null;
     let isOwn = true;
     while (target !== null && target !== undefined) {
       for (const key of Reflect.ownKeys(target)) {
@@ -252,7 +261,13 @@ export class ObjectRegistry {
 
     const internalProperties: InternalPropertyDescriptor[] = [];
     const proto = Object.getPrototypeOf(obj);
-    if (proto !== null && typeof obj === 'object' && params.ownProperties && !this.entryLists.has(obj)) {
+    if (
+      proto !== null &&
+      typeof obj === 'object' &&
+      obj !== null &&
+      params.ownProperties &&
+      !this.entryLists.has(obj)
+    ) {
       internalProperties.push({ name: '[[Prototype]]', value: this.wrap(proto) });
     }
     const { subtype } = classify(obj);
@@ -308,12 +323,12 @@ export class ObjectRegistry {
   }
 
   /** Accessors along the prototype chain; the frontend invokes the getters on demand. */
-  private accessorProperties(obj: any): PropertyDescriptor[] {
+  private accessorProperties(obj: object): PropertyDescriptor[] {
     const result: PropertyDescriptor[] = [];
     const seen = new Set<PropertyKey>();
-    let target = obj;
+    let target: object | null = obj;
     let isOwn = true;
-    while (target !== null && target !== undefined && target !== Object.prototype) {
+    while (target !== null && target !== Object.prototype) {
       for (const key of Reflect.ownKeys(target)) {
         if (seen.has(key)) continue;
         seen.add(key);
@@ -326,7 +341,7 @@ export class ObjectRegistry {
     return result;
   }
 
-  private preview(obj: any, subtype: Subtype): ObjectPreview {
+  private preview(obj: object, subtype: Subtype): ObjectPreview {
     const preview: ObjectPreview = {
       type: 'object',
       description: describe(obj, subtype),
@@ -351,7 +366,9 @@ export class ObjectRegistry {
     const seen = new Set<PropertyKey>();
     let own: PropertyKey[];
     try {
-      own = isArrayLike ? Array.from({ length: obj.length }, (_, i) => String(i)) : Reflect.ownKeys(obj);
+      own = isArrayLike
+        ? Array.from({ length: (obj as ArrayLike<unknown>).length }, (_, i) => String(i))
+        : Reflect.ownKeys(obj);
     } catch {
       own = [];
     }
@@ -383,7 +400,7 @@ export class ObjectRegistry {
    * Element#title, Error#stack) are invoked since they have no side effects; user-defined
    * getters are never invoked and show up as accessors.
    */
-  private previewProperty(obj: any, holder: object, key: PropertyKey): PropertyPreview | null {
+  private previewProperty(obj: object, holder: object, key: PropertyKey): PropertyPreview | null {
     if (key === '__proto__') return null;
     const desc = Object.getOwnPropertyDescriptor(holder, key);
     if (!desc) return null;
@@ -397,7 +414,7 @@ export class ObjectRegistry {
     }
   }
 
-  private withEntries(preview: ObjectPreview, obj: any, subtype: Subtype): ObjectPreview {
+  private withEntries(preview: ObjectPreview, obj: object, subtype: Subtype): ObjectPreview {
     if (subtype === 'map' || subtype === 'set') {
       preview.entries = [];
       for (const [k, v] of subtype === 'map'

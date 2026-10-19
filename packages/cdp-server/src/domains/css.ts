@@ -524,11 +524,13 @@ export function registerCss(ctx: Context) {
         const style = document.createElement('style');
         style.setAttribute(OWN_ATTRIBUTE, 'inspector-stylesheet');
         document.head.appendChild(style);
+        // A connected <style> always has a sheet.
+        if (!style.sheet) throw new CdpError('Could not create the inspector style sheet');
         sheets.inspectorSheet = style.sheet;
-        known.add(style.sheet!);
-        server.emit('CSS.styleSheetAdded', { header: header(style.sheet!) });
+        known.add(style.sheet);
+        server.emit('CSS.styleSheetAdded', { header: header(style.sheet) });
       }
-      return { styleSheetId: sheets.idOf(sheets.inspectorSheet!) };
+      return { styleSheetId: sheets.idOf(sheets.inspectorSheet) };
     },
 
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {

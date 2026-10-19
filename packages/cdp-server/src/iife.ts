@@ -3,4 +3,4 @@
 import { createCdpServer, installProbe } from './index';
 
 installProbe();
-(window as any).DevtoolsAnywhereCdp = { createCdpServer, installProbe };
+Object.assign(window, { DevtoolsAnywhereCdp: { createCdpServer, installProbe } });

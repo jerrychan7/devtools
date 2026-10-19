@@ -107,7 +107,7 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
 
   function pageUrl() {
     try {
-      return page.contentWindow!.location.href;
+      return page.contentWindow?.location.href ?? page.src;
     } catch {
       return page.src;
     }
@@ -116,9 +116,10 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
   /** Mirrors the page's URL and title in the address bar and tab. */
   function syncLocation() {
     try {
-      const doc = page.contentDocument!;
-      if (page.contentWindow!.location.href !== location.href)
-        history.replaceState(null, '', page.contentWindow!.location.href);
+      const win = page.contentWindow;
+      const doc = page.contentDocument;
+      if (!win || !doc) return;
+      if (win.location.href !== location.href) history.replaceState(null, '', win.location.href);
       document.title = doc.title;
     } catch {
       // Cross-origin navigation: leave the shell as it is.
@@ -172,8 +173,8 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
       }
       try {
         const { method, params } = JSON.parse(event.data);
-        if (/\.enable$/.test(method)) enabled.set(method, params ?? {});
-        else if (/\.disable$/.test(method)) enabled.delete(method.replace(/disable$/, 'enable'));
+        if (method.endsWith('.enable')) enabled.set(method, params ?? {});
+        else if (method.endsWith('.disable')) enabled.delete(method.replace(/disable$/, 'enable'));
       } catch {
         return;
       }

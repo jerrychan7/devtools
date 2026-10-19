@@ -10,10 +10,9 @@ import {
   setBundleUrl,
 } from './index';
 
-const w = window as any;
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
 // again itself: only the first copy runs.
-if (!w.DevtoolsAnywhere) {
+if (!('DevtoolsAnywhere' in window)) {
   const probe = installProbe();
   const script = document.currentScript as HTMLScriptElement | null;
   if (script?.src) {
@@ -23,5 +22,7 @@ if (!w.DevtoolsAnywhere) {
   }
   defineDevtoolsAnywhere();
   if (isShellPage()) connectToShell(createCdpServer());
-  w.DevtoolsAnywhere = { DevtoolsAnywhereElement, connectFrontend, createCdpServer, defineDevtoolsAnywhere };
+  Object.assign(window, {
+    DevtoolsAnywhere: { DevtoolsAnywhereElement, connectFrontend, createCdpServer, defineDevtoolsAnywhere },
+  });
 }

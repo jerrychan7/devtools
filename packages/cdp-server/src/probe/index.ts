@@ -25,8 +25,9 @@ const MAX_REQUESTS = 300;
 const MAX_BODY_LENGTH = 5 * 1024 * 1024;
 
 export function installProbe(): Probe {
-  const w = window as any;
-  if (w[PROBE_KEY]) return w[PROBE_KEY];
+  const w = window;
+  const existing: Probe | undefined = Reflect.get(w, PROBE_KEY);
+  if (existing) return existing;
 
   const logs: LogEntry[] = [];
   const requests: RequestRecord[] = [];
@@ -106,7 +107,7 @@ function resourceType(entry: PerformanceResourceTiming, mimeType: string): Reque
   if (entry.entryType === 'navigation') return 'Document';
   if (/^text\/css\b/.test(mimeType)) return 'Stylesheet';
   if (/javascript|ecmascript/.test(mimeType)) return 'Script';
-  if (/^image\//.test(mimeType)) return 'Image';
+  if (mimeType.startsWith('image/')) return 'Image';
   if (/^font\/|woff|opentype|truetype/.test(mimeType)) return 'Font';
   if (/^(audio|video)\//.test(mimeType)) return 'Media';
   if (/^text\/html\b/.test(mimeType)) return 'Document';
@@ -149,7 +150,11 @@ function observeResources(add: (rec: RequestRecord) => void, update: Update, req
       if (type !== 'devtools-anywhere:response') return;
       const rec = requests.find(r => r.url === url && r.initiatorType && !Object.keys(r.responseHeaders || {}).length);
       if (rec) update(rec, patch);
-      else (details.get(url) || details.set(url, []).get(url)!).push(patch);
+      else {
+        let list = details.get(url);
+        if (!list) details.set(url, (list = []));
+        list.push(patch);
+      }
     });
     sw.startMessages();
   }
@@ -161,9 +166,10 @@ function observeResources(add: (rec: RequestRecord) => void, update: Update, req
     // fetch() and XHR are hooked, with more detail; DevTools' own fetches are unhooked.
     if (entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') return;
     // The browser's own favicon request is not the page's, and Chrome does not report it.
-    if (entry.initiatorType === 'other' && /\/favicon\.ico$/.test(entry.name.split(/[?#]/)[0])) return;
-    const mimeType = (entry as any).contentType || '';
-    const status: number = (entry as any).responseStatus || 0;
+    if (entry.initiatorType === 'other' && entry.name.split(/[?#]/)[0].endsWith('/favicon.ico')) return;
+    // Not in TypeScript's DOM types yet (Chrome 129+).
+    const mimeType = (entry as PerformanceResourceTiming & { contentType?: string }).contentType || '';
+    const status = entry.responseStatus || 0;
     add({
       requestId: '',
       type: resourceType(entry, mimeType),
@@ -199,20 +205,19 @@ function observeResources(add: (rec: RequestRecord) => void, update: Update, req
 // ---- console ----
 
 function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
-  const c = console as any;
   const counts: Record<string, number> = {};
   const timers: Record<string, number> = {};
 
-  const wrap = (name: string, capture: (args: any[]) => Pick<ConsoleEntry, 'type' | 'args'> | null) => {
-    const orig = c[name];
+  const wrap = (name: string, capture: (args: unknown[]) => Pick<ConsoleEntry, 'type' | 'args'> | null) => {
+    const orig: unknown = Reflect.get(console, name);
     if (typeof orig !== 'function') return;
-    c[name] = function (...args: any[]) {
+    Reflect.set(console, name, function (this: unknown, ...args: unknown[]) {
       const captured = capture(args);
       if (captured) {
         addLog({ kind: 'console', type: captured.type, args: captured.args, time: now(), stack: new Error().stack });
       }
       return orig.apply(this, args);
-    };
+    });
   };
 
   const plain: [string, ConsoleType][] = [
@@ -242,23 +247,26 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
   wrap('assert', ([condition, ...rest]) =>
     condition ? null : { type: 'assert', args: rest.length ? rest : ['console.assert'] }
   );
-  wrap('count', ([label = 'default']) => {
+  wrap('count', ([value = 'default']) => {
+    const label = String(value);
     counts[label] = (counts[label] || 0) + 1;
     return { type: 'count', args: [`${label}: ${counts[label]}`] };
   });
   wrap('countReset', ([label = 'default']) => {
-    counts[label] = 0;
+    counts[String(label)] = 0;
     return null;
   });
   wrap('time', ([label = 'default']) => {
-    timers[label] = performance.now();
+    timers[String(label)] = performance.now();
     return null;
   });
   const elapsed = (label: string) => `${label}: ${performance.now() - timers[label]} ms`;
-  wrap('timeLog', ([label = 'default', ...rest]) =>
-    label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : null
-  );
-  wrap('timeEnd', ([label = 'default']) => {
+  wrap('timeLog', ([value = 'default', ...rest]) => {
+    const label = String(value);
+    return label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : null;
+  });
+  wrap('timeEnd', ([value = 'default']) => {
+    const label = String(value);
     if (!(label in timers)) return null;
     const args = [elapsed(label)];
     delete timers[label];
@@ -299,8 +307,9 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
     const opts = typeof options === 'object' ? options : undefined;
     if (!listener || opts?.signal?.aborted) return;
     const capture = captureOf(options);
-    let list = listeners.get(target);
-    if (!list) listeners.set(target, (list = []));
+    let found = listeners.get(target);
+    if (!found) listeners.set(target, (found = []));
+    const list = found;
     if (list.some(r => r.type === type && r.listener === listener && r.capture === capture)) return;
     const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once };
     list.push(record);
@@ -308,8 +317,8 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
     // page (which also list this helper) show what it is.
     const forget = {
       devtoolsAnywhereForget() {
-        const i = list!.indexOf(record);
-        if (i >= 0) list!.splice(i, 1);
+        const i = list.indexOf(record);
+        if (i >= 0) list.splice(i, 1);
       },
     }.devtoolsAnywhereForget;
     if (record.once) add.call(target, type, forget, { capture, once: true });
@@ -321,7 +330,7 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
     const list = listeners.get(this ?? globalThis);
     const capture = captureOf(options);
     const i = list ? list.findIndex(r => r.type === type && r.listener === listener && r.capture === capture) : -1;
-    if (i >= 0) list!.splice(i, 1);
+    if (list && i >= 0) list.splice(i, 1);
   };
 }
 
@@ -387,7 +396,7 @@ function hookFetch(track: Track, update: Update) {
       postData: bodyToString(init?.body),
       stack: new Error().stack,
     });
-    const promise = origFetch.call(this, input as any, init);
+    const promise = origFetch.call(this, input, init);
     promise.then(
       res => {
         const contentType = res.headers.get('content-type');
@@ -447,13 +456,16 @@ function hookXhr(track: Track, update: Update) {
   const origSetRequestHeader = proto.setRequestHeader;
   const infos = new WeakMap<XMLHttpRequest, XhrInfo>();
 
-  proto.open = function (this: XMLHttpRequest, method: string, url: string | URL) {
+  proto.open = function (
+    this: XMLHttpRequest,
+    ...args: [method: string, url: string | URL, async?: boolean, username?: string | null, password?: string | null]
+  ) {
     infos.set(this, {
-      method: String(method).toUpperCase(),
-      url: new URL(String(url), location.href).href,
+      method: String(args[0]).toUpperCase(),
+      url: new URL(String(args[1]), location.href).href,
       headers: {},
     });
-    return origOpen.apply(this, arguments as any);
+    return Reflect.apply(origOpen, this, args);
   } as typeof proto.open;
 
   proto.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
@@ -465,7 +477,6 @@ function hookXhr(track: Track, update: Update) {
   proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = infos.get(this);
     if (info) {
-      const xhr = this;
       const rec = track({
         type: 'XHR',
         method: info.method,
@@ -474,36 +485,41 @@ function hookXhr(track: Track, update: Update) {
         postData: bodyToString(body),
         stack: new Error().stack,
       });
-      const responseMeta = () => {
-        const responseHeaders = parseRawHeaders(xhr.getAllResponseHeaders());
-        return {
-          status: xhr.status,
-          statusText: xhr.statusText,
-          responseHeaders,
-          mimeType: mimeTypeOf(responseHeaders['content-type']),
-        };
-      };
-      xhr.addEventListener('readystatechange', () => {
-        if (xhr.readyState === 2) {
-          update(rec, { state: 'headers', responseTime: performance.now(), ...responseMeta() });
-        } else if (xhr.readyState === 4) {
-          if (!xhr.status) {
-            update(rec, { state: 'failed', errorText: 'net::ERR_FAILED', endTime: performance.now() });
-            return;
-          }
-          let text: string | undefined;
-          if (xhr.responseType === '' || xhr.responseType === 'text') text = xhr.responseText;
-          else if (xhr.responseType === 'json') text = JSON.stringify(xhr.response);
-          update(rec, {
-            state: 'done',
-            ...responseMeta(),
-            body: text,
-            encodedDataLength: text?.length || 0,
-            endTime: performance.now(),
-          });
-        }
-      });
+      watchXhr(this, rec, update);
     }
     return origSend.call(this, body);
   };
+}
+
+/** Updates `rec` as the request progresses. */
+function watchXhr(xhr: XMLHttpRequest, rec: RequestRecord, update: Update) {
+  const responseMeta = () => {
+    const responseHeaders = parseRawHeaders(xhr.getAllResponseHeaders());
+    return {
+      status: xhr.status,
+      statusText: xhr.statusText,
+      responseHeaders,
+      mimeType: mimeTypeOf(responseHeaders['content-type']),
+    };
+  };
+  xhr.addEventListener('readystatechange', () => {
+    if (xhr.readyState === 2) {
+      update(rec, { state: 'headers', responseTime: performance.now(), ...responseMeta() });
+    } else if (xhr.readyState === 4) {
+      if (!xhr.status) {
+        update(rec, { state: 'failed', errorText: 'net::ERR_FAILED', endTime: performance.now() });
+        return;
+      }
+      let text: string | undefined;
+      if (xhr.responseType === '' || xhr.responseType === 'text') text = xhr.responseText;
+      else if (xhr.responseType === 'json') text = JSON.stringify(xhr.response);
+      update(rec, {
+        state: 'done',
+        ...responseMeta(),
+        body: text,
+        encodedDataLength: text?.length || 0,
+        endTime: performance.now(),
+      });
+    }
+  });
 }

@@ -1,4 +1,11 @@
-export type Handler = (params: any) => unknown;
+/**
+ * A CDP method handler. Each handler declares its own params type; `never` accepts all of
+ * them, and the dispatcher passes whatever the client sent.
+ */
+export type Handler = (params: never) => unknown;
+
+/** Message text of anything thrown. */
+export const errorMessage = (e: unknown) => String(e instanceof Error ? e.message : e);
 
 /** An error answered to the client as a CDP error response. */
 export class CdpError extends Error {
@@ -32,24 +39,24 @@ export class CdpServer {
   }
 
   /** Handles one client message and sends the response to the listeners. */
-  async dispatch(message: string | { id: number | string; method: string; params?: any }) {
+  async dispatch(message: string | { id: number | string; method: string; params?: object }) {
     const { id, method, params } = typeof message === 'string' ? JSON.parse(message) : message;
     try {
       this.send({ id, result: await this.call(method, params) });
-    } catch (e: any) {
+    } catch (e) {
       this.send({
         id,
-        error: { code: e instanceof CdpError ? e.code : -32000, message: String(e?.message ?? e) },
+        error: { code: e instanceof CdpError ? e.code : -32000, message: errorMessage(e) },
       });
     }
   }
 
   /** Calls a method directly and returns its result, without going through listeners. */
-  async call(method: string, params: any = {}): Promise<any> {
+  async call(method: string, params: object = {}): Promise<unknown> {
     const [domain, name] = method.split('.');
     const handler = this.domains.get(domain)?.[name];
     if (!handler) throw new CdpError(`'${method}' wasn't found`, -32601);
-    return (await handler(params ?? {})) ?? {};
+    return (await (handler as (params: object) => unknown)(params ?? {})) ?? {};
   }
 
   private send(payload: object) {

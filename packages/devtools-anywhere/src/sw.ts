@@ -13,8 +13,27 @@
 // A Service Worker needs a secure context (HTTPS or localhost), and its scope must cover
 // the pages: serve this file from the site root or with `Service-Worker-Allowed: /`.
 
-// The DOM typings in this package do not include the Service Worker global scope.
-const scope = globalThis as any;
+// The DOM typings in this package do not include the Service Worker global scope: just
+// what this file uses.
+interface ExtendableEvent extends Event {
+  waitUntil(promise: Promise<unknown>): void;
+}
+interface FetchEvent extends ExtendableEvent {
+  request: Request;
+  clientId: string;
+  respondWith(response: Promise<Response>): void;
+}
+interface ServiceWorkerScope {
+  location: Location;
+  skipWaiting(): Promise<void>;
+  clients: {
+    claim(): Promise<void>;
+    get(id: string): Promise<{ postMessage(message: unknown): void } | undefined>;
+  };
+  addEventListener(type: 'fetch', listener: (event: FetchEvent) => void): void;
+  addEventListener(type: 'install' | 'activate', listener: (event: ExtendableEvent) => void): void;
+}
+const scope = globalThis as unknown as ServiceWorkerScope;
 
 const probe = new URL(scope.location.href).searchParams.get('probe');
 const SNIFF_LIMIT = 64 * 1024;
@@ -23,10 +42,10 @@ const DETAILS = 'devtools-anywhere:response';
 const DESTINATIONS = new Set(['style', 'script', 'image', 'font']);
 
 scope.addEventListener('install', () => scope.skipWaiting());
-scope.addEventListener('activate', (event: any) => event.waitUntil(scope.clients.claim()));
+scope.addEventListener('activate', event => event.waitUntil(scope.clients.claim()));
 
-scope.addEventListener('fetch', (event: any) => {
-  const request: Request = event.request;
+scope.addEventListener('fetch', event => {
+  const request = event.request;
   if (!probe) return;
   if (request.mode === 'navigate') {
     // Only iframe navigations: top-level pages pass through untouched.

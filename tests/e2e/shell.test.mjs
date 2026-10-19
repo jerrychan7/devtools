@@ -64,7 +64,7 @@ test('navigation inside the page updates the address bar', async () => {
   await page.evaluate(() => {
     document.getElementById('devtools-anywhere-page').contentWindow.location.href = '/tests/e2e/shell-page.html?second';
   });
-  const state = await waitFor(s => /\?second$/.test(s.url));
+  const state = await waitFor(s => s.url.endsWith('?second'));
   assert.ok(earlyLogs(state).length >= 3);
 });
 

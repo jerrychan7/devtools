@@ -40,7 +40,7 @@ export function registerDomDebugger(ctx: Context) {
       if (!key.startsWith('on')) continue;
       let handler: unknown;
       try {
-        handler = (target as any)[key];
+        handler = Reflect.get(target, key);
       } catch {
         continue;
       }
