@@ -29,7 +29,7 @@
   "lint-staged": {
     "*.{ts,mts,cts,js,mjs,cjs}": [
       "oxfmt --no-error-on-unmatched-pattern",
-      "oxlint"
+      "oxlint --no-error-on-unmatched-pattern"
     ],
     "*.{json,html,css,yaml,yml}": [
       "oxfmt --no-error-on-unmatched-pattern"
