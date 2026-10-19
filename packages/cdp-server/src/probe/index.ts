@@ -46,6 +46,7 @@ export function installProbe(): Probe {
     clearLogs() {
       logs.length = 0
     },
+    shadowRoots: new WeakMap(),
   }
   Object.defineProperty(w, PROBE_KEY, { value: probe })
 
@@ -58,6 +59,7 @@ export function installProbe(): Probe {
 
   hookConsole(addLog, now)
   hookErrors(addLog, now)
+  hookShadowRoots(probe.shadowRoots)
 
   let seq = 0
   function track(record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>): RequestRecord {
@@ -158,6 +160,19 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
     delete timers[label]
     return { type: 'timeEnd', args }
   })
+}
+
+// ---- shadow roots ----
+
+/** Records shadow roots as they are attached: closed ones are not reachable otherwise. */
+function hookShadowRoots(roots: WeakMap<Element, ShadowRoot>) {
+  const attachShadow = Element.prototype.attachShadow
+  if (!attachShadow) return
+  Element.prototype.attachShadow = function (this: Element, init: ShadowRootInit) {
+    const root = attachShadow.call(this, init)
+    roots.set(this, root)
+    return root
+  }
 }
 
 // ---- uncaught errors ----

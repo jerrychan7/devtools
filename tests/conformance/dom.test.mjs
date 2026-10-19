@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from './harness.mjs'
 
 // Node ids differ between implementations; compare everything else.
-for (const key of ['nodeId', 'backendNodeId', 'parentId', 'parentNodeId', 'previousNodeId', 'frameId']) VOLATILE.add(key)
+for (const key of ['nodeId', 'backendNodeId', 'parentId', 'parentNodeId', 'previousNodeId', 'frameId', 'hostId']) VOLATILE.add(key)
 
 let env
 let t
@@ -18,6 +18,7 @@ before(async () => {
     'DOM.attributeRemoved',
     'DOM.characterDataModified',
     'DOM.childNodeCountUpdated',
+    'DOM.shadowRootPushed',
   ])
 })
 after(() => env?.close())
@@ -148,5 +149,54 @@ describe('DOM', () => {
         assert.equal(ours.resultCount, chrome.resultCount, query)
       }
     })
+  })
+})
+
+describe('shadow DOM', () => {
+  before(async () => {
+    t.chrome.clear()
+    await t.ours.clear()
+    // Created after the CDP server is installed, so the probe records the closed root too.
+    await t.page.evaluate(() => {
+      const open = document.createElement('div')
+      open.id = 'open-host'
+      open.attachShadow({ mode: 'open' }).innerHTML = '<span>open</span>'
+      const closed = document.createElement('div')
+      closed.id = 'closed-host'
+      closed.attachShadow({ mode: 'closed' }).innerHTML = '<b>closed</b>'
+      document.body.append(open, closed)
+    })
+  })
+
+  for (const pierce of [false, true]) {
+    test(`open and closed shadow roots in getDocument (pierce: ${pierce})`, async () => {
+      const [{ root: o }, { root: c }] = await both('DOM.getDocument', { depth: -1, pierce })
+      for (const id of ['open-host', 'closed-host']) {
+        const host = root => find(root, n => attr(n, 'id') === id)
+        assert.deepEqual(diffSubset(host(o), host(c)), [], id)
+      }
+    })
+  }
+
+  test('mutations inside a shadow root', async () => {
+    await both('DOM.getDocument', { depth: -1, pierce: true })
+    t.chrome.clear()
+    await t.ours.clear()
+    await t.page.evaluate(() => {
+      document.getElementById('open-host').shadowRoot.appendChild(document.createElement('em'))
+    })
+    const [[ours], [chrome]] = await waitForBoth(t, 'DOM.childNodeInserted')
+    assert.deepEqual(diffSubset(ours, chrome), [])
+  })
+
+  test('shadow root attached later', async () => {
+    await both('DOM.getDocument', { depth: -1 })
+    t.chrome.clear()
+    await t.ours.clear()
+    await t.page.evaluate(() => {
+      document.getElementById('app').attachShadow({ mode: 'open' }).innerHTML = '<i>late</i>'
+    })
+    const [[ours], [chrome]] = await waitForBoth(t, 'DOM.shadowRootPushed')
+    assert.deepEqual(diffSubset(ours, chrome), [])
   })
 })

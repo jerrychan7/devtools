@@ -31,6 +31,11 @@ export class NodeRegistry {
   childrenSent = new WeakSet<Node>()
   /** Nodes selected in the Elements panel, most recent first ($0, $1, …). */
   inspected: Node[] = []
+  /** Called for every shadow root sent to the client, e.g. to observe its mutations. */
+  onShadowRoot: ((root: ShadowRoot) => void) | null = null
+
+  /** `shadowRootOf` also finds closed shadow roots (recorded by the probe). */
+  constructor(private shadowRootOf: (host: Element) => ShadowRoot | null = host => host.shadowRoot) {}
 
   /** Starts a new session: previously sent node ids become invalid. */
   reset() {
@@ -85,8 +90,11 @@ export class NodeRegistry {
     return Array.from(node.childNodes).filter(child => this.isVisible(child))
   }
 
-  /** Serializes `node`, including children down to `depth` (-1: the whole subtree). */
-  serialize(node: Node, depth = 0): DomNode {
+  /**
+   * Serializes `node`, including children down to `depth` (-1: the whole subtree). Like
+   * Chrome, shadow roots are listed but their children only follow with `pierce`.
+   */
+  serialize(node: Node, depth = 0, pierce = false): DomNode {
     const children = this.children(node)
     const result: DomNode = {
       nodeId: this.idOf(node),
@@ -101,7 +109,8 @@ export class NodeRegistry {
 
     if (node instanceof Element) {
       result.attributes = Array.from(node.attributes).flatMap(a => [a.name, a.value])
-      if (node.shadowRoot) result.shadowRoots = [this.serializeShadowRoot(node.shadowRoot, depth)]
+      const shadowRoot = this.shadowRootOf(node)
+      if (shadowRoot) result.shadowRoots = [this.serializeShadowRoot(shadowRoot, pierce ? depth : 0, pierce)]
     } else if (node instanceof Document) {
       result.documentURL = node.URL
       result.baseURL = node.baseURI
@@ -119,16 +128,17 @@ export class NodeRegistry {
         children[0].nodeType === Node.TEXT_NODE &&
         (children[0].nodeValue?.length ?? 0) <= MAX_INLINE_TEXT
       if (depth !== 0 || inlineText) {
-        result.children = children.map(child => this.serialize(child, depth > 0 ? depth - 1 : depth))
+        result.children = children.map(child => this.serialize(child, depth > 0 ? depth - 1 : depth, pierce))
         this.childrenSent.add(node)
       }
     }
     return result
   }
 
-  private serializeShadowRoot(root: ShadowRoot, depth: number): DomNode {
-    const node = this.serialize(root, depth)
+  private serializeShadowRoot(root: ShadowRoot, depth: number, pierce: boolean): DomNode {
+    const node = this.serialize(root, depth, pierce)
     node.shadowRootType = root.mode === 'open' ? 'open' : 'closed'
+    this.onShadowRoot?.(root)
     return node
   }
 

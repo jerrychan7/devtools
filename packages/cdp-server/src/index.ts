@@ -23,11 +23,12 @@ export type { Probe } from './probe/types'
  * otherwise installs it now, so output from this point on is captured.
  */
 export function createCdpServer(): CdpServer {
+  const probe = installProbe()
   const ctx: Context = {
     server: new CdpServer(),
     objects: new ObjectRegistry(),
-    nodes: new NodeRegistry(),
-    probe: installProbe(),
+    nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
+    probe,
   }
   registerStubs(ctx.server)
   registerRuntime(ctx)

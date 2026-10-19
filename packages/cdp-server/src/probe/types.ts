@@ -82,4 +82,6 @@ export interface Probe {
   /** Subscribes to request creation and every later state change. */
   onRequest(listener: (record: RequestRecord) => void): () => void
   clearLogs(): void
+  /** Every shadow root attached since the probe ran, including closed ones. */
+  shadowRoots: WeakMap<Element, ShadowRoot>
 }

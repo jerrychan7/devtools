@@ -100,8 +100,8 @@ export function registerDom(ctx: Context) {
   const searches = new Map<string, Node[]>()
   let searchSeq = 0
 
-  function emitChildren(parent: Node, depth = 1) {
-    const children = nodes.children(parent).map(child => nodes.serialize(child, depth - 1))
+  function emitChildren(parent: Node, depth = 1, pierce = false) {
+    const children = nodes.children(parent).map(child => nodes.serialize(child, depth - 1, pierce))
     nodes.childrenSent.add(parent)
     server.emit('DOM.setChildNodes', { parentId: nodes.idOf(parent), nodes: children } satisfies Protocol.DOM.SetChildNodesEvent)
   }
@@ -146,10 +146,28 @@ export function registerDom(ctx: Context) {
     }
   }
 
+  const OBSERVE: MutationObserverInit = { subtree: true, childList: true, attributes: true, characterData: true }
+
   function observe() {
     observer?.disconnect()
     observer = new MutationObserver(onMutations)
-    observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    observer.observe(document, OBSERVE)
+  }
+  // Observing the document does not reach into shadow trees: observe each one sent.
+  nodes.onShadowRoot = root => observer?.observe(root, OBSERVE)
+
+  // Shadow roots attached to hosts the client already knows are pushed to it.
+  const attachShadow = Element.prototype.attachShadow
+  Element.prototype.attachShadow = function (this: Element, init: ShadowRootInit) {
+    const root = attachShadow.call(this, init)
+    const hostId = observer ? nodes.knownId(this) : undefined
+    if (hostId !== undefined) {
+      const serialized = nodes.serialize(root, 0)
+      serialized.shadowRootType = root.mode === 'open' ? 'open' : 'closed'
+      nodes.onShadowRoot?.(root)
+      server.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent)
+    }
+    return root
   }
 
   const element = (ref: NodeRef) => {
@@ -168,17 +186,17 @@ export function registerDom(ctx: Context) {
     getDocument(params: Protocol.DOM.GetDocumentRequest): Protocol.DOM.GetDocumentResponse {
       nodes.reset()
       observe()
-      return { root: nodes.serialize(document, params.depth ?? 2) }
+      return { root: nodes.serialize(document, params.depth ?? 2, params.pierce) }
     },
 
     requestChildNodes(params: Protocol.DOM.RequestChildNodesRequest) {
       const depth = params.depth ?? 1
-      emitChildren(resolveNode(ctx, params), depth === -1 ? -1 : depth)
+      emitChildren(resolveNode(ctx, params), depth === -1 ? -1 : depth, params.pierce)
     },
 
     describeNode(params: Protocol.DOM.DescribeNodeRequest): Protocol.DOM.DescribeNodeResponse {
       const node = resolveNode(ctx, params)
-      const described = nodes.serialize(node, params.depth ?? 0)
+      const described = nodes.serialize(node, params.depth ?? 0, params.pierce)
       // describeNode does not push the node: report a 0 node id unless the client knows it.
       return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId: FRAME_ID } }
     },
