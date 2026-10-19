@@ -93,12 +93,11 @@ test('navigation inside the page updates the address bar', async () => {
   assert.ok(earlyLogs(state).length >= 3);
 });
 
-test('closing leaves shell mode', async () => {
-  await page.evaluate(() => {
-    const close = document.querySelector('devtools-anywhere[shell]')?.shadowRoot?.querySelector<HTMLElement>('.close');
-    if (!close) throw new Error('no close button');
-    close.click();
-  });
+test("closing (DevTools' own close button) leaves shell mode", async () => {
+  // What the frontend sends when its toolbar's close button is clicked.
+  const devtools = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));
+  assert.ok(devtools, 'the DevTools frame');
+  await devtools.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*'));
   await new Promise(r => setTimeout(r, 1000));
   const state = await page.evaluate(() => ({
     inShell: !!document.getElementById('devtools-anywhere-page'),

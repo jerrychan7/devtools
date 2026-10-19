@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ElementHandle, Frame } from 'puppeteer-core';
+import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import { launch } from '../conformance/harness.ts';
 import type { Env } from '../conformance/harness.ts';
 
@@ -11,6 +11,7 @@ const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere
 const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first';
 
 let env: Env | undefined;
+let page: Page;
 let frontend: Frame;
 /** Uncaught errors in the frontend. */
 const errors: string[] = [];
@@ -18,7 +19,7 @@ const errors: string[] = [];
 before(async () => {
   if (!built) return;
   env = await launch();
-  const page = await env.browser.newPage();
+  page = await env.browser.newPage();
   page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
   // Tall enough for the Network panel to render its rows below the overview.
   await page.setViewport({ width: 1000, height: 1600 });
@@ -169,4 +170,63 @@ test('the screencast is off by default and shows the page when turned on', { ski
   await waitFor(async () => (await frames()) > 0);
   await button.click();
   assert.ok(!(await text()).includes('snapdom.js'), "snapDOM is DevTools' own");
+});
+
+test('the Dock side menu moves the panel to each side, and floats it', { skip }, async () => {
+  /** Chooses a side as the main menu's Dock side buttons do. */
+  const setDockSide = (side: string) =>
+    frontend.evaluate(async side => {
+      // The built frontend has no type declarations; only this much of it is used.
+      const {
+        DockController,
+      }: {
+        DockController: { DockController: { instance(): { canDock(): boolean; setDockSide(side: string): void } } };
+      } = await import(new URL('ui/legacy/legacy.js', location.href).href);
+      const controller = DockController.DockController.instance();
+      if (!controller.canDock()) throw new Error('docking is off');
+      controller.setDockSide(side);
+    }, side);
+  const panel = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('devtools-anywhere');
+      const rect = el?.shadowRoot?.querySelector('.panel')?.getBoundingClientRect();
+      return rect && { dock: el?.getAttribute('dock'), x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+  const { width, height } = page.viewport() ?? { width: 0, height: 0 };
+  try {
+    await setDockSide('right');
+    let rect = await waitFor(async () => ((await panel())?.dock === 'right' ? panel() : null));
+    assert.equal(Math.round(rect.x + rect.width), width);
+    assert.equal(rect.height, height);
+
+    await setDockSide('left');
+    rect = await waitFor(async () => ((await panel())?.dock === 'left' ? panel() : null));
+    assert.equal(rect.x, 0);
+    assert.equal(rect.height, height);
+
+    await setDockSide('undocked');
+    rect = await waitFor(async () => ((await panel())?.dock === 'undocked' ? panel() : null));
+    assert.ok(rect.x > 0 && rect.y > 0 && rect.width < width && rect.height < height, 'a window over the page');
+    assert.equal(await page.evaluate(() => localStorage.getItem('devtools-anywhere:dock')), 'undocked', 'remembered');
+
+    // Dragging the window past the bottom right corner keeps all of it in view.
+    const bar = await page.evaluateHandle(() =>
+      document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.bar')
+    );
+    const box = await (bar.asElement() as ElementHandle<Element> | null)?.boundingBox();
+    assert.ok(box);
+    await page.mouse.move(box.x + 50, box.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 50 + width, box.y + 8 + height, { steps: 5 });
+    await page.mouse.up();
+    rect = await waitFor(() => panel());
+    assert.equal(Math.round(rect.x + rect.width), width);
+    assert.equal(Math.round(rect.y + rect.height), height);
+  } finally {
+    await setDockSide('bottom');
+    await page.evaluate(() => localStorage.removeItem('devtools-anywhere:dock'));
+  }
+  const rect = await waitFor(async () => ((await panel())?.dock === 'bottom' ? panel() : null));
+  assert.equal(Math.round(rect.y + rect.height), height);
+  assert.equal(rect.width, width);
 });

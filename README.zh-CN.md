@@ -144,7 +144,7 @@ export default {
 
 ### 组件
 
-点击右下角的 F12 悬浮按钮打开面板；拖动面板顶部的横条调整高度，⟳ 切换到外壳模式，× 关闭。属性：`frontend`、`open`、`height`、`no-launcher`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小，⟳ 切换到外壳模式，× 关闭。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里。属性：`frontend`、`open`、`dock`、`height`、`width`、`no-launcher`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 ## 开发
 

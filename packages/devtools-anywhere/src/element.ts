@@ -33,7 +33,23 @@ let loadSnapdom: SnapdomLoader = () => import('@zumer/snapdom');
 export const createPageServer = () => createCdpServer({ loadSnapdom: () => loadSnapdom() });
 
 const HEIGHT_KEY = 'devtools-anywhere:height';
-const MIN_HEIGHT = 80;
+const WIDTH_KEY = 'devtools-anywhere:width';
+const FLOAT_KEY = 'devtools-anywhere:float';
+const DOCK_KEY = 'devtools-anywhere:dock';
+const MIN_SIZE = 80;
+
+/** Where the panel is: docked to a side of the viewport, or floating over the page. */
+export type DockSide = 'bottom' | 'right' | 'left' | 'undocked';
+const DOCK_SIDES: readonly string[] = ['bottom', 'right', 'left', 'undocked'];
+const isDockSide = (value: unknown): value is DockSide => typeof value === 'string' && DOCK_SIDES.includes(value);
+
+/** Position and size of the undocked panel, in CSS pixels. */
+interface FloatRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
 
 const STYLE = `
 :host { all: initial; }
@@ -62,14 +78,37 @@ const STYLE = `
   position: absolute; top: 0; width: 24px; height: 16px; padding: 0; border: 0;
   background: none; color: #5f6368; font: 14px/16px system-ui, sans-serif; cursor: pointer;
 }
-.close { right: 4px; }
-.keep { right: 32px; }
+/* DevTools' own toolbar has a close button, except when undocked: then the bar has one. */
+.close { right: 4px; display: none; }
+.keep { right: 4px; }
+:host([dock=undocked]) .close { display: block; }
+:host([dock=undocked]) .keep { right: 32px; }
 :host(:not([data-can-keep])) .keep { display: none; }
-:host([shell]) { display: block; flex: none; }
-:host([shell]) .panel { position: static; display: flex; }
-:host([data-shell-page]) { display: none !important; }
-iframe { flex: 1; width: 100%; border: 0; }
+iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 .dragging iframe { pointer-events: none; }
+
+/* Docked to a side: full height, with the bar as a vertical strip on the inner edge. */
+:host([dock=right]) .panel, :host([dock=left]) .panel { top: 0; border-top: 0; }
+:host([dock=right]) .panel { left: auto; flex-direction: row; border-left: 1px solid #cacdd1; }
+:host([dock=left]) .panel { right: auto; flex-direction: row-reverse; border-right: 1px solid #cacdd1; }
+:host([dock=right]) .bar, :host([dock=left]) .bar { width: 16px; height: auto; cursor: col-resize; }
+:host([dock=right]) .bar::before, :host([dock=left]) .bar::before {
+  left: 6px; top: 50%; width: 4px; height: 32px; margin: -16px 0 0;
+}
+:host([dock=right]) .bar button, :host([dock=left]) .bar button { left: 0; right: auto; width: 16px; }
+
+/* Undocked: a window over the page, moved by its bar and resized from its corner. */
+:host([dock=undocked]) .panel {
+  right: auto; bottom: auto; border: 1px solid #cacdd1; border-radius: 6px; overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both;
+}
+:host([dock=undocked]) .bar { cursor: move; }
+
+/* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
+:host([shell]) { display: flex; flex: none; }
+:host([shell]) .panel { position: static; display: flex; flex: 1 1 auto; }
+:host([shell][dock=undocked]) .panel { position: fixed; }
+:host([data-shell-page]) { display: none !important; }
 `;
 
 /**
@@ -78,8 +117,11 @@ iframe { flex: 1; width: 100%; border: 0; }
  * Attributes:
  * - `frontend`: URL of the DevTools frontend entry page. Loaded on first open.
  * - `open`: shows the panel; otherwise a small launcher button is shown.
- * - `height`: panel height as a CSS length (default `50vh`). Dragging the top edge
- *   overrides it and is remembered in localStorage.
+ * - `dock`: `bottom` (default), `right`, `left` or `undocked` (a window over the page). The
+ *   main menu's "Dock side" in DevTools changes it; the choice is remembered in localStorage.
+ * - `height`: panel height when docked to the bottom, as a CSS length (default `50vh`).
+ * - `width`: panel width when docked to a side, as a CSS length (default `50vw`).
+ *   Dragging the bar overrides either size, and the size is remembered in localStorage.
  * - `no-launcher`: hides the launcher button.
  * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
  *   bundle when the value is empty), which injects the probe into iframe pages that do not
@@ -89,7 +131,7 @@ iframe { flex: 1; width: 100%; border: 0; }
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
-  static observedAttributes = ['open', 'frontend', 'height'];
+  static observedAttributes = ['open', 'frontend', 'height', 'width', 'dock'];
 
   /** The CDP server for this page. Created when the element is first connected. */
   server: CdpServer | null = null;
@@ -98,6 +140,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private frame: HTMLIFrameElement;
   private loadedUrl = '';
   private disconnect: (() => void) | null = null;
+  private frontendOrigin = '';
 
   constructor() {
     super();
@@ -123,7 +166,34 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     part('.close').addEventListener('click', () => (this.hasAttribute('shell') ? this.exitShell() : this.hide()));
     part('.keep').addEventListener('click', () => this.enterShell());
     this.setupResizer(part<HTMLElement>('.bar'));
+    // The undocked panel is resized by the browser (CSS resize): remember its size.
+    new ResizeObserver(() => {
+      if (this.dock === 'undocked' && this.open && this.panel.offsetWidth) this.saveFloat();
+    }).observe(this.panel);
   }
+
+  /** Where the panel is. */
+  get dock(): DockSide {
+    const value = this.getAttribute('dock');
+    return isDockSide(value) ? value : 'bottom';
+  }
+  set dock(side: DockSide) {
+    this.setAttribute('dock', side);
+  }
+
+  /** Requests from the frontend (objects, unlike CDP messages): its dock side menu, its close button. */
+  private onFrontendRequest = (event: MessageEvent) => {
+    if (event.source !== this.frame.contentWindow || event.origin !== this.frontendOrigin) return;
+    const request: unknown = event.data?.devtoolsAnywhere;
+    if (typeof request !== 'object' || !request || !('type' in request)) return;
+    if (request.type === 'dock' && 'side' in request && isDockSide(request.side)) {
+      localStorage.setItem(DOCK_KEY, request.side);
+      this.dock = request.side;
+    } else if (request.type === 'close') {
+      if (this.hasAttribute('shell')) this.exitShell();
+      else this.hide();
+    }
+  };
 
   get open() {
     return this.hasAttribute('open');
@@ -184,6 +254,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   connectedCallback() {
     // Marks the element so the DOM domain can hide it from the Elements panel.
     this.setAttribute('data-devtools-anywhere', '');
+    const stored = localStorage.getItem(DOCK_KEY);
+    if (isDockSide(stored)) this.dock = stored;
+    window.addEventListener('message', this.onFrontendRequest);
     if (isShellPage()) {
       // Inside the shell's page iframe the shell shows DevTools; the IIFE connects the page.
       this.setAttribute('data-shell-page', '');
@@ -203,6 +276,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect?.();
     this.disconnect = null;
     this.loadedUrl = '';
+    window.removeEventListener('message', this.onFrontendRequest);
   }
 
   attributeChangedCallback() {
@@ -210,10 +284,56 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   private update() {
-    const stored = Number(localStorage.getItem(HEIGHT_KEY));
-    this.panel.style.height = stored ? `${stored}px` : this.getAttribute('height') || '50vh';
+    this.layout();
     // Load the frontend only once DevTools is opened; the probe keeps capturing meanwhile.
     if (this.open) this.loadFrontend();
+  }
+
+  /** Sizes the panel for its dock side; in shell mode, also lays out the shell around it. */
+  private layout() {
+    const style = this.panel.style;
+    style.width = style.height = style.left = style.top = '';
+    const dock = this.dock;
+    if (dock === 'bottom') {
+      const stored = Number(localStorage.getItem(HEIGHT_KEY));
+      style.height = stored ? `${stored}px` : this.getAttribute('height') || '50vh';
+    } else if (dock === 'undocked') {
+      const rect = this.floatRect();
+      style.left = `${rect.left}px`;
+      style.top = `${rect.top}px`;
+      style.width = `${rect.width}px`;
+      style.height = `${rect.height}px`;
+    } else {
+      const stored = Number(localStorage.getItem(WIDTH_KEY));
+      style.width = stored ? `${stored}px` : this.getAttribute('width') || '50vw';
+    }
+    // The shell document is ours: the page iframe comes first, then this element.
+    if (this.hasAttribute('shell')) {
+      document.body.style.flexDirection = dock === 'right' ? 'row' : dock === 'left' ? 'row-reverse' : 'column';
+    }
+  }
+
+  /** The undocked panel's last position and size, kept inside the viewport. */
+  private floatRect(): FloatRect {
+    let rect: Partial<FloatRect> = {};
+    try {
+      rect = JSON.parse(localStorage.getItem(FLOAT_KEY) || '{}');
+    } catch {}
+    const width = Math.min(rect.width || innerWidth * 0.8, innerWidth);
+    const height = Math.min(rect.height || innerHeight * 0.6, innerHeight);
+    const clamp = (value: number | undefined, fallback: number, max: number) =>
+      Math.min(Math.max(value ?? fallback, 0), Math.max(max, 0));
+    return {
+      left: clamp(rect.left, (innerWidth - width) / 2, innerWidth - width),
+      top: clamp(rect.top, (innerHeight - height) / 2, innerHeight - height),
+      width,
+      height,
+    };
+  }
+
+  private saveFloat() {
+    const { left, top, width, height } = this.panel.getBoundingClientRect();
+    localStorage.setItem(FLOAT_KEY, JSON.stringify({ left, top, width, height }));
   }
 
   private loadFrontend() {
@@ -226,24 +346,42 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // The frontend's document is not one of the page's requests.
     installProbe().ownUrls.add(url.href);
     this.disconnect?.();
+    this.frontendOrigin = url.origin;
     if (this.server) this.disconnect = connectFrontend(this.server, this.frame, url.origin);
     else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
-    this.frame.src = `${url.href.split('#')[0]}#?embedded=${encodeURIComponent(location.origin)}`;
+    const hash = new URLSearchParams({ embedded: location.origin, dock: this.dock });
+    this.frame.src = `${url.href.split('#')[0]}#?${hash}`;
   }
 
+  /** Dragging the bar resizes the docked panel, or moves the undocked one. */
   private setupResizer(resizer: HTMLElement) {
     resizer.addEventListener('pointerdown', down => {
-      if ((down.target as HTMLElement).closest('.close')) return;
+      if ((down.target as HTMLElement).closest('button')) return;
       down.preventDefault();
       resizer.setPointerCapture(down.pointerId);
       this.panel.classList.add('dragging');
+      const dock = this.dock;
+      const start = this.panel.getBoundingClientRect();
+      const clampSize = (size: number, max: number) => Math.min(Math.max(size, MIN_SIZE), max - 16);
       const move = (e: PointerEvent) => {
-        const height = Math.min(Math.max(innerHeight - e.clientY, MIN_HEIGHT), innerHeight - 16);
-        this.panel.style.height = `${height}px`;
+        const style = this.panel.style;
+        if (dock === 'bottom') style.height = `${clampSize(innerHeight - e.clientY, innerHeight)}px`;
+        else if (dock === 'right') style.width = `${clampSize(innerWidth - e.clientX, innerWidth)}px`;
+        else if (dock === 'left') style.width = `${clampSize(e.clientX, innerWidth)}px`;
+        else {
+          const left = start.left + e.clientX - down.clientX;
+          const top = start.top + e.clientY - down.clientY;
+          // The whole window stays in the viewport, so its resize corner stays reachable; a
+          // window larger than the viewport keeps its top left corner in view.
+          style.left = `${Math.max(Math.min(left, innerWidth - start.width), 0)}px`;
+          style.top = `${Math.max(Math.min(top, innerHeight - start.height), 0)}px`;
+        }
       };
       const up = () => {
         this.panel.classList.remove('dragging');
-        localStorage.setItem(HEIGHT_KEY, String(this.panel.offsetHeight));
+        if (dock === 'bottom') localStorage.setItem(HEIGHT_KEY, String(this.panel.offsetHeight));
+        else if (dock === 'undocked') this.saveFloat();
+        else localStorage.setItem(WIDTH_KEY, String(this.panel.offsetWidth));
         resizer.removeEventListener('pointermove', move);
         resizer.removeEventListener('pointerup', up);
         resizer.removeEventListener('pointercancel', up);

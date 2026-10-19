@@ -144,7 +144,7 @@ Only `vite serve` is affected: the probe is injected as the first script of ever
 
 ### The element
 
-A floating F12 button opens the panel; drag its top bar to resize, ⟳ switches to shell mode and × closes. Attributes: `frontend`, `open`, `height`, `no-launcher`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
+A floating F12 button opens the panel; drag its bar to resize, ⟳ switches to shell mode and × closes. DevTools' main menu (⋮) has "Dock side": bottom (the default), right, left, or undocked, a window over the page moved by its bar and resized from its corner. In shell mode the page shrinks to make room, as in Chrome; otherwise the panel covers the page. The side and sizes are remembered in localStorage. Attributes: `frontend`, `open`, `dock`, `height`, `width`, `no-launcher`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
 
 ## Development
 
