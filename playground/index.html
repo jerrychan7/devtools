@@ -20,6 +20,11 @@
       console.log('[body] end of body');
     </script>
     <script src="/playground/seed.js"></script>
+    <form toolname="search_echo" tooldescription="Searches the echo API." toolautosubmit action="/api/echo">
+      <input name="q" placeholder="Query" required />
+      <button>Search</button>
+    </form>
+    <script src="/playground/webmcp.js"></script>
     <script>
       window.addEventListener('load', function () {
         console.log('[body] load');
