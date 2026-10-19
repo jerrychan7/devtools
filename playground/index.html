@@ -22,7 +22,7 @@
         s.src = '/packages/devtools-anywhere/dist/devtools-anywhere.iife.js'
         s.onload = function () {
           var devtools = document.createElement('devtools-anywhere')
-          devtools.setAttribute('frontend', '/chii.ignore/public/front_end/chii_app.html')
+          devtools.setAttribute('frontend', '/packages/devtools-frontend/dist/anywhere_app.html')
           if (location.hash === '#open') devtools.setAttribute('open', '')
           document.body.appendChild(devtools)
           setTimeout(function () {

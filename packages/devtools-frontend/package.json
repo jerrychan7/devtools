@@ -1,0 +1,18 @@
+{
+  "name": "@devtools-anywhere/devtools-frontend",
+  "version": "0.0.0",
+  "description": "Chrome DevTools frontend built from the official sources for devtools-anywhere",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./dist/*"
+  },
+  "files": ["dist", "REVISION"],
+  "scripts": {
+    "build:frontend": "node scripts/build.ts",
+    "update": "node scripts/build.ts --latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0"
+  }
+}

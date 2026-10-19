@@ -1,0 +1,32 @@
+# Copyright 2026 jerrychan7. MIT license.
+import("../../../scripts/build/ninja/devtools_entrypoint.gni")
+import("../visibility.gni")
+
+devtools_entrypoint("entrypoint") {
+  entrypoint = "anywhere_app.ts"
+
+  deps = [ "../../Images:optimize_images" ]
+
+  ts_deps = [
+    "../../core/host:bundle",
+    "../../core/root:bundle",
+    "../../entrypoints/inspector_main:meta",
+    "../../panels/application:meta",
+    "../../panels/common:meta",
+    "../../panels/console:meta",
+    "../../panels/console_counters:meta",
+    "../../panels/elements:meta",
+    "../../panels/network:meta",
+    "../../panels/settings:meta",
+    "../../panels/sources:meta",
+    "../../ui/dom_extension:bundle",
+    "../../ui/legacy/components/perf_ui:meta",
+    "../../ui/legacy/components/quick_open:meta",
+    "../../ui/legacy/components/source_frame:meta",
+    "../main:bundle",
+    "../main:meta",
+  ]
+
+  visibility = [ "../../:*" ]
+  visibility += devtools_entrypoints_visibility
+}
