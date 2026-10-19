@@ -75,6 +75,35 @@ describe('DOMStorage', () => {
       assert.deepEqual(diffSubset(ours, chrome), []);
     });
   }
+
+  test('setDOMStorageItem and removeDOMStorageItem (Application panel edits)', async () => {
+    await both('DOMStorage.setDOMStorageItem', { storageId: local(), key: 'edit', value: 'v1' });
+    let [ours, chrome] = await both('DOMStorage.getDOMStorageItems', { storageId: local() });
+    assert.deepEqual(ours.entries.sort(), chrome.entries.sort());
+    assert.equal(await t.page.evaluate(() => localStorage.getItem('edit')), 'v1');
+
+    await both('DOMStorage.removeDOMStorageItem', { storageId: local(), key: 'edit' });
+    [ours, chrome] = await both('DOMStorage.getDOMStorageItems', { storageId: local() });
+    assert.deepEqual(ours.entries.sort(), chrome.entries.sort());
+    assert.equal(await t.page.evaluate(() => localStorage.getItem('edit')), null);
+  });
+
+  test('changes made by another tab are reported', async () => {
+    await t.ours.clear();
+    // What the browser dispatches when another tab of the origin sets an item.
+    await t.page.evaluate(() =>
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: 'other', oldValue: null, newValue: 'x', storageArea: localStorage })
+      )
+    );
+    // Events reach the test asynchronously; Chrome does not report a synthetic event.
+    let events = await t.ours.events('DOMStorage.domStorageItemAdded');
+    for (let i = 0; !events.length && i < 50; i++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      events = await t.ours.events('DOMStorage.domStorageItemAdded');
+    }
+    assert.deepEqual(events, [{ storageId: { ...local(), securityOrigin: origin }, key: 'other', newValue: 'x' }]);
+  });
 });
 
 describe('IndexedDB', () => {
@@ -120,6 +149,28 @@ describe('IndexedDB', () => {
     const params = { storageKey, databaseName: 'db1', objectStoreName: 'users' };
     const [ours, chrome] = await both('IndexedDB.getMetadata', params);
     assert.equal(ours.entriesCount, chrome.entriesCount);
+  });
+
+  test('getMetadata reports the key generator of an autoIncrement store', async () => {
+    await t.page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open('db1');
+          open.onsuccess = () => {
+            const tx = open.result.transaction('plain', 'readwrite');
+            tx.objectStore('plain').add('first');
+            tx.objectStore('plain').add('second');
+            tx.oncomplete = () => {
+              open.result.close();
+              resolve();
+            };
+          };
+          open.onerror = () => reject(open.error);
+        })
+    );
+    const params = { storageKey, databaseName: 'db1', objectStoreName: 'plain' };
+    const [ours, chrome] = await both('IndexedDB.getMetadata', params);
+    assert.equal(ours.keyGeneratorValue, chrome.keyGeneratorValue);
   });
 });
 
@@ -179,17 +230,91 @@ describe('Storage and cookies', () => {
     assert.deepEqual(pick(ours), pick(chrome));
   });
 
-  test('getUsageAndQuota', async () => {
-    const ours = await t.ours.send('Storage.getUsageAndQuota', { origin });
-    assert.ok(ours.quota > 0);
+  test('setCookie reports failure for a cookie the page cannot set', async () => {
+    const ours = await t.ours.send('Network.setCookie', { name: 'secret', value: 'v', url: origin, httpOnly: true });
+    assert.equal(ours.success, false);
+    assert.equal(await t.page.evaluate(() => document.cookie.includes('secret=')), false);
   });
 
-  test('clearDataForOrigin clears local storage and IndexedDB', async () => {
+  test('setCookie takes its default path from the url', async () => {
+    const url = await t.page.evaluate(() => location.href);
+    const ours = await t.ours.send('Network.setCookie', { name: 'here', value: 'v', url });
+    assert.equal(ours.success, true);
+    assert.equal(await t.page.evaluate(() => document.cookie.includes('here=v')), true);
+    await t.ours.send('Network.deleteCookies', { name: 'here', url });
+    assert.equal(await t.page.evaluate(() => document.cookie.includes('here=')), false);
+  });
+
+  test('getUsageAndQuota', async () => {
+    const [ours, chrome] = await both('Storage.getUsageAndQuota', { origin });
+    assert.ok(ours.quota > 0);
+    // Usage differs between the two measurements; the shape must not.
+    assert.deepEqual(Object.keys(ours).sort(), Object.keys(chrome).sort());
+    for (const key of ['usage', 'quota', 'overrideActive'] as const) assert.equal(typeof ours[key], typeof chrome[key]);
+    assert.ok(Array.isArray(ours.usageBreakdown));
+  });
+
+  test('clearCookies removes cookies set on a sub-path', async () => {
+    const name = 'deep';
+    await t.page.evaluate(n => {
+      const path = location.pathname.replace(/[^/]*$/, '');
+      document.cookie = `${n}=1; path=${path}`;
+    }, name);
+    await t.ours.send('Storage.clearCookies');
+    assert.equal(await t.page.evaluate(n => document.cookie.includes(`${n}=`), name), false);
+  });
+
+  test('deleteCookies with a url removes a cookie set on its path', async () => {
+    const url = await t.page.evaluate(() => {
+      document.cookie = `scoped=1; path=${location.pathname.replace(/[^/]*$/, '')}`;
+      return location.href;
+    });
+    await t.ours.send('Network.deleteCookies', { name: 'scoped', url });
+    assert.equal(await t.page.evaluate(() => document.cookie.includes('scoped=')), false);
+  });
+
+  test('deleteCookies removes a cookie that setCookie set from the same url', async () => {
+    const url = await t.page.evaluate(() => location.href);
+    const { success } = await t.ours.send('Network.setCookie', { name: 'fromUrl', value: '1', url });
+    assert.equal(success, true);
+    assert.equal(await t.page.evaluate(() => document.cookie.includes('fromUrl=')), true);
+    await t.ours.send('Network.deleteCookies', { name: 'fromUrl', url });
+    assert.equal(await t.page.evaluate(() => document.cookie.includes('fromUrl=')), false);
+  });
+
+  test('deleteDatabase returns while the page holds a connection', async () => {
+    await t.page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open('held');
+          // Kept open on purpose, like a page that uses the database.
+          open.onsuccess = () => {
+            Reflect.set(window, 'heldDb', open.result);
+            resolve();
+          };
+          open.onerror = () => reject(open.error);
+        })
+    );
+    await t.ours.send('IndexedDB.deleteDatabase', { storageKey, databaseName: 'held' });
+    // Closing it lets the queued deletion finish, so later tests see no database.
+    await t.page.evaluate(() => {
+      const db = Reflect.get(window, 'heldDb');
+      if (db instanceof IDBDatabase) db.close();
+    });
+  });
+
+  test('clearDataForOrigin clears local storage and IndexedDB, and only them', async () => {
+    await t.page.evaluate(async () => {
+      sessionStorage.setItem('kept', '1');
+      await (await caches.open('kept')).put('/kept', new Response('kept'));
+    });
     await t.ours.send('Storage.clearDataForOrigin', { origin, storageTypes: 'local_storage,indexeddb' });
     const state = await t.page.evaluate(async () => ({
       local: localStorage.length,
       databases: (await indexedDB.databases()).length,
+      session: sessionStorage.getItem('kept'),
+      cache: await caches.has('kept'),
     }));
-    assert.deepEqual(state, { local: 0, databases: 0 });
+    assert.deepEqual(state, { local: 0, databases: 0, session: '1', cache: true });
   });
 });

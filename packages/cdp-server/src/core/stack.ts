@@ -13,10 +13,15 @@ export function parseStack(stack: string | undefined, skip = 0): Protocol.Runtim
   for (const line of stack.split('\n')) {
     const m = V8_FRAME.exec(line) || GECKO_FRAME.exec(line.trim());
     if (!m) continue;
+    const url = m[2] ?? '';
     frames.push({
-      functionName: (m[1] || '').replace(/^async /, ''),
+      // V8 names constructors without `new`, Firefox marks async frames with `async*`, and
+      // Safari names top-level code `global code`: CDP gives the bare name, or none.
+      functionName: (m[1] || '').replace(/^(?:async |new |async\*)/, '').replace(/^global code$/, ''),
       scriptId: '',
-      url: m[2] ?? '',
+      // Code run by eval has no URL in CDP: V8 writes `eval at f (url:1:2), <anonymous>`,
+      // Firefox `url line 2 > eval`.
+      url: /^eval at |> eval$|> Function$/.test(url) ? '' : url,
       lineNumber: Number(m[3]) - 1,
       columnNumber: Number(m[4]) - 1,
     });

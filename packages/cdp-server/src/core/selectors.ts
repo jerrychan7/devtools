@@ -2,7 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 
 type Specificity = Protocol.CSS.Specificity;
 
-/** Splits on top-level occurrences of `separator`, ignoring those inside (), [] and quotes. */
+/** Splits on top-level occurrences of `separator`, ignoring those inside (), [], quotes and escapes. */
 export function splitTopLevel(text: string, separator: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -10,9 +10,9 @@ export function splitTopLevel(text: string, separator: string): string[] {
   let start = 0;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (quote) {
-      if (ch === '\\') i++;
-      else if (ch === quote) quote = '';
+    if (ch === '\\') i++;
+    else if (quote) {
+      if (ch === quote) quote = '';
     } else if (ch === '"' || ch === "'") quote = ch;
     else if (ch === '(' || ch === '[') depth++;
     else if (ch === ')' || ch === ']') depth--;
@@ -36,16 +36,25 @@ export function specificity(selector: string): Specificity {
   const s = selector.trim();
   let i = 0;
   const ident = () => {
-    const m = /^-?(?:[\w-]|\\.)+/.exec(s.slice(i));
+    // Name code points include everything from U+0080 up; an escape is a hex code with an
+    // optional trailing space, or any other single character.
+    const m = /^(?:[\w\-\u0080-\uffff]|\\[0-9a-fA-F]{1,6}[ \t\n]?|\\[^])+/.exec(s.slice(i));
     i += m ? m[0].length : 1;
     return m ? m[0] : '';
+  };
+  /** Advances past a quoted string starting at s[i], escapes included. */
+  const skipString = () => {
+    const quote = s[i];
+    for (i++; i < s.length && s[i] !== quote; i++) if (s[i] === '\\') i++;
   };
   /** Reads a parenthesized argument starting at s[i] === '('. */
   const argument = () => {
     let depth = 0;
     const start = i;
     for (; i < s.length; i++) {
-      if (s[i] === '(') depth++;
+      if (s[i] === '\\') i++;
+      else if (s[i] === '"' || s[i] === "'") skipString();
+      else if (s[i] === '(') depth++;
       else if (s[i] === ')' && --depth === 0) break;
     }
     i++;
@@ -64,7 +73,10 @@ export function specificity(selector: string): Specificity {
       ident();
       result.b++;
     } else if (ch === '[') {
-      while (i < s.length && s[i] !== ']') i++;
+      for (; i < s.length && s[i] !== ']'; i++) {
+        if (s[i] === '\\') i++;
+        else if (s[i] === '"' || s[i] === "'") skipString();
+      }
       i++;
       result.b++;
     } else if (ch === ':') {
@@ -72,8 +84,14 @@ export function specificity(selector: string): Specificity {
       i += isElement ? 2 : 1;
       const name = ident().toLowerCase();
       const arg = s[i] === '(' ? argument() : null;
-      if (isElement || LEGACY_PSEUDO_ELEMENTS.has(name)) result.c++;
-      else if (name === 'where') {
+      if (isElement || LEGACY_PSEUDO_ELEMENTS.has(name)) {
+        result.c++;
+        // ::slotted() adds its compound selector, like :host() below.
+        if (name === 'slotted' && arg !== null) result = add(result, specificity(arg));
+      } else if (name === 'host' || name === 'host-context') {
+        result.b++;
+        if (arg !== null) result = add(result, specificity(arg));
+      } else if (name === 'where') {
         // Contributes nothing.
       } else if (name === 'is' || name === 'not' || name === 'has' || name === 'matches') {
         if (arg !== null) result = add(result, listMax(arg));

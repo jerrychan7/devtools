@@ -56,6 +56,10 @@ export class NodeRegistry {
   private seq = 0;
   private backendIds = new WeakMap<Inspectable, number>();
   private byBackendId = new Map<number, WeakRef<Inspectable>>();
+  /** Drops the entries of collected nodes from `byBackendId`. */
+  private collected = new FinalizationRegistry<number>(id => {
+    if (!this.byBackendId.get(id)?.deref()) this.byBackendId.delete(id);
+  });
   private pseudos = new WeakMap<Element, Map<PseudoType, PseudoElement>>();
   /** Pseudo-elements sent to the client, per host, to report later additions and removals. */
   pseudoSent = new Map<Element, Set<PseudoType>>();
@@ -64,8 +68,15 @@ export class NodeRegistry {
   childrenSent = new WeakSet<Node>();
   /** Nodes selected in the Elements panel, most recent first ($0, $1, …). */
   inspected: Node[] = [];
+  /** The `<template>` of each template content fragment sent to the client. */
+  private templateOf = new WeakMap<DocumentFragment, HTMLTemplateElement>();
   /** Called for every shadow root sent to the client, e.g. to observe its mutations. */
   onShadowRoot: ((root: ShadowRoot) => void) | null = null;
+  /**
+   * Sends a node and its ancestors to the client while the DOM domain is enabled, returning its
+   * node id (undefined while disabled). Set by the DOM domain.
+   */
+  pushToClient: ((node: Inspectable) => number | undefined) | null = null;
 
   /** `shadowRootOf` also finds closed shadow roots (recorded by the probe). */
   constructor(readonly shadowRootOf: (host: Element) => ShadowRoot | null = host => host.shadowRoot) {}
@@ -104,12 +115,43 @@ export class NodeRegistry {
       id = ++this.backendSeq;
       this.backendIds.set(node, id);
       this.byBackendId.set(id, new WeakRef(node));
+      this.collected.register(node, id);
     }
     return id;
   }
 
   getByBackendId(backendNodeId: number): Inspectable | undefined {
     return this.byBackendId.get(backendNodeId)?.deref();
+  }
+
+  /**
+   * After the client was told `node` was removed: like Chrome, the node ids of the removed
+   * subtree become invalid, and its children are sent again if it comes back. Only the
+   * descendants the client received are visited.
+   */
+  forget(node: Node) {
+    const visit = (n: Node) => {
+      const id = this.ids.get(n);
+      if (id === undefined) return;
+      this.ids.delete(n);
+      this.nodes.delete(id);
+      if (n instanceof Element) {
+        for (const type of this.pseudoSent.get(n) ?? []) {
+          const pseudo = this.pseudoOf(n, type);
+          const pseudoId = this.ids.get(pseudo);
+          this.ids.delete(pseudo);
+          if (pseudoId !== undefined) this.nodes.delete(pseudoId);
+        }
+        this.pseudoSent.delete(n);
+        const shadowRoot = this.shadowRootOf(n);
+        if (shadowRoot) visit(shadowRoot);
+        if (n instanceof HTMLTemplateElement) visit(n.content);
+      }
+      if (!this.childrenSent.has(n)) return;
+      this.childrenSent.delete(n);
+      n.childNodes.forEach(visit);
+    };
+    visit(node);
   }
 
   /** The (cached) pseudo-element object of `host`. */
@@ -181,6 +223,11 @@ export class NodeRegistry {
         result.pseudoElements = pseudoTypes.map(type => this.serializePseudo(this.pseudoOf(node, type)));
       }
       this.pseudoSent.set(node, new Set(pseudoTypes));
+      // Like Chrome, a template's content is listed (without children) apart from its children.
+      if (node instanceof HTMLTemplateElement) {
+        this.templateOf.set(node.content, node);
+        result.templateContent = this.serialize(node.content, 0, pierce);
+      }
     } else if (node instanceof Document) {
       result.documentURL = node.URL;
       result.baseURL = node.baseURI;
@@ -211,6 +258,13 @@ export class NodeRegistry {
     return result;
   }
 
+  /** The parent, or the host of a shadow root or template content. */
+  private hostOf(node: Node): Node | null {
+    if (node.parentNode) return node.parentNode;
+    if (node instanceof ShadowRoot) return node.host;
+    return node instanceof DocumentFragment ? (this.templateOf.get(node) ?? null) : null;
+  }
+
   private serializeShadowRoot(root: ShadowRoot, depth: number, pierce: boolean): DomNode {
     const node = this.serialize(root, depth, pierce);
     node.shadowRootType = root.mode === 'open' ? 'open' : 'closed';
@@ -229,7 +283,7 @@ export class NodeRegistry {
       return this.idOf(node);
     }
     const path: Node[] = [];
-    for (let n: Node | null = node; n; n = n.parentNode ?? (n instanceof ShadowRoot ? n.host : null)) path.unshift(n);
+    for (let n: Node | null = node; n; n = this.hostOf(n)) path.unshift(n);
     for (const ancestor of path.slice(0, -1)) {
       if (!this.childrenSent.has(ancestor)) emitChildren(ancestor);
     }

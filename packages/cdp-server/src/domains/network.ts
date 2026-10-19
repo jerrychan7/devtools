@@ -29,6 +29,36 @@ export function parseCookies(): Protocol.Network.Cookie[] {
   });
 }
 
+/**
+ * Expires every cookie called `name` that could be visible from `url` (the page by default).
+ * The page cannot read a cookie's path or domain, so without them each prefix of the path
+ * and each parent of the host (and the host-only form) is tried.
+ */
+export function deleteCookie(
+  name: string,
+  { url, path, domain }: { url?: string | undefined; path?: string | undefined; domain?: string | undefined } = {}
+) {
+  const target = new URL(url ?? location.href, location.href);
+  // Every path the url can see, its own included: `/a/b` sees cookies on `/`, `/a` and `/a/b`.
+  // Cookies match on the exact path, so each prefix is tried with and without a trailing `/`.
+  const segments = target.pathname.split('/').slice(1).filter(Boolean);
+  const paths = path
+    ? [path]
+    : [
+        '/',
+        ...segments.flatMap((_, i) => [
+          '/' + segments.slice(0, i + 1).join('/'),
+          '/' + segments.slice(0, i + 1).join('/') + '/',
+        ]),
+      ];
+  const labels = target.hostname.split('.');
+  // `undefined`: a host-only cookie, set without a domain attribute.
+  const domains = domain ? [domain] : [undefined, ...labels.slice(0, -1).map((_, i) => labels.slice(i).join('.'))];
+  for (const p of paths)
+    for (const d of domains)
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${p}${d ? `; domain=${d}` : ''}`;
+}
+
 const withoutHash = (url: string) => url.split('#')[0];
 
 /** Whether the request is one of devtools-anywhere's own (its bundle, the frontend, …). */
@@ -38,6 +68,16 @@ export const isOwnUrl = (probe: Context['probe'], url: string) => {
   return false;
 };
 export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => isOwnUrl(probe, rec.url);
+
+/**
+ * Loads `url` again, from the HTTP cache when possible, with the unhooked fetch (so it does
+ * not show up as a new request). An error status becomes a CDP error.
+ */
+export async function refetch(probe: Context['probe'], url: string, init?: RequestInit): Promise<Response> {
+  const res = await probe.fetch(url, { ...init, cache: 'force-cache' });
+  if (!res.ok) throw new CdpError(`Failed to load ${url}: ${res.status}`);
+  return res;
+}
 
 /**
  * CDP frame of a WebSocket payload: text as is, binary data (converted only now) as base64.
@@ -52,7 +92,10 @@ async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.W
   // A copy: the view may be on a SharedArrayBuffer, which Blob does not take.
   else if (ArrayBuffer.isView(data))
     blob = new Blob([new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()]);
-  return { opcode: 2, mask, payloadData: await base64(blob) };
+  // A payload that cannot be read (a failed Blob read) is shown empty rather than holding
+  // back the socket's later frames and its close.
+  const payloadData = await base64(blob).catch(() => '');
+  return { opcode: 2, mask, payloadData };
 }
 
 export function registerNetwork({ server, probe }: Context) {
@@ -63,6 +106,18 @@ export function registerNetwork({ server, probe }: Context) {
   let sentFrames = new WeakSet<SocketEvent>();
   // Socket events are emitted in order even though reading a Blob payload is asynchronous.
   let queue = Promise.resolve();
+  // Bumped by disable(): socket events still queued or waiting for a payload are dropped.
+  let generation = 0;
+
+  /**
+   * Forgets finished requests (or closed sockets) the probe has evicted, so the tables stay
+   * within the probe's own limit. Unfinished ones are kept: their record may still change.
+   */
+  function prune<T extends string>(table: Map<string, Set<T>>, live: { requestId: string }[], last: T) {
+    if (table.size <= live.length) return;
+    const ids = new Set(live.map(r => r.requestId));
+    for (const [id, done] of table) if (done.has(last) && !ids.has(id)) table.delete(id);
+  }
 
   function find(requestId: string) {
     return probe.requests.find(r => r.requestId === requestId);
@@ -71,6 +126,7 @@ export function registerNetwork({ server, probe }: Context) {
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
     if (isOwnRequest(probe, rec)) return;
+    prune(sent, probe.requests, 'end');
     let done = sent.get(rec.requestId);
     if (!done) sent.set(rec.requestId, (done = new Set()));
 
@@ -85,6 +141,9 @@ export function registerNetwork({ server, probe }: Context) {
       };
       if (rec.postData !== undefined) {
         request.postData = rec.postData;
+        request.hasPostData = true;
+      } else if (rec.hasPostData) {
+        // Read later: the frontend asks for it with getRequestPostData.
         request.hasPostData = true;
       }
       const callFrames = parseStack(rec.stack, 1);
@@ -141,15 +200,16 @@ export function registerNetwork({ server, probe }: Context) {
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         type: rec.type,
         errorText: rec.errorText ?? '',
-        canceled: false,
+        canceled: !!rec.canceled,
       } satisfies Protocol.Network.LoadingFailedEvent);
     }
   }
 
   /** Emits whichever events of the socket's lifecycle have not been sent yet. */
-  async function emitSocket(rec: SocketRecord) {
-    if (isOwnUrl(probe, rec.url)) return;
+  async function emitSocket(rec: SocketRecord, gen: number) {
+    if (gen !== generation || isOwnUrl(probe, rec.url)) return;
     const { requestId } = rec;
+    prune(sentSockets, probe.sockets, 'closed');
     let done = sentSockets.get(requestId);
     if (!done) sentSockets.set(requestId, (done = new Set()));
 
@@ -191,6 +251,7 @@ export function registerNetwork({ server, probe }: Context) {
         } satisfies Protocol.Network.WebSocketFrameErrorEvent);
       } else if (event.type === 'sent') {
         const response = await frameOf(event.data, true);
+        if (gen !== generation) return;
         server.emit('Network.webSocketFrameSent', {
           requestId,
           timestamp,
@@ -198,6 +259,7 @@ export function registerNetwork({ server, probe }: Context) {
         } satisfies Protocol.Network.WebSocketFrameSentEvent);
       } else {
         const response = await frameOf(event.data, false);
+        if (gen !== generation) return;
         server.emit('Network.webSocketFrameReceived', {
           requestId,
           timestamp,
@@ -216,7 +278,8 @@ export function registerNetwork({ server, probe }: Context) {
   }
 
   const queueSocket = (rec: SocketRecord) => {
-    queue = queue.then(() => emitSocket(rec)).catch(() => {});
+    const gen = generation;
+    queue = queue.then(() => emitSocket(rec, gen)).catch(() => {});
   };
 
   server.register('Network', {
@@ -237,6 +300,7 @@ export function registerNetwork({ server, probe }: Context) {
       sent.clear();
       sentSockets.clear();
       sentFrames = new WeakSet();
+      generation++;
     },
 
     async getResponseBody(
@@ -250,10 +314,12 @@ export function registerNetwork({ server, probe }: Context) {
           new Response(rec.body, { headers: { 'content-type': rec.responseHeaders?.['content-type'] ?? '' } })
         );
       // Requests known from Resource Timing: load the body again, from the HTTP cache when
-      // possible (unhooked, so it does not show up as a new request).
-      if (rec?.initiatorType && rec.method === 'GET') {
-        const res = await probe.fetch(rec.url, { cache: 'force-cache', credentials: 'include' }).catch(() => null);
-        if (res?.ok) return readBody(res);
+      // possible (unhooked, so it does not show up as a new request). Not for other origins:
+      // the cache may miss, and loading again would repeat a request with the user's cookies
+      // (a tracking pixel, a one-time link) that Chrome only reads from memory.
+      if (rec?.initiatorType && rec.method === 'GET' && new URL(rec.url, location.href).origin === location.origin) {
+        const res = await refetch(probe, rec.url, { credentials: 'include' }).catch(() => null);
+        if (res) return readBody(res);
       }
       throw new CdpError('No data found for resource with given identifier');
     },
@@ -269,18 +335,7 @@ export function registerNetwork({ server, probe }: Context) {
     getCookies: (): Protocol.Network.GetCookiesResponse => ({ cookies: parseCookies() }),
 
     deleteCookies(params: Protocol.Network.DeleteCookiesRequest) {
-      const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
-      document.cookie = `${params.name}=; ${expires}; path=${params.path || '/'}`;
-      if (params.domain)
-        document.cookie = `${params.name}=; ${expires}; path=${params.path || '/'}; domain=${params.domain}`;
+      deleteCookie(params.name, { url: params.url, path: params.path, domain: params.domain });
     },
-
-    setCacheDisabled: () => {},
-    setAttachDebugStack: () => {},
-    clearAcceptedEncodingsOverride: () => {},
-    emulateNetworkConditions: () => {},
-    setBypassServiceWorker: () => {},
-    setExtraHTTPHeaders: () => {},
-    setBlockedURLs: () => {},
   });
 }

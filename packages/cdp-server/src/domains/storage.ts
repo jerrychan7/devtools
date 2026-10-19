@@ -1,25 +1,38 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
 import { CdpError } from '../core/server';
-import { parseCookies } from './network';
+import { deleteCookie, parseCookies } from './network';
 
 const storageKey = () => location.origin + '/';
 
 // ---- cookies ----
 
-export function setCookie(cookie: Protocol.Network.CookieParam) {
-  let text = `${cookie.name}=${cookie.value}; path=${cookie.path || '/'}`;
+/**
+ * Sets a cookie through `document.cookie` and reports whether it took. Like Chrome, `url`
+ * gives the default domain (host-only) and path (its directory). Cookies the page cannot
+ * write (httpOnly, another host) fail; so does one the browser rejected, when the page can
+ * read it back.
+ */
+export function setCookie(cookie: Protocol.Network.CookieParam): boolean {
+  if (cookie.httpOnly) return false;
+  const target = cookie.url ? new URL(cookie.url, location.href) : null;
+  if (target && !cookie.domain && target.hostname !== location.hostname) return false;
+  // RFC 6265 default-path: up to, not including, the last `/` (`/a/b.html` gives `/a`).
+  const path = cookie.path || (target ? target.pathname.slice(0, target.pathname.lastIndexOf('/')) : '') || '/';
+  let text = `${cookie.name}=${cookie.value}; path=${path}`;
   if (cookie.domain) text += `; domain=${cookie.domain}`;
+  const expired = cookie.expires !== undefined && cookie.expires > 0 && cookie.expires * 1000 <= Date.now();
   if (cookie.expires && cookie.expires > 0) text += `; expires=${new Date(cookie.expires * 1000).toUTCString()}`;
   if (cookie.secure) text += '; secure';
   if (cookie.sameSite) text += `; samesite=${cookie.sameSite}`;
   document.cookie = text;
-}
-
-function deleteCookie(name: string, path = '/', domain?: string) {
-  const expired = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${path}`;
-  document.cookie = expired;
-  if (domain) document.cookie = `${expired}; domain=${domain}`;
+  // A cookie on another path or a parent domain is not readable from here: assume it took.
+  const here = location.pathname;
+  const readable =
+    !expired &&
+    (path === '/' || here === path || here.startsWith(path.endsWith('/') ? path : path + '/')) &&
+    (!cookie.domain || cookie.domain.replace(/^\./, '') === location.hostname);
+  return !readable || parseCookies().some(c => c.name === cookie.name && c.value === cookie.value);
 }
 
 function clearCookies() {
@@ -34,11 +47,34 @@ const request = <T>(req: IDBRequest<T>) =>
     req.onerror = () => reject(req.error);
   });
 
+/**
+ * Deletes a database. While the page keeps a connection open the deletion is `blocked` and
+ * only finishes once that connection closes; it is queued by then, so that counts as done
+ * rather than leaving the command waiting.
+ */
+const deleteDatabase = (name: string) =>
+  new Promise<void>((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(name);
+    req.onsuccess = req.onblocked = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+
 /** Opens an existing database; never creates one. */
 async function openDatabase(name: string): Promise<IDBDatabase> {
   const names = (await indexedDB.databases()).map(d => d.name);
   if (!names.includes(name)) throw new CdpError(`Database not found: ${name}`);
   return request(indexedDB.open(name));
+}
+
+/**
+ * The page cannot read a key generator, so this is the value it has at least: one past the
+ * largest numeric primary key (keys deleted since are not counted).
+ */
+async function keyGeneratorValue(store: IDBObjectStore): Promise<number> {
+  // Numbers sort before every other key type: the last one up to Infinity is the largest.
+  const cursor = await request(store.openKeyCursor(IDBKeyRange.upperBound(Infinity), 'prev'));
+  const key = cursor?.primaryKey;
+  return typeof key === 'number' ? Math.floor(key) + 1 : 1;
 }
 
 function keyPath(path: string | string[] | null): Protocol.IndexedDB.KeyPath {
@@ -100,6 +136,9 @@ function cacheStorage(): CacheStorage {
 
 const cacheIdOf = (name: string) => `${location.origin}|${name}`;
 const cacheNameOf = (cacheId: string) => cacheId.slice(cacheId.indexOf('|') + 1);
+/** Fetch's `Response.type` in the protocol's names: opaque ones differ. */
+const responseTypeOf = (type: ResponseType): Protocol.CacheStorage.CachedResponseType =>
+  type === 'opaque' ? 'opaqueResponse' : type === 'opaqueredirect' ? 'opaqueRedirect' : type;
 const headerList = (headers: Headers) => Array.from(headers, ([name, value]) => ({ name, value }));
 
 function toBase64(buffer: ArrayBuffer) {
@@ -122,7 +161,10 @@ export function registerStorage(ctx: Context) {
     isLocalStorage: storage === localStorage,
   });
 
-  /** Reports changes made through the Storage API while the domain is enabled. */
+  /**
+   * Reports changes made through the Storage API, and by other tabs, while the domain is
+   * enabled. Property access (`localStorage.foo = 'x'`) cannot be observed and is not reported.
+   */
   function hookStorage() {
     if (hooked) return;
     hooked = true;
@@ -146,6 +188,16 @@ export function registerStorage(ctx: Context) {
       clear.call(this);
       if (domStorageEnabled) server.emit('DOMStorage.domStorageItemsCleared', { storageId: storageIdOf(this) });
     };
+    // Changes other tabs of the origin make to localStorage.
+    window.addEventListener('storage', event => {
+      const { storageArea, key, oldValue, newValue } = event;
+      if (!domStorageEnabled || !storageArea) return;
+      const storageId = storageIdOf(storageArea);
+      if (key === null) server.emit('DOMStorage.domStorageItemsCleared', { storageId });
+      else if (newValue === null) server.emit('DOMStorage.domStorageItemRemoved', { storageId, key });
+      else if (oldValue === null) server.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue });
+      else server.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue });
+    });
   }
 
   const storageOf = (id: Protocol.DOMStorage.StorageId) => (id.isLocalStorage ? localStorage : sessionStorage);
@@ -244,7 +296,7 @@ export function registerStorage(ctx: Context) {
             entries.push({
               key: objects.wrap(cursor.key, { generatePreview: true, group: 'indexeddb' }),
               primaryKey: objects.wrap(cursor.primaryKey, { generatePreview: true, group: 'indexeddb' }),
-              value: objects.wrap((cursor as IDBCursorWithValue).value, { generatePreview: true, group: 'indexeddb' }),
+              value: objects.wrap(cursor.value, { generatePreview: true, group: 'indexeddb' }),
             });
             cursor.continue();
           };
@@ -255,7 +307,7 @@ export function registerStorage(ctx: Context) {
     async getMetadata(params: Protocol.IndexedDB.GetMetadataRequest): Promise<Protocol.IndexedDB.GetMetadataResponse> {
       return withStore(params.databaseName, params.objectStoreName, 'readonly', async store => ({
         entriesCount: await request(store.count()),
-        keyGeneratorValue: 0,
+        keyGeneratorValue: store.autoIncrement ? await keyGeneratorValue(store) : 0,
       }));
     },
 
@@ -270,7 +322,7 @@ export function registerStorage(ctx: Context) {
     },
 
     async deleteDatabase(params: Protocol.IndexedDB.DeleteDatabaseRequest) {
-      await request(indexedDB.deleteDatabase(params.databaseName));
+      await deleteDatabase(params.databaseName);
     },
   });
 
@@ -310,7 +362,7 @@ export function registerStorage(ctx: Context) {
             responseTime: Date.parse(res?.headers.get('date') ?? '') || 0,
             responseStatus: res?.status ?? 0,
             responseStatusText: res?.statusText ?? '',
-            responseType: (res?.type ?? 'basic') as Protocol.CacheStorage.CachedResponseType,
+            responseType: responseTypeOf(res?.type ?? 'basic'),
             responseHeaders: res ? headerList(res.headers) : [],
           };
         })
@@ -343,12 +395,12 @@ export function registerStorage(ctx: Context) {
     const types = new Set(storageTypes.split(',').map(t => t.trim()));
     const all = types.has('all');
     if (all || types.has('local_storage')) {
+      // Chrome leaves session storage alone when clearing for a given origin.
       localStorage.clear();
-      sessionStorage.clear();
     }
     if (all || types.has('cookies')) clearCookies();
     if ((all || types.has('indexeddb')) && typeof indexedDB !== 'undefined') {
-      for (const { name } of await indexedDB.databases()) if (name) await request(indexedDB.deleteDatabase(name));
+      await Promise.all((await indexedDB.databases()).map(({ name }) => name && deleteDatabase(name)));
     }
     if ((all || types.has('cache_storage')) && typeof caches !== 'undefined') {
       for (const name of await caches.keys()) await caches.delete(name);
@@ -377,10 +429,9 @@ export function registerStorage(ctx: Context) {
 
   server.register('Network', {
     getAllCookies: (): Protocol.Network.GetAllCookiesResponse => ({ cookies: parseCookies() }),
-    setCookie(params: Protocol.Network.SetCookieRequest): Protocol.Network.SetCookieResponse {
-      setCookie(params);
-      return { success: true };
-    },
+    setCookie: (params: Protocol.Network.SetCookieRequest): Protocol.Network.SetCookieResponse => ({
+      success: setCookie(params),
+    }),
     setCookies(params: Protocol.Network.SetCookiesRequest) {
       params.cookies.forEach(setCookie);
     },

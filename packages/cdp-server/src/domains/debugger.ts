@@ -2,6 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../core/server';
 import { EXECUTION_CONTEXT_ID, type Context } from '../core/context';
 import type { RequestRecord } from '../probe/types';
+import { refetch } from './network';
 
 /**
  * Lists the page's script files in the Sources panel. Page scripts cannot see the scripts
@@ -17,6 +18,8 @@ export function registerDebugger({ server, probe }: Context) {
   const ids = new Map<string, string>();
   const sources = new Map<string, Promise<string>>();
   let enabled = false;
+  /** Breakpoint ids are unique: the frontend keys its breakpoints by them. */
+  let nextBreakpointId = 0;
   let unsubscribe: (() => void) | null = null;
 
   const isScript = (rec: RequestRecord) => rec.type === 'Script' && rec.state === 'done';
@@ -65,6 +68,8 @@ export function registerDebugger({ server, probe }: Context) {
       enabled = false;
       unsubscribe?.();
       unsubscribe = null;
+      // The frontend keeps the sources it loaded; holding them here too only costs page memory.
+      sources.clear();
     },
 
     /** Re-fetches the script, from the HTTP cache when possible. */
@@ -74,10 +79,7 @@ export function registerDebugger({ server, probe }: Context) {
       const url = urlOf(params.scriptId);
       let source = sources.get(url);
       if (!source) {
-        source = probe.fetch(url, { cache: 'force-cache' }).then(res => {
-          if (!res.ok) throw new CdpError(`Failed to load ${url}: ${res.status}`);
-          return res.text();
-        });
+        source = refetch(probe, url).then(res => res.text());
         sources.set(url, source);
         source.catch(() => sources.delete(url));
       }
@@ -86,7 +88,7 @@ export function registerDebugger({ server, probe }: Context) {
 
     getPossibleBreakpoints: (): Protocol.Debugger.GetPossibleBreakpointsResponse => ({ locations: [] }),
     setBreakpointByUrl: (): Protocol.Debugger.SetBreakpointByUrlResponse => ({
-      breakpointId: String(Date.now()),
+      breakpointId: String(++nextBreakpointId),
       locations: [],
     }),
     removeBreakpoint: () => {},

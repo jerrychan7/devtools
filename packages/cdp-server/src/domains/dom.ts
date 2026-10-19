@@ -16,6 +16,22 @@ export function resolveNode({ nodes, objects }: Context, ref: NodeRef): Node {
   return node;
 }
 
+/** The element a command refers to. */
+export function resolveElement(ctx: Context, ref: NodeRef): Element {
+  const node = resolveNode(ctx, ref);
+  if (!(node instanceof Element)) throw new CdpError('Node is not an Element');
+  return node;
+}
+
+/** The node a command refers to, which must be able to have children (querySelector, …). */
+function resolveContainer(ctx: Context, ref: NodeRef): ParentNode {
+  const node = resolveNode(ctx, ref);
+  if (!(node instanceof Element || node instanceof Document || node instanceof DocumentFragment)) {
+    throw new CdpError('Not a container node');
+  }
+  return node;
+}
+
 const quad = (r: { left: number; top: number; right: number; bottom: number }) => [
   r.left,
   r.top,
@@ -70,14 +86,39 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
   };
 }
 
-/** Text matched by DOM.performSearch: tag names, attributes and text, case-insensitively. */
-function searchNodes(root: Node, query: string, isVisible: (n: Node) => boolean): Node[] {
+/**
+ * Nodes matched by DOM.performSearch, in the order Chrome collects them: tag names, attributes
+ * and text (case-insensitively) in tree order, a shadow tree right after its host (`shadowRootOf`
+ * also finds closed ones), then the document's XPath and selector matches.
+ */
+function searchNodes(
+  query: string,
+  isVisible: (n: Node) => boolean,
+  shadowRootOf: (host: Element) => ShadowRoot | null
+): Node[] {
   const found = new Set<Node>();
-  try {
-    document.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
-  } catch {
-    // Not a selector.
-  }
+  const needle = query.toLowerCase().replace(/^<|>$/g, '');
+  const walk = (root: Document | ShadowRoot) => {
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
+      {
+        acceptNode: n => (isVisible(n) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+      }
+    );
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node instanceof Element) {
+        if (node.localName.includes(needle)) found.add(node);
+        else if (Array.from(node.attributes).some(a => `${a.name}="${a.value}"`.toLowerCase().includes(needle)))
+          found.add(node);
+        const shadowRoot = shadowRootOf(node);
+        if (shadowRoot) walk(shadowRoot);
+      } else if (node.nodeValue?.toLowerCase().includes(needle)) {
+        found.add(node);
+      }
+    }
+  };
+  walk(document);
   try {
     const result = document.evaluate(query, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
     for (let i = 0; i < result.snapshotLength; i++) {
@@ -87,24 +128,37 @@ function searchNodes(root: Node, query: string, isVisible: (n: Node) => boolean)
   } catch {
     // Not an XPath expression.
   }
-  const needle = query.toLowerCase().replace(/^<|>$/g, '');
-  const walker = document.createTreeWalker(
-    root,
-    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
-    {
-      acceptNode: n => (isVisible(n) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
-    }
-  );
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node instanceof Element) {
-      if (node.localName.includes(needle)) found.add(node);
-      else if (Array.from(node.attributes).some(a => `${a.name}="${a.value}"`.toLowerCase().includes(needle)))
-        found.add(node);
-    } else if (node.nodeValue?.toLowerCase().includes(needle)) {
-      found.add(node);
-    }
+  try {
+    document.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
+  } catch {
+    // Not a selector.
   }
   return Array.from(found);
+}
+
+/** Markup of `node` as DOM.getOuterHTML returns it: without forced pseudo-class markers. */
+function outerHTML(node: Node): string {
+  if (node instanceof Element) {
+    if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`)) return node.outerHTML;
+    // Leave out forced pseudo-class markers.
+    const copy = node.cloneNode(true);
+    if (!(copy instanceof Element)) return node.outerHTML;
+    for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
+      el.removeAttribute(FORCE_ATTRIBUTE);
+    return copy.outerHTML;
+  }
+  // The whole document, doctype included, like Chrome.
+  if (node instanceof Document || node instanceof DocumentFragment)
+    return Array.from(node.childNodes, outerHTML).join('');
+  if (node instanceof DocumentType) {
+    const ids = node.publicId
+      ? ` PUBLIC "${node.publicId}"${node.systemId ? ` "${node.systemId}"` : ''}`
+      : node.systemId
+        ? ` SYSTEM "${node.systemId}"`
+        : '';
+    return `<!DOCTYPE ${node.name}${ids}>`;
+  }
+  return new XMLSerializer().serializeToString(node);
 }
 
 export function registerDom(ctx: Context) {
@@ -122,8 +176,9 @@ export function registerDom(ctx: Context) {
     } satisfies Protocol.DOM.SetChildNodesEvent);
   }
 
-  function previousVisibleSibling(node: Node): Node | null {
-    for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n)) return n;
+  /** The previous visible sibling the client already has: `pending` are not reported yet. */
+  function previousVisibleSibling(node: Node, pending: Set<Node>): Node | null {
+    for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n) && !pending.has(n)) return n;
     return null;
   }
 
@@ -161,26 +216,48 @@ export function registerDom(ctx: Context) {
   function onMutations(records: MutationRecord[]) {
     reportMutations(records);
     // Attribute and tree changes can make selectors such as `.x::before` start or stop matching.
-    refreshPseudoElements(records.map(r => r.target));
+    // devtools-anywhere's own elements (the highlight layer, …) change nothing on the page.
+    const roots = records.filter(r => !isOwnChange(r)).map(r => r.target);
+    if (roots.length) refreshPseudoElements(roots);
+  }
+
+  /** Whether a record only concerns devtools-anywhere's own elements. */
+  function isOwnChange(record: MutationRecord): boolean {
+    const own = (n: Node) => n instanceof Element && n.closest(`[${OWN_ATTRIBUTE}]`) !== null;
+    if (own(record.target)) return true;
+    if (record.type !== 'childList') return false;
+    const changed = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
+    return changed.length > 0 && changed.every(n => n instanceof Element && n.hasAttribute(OWN_ATTRIBUTE));
   }
 
   function reportMutations(records: MutationRecord[]) {
+    // The records describe the DOM step by step, but siblings are read from its final state:
+    // nodes inserted by a later record must not serve as the position of an earlier one.
+    const pending = new Set<Node>();
+    for (const record of records) record.addedNodes.forEach(node => pending.add(node));
     for (const record of records) {
       const target = record.target;
       const targetId = nodes.knownId(target);
       if (record.type === 'childList') {
-        if (targetId === undefined) continue;
+        if (targetId === undefined) {
+          record.addedNodes.forEach(node => pending.delete(node));
+          continue;
+        }
         if (!nodes.childrenSent.has(target)) {
+          record.addedNodes.forEach(node => pending.delete(node));
           server.emit('DOM.childNodeCountUpdated', { nodeId: targetId, childNodeCount: nodes.children(target).length });
           continue;
         }
         record.removedNodes.forEach(node => {
           const nodeId = nodes.knownId(node);
-          if (nodeId !== undefined) server.emit('DOM.childNodeRemoved', { parentNodeId: targetId, nodeId });
+          if (nodeId === undefined) return;
+          server.emit('DOM.childNodeRemoved', { parentNodeId: targetId, nodeId });
+          nodes.forget(node);
         });
         record.addedNodes.forEach(node => {
+          pending.delete(node);
           if (!nodes.isVisible(node) || node.parentNode !== target) return;
-          const previous = previousVisibleSibling(node);
+          const previous = previousVisibleSibling(node, pending);
           server.emit('DOM.childNodeInserted', {
             parentNodeId: targetId,
             previousNodeId: previous ? nodes.idOf(previous) : 0,
@@ -202,6 +279,11 @@ export function registerDom(ctx: Context) {
     }
   }
 
+  /** Reports pending mutations now, so the client knows the nodes a command returns. */
+  function flushMutations() {
+    if (observer) onMutations(observer.takeRecords());
+  }
+
   const OBSERVE: MutationObserverInit = { subtree: true, childList: true, attributes: true, characterData: true };
 
   function observe() {
@@ -211,11 +293,13 @@ export function registerDom(ctx: Context) {
   }
   // Observing the document does not reach into shadow trees: observe each one sent.
   nodes.onShadowRoot = root => observer?.observe(root, OBSERVE);
+  nodes.pushToClient = node => (observer ? nodes.push(node, parent => emitChildren(parent)) : undefined);
 
-  // Shadow roots attached to hosts the client already knows are pushed to it.
-  const attachShadow = Element.prototype.attachShadow;
-  Element.prototype.attachShadow = function (this: Element, init: ShadowRootInit) {
-    const root = attachShadow.call(this, init);
+  // Shadow roots attached to hosts the client already knows are pushed to it. The prototype is
+  // only patched while the client follows the tree (getDocument until disable).
+  let nativeAttachShadow: typeof Element.prototype.attachShadow | null = null;
+  function pushingAttachShadow(this: Element, init: ShadowRootInit): ShadowRoot {
+    const root = (nativeAttachShadow ?? attachShadowFallback).call(this, init);
     const hostId = observer ? nodes.knownId(this) : undefined;
     if (hostId !== undefined) {
       const serialized = nodes.serialize(root, 0);
@@ -224,24 +308,39 @@ export function registerDom(ctx: Context) {
       server.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
     }
     return root;
-  };
+  }
+  // Kept for a page that grabbed the wrapper before it was removed.
+  const attachShadowFallback = Element.prototype.attachShadow;
+  function patchAttachShadow() {
+    if (nativeAttachShadow) return;
+    nativeAttachShadow = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = pushingAttachShadow;
+  }
+  function unpatchAttachShadow() {
+    if (!nativeAttachShadow) return;
+    // A wrapper installed on top of ours stays, and ours with it: it no longer pushes once the
+    // observer is gone.
+    if (Element.prototype.attachShadow !== pushingAttachShadow) return;
+    Element.prototype.attachShadow = nativeAttachShadow;
+    nativeAttachShadow = null;
+  }
 
-  const element = (ref: NodeRef) => {
-    const node = resolveNode(ctx, ref);
-    if (!(node instanceof Element)) throw new CdpError('Node is not an Element');
-    return node;
-  };
+  const element = (ref: NodeRef) => resolveElement(ctx, ref);
 
   server.register('DOM', {
     enable: () => {},
     disable() {
       observer?.disconnect();
       observer = null;
+      unpatchAttachShadow();
+      searches.clear();
     },
 
     getDocument(params: Protocol.DOM.GetDocumentRequest): Protocol.DOM.GetDocumentResponse {
       nodes.reset();
+      searches.clear();
       observe();
+      patchAttachShadow();
       return { root: nodes.serialize(document, params.depth ?? 2, params.pierce) };
     },
 
@@ -285,10 +384,17 @@ export function registerDom(ctx: Context) {
     setAttributesAsText(params: Protocol.DOM.SetAttributesAsTextRequest) {
       const el = element(params);
       const parsed = document.createElement('template');
-      parsed.innerHTML = `<div ${params.text}></div>`;
-      const source = parsed.content.firstElementChild;
-      if (params.name) el.removeAttribute(params.name);
-      for (const attr of Array.from(source?.attributes ?? [])) el.setAttribute(attr.name, attr.value);
+      // Parse in the element's namespace, where e.g. SVG's `viewBox` keeps its case.
+      const context = el instanceof SVGElement ? 'svg' : el instanceof MathMLElement ? 'math' : null;
+      parsed.innerHTML = context
+        ? `<${context}><${context} ${params.text}></${context}></${context}>`
+        : `<div ${params.text}></div>`;
+      const outer = parsed.content.firstElementChild;
+      const source = context ? outer?.firstElementChild : outer;
+      const attrs = Array.from(source?.attributes ?? []);
+      // Like Chrome, an attribute that is set again keeps its place and is only reported as modified.
+      if (params.name && !attrs.some(attr => attr.name === params.name)) el.removeAttribute(params.name);
+      for (const attr of attrs) el.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
     },
 
     removeAttribute(params: Protocol.DOM.RemoveAttributeRequest) {
@@ -300,18 +406,7 @@ export function registerDom(ctx: Context) {
     },
 
     getOuterHTML(params: Protocol.DOM.GetOuterHTMLRequest): Protocol.DOM.GetOuterHTMLResponse {
-      const node = resolveNode(ctx, params);
-      if (node instanceof Element) {
-        if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`))
-          return { outerHTML: node.outerHTML };
-        // Leave out forced pseudo-class markers.
-        const copy = node.cloneNode(true) as Element;
-        for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
-          el.removeAttribute(FORCE_ATTRIBUTE);
-        return { outerHTML: copy.outerHTML };
-      }
-      if (node instanceof Document) return { outerHTML: node.documentElement.outerHTML };
-      return { outerHTML: new XMLSerializer().serializeToString(node) };
+      return { outerHTML: outerHTML(resolveNode(ctx, params)) };
     },
 
     setOuterHTML(params: Protocol.DOM.SetOuterHTMLRequest) {
@@ -321,9 +416,11 @@ export function registerDom(ctx: Context) {
     setNodeName(params: Protocol.DOM.SetNodeNameRequest): Protocol.DOM.SetNodeNameResponse {
       const el = element(params);
       const renamed = document.createElement(params.name);
-      for (const attr of Array.from(el.attributes)) renamed.setAttribute(attr.name, attr.value);
+      for (const attr of Array.from(el.attributes))
+        if (attr.name !== FORCE_ATTRIBUTE) renamed.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
       while (el.firstChild) renamed.appendChild(el.firstChild);
       el.replaceWith(renamed);
+      flushMutations();
       return { nodeId: nodes.idOf(renamed) };
     },
 
@@ -337,36 +434,49 @@ export function registerDom(ctx: Context) {
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
       target.insertBefore(node, before);
+      flushMutations();
       return { nodeId: nodes.idOf(node) };
     },
 
     copyTo(params: Protocol.DOM.CopyToRequest): Protocol.DOM.CopyToResponse {
       const copy = resolveNode(ctx, params).cloneNode(true);
+      // The copy is not forced into any pseudo-class state.
+      if (copy instanceof Element)
+        for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
+          el.removeAttribute(FORCE_ATTRIBUTE);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
       target.insertBefore(copy, before);
+      flushMutations();
       return { nodeId: nodes.idOf(copy) };
     },
 
     querySelector(params: Protocol.DOM.QuerySelectorRequest): Protocol.DOM.QuerySelectorResponse {
-      const found = (resolveNode(ctx, params) as ParentNode).querySelector(params.selector);
+      const found = resolveContainer(ctx, params).querySelector(params.selector);
       return { nodeId: found ? nodes.push(found, parent => emitChildren(parent)) : 0 };
     },
 
     querySelectorAll(params: Protocol.DOM.QuerySelectorAllRequest): Protocol.DOM.QuerySelectorAllResponse {
-      const found = Array.from((resolveNode(ctx, params) as ParentNode).querySelectorAll(params.selector));
+      const found = Array.from(resolveContainer(ctx, params).querySelectorAll(params.selector));
       return { nodeIds: found.map(node => nodes.push(node, parent => emitChildren(parent))) };
     },
 
     performSearch(params: Protocol.DOM.PerformSearchRequest): Protocol.DOM.PerformSearchResponse {
       const searchId = String(++searchSeq);
-      const results = searchNodes(document, params.query, n => nodes.isVisible(n));
+      const results = searchNodes(
+        params.query,
+        n => nodes.isVisible(n),
+        host => nodes.shadowRootOf(host)
+      );
       searches.set(searchId, results);
       return { searchId, resultCount: results.length };
     },
 
     getSearchResults(params: Protocol.DOM.GetSearchResultsRequest): Protocol.DOM.GetSearchResultsResponse {
-      const results = searches.get(params.searchId) ?? [];
+      const results = searches.get(params.searchId);
+      if (!results) throw new CdpError('No search session with given id found');
+      if (params.fromIndex < 0 || params.toIndex > results.length || params.fromIndex >= params.toIndex)
+        throw new CdpError('Invalid search result range');
       return {
         nodeIds: results
           .slice(params.fromIndex, params.toIndex)
@@ -382,13 +492,21 @@ export function registerDom(ctx: Context) {
       model: boxModel(element(params)),
     }),
 
-    getContentQuads: (params: Protocol.DOM.GetContentQuadsRequest): Protocol.DOM.GetContentQuadsResponse => ({
-      quads: Array.from(element(params).getClientRects()).map(quad),
-    }),
+    getContentQuads(params: Protocol.DOM.GetContentQuadsRequest): Protocol.DOM.GetContentQuadsResponse {
+      const node = resolveNode(ctx, params);
+      // Chrome also reports the line boxes of a text node.
+      if (node instanceof Text) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return { quads: Array.from(range.getClientRects()).map(quad) };
+      }
+      return { quads: Array.from(element(params).getClientRects()).map(quad) };
+    },
 
     getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
-      const el = document.elementFromPoint(params.x, params.y);
-      if (!el || !nodes.isVisible(el)) throw new CdpError('No node found at given location');
+      // The page's element under devtools-anywhere's own UI, which the page tree does not have.
+      const el = document.elementsFromPoint(params.x, params.y).find(e => !e.closest(`[${OWN_ATTRIBUTE}]`));
+      if (!el) throw new CdpError('No node found at given location');
       const nodeId = nodes.knownId(el);
       return { backendNodeId: nodes.backendIdOf(el), frameId: FRAME_ID, ...(nodeId !== undefined && { nodeId }) };
     },
@@ -427,7 +545,7 @@ export function registerDom(ctx: Context) {
           if (shadowRoot) visit(shadowRoot);
         }
       };
-      visit(resolveNode(ctx, params) as ParentNode);
+      visit(resolveContainer(ctx, params));
       return { nodeIds: found.map(el => nodes.push(el, parent => emitChildren(parent))) };
     },
 

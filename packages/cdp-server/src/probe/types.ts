@@ -69,6 +69,8 @@ export interface RequestRecord {
   url: string;
   requestHeaders: Record<string, string>;
   postData?: string | undefined;
+  /** The request has a body that is read afterwards: `postData` is set once it is. */
+  hasPostData?: boolean;
   /** Stack of the code that started the request. */
   stack?: string | undefined;
   /** `performance.now()` at start, in milliseconds. */
@@ -91,6 +93,8 @@ export interface RequestRecord {
   /** `performance.now()` when the response finished or failed. */
   endTime?: number;
   errorText?: string;
+  /** Whether a failed request was stopped by the page (abort), not by an error. */
+  canceled?: boolean;
 }
 
 /** Something that happened on a WebSocket after it was created. */
@@ -131,7 +135,7 @@ export interface Probe {
   version: 1;
   /** Ring buffer of console calls and uncaught exceptions. */
   logs: LogEntry[];
-  /** Ring buffer of fetch/XHR requests; records are updated in place. */
+  /** Ring buffer of fetch/XHR requests and the others seen by Resource Timing; records are updated in place. */
   requests: RequestRecord[];
   /** Ring buffer of WebSockets; records are updated in place. */
   sockets: SocketRecord[];
@@ -158,8 +162,14 @@ export interface ToolRecord {
   /** Raw `Error().stack` taken inside the registerTool wrapper. */
   stack?: string | undefined;
   /**
-   * What the tool's `execute` last returned or threw: the browser's `executeTool` gives
+   * What the tool's `execute` returned or threw, one entry per call in the order they
+   * settled, taken by the invocation they belong to: the browser's `executeTool` gives
    * results as JSON text, and errors only as the fact that the tool failed.
    */
-  outcome?: { threw: boolean; value: unknown } | undefined;
+  outcomes: ToolOutcome[];
+}
+
+export interface ToolOutcome {
+  threw: boolean;
+  value: unknown;
 }

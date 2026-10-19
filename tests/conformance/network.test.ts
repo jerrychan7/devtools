@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, waitForBoth } from './harness.ts';
+import { launch, openPage } from './harness.ts';
 import type { Env, EventName, Side, TestPage } from './harness.ts';
 
 let env: Env | undefined;
@@ -27,7 +27,19 @@ async function request(expression: string, marker: string, finalEvent: EventName
   await t.chrome.clear();
   await t.ours.clear();
   await t.page.evaluate(expression);
-  await waitForBoth(t, finalEvent);
+  // Wait for the final event of the marker request itself on both sides: another request (a late
+  // Resource Timing report, favicon) can finish first.
+  const settled = async (side: Side) => {
+    const sent = (await side.events('Network.requestWillBeSent')).find(e => e.request.url.includes(marker));
+    if (!sent) return false;
+    const final: { requestId: string }[] = await side.events(finalEvent);
+    return final.some(e => e.requestId === sent.requestId);
+  };
+  const start = Date.now();
+  while (!((await settled(t.ours)) && (await settled(t.chrome)))) {
+    if (Date.now() - start > 5000) throw new Error(`timed out waiting for ${finalEvent} of ${marker}`);
+    await new Promise(r => setTimeout(r, 20));
+  }
   const pick = async (side: Side) => {
     const sent = (await side.events('Network.requestWillBeSent')).find(e => e.request.url.includes(marker));
     assert.ok(sent, `no request to ${marker}`);
@@ -98,6 +110,19 @@ describe('Network', () => {
     );
   });
 
+  test('fetch of a Request with a body', async () => {
+    const { ours, chrome } = await request(
+      "void fetch(new Request('/api/echo?n=post-request', { method: 'POST', body: 'from a request' }))",
+      'n=post-request'
+    );
+    assert.equal(ours.sent.request.hasPostData, chrome.sent.request.hasPostData);
+    const [oursData, chromeData] = await Promise.all([
+      t.ours.send('Network.getRequestPostData', { requestId: ours.sent.requestId }),
+      t.chrome.send('Network.getRequestPostData', { requestId: chrome.sent.requestId }),
+    ]);
+    assert.equal(oursData.postData, chromeData.postData);
+  });
+
   test('XHR', async () => {
     const { ours, chrome } = await request(
       "(() => { const x = new XMLHttpRequest(); x.open('GET', '/api/echo?n=xhr'); x.send() })()",
@@ -106,6 +131,16 @@ describe('Network', () => {
     assert.equal(ours.sent.type, chrome.sent.type);
     assert.ok(ours.response && chrome.response);
     assert.equal(ours.response.response.status, chrome.response.response.status);
+  });
+
+  test('XHR reports the bytes of a multi-byte text body, not its characters', async () => {
+    const { ours } = await request(
+      "(() => { const x = new XMLHttpRequest(); x.open('GET', '/api/echo?n=xhr-utf8&s=' + encodeURIComponent('中文')); x.send() })()",
+      'n=xhr-utf8'
+    );
+    assert.ok(ours.finished);
+    const { body } = await t.ours.send('Network.getResponseBody', { requestId: ours.sent.requestId });
+    assert.equal(ours.finished.encodedDataLength, Buffer.byteLength(body));
   });
 
   test('404', async () => {
@@ -124,6 +159,59 @@ describe('Network', () => {
     assert.ok(ours.failed, 'ours emits loadingFailed');
     assert.ok(chrome.failed, 'chrome emits loadingFailed');
     assert.equal(ours.failed.type, chrome.failed.type);
+    assert.equal(ours.failed.canceled, chrome.failed.canceled);
+    // The page cannot see which net error it was, only that there was one.
+    assert.match(ours.failed.errorText, /^net::ERR_/);
+  });
+
+  for (const [name, expression, marker] of [
+    [
+      'XHR aborted',
+      "(() => { const x = new XMLHttpRequest(); x.open('GET', '/api/echo?n=xhr-abort&delay=2000'); x.send(); setTimeout(() => x.abort(), 50) })()",
+      'n=xhr-abort',
+    ],
+    [
+      'XHR timed out',
+      "(() => { const x = new XMLHttpRequest(); x.open('GET', '/api/echo?n=xhr-timeout&delay=2000'); x.timeout = 50; x.send() })()",
+      'n=xhr-timeout',
+    ],
+    [
+      'fetch aborted',
+      "(() => { const c = new AbortController(); fetch('/api/echo?n=fetch-abort&delay=2000', { signal: c.signal }).catch(() => {}); setTimeout(() => c.abort(), 50) })()",
+      'n=fetch-abort',
+    ],
+  ] as const) {
+    test(name, async () => {
+      const { ours, chrome } = await request(expression, marker, 'Network.loadingFailed');
+      assert.ok(ours.failed && chrome.failed);
+      assert.equal(ours.failed.errorText, chrome.failed.errorText);
+      assert.equal(ours.failed.canceled, chrome.failed.canceled);
+    });
+  }
+
+  test('a reused XHR keeps the first request as it was', async () => {
+    // Resolves once the second request has finished too.
+    const { ours } = await request(
+      "new Promise(done => { const x = new XMLHttpRequest(); x.open('GET', '/api/echo?n=reuse-1'); x.onload = () => { x.onload = done; x.open('GET', '/missing?n=reuse-2'); x.send() }; x.send() })",
+      'n=reuse-1'
+    );
+    const body = await t.ours.send('Network.getResponseBody', { requestId: ours.sent.requestId });
+    // The echo returns the parsed query.
+    assert.match(body.body, /"n":"reuse-1"/);
+  });
+
+  test('fetch with an invalid URL rejects instead of throwing', async () => {
+    const outcome = await t.page.evaluate(() => {
+      try {
+        return fetch('http://[').then(
+          () => 'resolved',
+          () => 'rejected'
+        );
+      } catch {
+        return 'threw';
+      }
+    });
+    assert.equal(outcome, 'rejected');
   });
 
   // Requests that cannot be hooked are known from Resource Timing once they finished.
@@ -159,14 +247,52 @@ describe('Network', () => {
     });
   }
 
-  test('the resource tree lists the page resources (Sources panel)', async () => {
-    const tree = await t.ours.send('Page.getResourceTree');
-    const urls = tree.frameTree.resources.map(r => r.url);
-    assert.ok(
-      urls.some(u => u.includes('n=css')),
-      JSON.stringify(urls)
+  test('the body of a request to another origin known from Resource Timing is not loaded again', async () => {
+    assert.ok(env);
+    const src = `${env.baseUrl.replace('localhost', '127.0.0.1')}/tests/conformance/assets/pixel.png?n=img-cross`;
+    const { ours } = await request(`(() => { new Image().src = ${JSON.stringify(src)} })()`, 'n=img-cross');
+    await assert.rejects(
+      t.ours.send('Network.getResponseBody', { requestId: ours.sent.requestId }),
+      /No data found for resource with given identifier/
     );
-    assert.ok(urls.some(u => u.includes('n=js')));
+  });
+
+  test('the resource tree lists the page resources (Sources panel)', async () => {
+    await t.chrome.send('Page.enable');
+    // Loads its own resources so the test does not depend on the ones loaded above.
+    await t.page.evaluate(() =>
+      Promise.all([
+        new Promise(onload =>
+          document.head.append(
+            Object.assign(document.createElement('link'), {
+              rel: 'stylesheet',
+              onload,
+              href: '/tests/conformance/assets/cross.css?n=tree-css',
+            })
+          )
+        ),
+        new Promise(onload =>
+          document.head.append(
+            Object.assign(document.createElement('script'), {
+              onload,
+              src: '/tests/conformance/assets/resource.js?n=tree-js',
+            })
+          )
+        ),
+      ])
+    );
+    const [ours, chrome] = await Promise.all([
+      t.ours.send('Page.getResourceTree'),
+      t.chrome.send('Page.getResourceTree'),
+    ]);
+    for (const marker of ['n=tree-css', 'n=tree-js']) {
+      const mine = ours.frameTree.resources.find(r => r.url.includes(marker));
+      const theirs = chrome.frameTree.resources.find(r => r.url.includes(marker));
+      assert.ok(mine, JSON.stringify(ours.frameTree.resources.map(r => r.url)));
+      assert.ok(theirs);
+      assert.equal(mine.type, theirs.type);
+      assert.equal(mine.mimeType, theirs.mimeType);
+    }
   });
 
   test('resource content: text as is, binary as base64 (Sources panel)', async () => {

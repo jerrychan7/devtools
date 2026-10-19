@@ -1,11 +1,35 @@
 import { FRAME_ID, LOADER_ID, type CdpServer } from '@devtools-anywhere/cdp-server';
 
-/** Sent by a page in shell mode when its CDP server starts listening, or when pinged. */
-const HELLO = JSON.stringify({ method: 'DevtoolsAnywhere.hello' });
+const HELLO_METHOD = 'DevtoolsAnywhere.hello';
+/**
+ * Sent by a page in shell mode when its CDP server starts listening, or when pinged. Carries
+ * the page's loader id, which the shell needs for the `Page.frameNavigated` it reports.
+ */
+const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } });
 /** Sent by the shell on startup, in case the page started listening first. */
 const PING = JSON.stringify({ method: 'DevtoolsAnywhere.ping' });
 /** Prefix of ids the shell uses when it re-sends `enable` commands; responses are dropped. */
 const SHELL_ID_PREFIX = 'shell-';
+/** Chrome's error for commands that were pending when the inspected document went away. */
+const NAVIGATED_ERROR = { code: -32000, message: 'Inspected target navigated or closed' };
+/** Domains that keep state while enabled; a new frontend instance must start from disabled. */
+const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+
+/** A CDP message as the shell sees it: only the fields it routes by are checked. */
+interface Envelope {
+  id?: unknown;
+  method?: unknown;
+  params?: unknown;
+}
+
+function parse(data: string): Envelope | undefined {
+  try {
+    const value: unknown = JSON.parse(data);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 interface Link {
   /** Forgets that the peer has spoken; outgoing messages are queued again. */
@@ -64,7 +88,9 @@ export function connectFrontend(server: CdpServer, frame: HTMLIFrameElement, fro
   const onLoad = () => {
     if (loads++ === 0) return;
     connection.reset();
-    for (const method of ['Runtime.disable', 'Network.disable']) server.call(method).catch(() => {});
+    // Like a new Chrome session: e.g. Debugger.enable and CSS.enable only report scripts and
+    // style sheets again after a disable.
+    for (const domain of STATEFUL_DOMAINS) server.call(`${domain}.disable`).catch(() => {});
   };
   frame.addEventListener('load', onLoad);
   return () => {
@@ -95,6 +121,8 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
   let seq = 0;
   const toFrontend: string[] = [];
   const toPage: string[] = [];
+  /** Ids of frontend commands sent to the current page instance and not answered yet. */
+  const pending = new Map<string | number, string>();
 
   const postFrontend = (message: string) => {
     if (frontendReady) devtools.contentWindow?.postMessage(message, frontendOrigin);
@@ -104,6 +132,32 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
     if (pageReady) page.contentWindow?.postMessage(message, location.origin);
     else toPage.push(message);
   };
+
+  /**
+   * Answers a frontend command the page will never answer. `enable` commands succeed: they
+   * are re-sent to the next page instance anyway.
+   */
+  function abandon(id: string | number, method: string) {
+    if (method.endsWith('.enable')) postFrontend(JSON.stringify({ id, result: {} }));
+    else postFrontend(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+  }
+
+  /** The page instance went away: commands it did not answer never will be. */
+  function onPagehide() {
+    pageReady = false;
+    for (const [id, method] of pending) abandon(id, method);
+    pending.clear();
+  }
+
+  /** Sends a frontend command to the page, or answers it if no page instance can. */
+  function sendCommand(data: string, id: string | number | undefined, method: string) {
+    if (id === undefined) return postPage(data);
+    // Before the first hello the page is still loading and will answer; between two page
+    // instances, Chrome fails the command too, and the next page may never come (no probe).
+    if (!pageReady && pageInstances > 0) return abandon(id, method);
+    pending.set(id, method);
+    postPage(data);
+  }
 
   function pageUrl() {
     try {
@@ -126,10 +180,10 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
     }
   }
 
-  function onHello() {
+  function onHello(loaderId: string) {
     pageReady = true;
     syncLocation();
-    page.contentWindow?.addEventListener('pagehide', () => (pageReady = false));
+    page.contentWindow?.addEventListener('pagehide', onPagehide);
     if (pageInstances++ === 0) {
       toPage.splice(0).forEach(postPage);
       return;
@@ -137,6 +191,12 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
     // A new page instance: whatever was queued was meant for the old one.
     toPage.length = 0;
     const url = pageUrl();
+    let secure = isSecureContext;
+    try {
+      secure = page.contentWindow?.isSecureContext ?? secure;
+    } catch {
+      // Cross-origin page: assume it is like the shell.
+    }
     postFrontend(JSON.stringify({ method: 'Runtime.executionContextsCleared', params: {} }));
     postFrontend(
       JSON.stringify({
@@ -144,12 +204,12 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
         params: {
           frame: {
             id: FRAME_ID,
-            loaderId: LOADER_ID,
+            loaderId,
             url,
             domainAndRegistry: '',
             securityOrigin: new URL(url).origin,
             mimeType: 'text/html',
-            secureContextType: isSecureContext ? 'Secure' : 'InsecureScheme',
+            secureContextType: secure ? 'Secure' : 'InsecureScheme',
             crossOriginIsolatedContextType: 'NotIsolated',
             gatedAPIFeatures: [],
           },
@@ -171,17 +231,28 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
         frontendReady = true;
         toFrontend.splice(0).forEach(postFrontend);
       }
-      try {
-        const { method, params } = JSON.parse(event.data);
-        if (method.endsWith('.enable')) enabled.set(method, params ?? {});
-        else if (method.endsWith('.disable')) enabled.delete(method.replace(/disable$/, 'enable'));
-      } catch {
-        return;
-      }
-      postPage(event.data);
+      const message = parse(event.data);
+      const { id, method, params } = message ?? {};
+      // Anything else is the page's CDP server's to answer (or reject).
+      if (typeof method !== 'string') return postPage(event.data);
+      if (method.endsWith('.enable')) enabled.set(method, params ?? {});
+      else if (method.endsWith('.disable')) enabled.delete(method.replace(/disable$/, 'enable'));
+      sendCommand(event.data, typeof id === 'string' || typeof id === 'number' ? id : undefined, method);
     } else if (event.source === page.contentWindow && event.origin === location.origin) {
-      if (event.data === HELLO) return onHello();
+      if (event.data.startsWith(`{"method":"${HELLO_METHOD}"`)) {
+        const params = parse(event.data)?.params;
+        const loaderId =
+          typeof params === 'object' && params !== null && 'loaderId' in params && typeof params.loaderId === 'string'
+            ? params.loaderId
+            : LOADER_ID;
+        return onHello(loaderId);
+      }
       if (event.data.includes(`"id":"${SHELL_ID_PREFIX}`)) return;
+      // Responses (not events) settle a pending command.
+      if (!event.data.startsWith('{"method"')) {
+        const id = parse(event.data)?.id;
+        if (typeof id === 'string' || typeof id === 'number') pending.delete(id);
+      }
       postFrontend(event.data);
     }
   };
