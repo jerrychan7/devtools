@@ -16,11 +16,14 @@ import '../../panels/network/network-meta.js';
 // Registers the throttling settings the Network panel's toolbar needs.
 import '../../panels/mobile_throttling/mobile_throttling-meta.js';
 import '../../panels/application/application-meta.js';
+// The page as an image, with input forwarded to it: for when the page is not in view.
+import '../../panels/screencast/screencast-meta.js';
 import '../../panels/settings/settings-meta.js';
 import '../../ui/legacy/components/perf_ui/perf_ui-meta.js';
 import '../../ui/legacy/components/quick_open/quick_open-meta.js';
 import '../../ui/legacy/components/source_frame/source_frame-meta.js';
 
+import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
@@ -56,6 +59,14 @@ UI.ViewManager.registerViewExtension({
     return SourcesModule.SourcesNavigator.NetworkNavigatorView.instance(
         {forceNew: null, networkProjectManager: universe.networkProjectManager});
   },
+});
+
+// The page is usually in view next to DevTools, and every frame is rendered in the page:
+// the screencast starts turned off (the toolbar's device button turns it on).
+Common.Settings.registerSettingExtension({
+  settingName: 'screencast-enabled',
+  settingType: Common.Settings.SettingType.BOOLEAN,
+  defaultValue: false,
 });
 
 // The embedder is the parent window: CDP messages travel as strings through postMessage,

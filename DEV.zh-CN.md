@@ -123,7 +123,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 
 `packages/devtools-frontend` 按钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)，只保留入口能加载到的文件。为了尽量少改上游：
 
-- **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用），其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
+- **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用）和投屏，其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
 - **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
 - **小屏**：沿用上游自带的响应式布局（元素面板窄屏时上下分栏、标签页溢出折叠）。
 

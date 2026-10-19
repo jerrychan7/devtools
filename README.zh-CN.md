@@ -40,6 +40,8 @@
   - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
   - 能显示 WebSocket 连接和帧，但没有握手阶段的请求头和响应头，页面拿不到它们。
+  - 投屏（工具栏上的设备按钮，默认关闭）显示的是 [snapDOM](https://github.com/zumerlab/snapdom) 根据 DOM 重新绘制的视口，不是屏幕上的真实像素：canvas、视频和跨域图片可能缺失，每秒最多更新约两次。snapDOM（gzip 后约 90 KB）只在开始投屏时加载。
+  - 投屏上的输入以 DOM 事件重放，这些事件不是可信事件（`isTrusted` 为 false）：聚焦、点击、滚动和文本编辑都会执行，但检查 `isTrusted` 的页面会忽略它们。
   - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
   - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。
 - 前端要部署在和页面不同的源上。如果同源，devtools 自己的设置会写进页面的 `localStorage`，并出现在 Application 面板里。
@@ -101,7 +103,7 @@
 
 | 包 | 内容 |
 |---|---|
-| `devtools-anywhere` | 总包：`<devtools-anywhere>` 组件、`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js` 和 `devtools-anywhere-sw.js` |
+| `devtools-anywhere` | 总包：`<devtools-anywhere>` 组件、`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`、`devtools-anywhere-sw.js` 和 `snapdom.js`（投屏的绘制器，按需加载） |
 | `@devtools-anywhere/cdp-server` | 页面内的 CDP 服务端。探针通过子路径 `@devtools-anywhere/cdp-server/probe` 导出，单独构建成一个很小的文件，供 `<script>` 引入和插件注入使用 |
 | `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
 | `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |

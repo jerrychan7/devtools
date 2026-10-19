@@ -8,6 +8,7 @@ devtools_entrypoint("entrypoint") {
   deps = [ "../../Images:optimize_images" ]
 
   ts_deps = [
+    "../../core/common:bundle",
     "../../core/host:bundle",
     "../../core/i18n:bundle",
     "../../core/root:bundle",
@@ -19,6 +20,7 @@ devtools_entrypoint("entrypoint") {
     "../../panels/elements:meta",
     "../../panels/mobile_throttling:meta",
     "../../panels/network:meta",
+    "../../panels/screencast:meta",
     "../../panels/settings:meta",
     "../../panels/sources:bundle",
     "../../panels/sources:meta",

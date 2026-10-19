@@ -40,6 +40,8 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
   - WebSocket connections and their frames are shown, but not the handshake headers, which the page cannot see.
+  - The screencast (the toolbar's device button, off by default) shows the viewport as [snapDOM](https://github.com/zumerlab/snapdom) redraws it from the DOM, not the pixels on screen: canvas, video and cross-origin images may be missing, and it updates about twice a second at most. snapDOM (about 90 KB gzip) is loaded only when the screencast starts.
+  - Input from the screencast is replayed as DOM events, which are not trusted (`isTrusted` is false): focus, clicks, scrolling and text editing are carried out, but pages that check `isTrusted` ignore them.
   - Cross-origin style sheets are read through a fetched copy, which needs CORS headers; their rules are read-only.
   - Forced pseudo-classes (`:hover`, `:focus`, … from the Styles pane) are emulated with companion style sheets that keep the cascade order; sheets from `@import` and `adoptedStyleSheets` are not covered.
 - Host the frontend on a different origin from the page. On the same origin, DevTools' own settings share the page's `localStorage` and show up in the Application panel.
@@ -101,7 +103,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | Umbrella package: the `<devtools-anywhere>` element, `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js` and `devtools-anywhere-sw.js` |
+| `devtools-anywhere` | Umbrella package: the `<devtools-anywhere>` element, `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js`, `devtools-anywhere-sw.js` and `snapdom.js` (the screencast's renderer, loaded on demand) |
 | `@devtools-anywhere/cdp-server` | In-page CDP server. The probe ships as the `@devtools-anywhere/cdp-server/probe` subpath export, built as a separate tiny file for `<script>` tags and injection |
 | `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets with English and Chinese UI, self-hostable or served from a CDN |
 | `@devtools-anywhere/devtools-frontend-locales` | Optional: the other 80 UI languages, at the same paths as in the frontend package. Serve both from one directory (the Vite plugin does this when it is installed); a missing language falls back to English |

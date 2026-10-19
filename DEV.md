@@ -123,7 +123,7 @@ pnpm typecheck                                # builds, then checks packages, bu
 
 `packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at a pinned revision and keeps only what its entrypoint can load. How it fits into upstream with as few patches as possible:
 
-- **Own entrypoint** `anywhere_app` instead of `devtools_app`: it imports only the panels that work against the in-page CDP server (Elements, Console, Sources, Network, Application), so the others are neither shown nor loaded. The only patch registers this entrypoint in the build (7 lines in 4 `BUILD.gn`/`.gni` files).
+- **Own entrypoint** `anywhere_app` instead of `devtools_app`: it imports only the panels that work against the in-page CDP server (Elements, Console, Sources, Network, Application) and the screencast, so the others are neither shown nor loaded. The only patch registers this entrypoint in the build (7 lines in 4 `BUILD.gn`/`.gni` files).
 - **Embedder through the official host API**: Chrome talks to DevTools through native `InspectorFrontendHost` bindings. The entrypoint keeps the hosted-mode stub and only replaces `sendMessageToBackend`/`isHostedMode`, so CDP messages travel through `postMessage` to the embedding window, which passes its origin as `#?embedded=<origin>`. No connection code is patched.
 - **Small screens**: upstream's responsive layouts (vertical split in Elements, overflowing tabs) are kept as is.
 

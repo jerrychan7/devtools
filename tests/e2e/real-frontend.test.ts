@@ -137,3 +137,36 @@ test("the Sources panel lists the page's scripts and style sheets, but not DevTo
   );
   assert.ok(!urls.some(url => url.endsWith('devtools-anywhere.iife.js')), "the bundle is DevTools' own");
 });
+
+test('the screencast is off by default and shows the page when turned on', { skip }, async () => {
+  await frontend.evaluate(() => {
+    const state = { frames: 0 };
+    Object.assign(window, { __screencast: state });
+    addEventListener('message', e => {
+      if (typeof e.data === 'string' && e.data.includes('"Page.screencastFrame"')) state.frames++;
+    });
+  });
+  const frames = () =>
+    frontend.evaluate(() => (window as unknown as { __screencast: { frames: number } }).__screencast.frames);
+  await new Promise(r => setTimeout(r, 1000));
+  assert.equal(await frames(), 0);
+  const toggle = await frontend.evaluateHandle(() => {
+    const find = (root: Document | ShadowRoot): Element | null => {
+      const button = root.querySelector('[aria-label="Toggle screencast"]');
+      if (button) return button;
+      for (const el of root.querySelectorAll('*')) {
+        const found = el.shadowRoot && find(el.shadowRoot);
+        if (found) return found;
+      }
+      return null;
+    };
+    return find(document);
+  });
+  // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+  const button = toggle.asElement() as ElementHandle<Element> | null;
+  assert.ok(button, 'the toolbar offers the screencast');
+  await button.click();
+  await waitFor(async () => (await frames()) > 0);
+  await button.click();
+  assert.ok(!(await text()).includes('snapdom.js'), "snapDOM is DevTools' own");
+});
