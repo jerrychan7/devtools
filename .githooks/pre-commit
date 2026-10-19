@@ -1,0 +1,6 @@
+#!/bin/sh
+# Lint and format check before every commit. Enabled by `pnpm install` (prepare script),
+# which points git's core.hooksPath at this directory. Skip once with `git commit --no-verify`.
+set -e
+pnpm run --silent lint
+pnpm run --silent fmt:check
