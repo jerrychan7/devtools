@@ -32,6 +32,6 @@
   "devDependencies": {
     "devtools-protocol": "^0.0.1721318",
     "esbuild": "^0.25.0",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   }
 }
