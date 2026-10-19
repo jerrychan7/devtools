@@ -83,7 +83,7 @@ export function installProbe(): Probe {
   }
   hookFetch(track, update)
   hookXhr(track, update)
-  observeResources(add)
+  observeResources(add, update, requests)
 
   const shell = readShellConfig()
   if (shell && window === top) {
@@ -136,8 +136,23 @@ function resourceType(entry: PerformanceResourceTiming, mimeType: string): Reque
  * fonts, …) from Resource Timing. Entries are only created once a request has finished, and
  * `buffered` also delivers those from before the probe ran, such as the document itself.
  */
-function observeResources(add: (rec: RequestRecord) => void) {
+function observeResources(add: (rec: RequestRecord) => void, update: Update, requests: RequestRecord[]) {
   if (typeof PerformanceObserver === 'undefined') return
+  // In shell mode with the Service Worker, it reports what Resource Timing does not expose
+  // (headers, status text) of same-origin subresources, before the request's entry exists.
+  // They are matched by URL; a late report still completes the record.
+  const details = new Map<string, Partial<RequestRecord>[]>()
+  const sw = navigator.serviceWorker
+  if (sw) {
+    sw.addEventListener('message', event => {
+      const { type, url, ...patch } = event.data || {}
+      if (type !== 'devtools-anywhere:response') return
+      const rec = requests.find(r => r.url === url && r.initiatorType && !Object.keys(r.responseHeaders || {}).length)
+      if (rec) update(rec, patch)
+      else (details.get(url) || details.set(url, []).get(url)!).push(patch)
+    })
+    sw.startMessages()
+  }
   // The navigation entry can be delivered again once the page has loaded.
   const seen = new Set<PerformanceEntry>()
   const record = (entry: PerformanceResourceTiming) => {
@@ -166,6 +181,7 @@ function observeResources(add: (rec: RequestRecord) => void) {
       mimeType,
       encodedDataLength: entry.transferSize,
       endTime: entry.responseEnd,
+      ...details.get(entry.name)?.shift(),
     })
   }
   for (const type of ['navigation', 'resource']) {

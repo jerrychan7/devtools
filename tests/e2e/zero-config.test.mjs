@@ -51,6 +51,21 @@ test('in shell mode the Service Worker injects the probe into pages without it',
   await waitFor(async () => logged(await received(), 'no-probe early'))
 })
 
+test('the Service Worker adds headers to requests known from Resource Timing', async () => {
+  const find = () =>
+    page.evaluate(() => {
+      const probe = document.getElementById('devtools-anywhere-page').contentWindow.__devtoolsAnywhereProbe__
+      return probe?.requests.find(r => r.url.includes('cross.css?n=sw'))
+    })
+  await waitFor(async () => (await find())?.responseHeaders?.['content-type'])
+  const rec = await find()
+  assert.equal(rec.type, 'Stylesheet')
+  assert.equal(rec.status, 200)
+  assert.equal(rec.statusText, 'OK')
+  assert.match(rec.responseHeaders['content-type'], /text\/css/)
+  assert.ok(Object.keys(rec.requestHeaders).length, 'request headers')
+})
+
 test('leaving shell mode unregisters the Service Worker', async () => {
   await page.evaluate(() => document.querySelector('devtools-anywhere[shell]').exitShell())
   await waitFor(() => page.evaluate(() => !document.getElementById('devtools-anywhere-page')))

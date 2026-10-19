@@ -5,6 +5,11 @@
 // captured when the page iframe navigates to them. The shell registers it with the probe
 // URL in the query string (`?probe=…`) and unregisters it when shell mode ends.
 //
+// It also reports the details Resource Timing does not expose (request and response headers,
+// status text) of same-origin subresources (style sheets, scripts, images, fonts) to
+// the page that requested them; the probe adds them to its records. Cross-origin, ranged and
+// non-GET requests pass through untouched, so the page's behavior does not change.
+//
 // A Service Worker needs a secure context (HTTPS or localhost), and its scope must cover
 // the pages: serve this file from the site root or with `Service-Worker-Allowed: /`.
 
@@ -13,16 +18,49 @@ const scope = globalThis as any
 
 const probe = new URL(scope.location.href).searchParams.get('probe')
 const SNIFF_LIMIT = 64 * 1024
+/** Message type the probe listens for; keep in sync with cdp-server's probe. */
+const DETAILS = 'devtools-anywhere:response'
+const DESTINATIONS = new Set(['style', 'script', 'image', 'font'])
 
 scope.addEventListener('install', () => scope.skipWaiting())
 scope.addEventListener('activate', (event: any) => event.waitUntil(scope.clients.claim()))
 
 scope.addEventListener('fetch', (event: any) => {
   const request: Request = event.request
-  // Only iframe navigations: top-level pages and subresources pass through untouched.
-  if (!probe || request.mode !== 'navigate' || request.destination !== 'iframe') return
-  event.respondWith(inject(request, probe))
+  if (!probe) return
+  if (request.mode === 'navigate') {
+    // Only iframe navigations: top-level pages pass through untouched.
+    if (request.destination === 'iframe') event.respondWith(inject(request, probe))
+  } else if (
+    DESTINATIONS.has(request.destination) &&
+    request.method === 'GET' &&
+    !request.headers.has('range') &&
+    new URL(request.url).origin === scope.location.origin
+  ) {
+    event.respondWith(report(request, event.clientId))
+  }
 })
+
+const headersToObject = (headers: Headers) => Object.fromEntries(headers.entries())
+
+/**
+ * Passes a subresource through, telling the requesting page first what the response looks
+ * like: the message arrives before the request's Resource Timing entry, which only exists
+ * once the page has read the response.
+ */
+async function report(request: Request, clientId: string): Promise<Response> {
+  const response = await fetch(request)
+  const client = await scope.clients.get(clientId)
+  client?.postMessage({
+    type: DETAILS,
+    url: request.url,
+    requestHeaders: headersToObject(request.headers),
+    status: response.status,
+    statusText: response.statusText,
+    responseHeaders: headersToObject(response.headers),
+  })
+  return response
+}
 
 async function inject(request: Request, probeUrl: string): Promise<Response> {
   const response = await fetch(request)
