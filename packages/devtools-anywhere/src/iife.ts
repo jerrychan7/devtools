@@ -8,9 +8,13 @@ const w = window as any
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
 // again itself: only the first copy runs.
 if (!w.DevtoolsAnywhere) {
-  installProbe()
+  const probe = installProbe()
   const script = document.currentScript as HTMLScriptElement | null
-  if (script?.src) setBundleUrl(script.src)
+  if (script?.src) {
+    setBundleUrl(script.src)
+    // DevTools' own code is not one of the page's requests.
+    probe.ownUrls.add(script.src)
+  }
   defineDevtoolsAnywhere()
   if (isShellPage()) connectToShell(createCdpServer())
   w.DevtoolsAnywhere = { DevtoolsAnywhereElement, connectFrontend, createCdpServer, defineDevtoolsAnywhere }

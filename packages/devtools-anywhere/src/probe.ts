@@ -9,13 +9,14 @@
 import { installProbe, readShellConfig } from '@devtools-anywhere/cdp-server/probe'
 
 const script = document.currentScript as HTMLScriptElement | null
-installProbe()
+const probe = installProbe()
 
 const frontend = script?.dataset.frontend
 // In the shell's top window the probe has replaced the document with the shell already.
 if (script && frontend && !(readShellConfig() && window === top)) {
   const bundle = new URL(script.dataset.bundle || 'devtools-anywhere.iife.js', script.src).href
   const open = script.hasAttribute('data-open')
+  probe.ownUrls.add(bundle)
 
   const mount = () => {
     const loader = document.createElement('script')

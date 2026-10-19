@@ -12,6 +12,7 @@ import {
   type LogEntry,
   type Probe,
   type RequestRecord,
+  type RequestType,
 } from './types'
 
 import { isShellPage, readShellConfig, writeShellDocument } from './shell'
@@ -49,6 +50,7 @@ export function installProbe(): Probe {
     },
     shadowRoots: new WeakMap(),
     listeners: new WeakMap(),
+    ownUrls: new Set(),
     fetch: w.fetch?.bind(w),
   }
   Object.defineProperty(w, PROBE_KEY, { value: probe })
@@ -66,15 +68,14 @@ export function installProbe(): Probe {
   hookListeners(probe.listeners)
 
   let seq = 0
-  function track(record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>): RequestRecord {
-    const rec = record as RequestRecord
+  function add(rec: RequestRecord) {
     rec.requestId = 'probe.' + ++seq
-    rec.startTime = performance.now()
-    rec.wallTime = Date.now()
-    rec.state = 'pending'
     if (requests.push(rec) > MAX_REQUESTS) requests.shift()
     requestListeners.forEach(fn => fn(rec))
     return rec
+  }
+  function track(record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>): RequestRecord {
+    return add({ ...record, requestId: '', startTime: performance.now(), wallTime: Date.now(), state: 'pending' })
   }
   function update(rec: RequestRecord, patch: Partial<RequestRecord>) {
     Object.assign(rec, patch)
@@ -82,6 +83,7 @@ export function installProbe(): Probe {
   }
   hookFetch(track, update)
   hookXhr(track, update)
+  observeResources(add)
 
   const shell = readShellConfig()
   if (shell && window === top) {
@@ -90,10 +92,92 @@ export function installProbe(): Probe {
     // Load the bundle that connects this page to the shell; capture continues meanwhile.
     const script = document.createElement('script')
     script.src = shell.bundle
+    probe.ownUrls.add(script.src)
     document.documentElement.appendChild(script)
   }
 
   return probe
+}
+
+// ---- other requests (Resource Timing) ----
+
+/** CDP resource type of a Resource Timing entry, from its MIME type or initiator. */
+function resourceType(entry: PerformanceResourceTiming, mimeType: string): RequestType {
+  if (entry.entryType === 'navigation') return 'Document'
+  if (/^text\/css\b/.test(mimeType)) return 'Stylesheet'
+  if (/javascript|ecmascript/.test(mimeType)) return 'Script'
+  if (/^image\//.test(mimeType)) return 'Image'
+  if (/^font\/|woff|opentype|truetype/.test(mimeType)) return 'Font'
+  if (/^(audio|video)\//.test(mimeType)) return 'Media'
+  if (/^text\/html\b/.test(mimeType)) return 'Document'
+  switch (entry.initiatorType) {
+    case 'img':
+    case 'image':
+    case 'input':
+      return 'Image'
+    case 'script':
+      return 'Script'
+    case 'audio':
+    case 'video':
+    case 'track':
+      return 'Media'
+    case 'iframe':
+    case 'frame':
+      return 'Document'
+    case 'beacon':
+      return 'Ping'
+    default:
+      return 'Other'
+  }
+}
+
+/**
+ * Records the requests that cannot be hooked (the document, style sheets, scripts, images,
+ * fonts, …) from Resource Timing. Entries are only created once a request has finished, and
+ * `buffered` also delivers those from before the probe ran, such as the document itself.
+ */
+function observeResources(add: (rec: RequestRecord) => void) {
+  if (typeof PerformanceObserver === 'undefined') return
+  // The navigation entry can be delivered again once the page has loaded.
+  const seen = new Set<PerformanceEntry>()
+  const record = (entry: PerformanceResourceTiming) => {
+    if (seen.has(entry)) return
+    seen.add(entry)
+    // fetch() and XHR are hooked, with more detail; DevTools' own fetches are unhooked.
+    if (entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') return
+    // The browser's own favicon request is not the page's, and Chrome does not report it.
+    if (entry.initiatorType === 'other' && /\/favicon\.ico$/.test(entry.name.split(/[?#]/)[0])) return
+    const mimeType = (entry as any).contentType || ''
+    const status: number = (entry as any).responseStatus || 0
+    add({
+      requestId: '',
+      type: resourceType(entry, mimeType),
+      initiatorType: entry.entryType === 'navigation' ? 'navigation' : entry.initiatorType,
+      method: 'GET',
+      url: entry.name,
+      requestHeaders: {},
+      startTime: entry.startTime,
+      wallTime: performance.timeOrigin + entry.startTime,
+      state: 'done',
+      responseTime: entry.responseStart || entry.responseEnd,
+      status,
+      statusText: '',
+      responseHeaders: {},
+      mimeType,
+      encodedDataLength: entry.transferSize,
+      endTime: entry.responseEnd,
+    })
+  }
+  for (const type of ['navigation', 'resource']) {
+    try {
+      new PerformanceObserver(list => list.getEntries().forEach(e => record(e as PerformanceResourceTiming))).observe({
+        type,
+        buffered: true,
+      })
+    } catch {
+      // Entry type not supported.
+    }
+  }
 }
 
 // ---- console ----

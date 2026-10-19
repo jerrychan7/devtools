@@ -28,6 +28,23 @@ export function parseCookies(): Protocol.Network.Cookie[] {
   })
 }
 
+const withoutHash = (url: string) => url.split('#')[0]
+
+/** Whether the request is one of devtools-anywhere's own (its bundle, the frontend, …). */
+export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => {
+  const url = withoutHash(rec.url)
+  for (const own of probe.ownUrls) if (withoutHash(own) === url) return true
+  return false
+}
+
+/** Base64 of a binary response body. */
+async function base64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
 export function registerNetwork({ server, probe }: Context) {
   let unsubscribe: (() => void) | null = null
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>()
@@ -38,6 +55,7 @@ export function registerNetwork({ server, probe }: Context) {
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
+    if (isOwnRequest(probe, rec)) return
     let done = sent.get(rec.requestId)
     if (!done) sent.set(rec.requestId, (done = new Set()))
 
@@ -62,6 +80,7 @@ export function registerNetwork({ server, probe }: Context) {
         request,
         timestamp: rec.startTime / 1000,
         wallTime: rec.wallTime / 1000,
+        // Requests known from Resource Timing do not tell who started them.
         initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
         redirectHasExtraInfo: false,
         type: rec.type,
@@ -126,10 +145,20 @@ export function registerNetwork({ server, probe }: Context) {
       sent.clear()
     },
 
-    getResponseBody(params: Protocol.Network.GetResponseBodyRequest): Protocol.Network.GetResponseBodyResponse {
+    async getResponseBody(params: Protocol.Network.GetResponseBodyRequest): Promise<Protocol.Network.GetResponseBodyResponse> {
       const rec = find(params.requestId)
-      if (rec?.body === undefined) throw new CdpError('No data found for resource with given identifier')
-      return { body: rec.body, base64Encoded: false }
+      if (rec?.body !== undefined) return { body: rec.body, base64Encoded: false }
+      // Requests known from Resource Timing: load the body again, from the HTTP cache when
+      // possible (unhooked, so it does not show up as a new request).
+      if (rec?.initiatorType && rec.method === 'GET') {
+        const res = await probe.fetch(rec.url, { cache: 'force-cache', credentials: 'include' }).catch(() => null)
+        if (res?.ok) {
+          const type = res.headers.get('content-type') || ''
+          if (/^text\/|json|javascript|xml|svg/.test(type)) return { body: await res.text(), base64Encoded: false }
+          return { body: await base64(await res.blob()), base64Encoded: true }
+        }
+      }
+      throw new CdpError('No data found for resource with given identifier')
     },
 
     getRequestPostData(params: Protocol.Network.GetRequestPostDataRequest): Protocol.Network.GetRequestPostDataResponse {

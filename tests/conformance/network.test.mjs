@@ -93,4 +93,43 @@ describe('Network', () => {
     assert.ok(chrome.failed, 'chrome emits loadingFailed')
     assert.equal(ours.failed.type, chrome.failed.type)
   })
+
+  // Requests that cannot be hooked are known from Resource Timing once they finished.
+  for (const [name, expression, marker] of [
+    ['image', "(() => { const i = new Image(); i.src = '/tests/conformance/assets/pixel.png?n=img' })()", 'n=img'],
+    [
+      'style sheet',
+      "(() => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/tests/conformance/assets/cross.css?n=css'; document.head.append(l) })()",
+      'n=css',
+    ],
+    [
+      'script',
+      "(() => { const s = document.createElement('script'); s.src = '/tests/conformance/assets/resource.js?n=js'; document.head.append(s) })()",
+      'n=js',
+    ],
+  ]) {
+    test(`${name} (Resource Timing)`, async () => {
+      const { ours, chrome } = await request(expression, marker)
+      assert.ok(ours.sent, 'ours reports the request')
+      assert.equal(ours.sent.type, chrome.sent.type)
+      assert.equal(ours.sent.request.url, chrome.sent.request.url)
+      assert.equal(ours.sent.request.method, chrome.sent.request.method)
+      assert.equal(ours.response.response.status, chrome.response.response.status)
+      assert.equal(ours.response.response.mimeType, chrome.response.response.mimeType)
+      assert.ok(ours.finished)
+
+      const [oursBody, chromeBody] = await Promise.all([
+        t.ours.send('Network.getResponseBody', { requestId: ours.sent.requestId }),
+        t.chrome.send('Network.getResponseBody', { requestId: chrome.sent.requestId }),
+      ])
+      assert.deepEqual(oursBody, chromeBody)
+    })
+  }
+
+  test('the resource tree lists the page resources (Sources panel)', async () => {
+    const tree = await t.ours.send('Page.getResourceTree')
+    const urls = tree.frameTree.resources.map(r => r.url)
+    assert.ok(urls.some(u => u.includes('n=css')), JSON.stringify(urls))
+    assert.ok(urls.some(u => u.includes('n=js')))
+  })
 })

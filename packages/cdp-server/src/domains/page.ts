@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol'
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context'
+import { isOwnRequest } from './network'
 
 export function registerPage({ server, probe }: Context) {
   server.register('Page', {
@@ -18,7 +19,10 @@ export function registerPage({ server, probe }: Context) {
           crossOriginIsolatedContextType: 'NotIsolated',
           gatedAPIFeatures: [],
         },
-        resources: [],
+        // The page's own resources, as far as Resource Timing knows them (Sources panel).
+        resources: probe.requests
+          .filter(rec => rec.initiatorType && rec.initiatorType !== 'navigation' && rec.type !== 'Ping' && !isOwnRequest(probe, rec))
+          .map(rec => ({ url: rec.url, type: rec.type as Protocol.Network.ResourceType, mimeType: rec.mimeType || '' })),
       },
     }),
 

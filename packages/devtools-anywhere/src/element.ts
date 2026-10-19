@@ -1,4 +1,5 @@
 import {
+  installProbe,
   SHELL_KEY,
   SHELL_PAGE_ID,
   createCdpServer,
@@ -204,6 +205,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const url = new URL(frontend, location.href)
     if (url.href === this.loadedUrl) return
     this.loadedUrl = url.href
+    // The frontend's document is not one of the page's requests.
+    installProbe().ownUrls.add(url.href)
     this.disconnect?.()
     this.disconnect = this.server
       ? connectFrontend(this.server, this.frame, url.origin)

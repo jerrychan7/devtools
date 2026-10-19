@@ -43,9 +43,18 @@ export interface ExceptionEntry {
 
 export type LogEntry = ConsoleEntry | ExceptionEntry
 
+/** CDP resource types of the requests the probe records. */
+export type RequestType = 'Fetch' | 'XHR' | 'Document' | 'Stylesheet' | 'Script' | 'Image' | 'Font' | 'Media' | 'Ping' | 'Other'
+
 export interface RequestRecord {
   requestId: string
-  type: 'Fetch' | 'XHR'
+  type: RequestType
+  /**
+   * For requests the probe could not hook (documents, style sheets, scripts, images, …),
+   * known only from their Resource Timing entry once they finished: the entry's
+   * `initiatorType`. Headers and bodies of these requests are not available.
+   */
+  initiatorType?: string
   method: string
   url: string
   requestHeaders: Record<string, string>
@@ -94,6 +103,8 @@ export interface Probe {
   shadowRoots: WeakMap<Element, ShadowRoot>
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>
+  /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */
+  ownUrls: Set<string>
   /** The page's fetch before it was hooked: DevTools' own requests stay out of the Network panel. */
   fetch: typeof fetch
 }
