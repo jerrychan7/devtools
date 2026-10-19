@@ -1,0 +1,32 @@
+diff --git a/front_end/panels/console/ConsolePanel.ts b/front_end/panels/console/ConsolePanel.ts
+index 7c8b61ab84..8bc917a010 100644
+--- a/front_end/panels/console/ConsolePanel.ts
++++ b/front_end/panels/console/ConsolePanel.ts
+@@ -137,10 +137,27 @@ export class WrapperView extends UI.Widget.VBox {
+   }
+ }
+ 
++/** Below this width or height (in pixels), a revealed Console gets more room. */
++const MIN_REVEALED_SIZE = 50;
++
+ export class ConsoleRevealer implements Common.Revealer.Revealer<Common.Console.Console> {
+   async reveal(_object: Common.Console.Console): Promise<void> {
+     const consoleView = ConsoleView.instance();
+     if (consoleView.isShowing()) {
++      // A Console in a minimized drawer, or one dragged down to its header, still counts as
++      // showing: make room for it, or revealing it would only move the focus to something the
++      // user cannot see.
++      const inspectorView = UI.InspectorView.InspectorView.maybeGetInspectorViewInstance();
++      if (inspectorView &&
++          UI.ViewManager.ViewManager.instance().locationNameForViewId('console-view') === 'drawer-view') {
++        if (inspectorView.isDrawerMinimized()) {
++          inspectorView.setDrawerMinimized(false);
++        }
++        const {offsetWidth, offsetHeight} = consoleView.element;
++        if (offsetWidth < MIN_REVEALED_SIZE || offsetHeight < MIN_REVEALED_SIZE) {
++          inspectorView.setDrawerSize(Math.round(inspectorView.totalSize() / 2));
++        }
++      }
+       consoleView.focus();
+       return;
+     }
