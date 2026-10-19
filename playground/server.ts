@@ -127,7 +127,12 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
 
     if (url.pathname === '/api/echo') {
       let body = '';
-      for await (const chunk of req) body += chunk;
+      try {
+        for await (const chunk of req) body += chunk;
+      } catch {
+        // The client went away mid-request (e.g. a navigation aborted it): nothing to answer.
+        return;
+      }
       res.writeHead(200, { 'content-type': 'application/json', 'x-echo': '1' });
       res.end(JSON.stringify({ method: req.method, query: Object.fromEntries(url.searchParams), body }));
       return;
