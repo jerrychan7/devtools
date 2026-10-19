@@ -68,6 +68,24 @@ pnpm playground   # http://localhost:8788/playground/
 
 The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON.
 
+### Repository layout
+
+```
+packages/
+  cdp-server/     in-page CDP server
+    src/probe/    early capture: zero dependencies, size budget, separate build entry
+    src/core/     state shared across domains: remote objects, node ids, DOM observer, stylesheets
+    src/domains/  one directory per domain: runtime, network, dom, css, overlay, storage, ...
+  devtools-frontend/  pinned devtools-frontend version, patches and build scripts
+  devtools-anywhere/  umbrella package: <devtools-anywhere>, iframe, connection layer, shell mode
+  vite-plugin/    zero-config injection
+tests/
+  conformance/    compare CDP output against real Chrome via Puppeteer
+  e2e/            probe → CDP → frontend
+playground/       pages and server for development
+experiments/      validation records
+```
+
 ### Where things are
 
 | Change | Where | How to see it |
@@ -77,6 +95,18 @@ The playground server serves the repository root, so any page in it can be opene
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
 | Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |
 | DevTools frontend | `packages/devtools-frontend/` | See below |
+
+### Constraints and caveats
+
+- Every `postMessage` must check `event.origin` and `event.source`; otherwise any page could send CDP commands to the runtime.
+- Detect whether the page is inside the shell through a postMessage handshake rather than reading properties on `window.parent`, which throws a SecurityError across origins.
+- Both ends of the handshake need buffering: messages must not be dropped while DevTools is still loading.
+- Frontend assets should be self-hostable, with no dependency on third-party CDNs such as unpkg or jsDelivr.
+- When injecting with a Service Worker:
+  - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.
+  - Call `unregister()` when f12 is disabled.
+  - Insert the probe with a `TransformStream` so SSR streaming is not broken.
+  - Mind the scope: the SW script must sit at the site root, or the server must send a `Service-Worker-Allowed` header.
 
 ### Tests
 
@@ -90,6 +120,12 @@ pnpm typecheck                                # builds, then checks packages, bu
 - `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend.
 
 ### Working on the frontend
+
+`packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at a pinned revision and keeps only what its entrypoint can load. How it fits into upstream with as few patches as possible:
+
+- **Own entrypoint** `anywhere_app` instead of `devtools_app`: it imports only the panels that work against the in-page CDP server (Elements, Console, Sources, Network, Application), so the others are neither shown nor loaded. The only patch registers this entrypoint in the build (7 lines in 4 `BUILD.gn`/`.gni` files).
+- **Embedder through the official host API**: Chrome talks to DevTools through native `InspectorFrontendHost` bindings. The entrypoint keeps the hosted-mode stub and only replaces `sendMessageToBackend`/`isHostedMode`, so CDP messages travel through `postMessage` to the embedding window, which passes its origin as `#?embedded=<origin>`. No connection code is patched.
+- **Small screens**: upstream's responsive layouts (vertical split in Elements, overflowing tabs) are kept as is.
 
 `packages/devtools-frontend/` contains:
 

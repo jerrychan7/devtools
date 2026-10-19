@@ -28,7 +28,7 @@
 | 部分 | 选择 | 理由 |
 |---|---|---|
 | CDP 实现 | 在本项目中自行实现，参考 [chobitsu](https://github.com/liriliri/chobitsu) | 在页面内调试只能通过 JS API 采集数据，所以只能用 JS/TS 实现。自行实现可以让探针和各个 CDP 域共用同一套 hook（不再需要回放技巧），修掉 chobitsu 的已知问题，并通过 [`devtools-protocol`](https://github.com/ChromeDevTools/devtools-protocol) 的类型跟进最新协议 |
-| 前端 | 官方 devtools-frontend，从源码构建，加一个很小的补丁集 | 构建时钉住官方的某个版本，补丁以 `.patch` 文件维护，升级时逐个重放，不维护长期 fork 分支。补丁只负责注册我们自己的入口（`anywhere_app`），其余定制都不改上游代码（见[前端](#前端)） |
+| 前端 | 官方 devtools-frontend，从源码构建，加一个很小的补丁集 | 构建时钉住官方的某个版本，补丁以 `.patch` 文件维护，升级时逐个重放，不维护长期 fork 分支。补丁只负责注册我们自己的入口（`anywhere_app`），其余定制都不改上游代码（见[修改前端](DEV.zh-CN.md#修改前端)） |
 | 隔离 | iframe | 隔离 devtools 自身的 DOM、日志和请求，避免它们出现在被调试页面中，也避免与页面的全局环境互相干扰 |
 
 本项目不依赖 Chii 和 chobitsu。遇到边界情况时会阅读它们的源码作为参考，但不复制代码；以真实 Chrome 的 CDP 输出和协议定义为准。
@@ -110,37 +110,6 @@
 - 前端单独成包，因为它体积大（约 16 MB），更新节奏跟随 Chrome 版本。其他语言（约 42 MB）再拆成一个包，需要的人才装。
 - 所有包使用同一个版本号、一起发布，版本号相同的包一定能配合使用。
 
-### 目录结构
-
-```
-packages/
-  cdp-server/     页面内的 CDP 服务端
-    src/probe/    早期捕获：零依赖，有体积上限，单独的构建入口
-    src/core/     跨域共享的状态：远程对象、节点 id、DOM 变化监听、样式表
-    src/domains/  每个域一个目录：runtime、network、dom、css、overlay、storage……
-  devtools-frontend/  钉住的 devtools-frontend 版本、补丁和构建脚本
-  devtools-anywhere/  总包：<devtools-anywhere>、iframe、连接层、外壳模式
-  vite-plugin/    零配置注入
-tests/
-  conformance/    用 Puppeteer 对比真实 Chrome 的 CDP 输出
-  e2e/            探针 → CDP → 前端的完整流程
-playground/       开发调试用的页面和服务器
-experiments/      验证记录
-```
-
-## 约束与注意事项
-
-- 所有 `postMessage` 都必须校验 `event.origin` 和 `event.source`，否则任意页面都能向 CDP 运行时发送命令。
-- 判断"是否处于外壳内"要通过 postMessage 握手完成，不要直接读取 `window.parent` 上的属性，否则跨域时会抛出 SecurityError。
-- 握手的两端都要有缓冲：devtools 尚未加载完成时，消息不能丢弃。
-- 前端资源应当支持自托管，不依赖 unpkg、jsdelivr 等第三方 CDN。
-- 使用 Service Worker 注入时：
-  - 只处理 `destination === 'iframe'` 的导航请求，其他请求一律放行。
-  - 关闭 f12 时调用 `unregister()`。
-  - 用 `TransformStream` 流式插入探针，避免破坏 SSR 的流式输出。
-  - 注意作用域：SW 脚本需要放在站点根路径，或者由服务器返回 `Service-Worker-Allowed` 头。
-
-
 ## 用法（预览）
 
 各个包尚未发布，下面的路径指本仓库构建出的文件。`data-frontend` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。
@@ -176,15 +145,7 @@ export default {
 
 ## 开发
 
-环境配置、实时重新构建、测试、构建前端和发布，见[开发指南](DEV.zh-CN.md)。
-
-### 前端
-
-`packages/devtools-frontend` 按钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)，只保留入口能加载到的文件。为了尽量少改上游：
-
-- **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用），其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
-- **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
-- **小屏**：沿用上游自带的响应式布局（元素面板窄屏时上下分栏、标签页溢出折叠）。
+环境配置、目录结构与实现约束、实时重新构建、测试、构建前端和发布，见[开发指南](DEV.zh-CN.md)。
 
 ## 参考
 

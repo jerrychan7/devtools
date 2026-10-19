@@ -28,7 +28,7 @@ Goals:
 | Part | Choice | Rationale |
 |---|---|---|
 | CDP implementation | Written in this project, using [chobitsu](https://github.com/liriliri/chobitsu) as a reference | In-page debugging can only collect data through JS APIs, so it has to be written in JS/TS. Owning it lets the probe and the CDP domains share the same hooks (no replay tricks), fixes chobitsu's known issues, and tracks the latest protocol through [`devtools-protocol`](https://github.com/ChromeDevTools/devtools-protocol) types |
-| Frontend | Official devtools-frontend, built from source with a small patch set | The build pins an official revision and keeps patches as `.patch` files that are replayed on upgrade, instead of maintaining a long-lived fork branch. The patches only register an own entrypoint (`anywhere_app`); everything else is done without touching upstream code (see [Frontend](#frontend)) |
+| Frontend | Official devtools-frontend, built from source with a small patch set | The build pins an official revision and keeps patches as `.patch` files that are replayed on upgrade, instead of maintaining a long-lived fork branch. The patches only register an own entrypoint (`anywhere_app`); everything else is done without touching upstream code (see [Working on the frontend](DEV.md#working-on-the-frontend)) |
 | Isolation | iframe | Keeps DevTools' own DOM, logs and requests out of the inspected page, and prevents the two global environments from interfering with each other |
 
 This project depends on neither Chii nor chobitsu. Their source is read as a reference for edge cases, but no code is copied; real Chrome's CDP output and the protocol definition are the source of truth.
@@ -110,37 +110,6 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 - The frontend is separate because it is large (about 16 MB) and follows Chrome's release cadence. Its other languages (about 42 MB) are another package, so that only those who need them install them.
 - All packages share one version number and are released together, so matching versions always work together.
 
-### Repository layout
-
-```
-packages/
-  cdp-server/     in-page CDP server
-    src/probe/    early capture: zero dependencies, size budget, separate build entry
-    src/core/     state shared across domains: remote objects, node ids, DOM observer, stylesheets
-    src/domains/  one directory per domain: runtime, network, dom, css, overlay, storage, ...
-  devtools-frontend/  pinned devtools-frontend version, patches and build scripts
-  devtools-anywhere/  umbrella package: <devtools-anywhere>, iframe, connection layer, shell mode
-  vite-plugin/    zero-config injection
-tests/
-  conformance/    compare CDP output against real Chrome via Puppeteer
-  e2e/            probe → CDP → frontend
-playground/       pages and server for development
-experiments/      validation records
-```
-
-## Constraints and caveats
-
-- Every `postMessage` must check `event.origin` and `event.source`; otherwise any page could send CDP commands to the runtime.
-- Detect whether the page is inside the shell through a postMessage handshake rather than reading properties on `window.parent`, which throws a SecurityError across origins.
-- Both ends of the handshake need buffering: messages must not be dropped while DevTools is still loading.
-- Frontend assets should be self-hostable, with no dependency on third-party CDNs such as unpkg or jsDelivr.
-- When injecting with a Service Worker:
-  - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.
-  - Call `unregister()` when f12 is disabled.
-  - Insert the probe with a `TransformStream` so SSR streaming is not broken.
-  - Mind the scope: the SW script must sit at the site root, or the server must send a `Service-Worker-Allowed` header.
-
-
 ## Usage (preview)
 
 The packages are not published yet; the paths below refer to the builds in this repository. `data-frontend` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build.
@@ -176,15 +145,7 @@ A floating F12 button opens the panel; drag its top bar to resize, ⟳ switches 
 
 ## Development
 
-See the [development guide](DEV.md) for setting up the environment, live rebuilds, tests, building the frontend, and releasing.
-
-### Frontend
-
-`packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at a pinned revision and keeps only what its entrypoint can load. How it fits into upstream with as few patches as possible:
-
-- **Own entrypoint** `anywhere_app` instead of `devtools_app`: it imports only the panels that work against the in-page CDP server (Elements, Console, Sources, Network, Application), so the others are neither shown nor loaded. The only patch registers this entrypoint in the build (7 lines in 4 `BUILD.gn`/`.gni` files).
-- **Embedder through the official host API**: Chrome talks to DevTools through native `InspectorFrontendHost` bindings. The entrypoint keeps the hosted-mode stub and only replaces `sendMessageToBackend`/`isHostedMode`, so CDP messages travel through `postMessage` to the embedding window, which passes its origin as `#?embedded=<origin>`. No connection code is patched.
-- **Small screens**: upstream's responsive layouts (vertical split in Elements, overflowing tabs) are kept as is.
+See the [development guide](DEV.md) for setting up the environment, the repository layout and implementation rules, live rebuilds, tests, building the frontend, and releasing.
 
 ## References
 
