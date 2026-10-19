@@ -71,6 +71,14 @@ export interface RequestRecord {
   errorText?: string
 }
 
+export interface ListenerRecord {
+  type: string
+  listener: EventListenerOrEventListenerObject
+  capture: boolean
+  passive: boolean
+  once: boolean
+}
+
 export interface Probe {
   version: 1
   /** Ring buffer of console calls and uncaught exceptions. */
@@ -84,4 +92,6 @@ export interface Probe {
   clearLogs(): void
   /** Every shadow root attached since the probe ran, including closed ones. */
   shadowRoots: WeakMap<Element, ShadowRoot>
+  /** Event listeners currently registered with addEventListener, per target. */
+  listeners: WeakMap<EventTarget, ListenerRecord[]>
 }

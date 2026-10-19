@@ -9,7 +9,6 @@ const NOOPS: Record<string, string[]> = {
   Autofill: ['enable', 'setAddresses'],
   BackgroundService: ['startObserving'],
   Database: ['enable'],
-  DOMDebugger: ['setBreakOnCSPViolation'],
   Emulation: [
     'setEmulatedMedia',
     'setAutoDarkModeOverride',

@@ -4,6 +4,7 @@ import { ObjectRegistry } from './core/objects'
 import { CdpServer } from './core/server'
 import { registerCss } from './domains/css'
 import { registerDom } from './domains/dom'
+import { registerDomDebugger } from './domains/dom-debugger'
 import { registerNetwork } from './domains/network'
 import { registerOverlay } from './domains/overlay'
 import { registerPage } from './domains/page'
@@ -38,5 +39,6 @@ export function createCdpServer(): CdpServer {
   registerOverlay(ctx)
   registerCss(ctx)
   registerStorage(ctx)
+  registerDomDebugger(ctx)
   return ctx.server
 }

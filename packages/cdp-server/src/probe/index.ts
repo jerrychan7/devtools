@@ -8,6 +8,7 @@ import {
   PROBE_KEY,
   type ConsoleEntry,
   type ConsoleType,
+  type ListenerRecord,
   type LogEntry,
   type Probe,
   type RequestRecord,
@@ -47,6 +48,7 @@ export function installProbe(): Probe {
       logs.length = 0
     },
     shadowRoots: new WeakMap(),
+    listeners: new WeakMap(),
   }
   Object.defineProperty(w, PROBE_KEY, { value: probe })
 
@@ -60,6 +62,7 @@ export function installProbe(): Probe {
   hookConsole(addLog, now)
   hookErrors(addLog, now)
   hookShadowRoots(probe.shadowRoots)
+  hookListeners(probe.listeners)
 
   let seq = 0
   function track(record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>): RequestRecord {
@@ -172,6 +175,52 @@ function hookShadowRoots(roots: WeakMap<Element, ShadowRoot>) {
     const root = attachShadow.call(this, init)
     roots.set(this, root)
     return root
+  }
+}
+
+// ---- event listeners ----
+
+/**
+ * Records listeners as the DOM keeps them: duplicates are ignored, `once` listeners are
+ * forgotten after they run, and listeners with an aborted `signal` are forgotten too.
+ */
+function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
+  const proto = EventTarget.prototype
+  const add = proto.addEventListener
+  const remove = proto.removeEventListener
+  const captureOf = (options?: boolean | EventListenerOptions) =>
+    typeof options === 'boolean' ? options : !!options?.capture
+
+  proto.addEventListener = function (this: EventTarget, type, listener, options) {
+    add.call(this, type, listener, options)
+    // Unqualified calls like addEventListener('load', f) run on the global object.
+    const target: EventTarget = this ?? globalThis
+    const opts = typeof options === 'object' ? options : undefined
+    if (!listener || opts?.signal?.aborted) return
+    const capture = captureOf(options)
+    let list = listeners.get(target)
+    if (!list) listeners.set(target, (list = []))
+    if (list.some(r => r.type === type && r.listener === listener && r.capture === capture)) return
+    const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once }
+    list.push(record)
+    // A method keeps its name through minification, so browser DevTools attached to the
+    // page (which also list this helper) show what it is.
+    const forget = {
+      devtoolsAnywhereForget() {
+        const i = list!.indexOf(record)
+        if (i >= 0) list!.splice(i, 1)
+      },
+    }.devtoolsAnywhereForget
+    if (record.once) add.call(target, type, forget, { capture, once: true })
+    if (opts?.signal) add.call(opts.signal, 'abort', forget, { once: true })
+  }
+
+  proto.removeEventListener = function (this: EventTarget, type, listener, options) {
+    remove.call(this, type, listener, options)
+    const list = listeners.get(this ?? globalThis)
+    const capture = captureOf(options)
+    const i = list ? list.findIndex(r => r.type === type && r.listener === listener && r.capture === capture) : -1
+    if (i >= 0) list!.splice(i, 1)
   }
 }
 

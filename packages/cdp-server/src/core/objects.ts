@@ -205,6 +205,12 @@ export class ObjectRegistry {
     this.byId.delete(objectId)
   }
 
+  /** The first object group `objectId` was wrapped in, if any. */
+  groupOf(objectId: string): string | undefined {
+    for (const [group, ids] of this.groups) if (ids.has(objectId)) return group
+    return undefined
+  }
+
   releaseGroup(group: string) {
     this.groups.get(group)?.forEach(id => this.release(id))
     this.groups.delete(group)
