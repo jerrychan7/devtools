@@ -32,9 +32,15 @@ let loadSnapdom: SnapdomLoader = () => import('@zumer/snapdom');
 /** The CDP server of a page, with the screencast's renderer. */
 export const createPageServer = () => createCdpServer({ loadSnapdom: () => loadSnapdom() });
 
-const HEIGHT_KEY = 'devtools-anywhere:height';
-const WIDTH_KEY = 'devtools-anywhere:width';
-const FLOAT_KEY = 'devtools-anywhere:float';
+// Sizes are remembered as percentages of the viewport, so they fit any screen and orientation.
+const HEIGHT_KEY = 'devtools-anywhere:height%';
+const WIDTH_KEY = 'devtools-anywhere:width%';
+const FLOAT_KEY = 'devtools-anywhere:float%';
+/** Viewport units that follow the browser's collapsing toolbars on mobile, where supported. */
+const VH = typeof CSS !== 'undefined' && CSS.supports('height', '1dvh') ? 'dvh' : 'vh';
+const VW = typeof CSS !== 'undefined' && CSS.supports('width', '1dvw') ? 'dvw' : 'vw';
+/** `part` as a percentage of `whole`, to one decimal. */
+const percent = (part: number, whole: number) => Math.round((part / whole) * 1000) / 10;
 const DOCK_KEY = 'devtools-anywhere:dock';
 const MIN_SIZE = 80;
 
@@ -43,7 +49,7 @@ export type DockSide = 'bottom' | 'right' | 'left' | 'undocked';
 const DOCK_SIDES: readonly string[] = ['bottom', 'right', 'left', 'undocked'];
 const isDockSide = (value: unknown): value is DockSide => typeof value === 'string' && DOCK_SIDES.includes(value);
 
-/** Position and size of the undocked panel, in CSS pixels. */
+/** Position and size of the undocked panel, in percent of the viewport. */
 interface FloatRect {
   left: number;
   top: number;
@@ -62,7 +68,7 @@ const STYLE = `
 :host([open]) .launcher, :host([no-launcher]) .launcher { display: none; }
 .panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647;
-  display: none; flex-direction: column;
+  display: none; flex-direction: column; box-sizing: border-box;
   background: #fff; border-top: 1px solid var(--bar-border, #cacdd1);
 }
 :host([open]) .panel { display: flex; }
@@ -117,9 +123,10 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * - `open`: shows the panel; otherwise a small launcher button is shown.
  * - `dock`: `bottom` (default), `right`, `left` or `undocked` (a window over the page). The
  *   main menu's "Dock side" in DevTools changes it; the choice is remembered in localStorage.
- * - `height`: panel height when docked to the bottom, as a CSS length (default `50vh`).
- * - `width`: panel width when docked to a side, as a CSS length (default `50vw`).
- *   Dragging the bar overrides either size, and the size is remembered in localStorage.
+ * - `height`: panel height when docked to the bottom, as a CSS length (default `50dvh`).
+ * - `width`: panel width when docked to a side, as a CSS length (default `50dvw`).
+ *   Dragging the bar overrides either size; the size is remembered in localStorage as a
+ *   percentage of the viewport (`dvh`/`dvw`), so it fits other screens and orientations.
  * - `no-launcher`: hides the launcher button.
  * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
  *   bundle when the value is empty), which injects the probe into iframe pages that do not
@@ -306,16 +313,16 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const dock = this.dock;
     if (dock === 'bottom') {
       const stored = Number(localStorage.getItem(HEIGHT_KEY));
-      style.height = stored ? `${stored}px` : this.getAttribute('height') || '50vh';
+      style.height = stored ? `${stored}${VH}` : this.getAttribute('height') || `50${VH}`;
     } else if (dock === 'undocked') {
       const rect = this.floatRect();
-      style.left = `${rect.left}px`;
-      style.top = `${rect.top}px`;
-      style.width = `${rect.width}px`;
-      style.height = `${rect.height}px`;
+      style.left = `${rect.left}${VW}`;
+      style.top = `${rect.top}${VH}`;
+      style.width = `${rect.width}${VW}`;
+      style.height = `${rect.height}${VH}`;
     } else {
       const stored = Number(localStorage.getItem(WIDTH_KEY));
-      style.width = stored ? `${stored}px` : this.getAttribute('width') || '50vw';
+      style.width = stored ? `${stored}${VW}` : this.getAttribute('width') || `50${VW}`;
     }
     // The shell document is ours: the page iframe comes first, then this element.
     if (this.hasAttribute('shell')) {
@@ -329,13 +336,13 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     try {
       rect = JSON.parse(localStorage.getItem(FLOAT_KEY) || '{}');
     } catch {}
-    const width = Math.min(rect.width || innerWidth * 0.8, innerWidth);
-    const height = Math.min(rect.height || innerHeight * 0.6, innerHeight);
+    const width = Math.min(rect.width || 80, 100);
+    const height = Math.min(rect.height || 60, 100);
     const clamp = (value: number | undefined, fallback: number, max: number) =>
-      Math.min(Math.max(value ?? fallback, 0), Math.max(max, 0));
+      Math.min(Math.max(value ?? fallback, 0), max);
     return {
-      left: clamp(rect.left, (innerWidth - width) / 2, innerWidth - width),
-      top: clamp(rect.top, (innerHeight - height) / 2, innerHeight - height),
+      left: clamp(rect.left, (100 - width) / 2, 100 - width),
+      top: clamp(rect.top, (100 - height) / 2, 100 - height),
       width,
       height,
     };
@@ -343,7 +350,13 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   private saveFloat() {
     const { left, top, width, height } = this.panel.getBoundingClientRect();
-    localStorage.setItem(FLOAT_KEY, JSON.stringify({ left, top, width, height }));
+    const rect: FloatRect = {
+      left: percent(left, innerWidth),
+      top: percent(top, innerHeight),
+      width: percent(width, innerWidth),
+      height: percent(height, innerHeight),
+    };
+    localStorage.setItem(FLOAT_KEY, JSON.stringify(rect));
   }
 
   private loadFrontend() {
@@ -396,9 +409,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       };
       const up = () => {
         this.panel.classList.remove('dragging');
-        if (dock === 'bottom') localStorage.setItem(HEIGHT_KEY, String(this.panel.offsetHeight));
+        if (dock === 'bottom') localStorage.setItem(HEIGHT_KEY, String(percent(this.panel.offsetHeight, innerHeight)));
         else if (dock === 'undocked') this.saveFloat();
-        else localStorage.setItem(WIDTH_KEY, String(this.panel.offsetWidth));
+        else localStorage.setItem(WIDTH_KEY, String(percent(this.panel.offsetWidth, innerWidth)));
+        // From the pixels of the drag to the remembered percentages.
+        this.layout();
         resizer.removeEventListener('pointermove', move);
         resizer.removeEventListener('pointerup', up);
         resizer.removeEventListener('pointercancel', up);

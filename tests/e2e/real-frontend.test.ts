@@ -227,6 +227,12 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
     rect = await waitFor(async () => ((await panel())?.dock === 'undocked' ? panel() : null));
     assert.ok(rect.x > 0 && rect.y > 0 && rect.width < width && rect.height < height, 'a window over the page');
     assert.equal(await page.evaluate(() => localStorage.getItem('devtools-anywhere:dock')), 'undocked', 'remembered');
+    // Sizes are in viewport units, so they fit other screens.
+    const floatStyle = await page.evaluate(() => {
+      const el = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      return el instanceof HTMLElement ? [el.style.width, el.style.height] : [];
+    });
+    assert.match(floatStyle.join(' '), /^[\d.]+dvw [\d.]+dvh$/);
 
     // Dragging the window past the bottom right corner keeps all of it in view.
     const bar = await page.evaluateHandle(() =>
