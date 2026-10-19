@@ -89,6 +89,22 @@ describe('CSS', () => {
     });
   }
 
+  test('shorthands list their longhands (expanded in the Styles pane)', async () => {
+    const [o, c] = byTag('section');
+    const [mo, mc] = await Promise.all([
+      t.ours.send('CSS.getMatchedStylesForNode', { nodeId: o }),
+      t.chrome.send('CSS.getMatchedStylesForNode', { nodeId: c }),
+    ]);
+    const longhands = (matches: Protocol.CSS.RuleMatch[] | undefined) =>
+      matches
+        ?.find(m => m.rule.selectorList.text === '.box')
+        ?.rule.style.cssProperties.filter(p => p.text)
+        .map(p => ({ name: p.name, longhands: p.longhandProperties ?? [] }));
+    const result = longhands(mo.matchedCSSRules);
+    assert.deepEqual(result, longhands(mc.matchedCSSRules));
+    assert.ok(result?.some(p => p.name === 'margin' && p.longhands.length === 4));
+  });
+
   test('getComputedStyleForNode', async () => {
     const [o, c] = byTag('section');
     const [so, sc] = await Promise.all([

@@ -45,7 +45,7 @@ function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: numbe
     if (text) text += ' ';
     const start = column + text.length;
     text += declText;
-    cssProperties.push({
+    const property: CSSProperty = {
       name,
       value,
       important,
@@ -54,15 +54,16 @@ function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: numbe
       parsedOk: true,
       disabled: false,
       range: { startLine: line, startColumn: start, endLine: line, endColumn: start + declText.length },
-    });
-    // Expand shorthands into their longhands, like Chrome does.
+    };
+    cssProperties.push(property);
+    // Expand shorthands into their longhands, like Chrome does: listed on the shorthand (the
+    // Styles pane shows them when it is expanded) and as properties of their own.
     probe.cssText = `${name}: ${value}`;
-    const longhands = Array.from(probe);
-    if (longhands.length > 1 || (longhands.length === 1 && longhands[0] !== name)) {
+    const longhands = Array.from(probe, longhand => ({ name: longhand, value: probe.getPropertyValue(longhand) }));
+    if (longhands.length > 1 || (longhands.length === 1 && longhands[0]?.name !== name)) {
       shorthandEntries.push({ name, value, important });
-      for (const longhand of longhands) {
-        cssProperties.push({ name: longhand, value: probe.getPropertyValue(longhand), important, implicit: false });
-      }
+      property.longhandProperties = longhands;
+      for (const longhand of longhands) cssProperties.push({ ...longhand, important, implicit: false });
     }
   }
   return {
