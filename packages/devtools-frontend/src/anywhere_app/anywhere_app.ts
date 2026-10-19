@@ -271,6 +271,15 @@ new MutationObserver(() => {
   }
 }).observe(document.documentElement, {attributes: true, attributeFilter: ['class']});
 
+// Context menus: outside hosted mode the frontend asks the host for a native menu, which no
+// embedder can show. Switch to the DOM-drawn ("soft") menus the way Chrome does, right after
+// ContextMenu starts listening for the switch.
+const initializeContextMenu = UI.ContextMenu.ContextMenu.initialize;
+UI.ContextMenu.ContextMenu.initialize = () => {
+  initializeContextMenu();
+  host.events.dispatchEventToListeners(Host.InspectorFrontendHostAPI.Events.SetUseSoftMenu, true);
+};
+
 // @ts-expect-error Exposed like in devtools_app, for parity.
 self.runtime = Root.Runtime.Runtime.instance({forceNew: true});
 new Main.MainImpl.MainImpl();
