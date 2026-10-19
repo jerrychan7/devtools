@@ -119,12 +119,55 @@ class SheetRegistry {
     return result
   }
 
+  /**
+   * Copies of cross-origin sheets, whose rules page scripts cannot read: the CSS text is
+   * fetched again (which needs CORS headers) and parsed. null: the fetch failed.
+   */
+  private copies = new WeakMap<CSSStyleSheet, CSSStyleSheet | null>()
+  private loading = new Map<CSSStyleSheet, Promise<void>>()
+
   rulesOf(sheet: CSSStyleSheet | CSSGroupingRule): CSSRule[] {
     try {
       return Array.from(sheet.cssRules)
     } catch {
-      return [] // Cross-origin sheet.
+      const copy = sheet instanceof CSSStyleSheet ? this.copies.get(sheet) : null
+      return copy ? Array.from(copy.cssRules) : []
     }
+  }
+
+  /** Whether the sheet's rules come from a fetched copy, so editing them has no effect. */
+  isCopy(sheet: CSSStyleSheet): boolean {
+    try {
+      void sheet.cssRules
+      return false
+    } catch {
+      return !!this.copies.get(sheet)
+    }
+  }
+
+  /** Fetches copies of the cross-origin sheets not loaded yet; resolves when all are done. */
+  loadCopies(onLoaded: (sheet: CSSStyleSheet) => void): Promise<void> {
+    for (const sheet of this.all()) {
+      if (!sheet.href || this.copies.has(sheet) || this.loading.has(sheet)) continue
+      try {
+        void sheet.cssRules
+        continue
+      } catch {
+        // Cross-origin: load a copy below.
+      }
+      const load = fetch(sheet.href, { credentials: 'omit' })
+        .then(res => (res.ok ? res.text() : Promise.reject(new Error(res.statusText))))
+        .then(text => {
+          const copy = new CSSStyleSheet()
+          copy.replaceSync(text)
+          this.copies.set(sheet, copy)
+          onLoaded(sheet)
+        })
+        .catch(() => void this.copies.set(sheet, null))
+        .finally(() => this.loading.delete(sheet))
+      this.loading.set(sheet, load)
+    }
+    return Promise.all(this.loading.values()).then(() => {})
   }
 
   ruleId(sheet: CSSStyleSheet, rule: CSSStyleRule): number {
@@ -222,6 +265,16 @@ export function registerCss(ctx: Context) {
     for (const sheet of current) if (!known.has(sheet)) server.emit('CSS.styleSheetAdded', { header: header(sheet) })
     for (const sheet of known) if (!current.has(sheet)) server.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) })
     known = current
+    return loadCopies()
+  }
+
+  /** Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in. */
+  const loadCopies = () =>
+    sheets.loadCopies(sheet => server.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) }))
+
+  /** Rules of fetched copies are shown, but editing them would not affect the page. */
+  function assertEditable(sheet: CSSStyleSheet) {
+    if (sheets.isCopy(sheet)) throw new CdpError('This style sheet comes from another origin and cannot be edited')
   }
 
   function ruleStyle(sheet: CSSStyleSheet, rule: CSSStyleRule): CSSStyle {
@@ -323,6 +376,7 @@ export function registerCss(ctx: Context) {
       return buildStyle(edit.styleSheetId, el.style, 0, 0)
     }
     const sheet = sheets.get(edit.styleSheetId)
+    assertEditable(sheet)
     const rule = sheets.findRule(sheet, edit.range.startLine)
     rule.style.cssText = edit.text
     return ruleStyle(sheet, rule)
@@ -353,8 +407,11 @@ export function registerCss(ctx: Context) {
       document.removeEventListener('load', syncSheets, true)
     },
 
-    getMatchedStylesForNode(params: Protocol.CSS.GetMatchedStylesForNodeRequest): Protocol.CSS.GetMatchedStylesForNodeResponse {
+    async getMatchedStylesForNode(
+      params: Protocol.CSS.GetMatchedStylesForNodeRequest
+    ): Promise<Protocol.CSS.GetMatchedStylesForNodeResponse> {
       const { el, pseudo } = target(params.nodeId)
+      await loadCopies()
       // For a pseudo-element, its host is the first element it inherits from.
       if (pseudo) {
         return { matchedCSSRules: matchedRules(el, pseudo), pseudoElements: [], inherited: inheritedEntries(el), cssKeyframesRules: [] }
@@ -404,6 +461,7 @@ export function registerCss(ctx: Context) {
 
     setStyleSheetText(params: Protocol.CSS.SetStyleSheetTextRequest): Protocol.CSS.SetStyleSheetTextResponse {
       const owner = sheets.get(params.styleSheetId).ownerNode
+      assertEditable(sheets.get(params.styleSheetId))
       if (!(owner instanceof HTMLStyleElement)) throw new CdpError('Style sheet is not editable')
       owner.textContent = params.text
       return {}
@@ -417,6 +475,7 @@ export function registerCss(ctx: Context) {
 
     setRuleSelector(params: Protocol.CSS.SetRuleSelectorRequest): Protocol.CSS.SetRuleSelectorResponse {
       const sheet = sheets.get(params.styleSheetId)
+      assertEditable(sheet)
       const rule = sheets.findRule(sheet, params.range.startLine)
       rule.selectorText = params.selector
       ctx.refreshPseudoElements?.()
@@ -437,6 +496,7 @@ export function registerCss(ctx: Context) {
 
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {
       const sheet = sheets.get(params.styleSheetId)
+      assertEditable(sheet)
       const index = sheet.insertRule(params.ruleText, sheet.cssRules.length)
       const rule = sheet.cssRules[index] as CSSStyleRule
       ctx.refreshPseudoElements?.()

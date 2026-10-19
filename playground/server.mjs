@@ -51,6 +51,8 @@ export function startServer(port = 0) {
         'cache-control': 'no-store',
         // Lets devtools-anywhere-sw.js control the whole site from its dist directory.
         ...(target.endsWith('-sw.js') ? { 'service-worker-allowed': '/' } : {}),
+        // Style sheets are readable from other origins (the tests load them cross-origin).
+        ...(target.endsWith('.css') ? { 'access-control-allow-origin': '*' } : {}),
       })
       res.end(data)
     } catch {
