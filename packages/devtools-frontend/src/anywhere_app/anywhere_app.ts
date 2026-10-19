@@ -116,7 +116,8 @@ host.sendMessageToBackend = (message: string) => window.parent.postMessage(messa
 // Docking: the main menu's "Dock side" moves the panel in the embedding page, which owns the
 // side (`#?dock=`, the side it shows the panel on now). Requests to the embedder are objects,
 // so they never mix with CDP messages, which are strings.
-const notifyEmbedder = (request: {type: 'dock', side: string}|{type: 'close'}|{type: 'keep-open', keep: boolean}) =>
+const notifyEmbedder = (request: {type: 'dock', side: string}|{type: 'close'}|{type: 'keep-open', keep: boolean}|
+                        {type: 'theme', toolbar: string, divider: string, icon: string}) =>
     window.parent.postMessage({devtoolsAnywhere: request}, embedder);
 Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
 const dock = params.get('dock');
@@ -234,6 +235,41 @@ window.addEventListener('message', event => {
   }
   host.events.dispatchEventToListeners(Host.InspectorFrontendHostAPI.Events.DispatchMessage, event.data);
 });
+
+// Chrome gives DevTools its theme colors through devtools://theme/colors.css, which a page
+// cannot load: the frontend then never learns which theme is on, and shows the colors of a
+// dynamic theme (blue-tinted surfaces). Here the page names Chrome's default theme itself and
+// the request is reported as loaded, which gives Chrome's default look: the palette's
+// fallbacks are its colors.
+const defaultTheme = document.createElement('style');
+defaultTheme.textContent = ':root { --user-color-source: baseline-default; }';
+document.head.append(defaultTheme);
+new MutationObserver(records => {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node instanceof HTMLLinkElement && node.href.startsWith('devtools://theme/colors.css')) {
+        node.dispatchEvent(new Event('load'));
+      }
+    }
+  }
+}).observe(document, {childList: true, subtree: true});
+
+// The embedder's bar sits on top of the toolbar: it takes the toolbar's colors, sent whenever
+// the theme is applied (which sets classes on the root element).
+let reportedTheme = '';
+new MutationObserver(() => {
+  const style = getComputedStyle(document.documentElement);
+  const theme = {
+    type: 'theme' as const,
+    toolbar: style.getPropertyValue('--app-color-toolbar-background').trim(),
+    divider: style.getPropertyValue('--sys-color-divider').trim(),
+    icon: style.getPropertyValue('--sys-color-on-surface-subtle').trim(),
+  };
+  if (theme.toolbar && JSON.stringify(theme) !== reportedTheme) {
+    reportedTheme = JSON.stringify(theme);
+    notifyEmbedder(theme);
+  }
+}).observe(document.documentElement, {attributes: true, attributeFilter: ['class']});
 
 // @ts-expect-error Exposed like in devtools_app, for parity.
 self.runtime = Root.Runtime.Runtime.instance({forceNew: true});
