@@ -68,7 +68,7 @@ export class NodeRegistry {
   onShadowRoot: ((root: ShadowRoot) => void) | null = null;
 
   /** `shadowRootOf` also finds closed shadow roots (recorded by the probe). */
-  constructor(private shadowRootOf: (host: Element) => ShadowRoot | null = host => host.shadowRoot) {}
+  constructor(readonly shadowRootOf: (host: Element) => ShadowRoot | null = host => host.shadowRoot) {}
 
   /** Starts a new session: previously sent node ids become invalid. */
   reset() {

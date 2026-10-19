@@ -168,6 +168,45 @@ describe('DOM', () => {
       assert.equal(nodeId, sectionId(ourRoot));
     });
 
+    test('getNodesForSubtreeByStyle (the Layout pane)', async () => {
+      const names = async (side: TestPage['ours'], root: DomNode) => {
+        const { nodeIds } = await side.send('DOM.getNodesForSubtreeByStyle', {
+          nodeId: root.nodeId,
+          computedStyles: [
+            { name: 'display', value: 'block' },
+            { name: 'font-weight', value: '700' },
+          ],
+        });
+        const described = await Promise.all(nodeIds.map(nodeId => side.send('DOM.describeNode', { nodeId })));
+        return described.map(({ node }) => node.localName);
+      };
+      const [ours, chrome] = await Promise.all([names(t.ours, ourRoot), names(t.chrome, chromeRoot)]);
+      assert.deepEqual(ours, chrome);
+      assert.ok(ours.includes('b'));
+    });
+
+    test('pushNodeByPathToFrontend (selection restored after a reload)', async () => {
+      /** The path DOMNode.path() builds in the frontend: index among the children and name, from the top. */
+      const pathOf = (node: DomNode, predicate: (n: DomNode) => boolean): string | null => {
+        for (const [i, child] of (node.children || []).entries()) {
+          if (predicate(child)) return `${i},${child.nodeName}`;
+          const rest = pathOf(child, predicate);
+          if (rest) return `${i},${child.nodeName},${rest}`;
+        }
+        return null;
+      };
+      const isBold = (n: DomNode) => n.localName === 'b';
+      const resolve = async (side: TestPage['ours'], root: DomNode) => {
+        const path = pathOf(root, isBold);
+        assert.ok(path);
+        const { nodeId } = await side.send('DOM.pushNodeByPathToFrontend', { path });
+        return { path, node: (await side.send('DOM.describeNode', { nodeId })).node.localName };
+      };
+      const [ours, chrome] = await Promise.all([resolve(t.ours, ourRoot), resolve(t.chrome, chromeRoot)]);
+      assert.deepEqual(ours, chrome);
+      assert.equal(ours.node, 'b');
+    });
+
     test('performSearch', async () => {
       for (const query of ['section', 'note', 'world']) {
         const [ours, chrome] = await both('DOM.performSearch', { query });

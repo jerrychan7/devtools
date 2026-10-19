@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import type { CdpServer } from '../core/server';
+import { CdpError, type CdpServer } from '../core/server';
 
 /**
  * Commands the frontend sends at startup that have no in-page equivalent (or are not
@@ -63,6 +63,12 @@ export function registerStubs(server: CdpServer) {
   // COOP, COEP and CSP are response headers of the document, unknown to the page.
   server.register('Network', {
     getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
+  });
+  // The page cannot read its shared storage's metadata: an error rather than made-up numbers.
+  server.register('Storage', {
+    getSharedStorageMetadata() {
+      throw new CdpError('Shared storage metadata is not available to the page');
+    },
   });
   // env() values are not readable from the page.
   server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });

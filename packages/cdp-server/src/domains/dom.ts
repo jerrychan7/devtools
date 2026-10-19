@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, type Context } from '../core/context';
-import { FORCE_ATTRIBUTE, PseudoElement, truncateNodeValue, visibleAttributes } from '../core/nodes';
+import { FORCE_ATTRIBUTE, OWN_ATTRIBUTE, PseudoElement, truncateNodeValue, visibleAttributes } from '../core/nodes';
 import { CdpError } from '../core/server';
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string };
@@ -411,6 +411,47 @@ export function registerDom(ctx: Context) {
 
     scrollIntoViewIfNeeded(params: Protocol.DOM.ScrollIntoViewIfNeededRequest) {
       element(params).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    },
+
+    /** Elements whose computed style matches any of the given ones (e.g. the Layout pane's grids). */
+    getNodesForSubtreeByStyle(
+      params: Protocol.DOM.GetNodesForSubtreeByStyleRequest
+    ): Protocol.DOM.GetNodesForSubtreeByStyleResponse {
+      const found: Element[] = [];
+      const visit = (root: ParentNode) => {
+        for (const el of root.querySelectorAll('*')) {
+          if (!nodes.isVisible(el) || el.closest(`[${OWN_ATTRIBUTE}]`)) continue;
+          const style = getComputedStyle(el);
+          if (params.computedStyles.some(({ name, value }) => style.getPropertyValue(name) === value)) found.push(el);
+          const shadowRoot = params.pierce && nodes.shadowRootOf(el);
+          if (shadowRoot) visit(shadowRoot);
+        }
+      };
+      visit(resolveNode(ctx, params) as ParentNode);
+      return { nodeIds: found.map(el => nodes.push(el, parent => emitChildren(parent))) };
+    },
+
+    /**
+     * Finds a node by the path the frontend keeps to select it again after a reload: pairs of
+     * the index among the parent's children (`u`/`a` for a shadow root) and the node name.
+     */
+    pushNodeByPathToFrontend(
+      params: Protocol.DOM.PushNodeByPathToFrontendRequest
+    ): Protocol.DOM.PushNodeByPathToFrontendResponse {
+      const parts = params.path.split(',');
+      let node: Node = document;
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        const [key = '', name = ''] = [parts[i], parts[i + 1]];
+        const next: Node | null | undefined =
+          key === 'u' || key === 'a'
+            ? node instanceof Element
+              ? nodes.shadowRootOf(node)
+              : null
+            : nodes.children(node)[Number(key)];
+        if (!next || next.nodeName !== name) throw new CdpError('No node with given path found');
+        node = next;
+      }
+      return { nodeId: nodes.push(node, parent => emitChildren(parent)) };
     },
 
     getTopLayerElements: () => ({ nodeIds: [] }),
