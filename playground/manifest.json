@@ -1,0 +1,10 @@
+{
+  "name": "devtools-anywhere playground",
+  "short_name": "playground",
+  "start_url": "/playground/",
+  "scope": "/playground/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1a73e8",
+  "icons": [{ "src": "/playground/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
