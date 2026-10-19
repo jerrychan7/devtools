@@ -90,6 +90,32 @@ export interface RequestRecord {
   errorText?: string;
 }
 
+/** Something that happened on a WebSocket after it was created. */
+export interface SocketEvent {
+  type: 'sent' | 'received' | 'error';
+  /** `performance.now()` when it happened. */
+  time: number;
+  /** Payload as given to `send()` or carried by the `message` event: a string, Blob, ArrayBuffer or view. */
+  data?: unknown;
+}
+
+export interface SocketRecord {
+  requestId: string;
+  url: string;
+  /** Stack of the code that created the socket. */
+  stack?: string | undefined;
+  /** `performance.now()` at creation. */
+  startTime: number;
+  /** `Date.now()` at creation. */
+  wallTime: number;
+  /** `performance.now()` when the connection opened. */
+  openTime?: number;
+  /** `performance.now()` when the connection closed. */
+  closeTime?: number;
+  /** Frames and errors, oldest first; the oldest are dropped past a limit. */
+  events: SocketEvent[];
+}
+
 export interface ListenerRecord {
   type: string;
   listener: EventListenerOrEventListenerObject;
@@ -104,10 +130,14 @@ export interface Probe {
   logs: LogEntry[];
   /** Ring buffer of fetch/XHR requests; records are updated in place. */
   requests: RequestRecord[];
+  /** Ring buffer of WebSockets; records are updated in place. */
+  sockets: SocketRecord[];
   /** Subscribes to new log entries. Returns an unsubscribe function. */
   onLog(listener: (entry: LogEntry) => void): () => void;
   /** Subscribes to request creation and every later state change. */
   onRequest(listener: (record: RequestRecord) => void): () => void;
+  /** Subscribes to WebSocket creation and every later change. */
+  onSocket(listener: (record: SocketRecord) => void): () => void;
   clearLogs(): void;
   /** Every shadow root attached since the probe ran, including closed ones. */
   shadowRoots: WeakMap<Element, ShadowRoot>;

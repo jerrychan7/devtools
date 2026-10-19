@@ -66,7 +66,7 @@ pnpm playground   # http://localhost:8788/playground/
 
 `pnpm dev` 以 watch 模式运行 `cdp-server`、`devtools-anywhere` 和 `vite-plugin` 的 esbuild。改动 `cdp-server` 时，打包了它的 `devtools-anywhere` 产物也会跟着重新构建。没有热更新：刷新页面即可加载新的构建。类型声明只在 `pnpm build` 时生成。
 
-playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回。
+playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回，`/ws/echo` 是一个把每条消息原样发回的 WebSocket。
 
 ### 目录结构
 

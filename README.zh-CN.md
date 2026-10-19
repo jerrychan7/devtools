@@ -39,6 +39,7 @@
 - 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
   - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
+  - 能显示 WebSocket 连接和帧，但没有握手阶段的请求头和响应头，页面拿不到它们。
   - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
   - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。
 - 前端要部署在和页面不同的源上。如果同源，devtools 自己的设置会写进页面的 `localStorage`，并出现在 Application 面板里。
@@ -62,9 +63,9 @@
 
 #### 1. 探针
 
-压缩后约 3.7 KB（min+gzip，包含外壳模式和自动挂载）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
+压缩后约 4.2 KB（min+gzip，包含外壳模式和自动挂载）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
 
-- 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch` 和 `XHR`，把事件连同时间戳写入缓冲。
+- 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch`、`XHR` 和 `WebSocket`，把事件连同时间戳写入缓冲。WebSocket 帧按原样保存，二进制负载到 CDP 服务端才转成 base64。
 - 无法 hook 的请求（文档、样式表、脚本、图片、字体等）通过 Resource Timing 记录；带 `buffered` 的 `PerformanceObserver` 还能拿到探针运行之前的请求。这些记录有 URL、类型、时序、大小，以及浏览器公开时的状态码和 MIME 类型，但没有请求头和响应头；响应体在需要时从 HTTP 缓存重新读取。外壳模式下启用了 Service Worker 时，它会为同源请求补上请求头和响应头。之所以仍以 hook 为主：hook 从最开始就生效、带调用栈、无需部署；Service Worker 要安装后才能接管页面，会和网站自己的 Service Worker 冲突，而且要代理请求才能看到响应。
 - CDP 运行时和前端延迟加载。运行时的 Runtime、Network 域直接读取探针的缓冲并订阅新事件，因此每个 API 只被 hook 一次。
 

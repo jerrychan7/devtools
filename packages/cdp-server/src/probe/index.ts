@@ -1,7 +1,7 @@
 // Early-capture probe.
 //
 // Load it as the first synchronous script of a page (probe.iife.js). It hooks console,
-// uncaught errors and fetch/XHR once, keeps recent events in ring buffers, and the CDP
+// uncaught errors, fetch/XHR and WebSocket once, keeps recent events in ring buffers, and the CDP
 // server reads those buffers later. The CDP server installs it itself when no earlier
 // probe exists, so every API is hooked exactly once either way.
 import {
@@ -13,6 +13,7 @@ import {
   type Probe,
   type RequestRecord,
   type RequestType,
+  type SocketRecord,
 } from './types';
 
 import { isShellPage, readShellConfig, writeShellDocument } from './shell';
@@ -22,6 +23,7 @@ export * from './shell';
 
 const MAX_LOGS = 1000;
 const MAX_REQUESTS = 300;
+const MAX_SOCKET_EVENTS = 500;
 const MAX_BODY_LENGTH = 5 * 1024 * 1024;
 
 export function installProbe(): Probe {
@@ -33,6 +35,8 @@ export function installProbe(): Probe {
   const requests: RequestRecord[] = [];
   const logListeners = new Set<(entry: LogEntry) => void>();
   const requestListeners = new Set<(record: RequestRecord) => void>();
+  const sockets: SocketRecord[] = [];
+  const socketListeners = new Set<(record: SocketRecord) => void>();
 
   const probe: Probe = {
     version: 1,
@@ -45,6 +49,11 @@ export function installProbe(): Probe {
     onRequest(listener) {
       requestListeners.add(listener);
       return () => requestListeners.delete(listener);
+    },
+    sockets,
+    onSocket(listener) {
+      socketListeners.add(listener);
+      return () => socketListeners.delete(listener);
     },
     clearLogs() {
       logs.length = 0;
@@ -63,12 +72,20 @@ export function installProbe(): Probe {
     logListeners.forEach(fn => fn(entry));
   }
 
+  let seq = 0;
+  // Before hookListeners: the socket's own listeners are not the page's.
+  hookWebSocket(rec => {
+    if (!rec.requestId) {
+      rec.requestId = 'probe.' + ++seq;
+      if (sockets.push(rec) > MAX_REQUESTS) sockets.shift();
+    }
+    socketListeners.forEach(fn => fn(rec));
+  });
   hookConsole(addLog, now);
   hookErrors(addLog, now);
   hookShadowRoots(probe.shadowRoots);
   hookListeners(probe.listeners);
 
-  let seq = 0;
   function add(rec: RequestRecord) {
     rec.requestId = 'probe.' + ++seq;
     if (requests.push(rec) > MAX_REQUESTS) requests.shift();
@@ -200,6 +217,54 @@ function observeResources(add: (rec: RequestRecord) => void, update: Update, req
       // Entry type not supported.
     }
   }
+}
+
+// ---- WebSocket ----
+
+/**
+ * Replaces WebSocket with a subclass that records connection, frames and close. `notify`
+ * assigns the record an id the first time and publishes every change.
+ */
+function hookWebSocket(notify: (rec: SocketRecord) => void) {
+  const WS = window.WebSocket;
+  if (!WS) return;
+  const listen = EventTarget.prototype.addEventListener;
+  const records = new WeakMap<WebSocket, SocketRecord>();
+  const push = (rec: SocketRecord, type: 'sent' | 'received' | 'error', data?: unknown) => {
+    if (rec.events.push({ type, time: performance.now(), data }) > MAX_SOCKET_EVENTS) rec.events.shift();
+    notify(rec);
+  };
+  window.WebSocket = class WebSocket extends WS {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      const rec: SocketRecord = {
+        requestId: '',
+        url: this.url,
+        stack: new Error().stack,
+        startTime: performance.now(),
+        wallTime: Date.now(),
+        events: [],
+      };
+      records.set(this, rec);
+      notify(rec);
+      listen.call(this, 'open', () => {
+        rec.openTime = performance.now();
+        notify(rec);
+      });
+      listen.call(this, 'message', e => push(rec, 'received', (e as MessageEvent).data));
+      listen.call(this, 'error', () => push(rec, 'error'));
+      listen.call(this, 'close', () => {
+        rec.closeTime = performance.now();
+        notify(rec);
+      });
+    }
+    override send(data: Parameters<InstanceType<typeof WS>['send']>[0]) {
+      super.send(data);
+      const rec = records.get(this);
+      // Frames given to a closing socket are dropped, and Chrome does not report them.
+      if (rec && this.readyState === 1) push(rec, 'sent', data);
+    }
+  };
 }
 
 // ---- console ----

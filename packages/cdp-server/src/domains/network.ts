@@ -1,9 +1,9 @@
 import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
-import { readBody } from '../core/body';
+import { base64, readBody } from '../core/body';
 import { CdpError } from '../core/server';
 import { parseStack } from '../core/stack';
-import type { RequestRecord } from '../probe/types';
+import type { RequestRecord, SocketEvent, SocketRecord } from '../probe/types';
 
 export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return [];
@@ -39,9 +39,30 @@ export const isOwnUrl = (probe: Context['probe'], url: string) => {
 };
 export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => isOwnUrl(probe, rec.url);
 
+/**
+ * CDP frame of a WebSocket payload: text as is, binary data (converted only now) as base64.
+ * Like Chrome, a Blob given to `send()` is reported without its payload.
+ */
+async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.WebSocketFrame> {
+  if (typeof data === 'string') return { opcode: 1, mask, payloadData: data };
+  let blob = new Blob();
+  if (data instanceof Blob) {
+    if (!mask) blob = data;
+  } else if (data instanceof ArrayBuffer) blob = new Blob([data]);
+  // A copy: the view may be on a SharedArrayBuffer, which Blob does not take.
+  else if (ArrayBuffer.isView(data))
+    blob = new Blob([new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()]);
+  return { opcode: 2, mask, payloadData: await base64(blob) };
+}
+
 export function registerNetwork({ server, probe }: Context) {
   let unsubscribe: (() => void) | null = null;
+  let unsubscribeSockets: (() => void) | null = null;
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
+  const sentSockets = new Map<string, Set<'created' | 'open' | 'closed'>>();
+  let sentFrames = new WeakSet<SocketEvent>();
+  // Socket events are emitted in order even though reading a Blob payload is asynchronous.
+  let queue = Promise.resolve();
 
   function find(requestId: string) {
     return probe.requests.find(r => r.requestId === requestId);
@@ -125,18 +146,97 @@ export function registerNetwork({ server, probe }: Context) {
     }
   }
 
+  /** Emits whichever events of the socket's lifecycle have not been sent yet. */
+  async function emitSocket(rec: SocketRecord) {
+    if (isOwnUrl(probe, rec.url)) return;
+    const { requestId } = rec;
+    let done = sentSockets.get(requestId);
+    if (!done) sentSockets.set(requestId, (done = new Set()));
+
+    if (!done.has('created')) {
+      done.add('created');
+      const callFrames = parseStack(rec.stack, 1);
+      server.emit('Network.webSocketCreated', {
+        requestId,
+        url: rec.url,
+        initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
+      } satisfies Protocol.Network.WebSocketCreatedEvent);
+      server.emit('Network.webSocketWillSendHandshakeRequest', {
+        requestId,
+        timestamp: rec.startTime / 1000,
+        wallTime: rec.wallTime / 1000,
+        // The handshake headers are not visible to the page.
+        request: { headers: {} },
+      } satisfies Protocol.Network.WebSocketWillSendHandshakeRequestEvent);
+    }
+
+    if (rec.openTime !== undefined && !done.has('open')) {
+      done.add('open');
+      server.emit('Network.webSocketHandshakeResponseReceived', {
+        requestId,
+        timestamp: rec.openTime / 1000,
+        response: { status: 101, statusText: 'Switching Protocols', headers: {} },
+      } satisfies Protocol.Network.WebSocketHandshakeResponseReceivedEvent);
+    }
+
+    for (const event of rec.events) {
+      if (sentFrames.has(event)) continue;
+      sentFrames.add(event);
+      const timestamp = event.time / 1000;
+      if (event.type === 'error') {
+        server.emit('Network.webSocketFrameError', {
+          requestId,
+          timestamp,
+          errorMessage: 'WebSocket error',
+        } satisfies Protocol.Network.WebSocketFrameErrorEvent);
+      } else if (event.type === 'sent') {
+        const response = await frameOf(event.data, true);
+        server.emit('Network.webSocketFrameSent', {
+          requestId,
+          timestamp,
+          response,
+        } satisfies Protocol.Network.WebSocketFrameSentEvent);
+      } else {
+        const response = await frameOf(event.data, false);
+        server.emit('Network.webSocketFrameReceived', {
+          requestId,
+          timestamp,
+          response,
+        } satisfies Protocol.Network.WebSocketFrameReceivedEvent);
+      }
+    }
+
+    if (rec.closeTime !== undefined && !done.has('closed')) {
+      done.add('closed');
+      server.emit('Network.webSocketClosed', {
+        requestId,
+        timestamp: rec.closeTime / 1000,
+      } satisfies Protocol.Network.WebSocketClosedEvent);
+    }
+  }
+
+  const queueSocket = (rec: SocketRecord) => {
+    queue = queue.then(() => emitSocket(rec)).catch(() => {});
+  };
+
   server.register('Network', {
     enable() {
       if (unsubscribe) return;
-      // Report requests made before the client connected, including early ones.
+      // Report requests and sockets made before the client connected, including early ones.
       probe.requests.forEach(emit);
       unsubscribe = probe.onRequest(emit);
+      probe.sockets.forEach(queueSocket);
+      unsubscribeSockets = probe.onSocket(queueSocket);
     },
 
     disable() {
       unsubscribe?.();
       unsubscribe = null;
+      unsubscribeSockets?.();
+      unsubscribeSockets = null;
       sent.clear();
+      sentSockets.clear();
+      sentFrames = new WeakSet();
     },
 
     async getResponseBody(

@@ -39,6 +39,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 - Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
+  - WebSocket connections and their frames are shown, but not the handshake headers, which the page cannot see.
   - Cross-origin style sheets are read through a fetched copy, which needs CORS headers; their rules are read-only.
   - Forced pseudo-classes (`:hover`, `:focus`, … from the Styles pane) are emulated with companion style sheets that keep the cascade order; sheets from `@import` and `adoptedStyleSheets` are not covered.
 - Host the frontend on a different origin from the page. On the same origin, DevTools' own settings share the page's `localStorage` and show up in the Application panel.
@@ -62,9 +63,9 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 #### 1. Probe
 
-A synchronous script of about 3.7 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
+A synchronous script of about 4.2 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
 
-- Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch` and `XHR`, and writes events with timestamps into a buffer.
+- Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch`, `XHR` and `WebSocket`, and writes events with timestamps into a buffer. WebSocket frames are kept as given; binary payloads are only converted to base64 by the CDP server.
 - Requests that cannot be hooked (the document, style sheets, scripts, images, fonts, …) are recorded from Resource Timing; a buffered `PerformanceObserver` also delivers those from before the probe ran. They have URL, type, timing, size and (where the browser exposes it) status and MIME type, but no headers; their bodies are loaded again from the HTTP cache on demand. In shell mode with the Service Worker, it adds the request and response headers of same-origin ones. Hooks stay first because they work from the very start, keep call stacks, and need no deployment; a Service Worker only controls pages after it is installed, conflicts with a site's own, and would have to proxy requests to see responses.
 - The CDP runtime and the frontend are loaded lazily. The runtime's Runtime and Network domains consume the probe's buffer directly and subscribe to new events, so every API is hooked only once.
 

@@ -66,7 +66,7 @@ pnpm playground   # http://localhost:8788/playground/
 
 `pnpm dev` runs esbuild in watch mode for `cdp-server`, `devtools-anywhere` and `vite-plugin`. A change in `cdp-server` also rebuilds the `devtools-anywhere` bundles that include it. There is no hot reload: refresh the page to load the new build. Type declarations are only emitted by `pnpm build`.
 
-The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON.
+The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON; `/ws/echo` is a WebSocket that sends every message back.
 
 ### Repository layout
 

@@ -2,8 +2,11 @@
 //
 //   node playground/server.ts [port]
 //
-// Any request accepts `?delay=<ms>`. `/api/echo` returns the request as JSON.
+// Any request accepts `?delay=<ms>`. `/api/echo` returns the request as JSON, and
+// `/ws/echo` is a WebSocket endpoint that sends every message back.
 import http from 'node:http';
+import crypto from 'node:crypto';
+import type { Duplex } from 'node:stream';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +27,86 @@ const types: Record<string, string> = {
 };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/** Encodes one unmasked, unfragmented frame (server to client). */
+function wsFrame(opcode: number, payload: Buffer): Buffer {
+  const length = payload.length;
+  const header = length < 126 ? Buffer.alloc(2) : length < 65536 ? Buffer.alloc(4) : Buffer.alloc(10);
+  header[0] = 0x80 | opcode;
+  if (length < 126) header[1] = length;
+  else if (length < 65536) {
+    header[1] = 126;
+    header.writeUInt16BE(length, 2);
+  } else {
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(length), 2);
+  }
+  return Buffer.concat([header, payload]);
+}
+
+/** Minimal RFC 6455 echo: text and binary messages are sent back, close is answered. */
+function wsEcho(req: http.IncomingMessage, socket: Duplex) {
+  const key = req.headers['sec-websocket-key'];
+  if (typeof key !== 'string') {
+    socket.destroy();
+    return;
+  }
+  const accept = crypto
+    .createHash('sha1')
+    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+    .digest('base64');
+  const protocol = String(req.headers['sec-websocket-protocol'] ?? '')
+    .split(',')[0]
+    ?.trim();
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n` +
+      (protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : '') +
+      '\r\n'
+  );
+  let buffer = Buffer.alloc(0);
+  // A fragmented message (Chrome sends Blobs that way) is echoed once complete.
+  let message: { opcode: number; parts: Buffer[] } | null = null;
+  socket.on('data', (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    // Client frames are always masked.
+    for (;;) {
+      if (buffer.length < 2) return;
+      const b0 = buffer.readUInt8(0);
+      const b1 = buffer.readUInt8(1);
+      let length = b1 & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (buffer.length < 4) return;
+        length = buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (buffer.length < 10) return;
+        length = Number(buffer.readBigUInt64BE(2));
+        offset = 10;
+      }
+      if (buffer.length < offset + 4 + length) return;
+      const mask = buffer.subarray(offset, offset + 4);
+      const payload = Buffer.from(buffer.subarray(offset + 4, offset + 4 + length));
+      for (let i = 0; i < payload.length; i++) payload.writeUInt8(payload.readUInt8(i) ^ mask.readUInt8(i % 4), i);
+      buffer = buffer.subarray(offset + 4 + length);
+      const opcode = b0 & 0x0f;
+      if (opcode === 1 || opcode === 2) message = { opcode, parts: [] };
+      if (opcode <= 2 && message) {
+        message.parts.push(payload);
+        if (b0 & 0x80) {
+          socket.write(wsFrame(message.opcode, Buffer.concat(message.parts)));
+          message = null;
+        }
+      } else if (opcode === 9) socket.write(wsFrame(10, payload));
+      else if (opcode === 8) {
+        socket.end(wsFrame(8, payload));
+        return;
+      }
+    }
+  });
+  socket.on('error', () => socket.destroy());
+}
 
 /** Starts the server; resolves with its base URL. Port 0 picks a free port. */
 export interface PlaygroundServer {
@@ -66,6 +149,10 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
     } catch {
       res.writeHead(404).end('not found');
     }
+  });
+  server.on('upgrade', (req, socket) => {
+    if (new URL(req.url ?? '/', 'http://localhost').pathname === '/ws/echo') wsEcho(req, socket);
+    else socket.destroy();
   });
   return new Promise(resolve => {
     server.listen(port, () => {
