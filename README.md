@@ -140,15 +140,6 @@ experiments/      validation records
   - Insert the probe with a `TransformStream` so SSR streaming is not broken.
   - Mind the scope: the SW script must sit at the site root, or the server must send a `Service-Worker-Allowed` header.
 
-## Roadmap
-
-1. ✅ **Validate early capture**: probe, buffering and replay ([results](experiments/early-capture/RESULTS.md)).
-2. ✅ **Project skeleton and CDP core**: workspace, TypeScript, latest `devtools-protocol`; shared core state; Runtime, Network and Page domains backed by the probe; conformance tests against real Chrome.
-3. ✅ **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
-4. ✅ **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
-5. ✅ **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
-6. ✅ **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
-7. ✅ **Frontend customization**: own build of the official devtools-frontend with a patch set and a one-command upgrade; only panels that work in the page.
 
 ## Usage (preview)
 
@@ -185,29 +176,11 @@ A floating F12 button opens the panel; drag its top bar to resize, ⟳ switches 
 
 ## Development
 
-Requires Node.js 22.18+ (the build scripts are TypeScript run by Node directly), pnpm and a local Google Chrome (set `CHROME_PATH` if it is not in the default macOS location).
-
-```bash
-pnpm install
-pnpm test          # build, then run the conformance tests against real Chrome
-pnpm playground    # http://localhost:8788/playground/
-```
-
-The playground and the real-frontend tests use the frontend in `packages/devtools-frontend/dist` (the tests are skipped until it is built).
+See the [development guide](DEV.md) for setting up the environment, live rebuilds, tests, building the frontend, and releasing.
 
 ### Frontend
 
-`packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at the revision pinned in `REVISION`:
-
-```bash
-fetch devtools-frontend   # once, with depot_tools on PATH; checks out into ./devtools-frontend.ignore by default
-pnpm --filter @devtools-anywhere/devtools-frontend build:frontend   # pinned revision
-pnpm --filter @devtools-anywhere/devtools-frontend update           # latest upstream, pins it on success
-```
-
-`DEVTOOLS_FRONTEND_SRC` and `DEPOT_TOOLS` override the default locations (`devtools-frontend.ignore/devtools-frontend`, `depot_tools.ignore`). The script checks out the revision, runs `gclient sync`, applies `patches/*.patch`, copies `src/` into `front_end/entrypoints/`, builds with gn and autoninja, and copies to `dist/` only what the entrypoint can load (modules reachable through imports, their assets, and the UI strings of those modules: English and Chinese in `dist/`, the other locales in `packages/devtools-frontend-locales/dist/`).
-
-How it fits into upstream with as few patches as possible:
+`packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at a pinned revision and keeps only what its entrypoint can load. How it fits into upstream with as few patches as possible:
 
 - **Own entrypoint** `anywhere_app` instead of `devtools_app`: it imports only the panels that work against the in-page CDP server (Elements, Console, Sources, Network, Application), so the others are neither shown nor loaded. The only patch registers this entrypoint in the build (7 lines in 4 `BUILD.gn`/`.gni` files).
 - **Embedder through the official host API**: Chrome talks to DevTools through native `InspectorFrontendHost` bindings. The entrypoint keeps the hosted-mode stub and only replaces `sendMessageToBackend`/`isHostedMode`, so CDP messages travel through `postMessage` to the embedding window, which passes its origin as `#?embedded=<origin>`. No connection code is patched.

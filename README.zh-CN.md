@@ -140,15 +140,6 @@ experiments/      验证记录
   - 用 `TransformStream` 流式插入探针，避免破坏 SSR 的流式输出。
   - 注意作用域：SW 脚本需要放在站点根路径，或者由服务器返回 `Service-Worker-Allowed` 头。
 
-## 路线图
-
-1. ✅ **验证早期捕获**：探针、缓冲和回放（[结果](experiments/early-capture/RESULTS.md)）。
-2. ✅ **项目骨架和 CDP 核心**：workspace、TypeScript、最新的 `devtools-protocol`；跨域共享的核心状态；基于探针的 Runtime、Network 和 Page 域；对比真实 Chrome 的一致性测试。
-3. ✅ **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
-4. ✅ **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
-5. ✅ **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
-6. ✅ **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
-7. ✅ **前端定制**：从官方 devtools-frontend 自己构建，维护补丁集，一条命令升级；只包含页面内能用的面板。
 
 ## 用法（预览）
 
@@ -185,29 +176,11 @@ export default {
 
 ## 开发
 
-需要 Node.js 22.18 及以上（构建脚本是 TypeScript，由 Node 直接运行）、pnpm 和本机安装的 Google Chrome（如果不在 macOS 的默认位置，请设置 `CHROME_PATH`）。
-
-```bash
-pnpm install
-pnpm test          # 构建后运行对比真实 Chrome 的一致性测试
-pnpm playground    # http://localhost:8788/playground/
-```
-
-playground 和真实前端测试使用 `packages/devtools-frontend/dist` 里的前端（未构建时这些测试会跳过）。
+环境配置、实时重新构建、测试、构建前端和发布，见[开发指南](DEV.zh-CN.md)。
 
 ### 前端
 
-`packages/devtools-frontend` 按 `REVISION` 里钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)：
-
-```bash
-fetch devtools-frontend   # 只需一次，depot_tools 需在 PATH 上；默认检出到 ./devtools-frontend.ignore
-pnpm --filter @devtools-anywhere/devtools-frontend build:frontend   # 构建钉住的版本
-pnpm --filter @devtools-anywhere/devtools-frontend update           # 构建上游最新版，成功后钉住
-```
-
-`DEVTOOLS_FRONTEND_SRC` 和 `DEPOT_TOOLS` 可以覆盖默认位置（`devtools-frontend.ignore/devtools-frontend`、`depot_tools.ignore`）。脚本会检出指定版本、运行 `gclient sync`、打上 `patches/*.patch`、把 `src/` 复制到 `front_end/entrypoints/`、用 gn 和 autoninja 构建，再只把入口能加载到的文件复制到 `dist/`：经 import 可达的模块、它们的资源，以及这些模块的界面文案：英文和中文放在 `dist/`，其他语言放在 `packages/devtools-frontend-locales/dist/`。
-
-为了尽量少改上游：
+`packages/devtools-frontend` 按钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)，只保留入口能加载到的文件。为了尽量少改上游：
 
 - **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用），其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
 - **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
