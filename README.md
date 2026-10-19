@@ -35,7 +35,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 ### Limitations
 
-- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. The Sources panel does not list the page's scripts yet (snippets work).
+- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. The Sources panel's Page tab lists the page's documents, images and fonts but not yet its scripts and style sheets (these need `Debugger.scriptParsed` and `CSS.styleSheetAdded`); snippets work.
 - Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
@@ -62,9 +62,10 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 #### 1. Probe
 
-A synchronous script of about 3 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
+A synchronous script of about 3.7 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
 
 - Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch` and `XHR`, and writes events with timestamps into a buffer.
+- Requests that cannot be hooked (the document, style sheets, scripts, images, fonts, …) are recorded from Resource Timing; a buffered `PerformanceObserver` also delivers those from before the probe ran. They have URL, type, timing, size and (where the browser exposes it) status and MIME type, but no headers; their bodies are loaded again from the HTTP cache on demand. In shell mode with the Service Worker, it adds the request and response headers of same-origin ones. Hooks stay first because they work from the very start, keep call stacks, and need no deployment; a Service Worker only controls pages after it is installed, conflicts with a site's own, and would have to proxy requests to see responses.
 - The CDP runtime and the frontend are loaded lazily. The runtime's Runtime and Network domains consume the probe's buffer directly and subscribe to new events, so every API is hooked only once.
 
 Nothing outside a page can observe its output; only a script that runs before the page's own code can capture the earliest output. The full CDP runtime is too large to load synchronously, so only the minimal capture logic goes first.
