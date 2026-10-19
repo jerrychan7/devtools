@@ -57,6 +57,48 @@ test('one script tag captures early output and mounts DevTools after load', asyn
   assert.equal(open, true);
 });
 
+/** The undocked panel's size, in px and as a fraction of the viewport. */
+const panelSize = () =>
+  page.evaluate(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    if (!panel) throw new Error('no panel');
+    const { width, height } = panel.getBoundingClientRect();
+    return { width, height, widthRatio: width / innerWidth, heightRatio: height / innerHeight };
+  });
+
+test('an undocked panel ignores a stored size that is not numbers', async () => {
+  await page.evaluate(() => {
+    localStorage.setItem('devtools-anywhere:float%', 'null');
+    const devtools = document.querySelector('devtools-anywhere');
+    if (!devtools) throw new Error('no <devtools-anywhere>');
+    devtools.setAttribute('dock', 'undocked');
+  });
+  const size = await panelSize();
+  assert.ok(Math.abs(size.widthRatio - 0.8) < 0.01, `width ${size.widthRatio}`);
+  assert.ok(Math.abs(size.heightRatio - 0.6) < 0.01, `height ${size.heightRatio}`);
+});
+
+test('the undocked panel is resized by touch from its corner', async () => {
+  const before = await panelSize();
+  const corner = await page.evaluate(() => {
+    const el = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.corner');
+    if (!el) throw new Error('no corner');
+    const { x, y, width, height } = el.getBoundingClientRect();
+    return { x: x + width / 2, y: y + height / 2 };
+  });
+  await page.touchscreen.touchStart(corner.x, corner.y);
+  await page.touchscreen.touchMove(corner.x - 100, corner.y - 50);
+  await page.touchscreen.touchEnd();
+  const after = await panelSize();
+  assert.ok(Math.abs(before.width - after.width - 100) < 2, `width ${before.width} -> ${after.width}`);
+  assert.ok(Math.abs(before.height - after.height - 50) < 2, `height ${before.height} -> ${after.height}`);
+  await page.evaluate(() => {
+    localStorage.removeItem('devtools-anywhere:float%');
+    localStorage.removeItem('devtools-anywhere:dock');
+    document.querySelector('devtools-anywhere')?.setAttribute('dock', 'bottom');
+  });
+});
+
 test('in shell mode the Service Worker injects the probe into pages without it', async () => {
   await page.evaluate(() => {
     const devtools = document.querySelector('devtools-anywhere');
@@ -140,6 +182,33 @@ test('the Service Worker passes non-HTML responses through unchanged', async () 
   assert.equal(contentType, 'application/json');
   assert.equal(text?.trimEnd(), '{ "page": "<head> in a non-HTML response" }');
   assert.deepEqual(await pageScripts(), []);
+});
+
+test('the Service Worker leaves the same-origin DevTools frontend alone', async () => {
+  // The worker controls the shell by now, so it sees the frontend frame's navigation.
+  await page.evaluate(() => {
+    const frontend = document.querySelector('devtools-anywhere[shell]')?.shadowRoot?.querySelector('iframe');
+    if (!frontend?.contentWindow) throw new Error('no frontend frame');
+    // Marks the old document, to wait for the new one.
+    Reflect.set(frontend.contentWindow, 'stale', true);
+    frontend.contentWindow.location.reload();
+  });
+  await waitFor(() =>
+    page.evaluate(() => {
+      const doc = document
+        .querySelector('devtools-anywhere[shell]')
+        ?.shadowRoot?.querySelector('iframe')?.contentDocument;
+      const win = doc?.defaultView;
+      return !!win && !Reflect.get(win, 'stale') && doc.readyState === 'complete' && !!win.received;
+    })
+  );
+  const scripts = await page.evaluate(() => {
+    const devtools = document.querySelector('devtools-anywhere[shell]');
+    const frontendDocument = devtools?.shadowRoot?.querySelector('iframe')?.contentDocument;
+    if (!frontendDocument) throw new Error('no frontend frame');
+    return [...frontendDocument.querySelectorAll('script')].map(s => s.src);
+  });
+  assert.equal(scripts.filter(src => src.endsWith('/probe.iife.js')).length, 0, scripts.join(', '));
 });
 
 test('leaving shell mode unregisters the Service Worker', async () => {

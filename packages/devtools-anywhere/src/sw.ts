@@ -3,7 +3,8 @@
 // While shell mode is on, it injects the probe at the top of <head> of every same-origin
 // page loaded into an iframe, so pages that do not include the probe themselves are still
 // captured when the page iframe navigates to them. The shell registers it with the probe
-// URL in the query string (`?probe=…`) and unregisters it when shell mode ends.
+// URL in the query string (`?probe=…`) and unregisters it when shell mode ends. The DevTools
+// frontend page (`&skip=…`, its URL without query or hash) is left alone even if same-origin.
 //
 // It also reports the details Resource Timing does not expose (request and response headers,
 // status text) of same-origin subresources (style sheets, scripts, images, fonts) to
@@ -17,7 +18,9 @@
 declare const self: ServiceWorkerGlobalScope;
 export {};
 
-const probe = new URL(self.location.href).searchParams.get('probe');
+const params = new URL(self.location.href).searchParams;
+const probe = params.get('probe');
+const skip = params.get('skip');
 const SNIFF_LIMIT = 64 * 1024;
 /** Message type the probe listens for; keep in sync with cdp-server's probe. */
 const DETAILS = 'devtools-anywhere:response';
@@ -31,7 +34,9 @@ self.addEventListener('fetch', event => {
   if (!probe) return;
   if (request.mode === 'navigate') {
     // Only iframe navigations: top-level pages pass through untouched.
-    if (request.destination === 'iframe') event.respondWith(inject(request, probe));
+    if (request.destination !== 'iframe') return;
+    const url = new URL(request.url);
+    if (url.origin + url.pathname !== skip) event.respondWith(inject(request, probe));
   } else if (
     DESTINATIONS.has(request.destination) &&
     request.method === 'GET' &&

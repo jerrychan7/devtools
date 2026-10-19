@@ -320,6 +320,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (!config?.sw || !navigator.serviceWorker) return;
     const url = new URL(config.sw);
     url.searchParams.set('probe', new URL('probe.iife.js', config.bundle).href);
+    // The DevTools frontend may be same-origin (the Vite plugin serves it): keep the probe out of it.
+    const frontend = new URL(config.frontend);
+    url.searchParams.set('skip', frontend.origin + frontend.pathname);
     try {
       await navigator.serviceWorker.register(url.href, { scope: '/' });
     } catch (e) {
