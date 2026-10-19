@@ -1,18 +1,24 @@
 import type { Protocol } from 'devtools-protocol';
+import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping';
 import { CdpError, type CdpServer } from '../core/server';
+
+type Command = keyof ProtocolMapping.Commands;
+type DomainOf<C> = C extends `${infer D}.${string}` ? D : never;
+type MethodOf<C, D extends string> = C extends `${D}.${infer M}` ? M : never;
+/** Commands of each domain, so a misspelt name fails to compile. */
+type CommandsByDomain = { [D in DomainOf<Command>]?: MethodOf<Command, D>[] };
 
 /**
  * Commands the frontend sends at startup that have no in-page equivalent (or are not
  * implemented yet). Answering them with an empty result keeps the frontend happy.
  */
-const NOOPS: Record<string, string[]> = {
+const NOOPS = {
   Accessibility: ['enable'],
   Animation: ['enable'],
   Audits: ['enable'],
   Autofill: ['enable', 'setAddresses'],
   BackgroundService: ['startObserving'],
   CSS: ['trackComputedStyleUpdatesForNode'],
-  Database: ['enable'],
   Emulation: ['setEmulatedMedia', 'setAutoDarkModeOverride', 'setEmulatedVisionDeficiency', 'setFocusEmulationEnabled'],
   HeapProfiler: ['enable'],
   Inspector: ['enable'],
@@ -26,7 +32,16 @@ const NOOPS: Record<string, string[]> = {
     'setShowContainerQueryOverlays',
     'setShowIsolatedElements',
   ],
-  Network: ['overrideNetworkState', 'enableReportingApi'],
+  Network: [
+    'overrideNetworkState',
+    'enableReportingApi',
+    'setCacheDisabled',
+    'setAttachDebugStack',
+    'emulateNetworkConditions',
+    'setBypassServiceWorker',
+    'setExtraHTTPHeaders',
+    'setBlockedURLs',
+  ],
   Preload: ['enable'],
   Profiler: ['enable'],
   ServiceWorker: ['enable'],
@@ -34,8 +49,6 @@ const NOOPS: Record<string, string[]> = {
     'trackCacheStorageForOrigin',
     'trackIndexedDBForOrigin',
     'trackIndexedDBForStorageKey',
-    'setInterestGroupTracking',
-    'setSharedStorageTracking',
     'setStorageBucketTracking',
     'untrackCacheStorageForOrigin',
     'untrackCacheStorageForStorageKey',
@@ -43,25 +56,30 @@ const NOOPS: Record<string, string[]> = {
     'untrackIndexedDBForStorageKey',
   ],
   Target: ['setAutoAttach', 'setDiscoverTargets', 'setRemoteLocations'],
+} satisfies CommandsByDomain;
+
+/** No-ops the frontend sends that this devtools-protocol version does not declare. */
+const UNDECLARED_NOOPS: Record<string, string[]> = {
+  Database: ['enable'],
+  Network: ['clearAcceptedEncodingsOverride'],
+  Storage: ['setInterestGroupTracking', 'setSharedStorageTracking'],
 };
 
 export function registerStubs(server: CdpServer) {
-  for (const [domain, methods] of Object.entries(NOOPS)) {
+  for (const [domain, methods] of [...Object.entries(NOOPS), ...Object.entries(UNDECLARED_NOOPS)]) {
     server.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])));
   }
-  // Throttling cannot be emulated in the page: the rules are accepted but never applied.
   server.register('Network', {
+    // Throttling cannot be emulated in the page: the rules are accepted but never applied.
     emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({
       ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`),
     }),
+    // COOP, COEP and CSP are response headers of the document, unknown to the page.
+    getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
   });
   // Feature flags of the browser are not readable from the page: report them as off.
   server.register('SystemInfo', {
     getFeatureState: (): Protocol.SystemInfo.GetFeatureStateResponse => ({ featureEnabled: false }),
-  });
-  // COOP, COEP and CSP are response headers of the document, unknown to the page.
-  server.register('Network', {
-    getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
   });
   // The page cannot read its shared storage's metadata: an error rather than made-up numbers.
   server.register('Storage', {

@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../core/body';
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
-import { isOwnRequest } from './network';
+import { isOwnRequest, refetch } from './network';
 
 export function registerPage({ server, probe }: Context) {
   server.register('Page', {
@@ -31,7 +31,7 @@ export function registerPage({ server, probe }: Context) {
           )
           .map(rec => ({
             url: rec.url,
-            type: rec.type as Protocol.Network.ResourceType,
+            type: rec.type,
             mimeType: rec.mimeType || '',
           })),
       },
@@ -41,8 +41,7 @@ export function registerPage({ server, probe }: Context) {
     async getResourceContent(
       params: Protocol.Page.GetResourceContentRequest
     ): Promise<Protocol.Page.GetResourceContentResponse> {
-      const res = await probe.fetch(params.url, { cache: 'force-cache' });
-      if (!res.ok) throw new Error(`Failed to load ${params.url}: ${res.status}`);
+      const res = await refetch(probe, params.url);
       const { body, base64Encoded } = await readBody(res);
       return { content: body, base64Encoded };
     },
@@ -54,11 +53,9 @@ export function registerPage({ server, probe }: Context) {
     async getAppManifest(): Promise<Protocol.Page.GetAppManifestResponse> {
       const link = document.querySelector<HTMLLinkElement>('link[rel~="manifest"][href]');
       if (!link) return { url: '', errors: [], data: '', manifest: {} };
-      const res = await probe.fetch(link.href, {
-        cache: 'force-cache',
+      const res = await refetch(probe, link.href, {
         credentials: link.crossOrigin === 'use-credentials' ? 'include' : 'omit',
       });
-      if (!res.ok) throw new Error(`Failed to load ${link.href}: ${res.status}`);
       return { url: link.href, errors: [], data: await res.text(), manifest: {} };
     },
 

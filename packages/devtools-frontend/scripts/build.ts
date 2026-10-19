@@ -11,7 +11,8 @@
 // Flags:
 //   --latest     build the tip of origin/main instead of REVISION, and pin it on success
 //   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout)
-//   --copy-only  also skip the build: only copy the last build's output to dist/
+//   --copy-only  implies --no-sync and also skips the build: only copy the last build's
+//                output to dist/
 //
 // locales/<locale>.json translates anywhere_app's own UI strings (keys of its UIStrings),
 // which upstream's translations do not have; other locales show them in English.
@@ -35,6 +36,8 @@ const BUNDLED_LOCALES = ['en-US', 'zh'];
 const revisionFile = path.join(pkg, 'REVISION');
 
 const args = new Set(process.argv.slice(2));
+/** --copy-only reuses the last build, so syncing (or moving to --latest) would mislabel it. */
+const noSync = args.has('--no-sync') || args.has('--copy-only');
 const env = { ...process.env, PATH: `${depotTools}${path.delimiter}${process.env['PATH']}`, DEPOT_TOOLS_UPDATE: '0' };
 const run = (cmd: string, argv: string[], opts: ExecFileSyncOptions = {}) =>
   execFileSync(cmd, argv, { cwd: src, env, stdio: 'inherit', ...opts });
@@ -46,7 +49,7 @@ if (!fs.existsSync(path.join(src, '.git'))) {
 }
 
 let revision = fs.readFileSync(revisionFile, 'utf8').trim();
-if (!args.has('--no-sync')) {
+if (!noSync) {
   run('git', ['fetch', 'origin', 'main']);
   if (args.has('--latest')) revision = read('git', ['rev-parse', 'origin/main']);
   run('git', ['checkout', '--force', '--detach', revision]);
@@ -110,6 +113,16 @@ const LOCALES = 'core/i18n/locales/';
 const BORROWED_STRINGS = ['panels/browser_debugger/browser_debugger-meta.ts'];
 /** The file anywhere_app's own UI strings are registered under. */
 const OWN_STRINGS = 'entrypoints/anywhere_app/anywhere_app.ts';
+// Both are the paths anywhere_app registers its strings under: if they drift apart, the strings
+// would be dropped below and every locale would show English.
+{
+  const source = fs.readFileSync(path.join(pkg, 'src/anywhere_app/anywhere_app.ts'), 'utf8');
+  for (const file of [...BORROWED_STRINGS, OWN_STRINGS]) {
+    if (!source.includes(`registerUIStrings('${file}'`)) {
+      throw new Error(`anywhere_app.ts does not register UI strings under ${file}: update build.ts`);
+    }
+  }
+}
 const keep = (file: string) => {
   if (file.endsWith('.js')) return reachable.has(file);
   if (file.endsWith('.html')) return file === 'anywhere_app.html';

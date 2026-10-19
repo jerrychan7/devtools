@@ -3,12 +3,16 @@ import { FRAME_ID, type Context } from '../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, PseudoElement, type PseudoType } from '../core/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../core/selectors';
 import { CdpError } from '../core/server';
-import { resolveNode } from './dom';
+import { resolveElement } from './dom';
 import { ForcedPseudoClasses } from './forced-pseudo';
 
 type CSSStyle = Protocol.CSS.CSSStyle;
 type CSSProperty = Protocol.CSS.CSSProperty;
 type StyleOrigin = Protocol.CSS.StyleSheetOrigin;
+/** `extraFields` also carries `isTableSetVisuallyTable`, which devtools-protocol does not declare. */
+type ComputedStyleResponse = Protocol.CSS.GetComputedStyleForNodeResponse & {
+  extraFields: Protocol.CSS.ComputedStyleExtraFields & { isTableSetVisuallyTable: boolean };
+};
 
 const INLINE_PREFIX = 'inline:';
 
@@ -25,15 +29,56 @@ function splitPseudoElement(selector: string): { host: string; pseudo: string | 
 }
 
 /**
- * Serializes declarations as `name: value;` separated by spaces, the text the client edits.
- * Each declared property gets a range; longhands of shorthands follow without one.
+ * The text the client last set on a style, with the CSSOM text it produced. The CSSOM drops
+ * comments and invalid declarations, but Chrome keeps them as properties: disabled ones (the
+ * Styles pane comments a property out when it is unchecked) and ones with parsedOk false.
+ * The source is used as long as the page has not changed the style since.
+ */
+const sources = new WeakMap<CSSStyleDeclaration, { text: string; applied: string }>();
+
+/** Sets `text` on a style, keeping it to report disabled and invalid declarations. */
+function setStyleText(decl: CSSStyleDeclaration, text: string, apply: () => void) {
+  apply();
+  sources.set(decl, { text, applied: decl.cssText });
+}
+
+interface Declaration {
+  raw: string;
+  disabled: boolean;
+}
+
+/** Declarations of a style text in order, those in comments disabled. */
+function declarations(text: string): Declaration[] {
+  const result: Declaration[] = [];
+  const comment = /\/\*([\s\S]*?)\*\//g;
+  let last = 0;
+  const enabled = (part: string) => splitTopLevel(part, ';').forEach(raw => result.push({ raw, disabled: false }));
+  for (let m = comment.exec(text); m; m = comment.exec(text)) {
+    enabled(text.slice(last, m.index));
+    last = m.index + m[0].length;
+    const inner = (m[1] ?? '').trim().replace(/;$/, '');
+    if (inner.includes(':')) result.push({ raw: inner, disabled: true });
+  }
+  enabled(text.slice(last));
+  return result;
+}
+
+/**
+ * Serializes declarations as `name: value;` separated by spaces, the text the client edits;
+ * disabled ones as `/* name: value; *\/`. Each declared property gets a range; longhands of
+ * shorthands follow without one.
  */
 function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: number, column: number): CSSStyle {
   const cssProperties: CSSProperty[] = [];
   const shorthandEntries: Protocol.CSS.ShorthandEntry[] = [];
   const probe = document.createElement('div').style;
+  const source = sources.get(decl);
+  const list =
+    source && source.applied === decl.cssText
+      ? declarations(source.text)
+      : splitTopLevel(decl.cssText, ';').map(raw => ({ raw, disabled: false }));
   let text = '';
-  for (const raw of splitTopLevel(decl.cssText, ';')) {
+  for (const { raw, disabled } of list) {
     const colon = raw.indexOf(':');
     if (colon < 0) continue;
     const name = raw.slice(0, colon).trim();
@@ -42,23 +87,28 @@ function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: numbe
     const important = /!\s*important$/i.test(value);
     if (important) value = value.replace(/\s*!\s*important$/i, '');
     const declText = `${name}: ${value}${important ? ' !important' : ''};`;
+    // Whether the browser accepts the declaration.
+    probe.cssText = declText;
+    const parsedOk = probe.length > 0;
+    const propertyText = disabled ? `/* ${declText} */` : declText;
     if (text) text += ' ';
     const start = column + text.length;
-    text += declText;
+    text += propertyText;
     const property: CSSProperty = {
       name,
       value,
       important,
       implicit: false,
-      text: declText,
-      parsedOk: true,
-      disabled: false,
-      range: { startLine: line, startColumn: start, endLine: line, endColumn: start + declText.length },
+      text: propertyText,
+      // Like Chrome, only reported when false.
+      ...(!parsedOk && { parsedOk }),
+      disabled,
+      range: { startLine: line, startColumn: start, endLine: line, endColumn: start + propertyText.length },
     };
     cssProperties.push(property);
+    if (disabled || !parsedOk) continue;
     // Expand shorthands into their longhands, like Chrome does: listed on the shorthand (the
     // Styles pane shows them when it is expanded) and as properties of their own.
-    probe.cssText = `${name}: ${value}`;
     const longhands = Array.from(probe, longhand => ({ name: longhand, value: probe.getPropertyValue(longhand) }));
     if (longhands.length > 1 || (longhands.length === 1 && longhands[0]?.name !== name)) {
       shorthandEntries.push({ name, value, important });
@@ -104,6 +154,17 @@ class SheetRegistry {
       this.sheets.set(id, sheet);
     }
     return id;
+  }
+
+  /**
+   * Gives `replacement` the id of `sheet`, e.g. the new sheet of a <style> whose text was
+   * replaced: like in Chrome, the style sheet keeps its id.
+   */
+  rebind(sheet: CSSStyleSheet, replacement: CSSStyleSheet) {
+    const id = this.idOf(sheet);
+    this.sheetIds.set(replacement, id);
+    this.sheets.set(id, replacement);
+    if (this.inspectorSheet === sheet) this.inspectorSheet = replacement;
   }
 
   get(styleSheetId: string): CSSStyleSheet {
@@ -232,6 +293,10 @@ class SheetRegistry {
     return lines.join('\n');
   }
 
+  origin(sheet: CSSStyleSheet): StyleOrigin {
+    return sheet === this.inspectorSheet ? 'inspector' : 'regular';
+  }
+
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
     const text = this.text(sheet);
     const lines = text.split('\n');
@@ -240,7 +305,7 @@ class SheetRegistry {
       styleSheetId: this.idOf(sheet),
       frameId: FRAME_ID,
       sourceURL: sheet.href ?? (isInspector ? '' : location.href),
-      origin: isInspector ? 'inspector' : 'regular',
+      origin: this.origin(sheet),
       title: sheet.title ?? '',
       disabled: sheet.disabled,
       isInline: !sheet.href && !isInspector,
@@ -253,6 +318,38 @@ class SheetRegistry {
       endColumn: lines.at(-1)?.length ?? 0,
     };
   }
+}
+
+/** Channels of a computed `rgb()` / `rgba()` color, or null for other notations. */
+function rgba(value: string): [number, number, number, number] | null {
+  const match = /^rgba?\(([\d.]+), ([\d.]+), ([\d.]+)(?:, ([\d.]+))?\)$/.exec(value);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];
+}
+
+/**
+ * The color text is drawn on: like Chrome, translucent backgrounds are blended over those of the
+ * ancestors (down to the white page), and null when an image or gradient makes it unknown.
+ */
+function backgroundBehind(el: Element, style: CSSStyleDeclaration): string | null {
+  const layers: [number, number, number, number][] = [];
+  for (let node: Element | null = el, s = style; node;) {
+    if (s.backgroundImage !== 'none') return null;
+    const color = rgba(s.backgroundColor);
+    if (!color) return null;
+    if (color[3] > 0) layers.push(color);
+    if (color[3] >= 1) break;
+    const root = node.getRootNode();
+    node = node.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+    if (node) s = getComputedStyle(node);
+  }
+  let [r, g, b] = [255, 255, 255];
+  for (const [lr, lg, lb, la] of layers.reverse()) {
+    r = lr * la + r * (1 - la);
+    g = lg * la + g * (1 - la);
+    b = lb * la + b * (1 - la);
+  }
+  return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
 export function registerCss(ctx: Context) {
@@ -272,8 +369,6 @@ export function registerCss(ctx: Context) {
   let known = new Set<CSSStyleSheet>();
   let observer: MutationObserver | null = null;
 
-  const origin = (sheet: CSSStyleSheet): StyleOrigin => (sheet === sheets.inspectorSheet ? 'inspector' : 'regular');
-
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
     if (sheet.ownerNode && sheet !== sheets.inspectorSheet) h.ownerNode = nodes.backendIdOf(sheet.ownerNode);
@@ -290,6 +385,11 @@ export function registerCss(ctx: Context) {
     if (forced.isActive) forced.rebuild();
     return loadCopies();
   }
+
+  /** `load` reaches the document for every image and script too: only style elements matter. */
+  const onLoad = (event: Event) => {
+    if (event.target instanceof HTMLLinkElement || event.target instanceof HTMLStyleElement) void syncSheets();
+  };
 
   /** Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in. */
   const loadCopies = () =>
@@ -325,12 +425,44 @@ export function registerCss(ctx: Context) {
     const rule: Protocol.CSS.CSSRule = {
       styleSheetId: sheets.idOf(sheet),
       selectorList: selectorList(sheet, entry.rule),
-      origin: origin(sheet),
+      origin: sheets.origin(sheet),
       style: ruleStyle(sheet, entry.rule),
     };
     if (entry.media.length) rule.media = entry.media;
     return rule;
   }
+
+  /** A style rule ready for matching: its selectors split, with forced pseudo-classes rewritten. */
+  type Candidate = {
+    sheet: CSSStyleSheet;
+    entry: Entry;
+    order: number;
+    selectors: { selector: string; index: number; pseudo: string | null; host: string }[];
+  };
+
+  function candidates(): Candidate[] {
+    const result: Candidate[] = [];
+    let order = 0;
+    for (const sheet of sheets.all()) {
+      if (sheet.disabled) continue;
+      for (const entry of sheets.entries(sheet, true)) {
+        order++;
+        const selectors = splitTopLevel(entry.rule.selectorText, ',').map((s, index) => {
+          const selector = s.trim();
+          const split = splitPseudoElement(selector);
+          return { selector, index, pseudo: split.pseudo, host: forced.rewrite(split.host) };
+        });
+        result.push({ sheet, entry, order, selectors });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * The candidates of the request being answered: one request matches the element, its
+   * pseudo-elements and its ancestors against the same rules, so they are collected once.
+   */
+  let requestCandidates: Candidate[] | null = null;
 
   /**
    * Rules matching `el`, or with `pseudo`, its pseudo-element, in cascade order (lowest
@@ -338,26 +470,19 @@ export function registerCss(ctx: Context) {
    */
   function matchedRules(el: Element, pseudo: PseudoType | null = null): Protocol.CSS.RuleMatch[] {
     const matches: { match: Protocol.CSS.RuleMatch; spec: Protocol.CSS.Specificity; order: number }[] = [];
-    let order = 0;
-    for (const sheet of sheets.all()) {
-      if (sheet.disabled) continue;
-      for (const entry of sheets.entries(sheet, true)) {
-        order++;
-        const selectors = splitTopLevel(entry.rule.selectorText, ',').map(s => s.trim());
-        const matched = selectors.flatMap((selector, index) => {
-          const split = splitPseudoElement(selector);
-          if (split.pseudo !== pseudo) return [];
-          try {
-            return el.matches(split.host) || el.matches(forced.rewrite(split.host)) ? [{ selector, index }] : [];
-          } catch {
-            return []; // Unsupported selector.
-          }
-        });
-        if (!matched.length) continue;
-        const matching = matched.map(m => m.index);
-        const spec = matched.map(m => specificity(m.selector)).reduce((m, s) => (compareSpecificity(s, m) > 0 ? s : m));
-        matches.push({ match: { rule: cssRule(sheet, entry), matchingSelectors: matching }, spec, order });
-      }
+    for (const { sheet, entry, order, selectors } of requestCandidates ?? candidates()) {
+      const matched = selectors.filter(s => {
+        if (s.pseudo !== pseudo) return false;
+        try {
+          return el.matches(s.host);
+        } catch {
+          return false; // Unsupported selector.
+        }
+      });
+      if (!matched.length) continue;
+      const matching = matched.map(m => m.index);
+      const spec = matched.map(m => specificity(m.selector)).reduce((m, s) => (compareSpecificity(s, m) > 0 ? s : m));
+      matches.push({ match: { rule: cssRule(sheet, entry), matchingSelectors: matching }, spec, order });
     }
     // Inspector rules win over regular ones of equal specificity, as they come last.
     return matches.sort((x, y) => compareSpecificity(x.spec, y.spec) || x.order - y.order).map(m => m.match);
@@ -368,11 +493,7 @@ export function registerCss(ctx: Context) {
     return buildStyle(INLINE_PREFIX + nodes.backendIdOf(el), el.style, 0, 0);
   }
 
-  const element = (nodeId: number) => {
-    const node = resolveNode(ctx, { nodeId });
-    if (!(node instanceof Element)) throw new CdpError('Node is not an Element');
-    return node;
-  };
+  const element = (nodeId: number) => resolveElement(ctx, { nodeId });
 
   /** An element or a pseudo-element, as its host and pseudo type. */
   const target = (nodeId: number): { el: Element; pseudo: PseudoType | null } => {
@@ -396,13 +517,13 @@ export function registerCss(ctx: Context) {
     if (edit.styleSheetId.startsWith(INLINE_PREFIX)) {
       const el = ctx.nodes.getByBackendId(Number(edit.styleSheetId.slice(INLINE_PREFIX.length)));
       if (!(el instanceof HTMLElement || el instanceof SVGElement)) throw new CdpError('Node not found');
-      el.setAttribute('style', edit.text);
+      setStyleText(el.style, edit.text, () => el.setAttribute('style', edit.text));
       return buildStyle(edit.styleSheetId, el.style, 0, 0);
     }
     const sheet = sheets.get(edit.styleSheetId);
     assertEditable(sheet);
     const rule = sheets.findRule(sheet, edit.range.startLine);
-    rule.style.cssText = edit.text;
+    setStyleText(rule.style, edit.text, () => (rule.style.cssText = edit.text));
     return ruleStyle(sheet, rule);
   }
 
@@ -412,24 +533,35 @@ export function registerCss(ctx: Context) {
       enabled = true;
       known = new Set();
       syncSheets();
+      const ownsSheet = (n: Node | null) =>
+        (n instanceof HTMLStyleElement || n instanceof HTMLLinkElement) && !n.hasAttribute(OWN_ATTRIBUTE);
       observer = new MutationObserver(records => {
-        const touchesSheets = records.some(r =>
-          [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(
-            n => (n instanceof HTMLStyleElement || n instanceof HTMLLinkElement) && !n.hasAttribute(OWN_ATTRIBUTE)
-          )
+        // Adding or removing a <style> or <link>, changing the text of a <style> or the href
+        // of a <link> all replace style sheets.
+        const touchesSheets = records.some(
+          r =>
+            ownsSheet(r.target) ||
+            ownsSheet(r.target.parentNode) ||
+            [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(ownsSheet)
         );
+        forced.removed(records.flatMap(r => Array.from(r.removedNodes)));
         if (touchesSheets) syncSheets();
       });
-      observer.observe(document, { childList: true, subtree: true });
-      // A <link> stylesheet becomes available once loaded.
-      document.addEventListener('load', syncSheets, true);
+      observer.observe(document, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributeFilter: ['href', 'rel', 'disabled', 'media', 'type'],
+      });
+      // A <link> stylesheet (or a <style> with @import) becomes available once loaded.
+      document.addEventListener('load', onLoad, true);
     },
 
     disable() {
       enabled = false;
       forced.clear();
       observer?.disconnect();
-      document.removeEventListener('load', syncSheets, true);
+      document.removeEventListener('load', onLoad, true);
     },
 
     async getMatchedStylesForNode(
@@ -437,27 +569,32 @@ export function registerCss(ctx: Context) {
     ): Promise<Protocol.CSS.GetMatchedStylesForNodeResponse> {
       const { el, pseudo } = target(params.nodeId);
       await loadCopies();
-      // For a pseudo-element, its host is the first element it inherits from.
-      if (pseudo) {
-        return {
-          matchedCSSRules: matchedRules(el, pseudo),
-          pseudoElements: [],
-          inherited: inheritedEntries(el),
+      requestCandidates = candidates();
+      try {
+        // For a pseudo-element, its host is the first element it inherits from.
+        if (pseudo) {
+          return {
+            matchedCSSRules: matchedRules(el, pseudo),
+            pseudoElements: [],
+            inherited: inheritedEntries(el),
+            cssKeyframesRules: [],
+          };
+        }
+        const pseudoElements = PSEUDO_TYPES.map(type => ({ pseudoType: type, matches: matchedRules(el, type) })).filter(
+          p => p.matches.length
+        );
+        const result: Protocol.CSS.GetMatchedStylesForNodeResponse = {
+          matchedCSSRules: matchedRules(el),
+          pseudoElements,
+          inherited: inheritedEntries(el.parentElement),
           cssKeyframesRules: [],
         };
+        const style = inlineStyle(el);
+        if (style) result.inlineStyle = style;
+        return result;
+      } finally {
+        requestCandidates = null;
       }
-      const pseudoElements = PSEUDO_TYPES.map(type => ({ pseudoType: type, matches: matchedRules(el, type) })).filter(
-        p => p.matches.length
-      );
-      const result: Protocol.CSS.GetMatchedStylesForNodeResponse = {
-        matchedCSSRules: matchedRules(el),
-        pseudoElements,
-        inherited: inheritedEntries(el.parentElement),
-        cssKeyframesRules: [],
-      };
-      const style = inlineStyle(el);
-      if (style) result.inlineStyle = style;
-      return result;
     },
 
     getInlineStylesForNode(
@@ -468,22 +605,21 @@ export function registerCss(ctx: Context) {
       return style ? { inlineStyle: style } : {};
     },
 
-    getComputedStyleForNode(
-      params: Protocol.CSS.GetComputedStyleForNodeRequest
-    ): Protocol.CSS.GetComputedStyleForNodeResponse {
+    getComputedStyleForNode(params: Protocol.CSS.GetComputedStyleForNodeRequest): ComputedStyleResponse {
       const { el, pseudo } = target(params.nodeId);
       const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
       return {
         computedStyle: Array.from(style, name => ({ name, value: style.getPropertyValue(name) })),
         extraFields: { isAppearanceBase: false, isTableSetVisuallyTable: false },
-      } as Protocol.CSS.GetComputedStyleForNodeResponse;
+      };
     },
 
     getBackgroundColors(params: Protocol.CSS.GetBackgroundColorsRequest): Protocol.CSS.GetBackgroundColorsResponse {
       const { el, pseudo } = target(params.nodeId);
       const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
+      const background = backgroundBehind(el, style);
       return {
-        backgroundColors: [style.backgroundColor],
+        ...(background && { backgroundColors: [background] }),
         computedFontSize: style.fontSize,
         computedFontWeight: style.fontWeight,
       };
@@ -494,10 +630,16 @@ export function registerCss(ctx: Context) {
     }),
 
     setStyleSheetText(params: Protocol.CSS.SetStyleSheetTextRequest): Protocol.CSS.SetStyleSheetTextResponse {
-      const owner = sheets.get(params.styleSheetId).ownerNode;
-      assertEditable(sheets.get(params.styleSheetId));
+      const sheet = sheets.get(params.styleSheetId);
+      const owner = sheet.ownerNode;
+      assertEditable(sheet);
       if (!(owner instanceof HTMLStyleElement)) throw new CdpError('Style sheet is not editable');
       owner.textContent = params.text;
+      // The <style> now has a new sheet: it takes the place of the old one.
+      if (owner.sheet && owner.sheet !== sheet) {
+        sheets.rebind(sheet, owner.sheet);
+        if (known.delete(sheet)) known.add(owner.sheet);
+      }
       stylesChanged();
       return {};
     },
@@ -535,7 +677,11 @@ export function registerCss(ctx: Context) {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
       const index = sheet.insertRule(params.ruleText, sheet.cssRules.length);
-      const rule = sheet.cssRules[index] as CSSStyleRule;
+      const rule = sheet.cssRules[index];
+      if (!(rule instanceof CSSStyleRule)) {
+        sheet.deleteRule(index);
+        throw new CdpError('Failed to parse rule text');
+      }
       stylesChanged();
       return { rule: cssRule(sheet, { rule, media: [] }) };
     },
@@ -557,7 +703,9 @@ export function registerCss(ctx: Context) {
     trackComputedStyleUpdates: () => {},
     takeComputedStyleUpdates: (): Protocol.CSS.TakeComputedStyleUpdatesResponse => ({ nodeIds: [] }),
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {
-      (element(params.nodeId) as HTMLElement).style.setProperty(params.propertyName, params.value);
+      const el = element(params.nodeId);
+      if (!(el instanceof HTMLElement || el instanceof SVGElement)) throw new CdpError('Element has no inline style');
+      el.style.setProperty(params.propertyName, params.value);
     },
   });
 }

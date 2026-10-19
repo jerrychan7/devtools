@@ -13,6 +13,7 @@ devtools_entrypoint("entrypoint") {
     "../../core/i18n:bundle",
     "../../core/root:bundle",
     "../../entrypoints/inspector_main:meta",
+    "../../models/workspace:bundle",
     "../../panels/application:meta",
     "../../panels/common:meta",
     "../../panels/console:meta",

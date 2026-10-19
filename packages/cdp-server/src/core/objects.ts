@@ -7,6 +7,15 @@ type PropertyPreview = Protocol.Runtime.PropertyPreview;
 type PropertyDescriptor = Protocol.Runtime.PropertyDescriptor;
 type InternalPropertyDescriptor = Protocol.Runtime.InternalPropertyDescriptor;
 type Subtype = RemoteObject['subtype'] | 'internal#entry';
+type ProtocolSubtype = NonNullable<RemoteObject['subtype']>;
+
+/**
+ * `internal#entry` is not in the protocol's subtype enum, but V8 reports it for `[[Entries]]`
+ * items and the frontend relies on it: the one place a non-enum subtype reaches the protocol.
+ */
+function toProtocolSubtype(subtype: NonNullable<Subtype>): ProtocolSubtype {
+  return subtype as ProtocolSubtype;
+}
 
 const MAX_OBJECT_PREVIEW = 5;
 const MAX_ARRAY_PREVIEW = 100;
@@ -64,7 +73,9 @@ function classify(v: unknown): { type: RemoteObject['type']; subtype?: Subtype }
   if (v === null) return { type, subtype: 'null' };
   if (v instanceof InternalEntry) return { type, subtype: 'internal#entry' };
   if (Array.isArray(v)) return { type, subtype: 'array' };
-  if (typeof Node !== 'undefined' && v instanceof Node) return { type, subtype: 'node' };
+  // Nodes of other realms (same-origin iframes) are not instances of this realm's Node.
+  if (typeof Node !== 'undefined' && brand(v, v => getter(Node.prototype, 'nodeType').call(v)))
+    return { type, subtype: 'node' };
   for (const [subtype, check] of BRANDS) if (brand(v, check)) return { type, subtype };
   if (v instanceof Error || toTag(v) === 'Error') return { type, subtype: 'error' };
   // A promise's prototype is tagged "Promise"; Promise.prototype's own prototype is not.
@@ -93,8 +104,10 @@ function className(v: unknown): string {
   }
 }
 
+const isElement = (node: Node): node is Element => node.nodeType === Node.ELEMENT_NODE;
+
 function describeNode(node: Node): string {
-  if (node instanceof Element) {
+  if (isElement(node)) {
     let desc = node.tagName.toLowerCase();
     if (node.id) desc += '#' + node.id;
     const cls = node.getAttribute('class');
@@ -171,7 +184,12 @@ export class ObjectRegistry {
   private prefix = Math.floor(Math.random() * 1e9) + '.';
   private seq = 0;
   private byId = new Map<string, unknown>();
-  private ids = new Map<unknown, string>();
+  /**
+   * Ids by object group ('' for none), then by value. Like Chrome, a value wrapped in
+   * several groups gets one id per group, so releasing one group leaves the others intact.
+   */
+  private ids = new Map<string, Map<unknown, string>>();
+  private groupById = new Map<string, string>();
   private groups = new Map<string, Set<string>>();
   /** Arrays created for `[[Entries]]`; like Chrome, they have no visible prototype. */
   private entryLists = new WeakSet<object>();
@@ -197,7 +215,7 @@ export class ObjectRegistry {
     if (options.returnByValue && type === 'object') return { type, value: cloneByValue(value) };
 
     const result: RemoteObject = { type, description: describe(value, subtype) };
-    if (subtype) result.subtype = subtype as NonNullable<RemoteObject['subtype']>;
+    if (subtype) result.subtype = toProtocolSubtype(subtype);
     if (type === 'function') result.className = 'Function';
     else if (type === 'object')
       result.className = subtype === 'error' ? (value as Error).name || className(value) : className(value);
@@ -212,19 +230,23 @@ export class ObjectRegistry {
   }
 
   release(objectId: string) {
-    this.ids.delete(this.byId.get(objectId));
+    if (!this.byId.has(objectId)) return;
+    const group = this.groupById.get(objectId) ?? '';
+    this.ids.get(group)?.delete(this.byId.get(objectId));
+    this.groups.get(group)?.delete(objectId);
+    this.groupById.delete(objectId);
     this.byId.delete(objectId);
   }
 
-  /** The first object group `objectId` was wrapped in, if any. */
+  /** The object group `objectId` was wrapped in, if any. */
   groupOf(objectId: string): string | undefined {
-    for (const [group, ids] of this.groups) if (ids.has(objectId)) return group;
-    return undefined;
+    return this.groupById.get(objectId);
   }
 
   releaseGroup(group: string) {
     this.groups.get(group)?.forEach(id => this.release(id));
     this.groups.delete(group);
+    this.ids.delete(group);
   }
 
   getProperties(params: Protocol.Runtime.GetPropertiesRequest): Protocol.Runtime.GetPropertiesResponse {
@@ -238,14 +260,19 @@ export class ObjectRegistry {
       return { result };
     }
 
+    // Symbols get an objectId too, but like V8 only objects have properties to list.
+    if ((typeof obj !== 'object' && typeof obj !== 'function') || obj === null) {
+      throw new CdpError('Value with given id is not an object');
+    }
+
     if (params.accessorPropertiesOnly) {
-      return { result: this.accessorProperties(obj as object) };
+      return { result: this.accessorProperties(obj) };
     }
 
     const result: PropertyDescriptor[] = [];
     const seen = new Set<PropertyKey>();
     const isArrayLike = Array.isArray(obj) || obj instanceof TypedArray;
-    let target = obj as object | null;
+    let target: object | null = obj;
     let isOwn = true;
     while (target !== null && target !== undefined) {
       for (const key of Reflect.ownKeys(target)) {
@@ -287,13 +314,16 @@ export class ObjectRegistry {
   }
 
   private idOf(value: unknown, group?: string): string {
-    let id = this.ids.get(value);
-    if (!id) {
-      id = this.prefix + ++this.seq;
-      this.ids.set(value, id);
-      this.byId.set(id, value);
-    }
+    const key = group ?? '';
+    let byValue = this.ids.get(key);
+    if (!byValue) this.ids.set(key, (byValue = new Map()));
+    let id = byValue.get(value);
+    if (id) return id;
+    id = this.prefix + ++this.seq;
+    byValue.set(value, id);
+    this.byId.set(id, value);
     if (group) {
+      this.groupById.set(id, group);
       let ids = this.groups.get(group);
       if (!ids) this.groups.set(group, (ids = new Set()));
       ids.add(id);
@@ -349,7 +379,7 @@ export class ObjectRegistry {
       overflow: false,
       properties: [],
     };
-    if (subtype) preview.subtype = subtype as NonNullable<ObjectPreview['subtype']>;
+    if (subtype) preview.subtype = toProtocolSubtype(subtype);
     if (subtype === 'internal#entry') return preview;
 
     const isArrayLike = subtype === 'array' || subtype === 'typedarray';
@@ -437,7 +467,7 @@ export class ObjectRegistry {
 function propertyPreview(name: string, value: unknown): PropertyPreview {
   const { type, subtype } = classify(value);
   const preview: PropertyPreview = { name, type, value: '' };
-  if (subtype) preview.subtype = subtype as NonNullable<PropertyPreview['subtype']>;
+  if (subtype) preview.subtype = toProtocolSubtype(subtype);
   if (type === 'function') return preview;
   if (type === 'object' && subtype === 'error') {
     const err = value as Error;
@@ -451,7 +481,7 @@ function propertyPreview(name: string, value: unknown): PropertyPreview {
 function entryPreview(value: unknown): ObjectPreview {
   const { type, subtype } = classify(value);
   const preview: ObjectPreview = { type, description: describe(value, subtype), overflow: false, properties: [] };
-  if (subtype) preview.subtype = subtype as NonNullable<ObjectPreview['subtype']>;
+  if (subtype) preview.subtype = toProtocolSubtype(subtype);
   return preview;
 }
 
