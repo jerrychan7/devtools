@@ -63,20 +63,21 @@ const STYLE = `
 .panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647;
   display: none; flex-direction: column;
-  background: #fff; border-top: 1px solid #cacdd1;
+  background: #fff; border-top: 1px solid var(--bar-border, #cacdd1);
 }
 :host([open]) .panel { display: flex; }
+/* The bar takes the DevTools toolbar's colors, which the frontend reports (theme request). */
 .bar {
-  flex: none; position: relative; height: 16px; background: #f1f3f4;
+  flex: none; position: relative; height: 16px; background: var(--bar-background, #f1f3f4);
   cursor: row-resize; touch-action: none;
 }
 .bar::before {
   content: ''; position: absolute; left: 50%; top: 6px; width: 32px; height: 4px;
-  margin-left: -16px; border-radius: 2px; background: #bdc1c6;
+  margin-left: -16px; border-radius: 2px; background: var(--bar-handle, #bdc1c6);
 }
 .bar button {
   position: absolute; top: 0; width: 24px; height: 16px; padding: 0; border: 0;
-  background: none; color: #5f6368; font: 14px/16px system-ui, sans-serif; cursor: pointer;
+  background: none; color: var(--bar-icon, #5f6368); font: 14px/16px system-ui, sans-serif; cursor: pointer;
 }
 /* DevTools' own toolbar has a close button, except when undocked: then the bar has one. */
 .close { right: 4px; display: none; }
@@ -86,8 +87,8 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 
 /* Docked to a side: full height, with the bar as a vertical strip on the inner edge. */
 :host([dock=right]) .panel, :host([dock=left]) .panel { top: 0; border-top: 0; }
-:host([dock=right]) .panel { left: auto; flex-direction: row; border-left: 1px solid #cacdd1; }
-:host([dock=left]) .panel { right: auto; flex-direction: row-reverse; border-right: 1px solid #cacdd1; }
+:host([dock=right]) .panel { left: auto; flex-direction: row; border-left: 1px solid var(--bar-border, #cacdd1); }
+:host([dock=left]) .panel { right: auto; flex-direction: row-reverse; border-right: 1px solid var(--bar-border, #cacdd1); }
 :host([dock=right]) .bar, :host([dock=left]) .bar { width: 16px; height: auto; cursor: col-resize; }
 :host([dock=right]) .bar::before, :host([dock=left]) .bar::before {
   left: 6px; top: 50%; width: 4px; height: 32px; margin: -16px 0 0;
@@ -96,7 +97,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 
 /* Undocked: a window over the page, moved by its bar and resized from its corner. */
 :host([dock=undocked]) .panel {
-  right: auto; bottom: auto; border: 1px solid #cacdd1; border-radius: 6px; overflow: hidden;
+  right: auto; bottom: auto; border: 1px solid var(--bar-border, #cacdd1); border-radius: 6px; overflow: hidden;
   box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both;
 }
 :host([dock=undocked]) .bar { cursor: move; }
@@ -187,6 +188,18 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     } else if (request.type === 'keep-open' && 'keep' in request) {
       if (request.keep) this.enterShell();
       else this.exitShell();
+    } else if (request.type === 'theme') {
+      const colors: Record<string, string> = {
+        toolbar: '--bar-background',
+        divider: '--bar-handle',
+        icon: '--bar-icon',
+      };
+      for (const [key, property] of Object.entries(colors)) {
+        const value: unknown = Reflect.get(request, key);
+        if (typeof value === 'string' && CSS.supports('color', value)) this.panel.style.setProperty(property, value);
+        if (key === 'divider' && typeof value === 'string' && CSS.supports('color', value))
+          this.panel.style.setProperty('--bar-border', value);
+      }
     } else if (request.type === 'close') {
       if (this.hasAttribute('shell')) this.exitShell();
       else this.hide();

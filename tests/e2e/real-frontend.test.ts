@@ -82,6 +82,25 @@ test('the Console panel shows output from before DevTools loaded', { skip }, asy
   });
 });
 
+test("the frontend uses Chrome's default theme colors", { skip }, async () => {
+  // Without Chrome's theme, the frontend would show a dynamic theme's blue-tinted surfaces.
+  const classes = await frontend.evaluate(() => document.documentElement.className);
+  assert.ok(classes.split(' ').includes('baseline-default'), classes);
+});
+
+test("the panel's bar takes the color of DevTools' toolbar", { skip }, async () => {
+  const toolbar = await frontend.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--app-color-toolbar-background').trim()
+  );
+  const bar = await waitFor(() =>
+    page.evaluate(() => {
+      const el = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      return el instanceof HTMLElement ? el.style.getPropertyValue('--bar-background') : '';
+    })
+  );
+  assert.equal(bar, toolbar);
+});
+
 test('only the panels that work in the page are offered', { skip }, async () => {
   const tabs = await frontend.evaluate(() => {
     const ids: string[] = [];
