@@ -1,0 +1,10 @@
+{
+  "keepOpen": "刷新后保持 DevTools 打开",
+  "stopKeepingOpen": "不再在刷新后保持 DevTools 打开",
+  "keepOpenExplanation": "页面会重新加载，并放进一个框架里运行。之后刷新或跳转页面，DevTools 都保持打开，日志也会保留。部分行为可能和直接打开页面时不同，比如 100vh、position: fixed 和 window.top。",
+  "dontAskAgain": "不再询问",
+  "reloadAndKeepOpen": "重新加载并保持打开",
+  "cancel": "取消",
+  "keptOpen": "刷新后 DevTools 保持打开，页面在框架里运行。",
+  "stopKeeping": "停止保持"
+}
