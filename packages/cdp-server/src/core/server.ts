@@ -40,7 +40,15 @@ export class CdpServer {
 
   /** Handles one client message and sends the response to the listeners. */
   async dispatch(message: string | { id: number | string; method: string; params?: object }) {
-    const { id, method, params } = typeof message === 'string' ? JSON.parse(message) : message;
+    let parsed: { id?: number | string; method: string; params?: object };
+    try {
+      parsed = typeof message === 'string' ? JSON.parse(message) : message;
+    } catch (e) {
+      // Like Chrome, an unparsable message gets an error without an id rather than a rejection.
+      this.send({ error: { code: -32700, message: errorMessage(e) } });
+      return;
+    }
+    const { id, method, params } = parsed;
     try {
       this.send({ id, result: await this.call(method, params) });
     } catch (e) {
@@ -54,7 +62,9 @@ export class CdpServer {
   /** Calls a method directly and returns its result, without going through listeners. */
   async call(method: string, params: object = {}): Promise<unknown> {
     const [domain = '', name = ''] = method.split('.');
-    const handler = this.domains.get(domain)?.[name];
+    const handlers = this.domains.get(domain);
+    // Own properties only: `Runtime.constructor` must not reach Object.prototype.
+    const handler = handlers && Object.hasOwn(handlers, name) ? handlers[name] : undefined;
     if (!handler) throw new CdpError(`'${method}' wasn't found`, -32601);
     return (await (handler as (params: object) => unknown)(params ?? {})) ?? {};
   }

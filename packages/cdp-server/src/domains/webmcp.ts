@@ -2,6 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../core/server';
 import { FRAME_ID, type Context } from '../core/context';
 import { parseStack } from '../core/stack';
+import type { ToolOutcome, ToolRecord } from '../probe/types';
 
 /** A tool as `document.modelContext.getTools()` describes it. */
 interface RegisteredTool {
@@ -64,6 +65,22 @@ function annotationsOf(hints: object | undefined): Protocol.WebMCP.Annotation | 
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
+/**
+ * A tool's result: no `output` when it returned nothing, as in Chrome. A value that cannot be
+ * sent as JSON (a cycle, a BigInt) fails the call with the exception, as in Chrome.
+ */
+function completed(output: unknown): Outcome {
+  if (output === undefined) return { status: 'Completed' };
+  try {
+    JSON.stringify(output);
+  } catch (error) {
+    // Chrome reports the serialization's exception, with no text and no stack frames.
+    if (error instanceof Error) error.stack = `${error.name}: ${error.message}`;
+    return { status: 'Error', errorText: '', exception: error };
+  }
+  return { status: 'Completed', output };
+}
+
 /** `executeTool`'s result: JSON text, or the plain string a tool returned. */
 function parseOutput(text: string): unknown {
   try {
@@ -71,6 +88,26 @@ function parseOutput(text: string): unknown {
   } catch {
     return text;
   }
+}
+
+/** Matches `executeTool`'s text against what `execute` returned. */
+function isOutputOf(value: unknown, text: string): boolean {
+  try {
+    return typeof value === 'string' ? value === text : JSON.stringify(value) === text;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Takes the outcome of one call out of the probe's record, so concurrent calls of a tool
+ * each get their own: a result the output text matches, else the oldest settled one.
+ */
+function takeOutcome(record: ToolRecord, threw: boolean, output?: string): ToolOutcome | undefined {
+  const { outcomes } = record;
+  let i = output === undefined ? -1 : outcomes.findIndex(o => !o.threw && isOutputOf(o.value, output));
+  if (i < 0) i = outcomes.findIndex(o => o.threw === threw);
+  return i < 0 ? undefined : outcomes.splice(i, 1)[0];
 }
 
 const newInvocationId = () =>
@@ -92,13 +129,18 @@ export function registerWebMcp(ctx: Context) {
   const invocations = new Map<string, AbortController>();
   let stop: (() => void) | null = null;
 
+  // Each tool's info serialized once, for comparing it with the next scan's.
+  const serialized = new WeakMap<Tool, string>();
+  const jsonOf = (tool: Tool | undefined) => {
+    if (!tool) return undefined;
+    let json = serialized.get(tool);
+    if (json === undefined) serialized.set(tool, (json = sortedJson(tool.info)));
+    return json;
+  };
+
   function update(next: Map<string, Tool>) {
-    const removed = [...tools.keys()].filter(
-      name => sortedJson(next.get(name)?.info) !== sortedJson(tools.get(name)?.info)
-    );
-    const added = [...next.values()].filter(
-      tool => sortedJson(tool.info) !== sortedJson(tools.get(tool.info.name)?.info)
-    );
+    const removed = [...tools.keys()].filter(name => jsonOf(next.get(name)) !== jsonOf(tools.get(name)));
+    const added = [...next.values()].filter(tool => jsonOf(tool) !== jsonOf(tools.get(tool.info.name)));
     for (const name of removed) tools.delete(name);
     for (const tool of added) tools.set(tool.info.name, tool);
     if (removed.length)
@@ -117,7 +159,14 @@ export function registerWebMcp(ctx: Context) {
     let generation = 0;
     const refresh = async () => {
       const current = ++generation;
-      const list = (await context.getTools()).filter(isRegisteredTool);
+      // A failing getTools() (the document unloading) keeps the list as it is, and must not
+      // show up as an unhandled rejection of the page.
+      let list: RegisteredTool[];
+      try {
+        list = (await context.getTools()).filter(isRegisteredTool);
+      } catch {
+        return;
+      }
       if (current !== generation || !stop) return;
       update(new Map(list.map(tool => [tool.name, nativeTool(context, tool)])));
     };
@@ -147,16 +196,19 @@ export function registerWebMcp(ctx: Context) {
       async invoke(input, signal) {
         try {
           const output = await context.executeTool(tool, input, { signal });
-          const returned = record?.outcome;
-          if (returned && !returned.threw)
-            return returned.value === undefined
-              ? { status: 'Completed' }
-              : { status: 'Completed', output: returned.value };
-          return { status: 'Completed', output: parseOutput(output) };
+          const returned = record && takeOutcome(record, false, output);
+          // What `execute` returned, unless only the browser's JSON text of it can be sent.
+          const outcome = returned && completed(returned.value);
+          if (outcome?.status === 'Completed') return outcome;
+          return completed(parseOutput(output));
         } catch (error) {
           if (signal.aborted) return { status: 'Canceled' };
-          const thrown = record?.outcome;
-          if (thrown?.threw) return { status: 'Error', errorText: '', exception: thrown.value };
+          const thrown = record && takeOutcome(record, true);
+          if (thrown) return { status: 'Error', errorText: '', exception: thrown.value };
+          // The browser also fails a call whose result it cannot serialize (a cycle).
+          const unsendable = record?.outcomes.findIndex(o => !o.threw && completed(o.value).status === 'Error') ?? -1;
+          const returned = unsendable < 0 ? undefined : record?.outcomes.splice(unsendable, 1)[0];
+          if (returned) return completed(returned.value);
           return { status: 'Error', errorText: error instanceof Error ? error.message : String(error) };
         }
       },
@@ -174,10 +226,14 @@ export function registerWebMcp(ctx: Context) {
       }
       update(next);
     };
-    const observer = new MutationObserver(scan);
+    // Only changes to tool forms rescan them: other pages' DOM changes cost no more than this.
+    const observer = new MutationObserver(records => {
+      if (records.some(affectsTools)) scan();
+    });
     observer.observe(document, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributes: true,
       attributeFilter: [
         'toolname',
@@ -187,6 +243,11 @@ export function registerWebMcp(ctx: Context) {
         'name',
         'type',
         'required',
+        'step',
+        'value',
+        'label',
+        'form',
+        'id',
       ],
     });
     scan();
@@ -223,9 +284,14 @@ export function registerWebMcp(ctx: Context) {
       stop?.();
       stop = null;
       tools.clear();
+      // Pending invocations end without events: a form waiting for the user's submit stops
+      // listening for it.
+      for (const controller of invocations.values()) controller.abort();
+      invocations.clear();
     },
 
     invokeTool(params: Protocol.WebMCP.InvokeToolRequest): Protocol.WebMCP.InvokeToolResponse {
+      if (!stop) throw new CdpError('WebMCP domain is not enabled');
       const tool = params.frameId === FRAME_ID ? tools.get(params.toolName) : undefined;
       if (!tool) throw new CdpError('Tool not found');
       const invocationId = newInvocationId();
@@ -243,7 +309,8 @@ export function registerWebMcp(ctx: Context) {
         const outcome = await tool
           .invoke(input, controller.signal)
           .catch((error: unknown): Outcome => ({ status: 'Error', errorText: '', exception: error }));
-        invocations.delete(invocationId);
+        // Gone when the domain was disabled meanwhile.
+        if (!invocations.delete(invocationId)) return;
         server.emit('WebMCP.toolResponded', respondedEvent(invocationId, outcome));
       });
       return { invocationId };
@@ -270,6 +337,22 @@ export function registerWebMcp(ctx: Context) {
 }
 
 // ---- forms ----
+
+const TOOL_FORM = 'form[toolname]';
+// Fields can belong to a form from outside it, with `form="id"`.
+const TOOL_PARTS = `${TOOL_FORM}, [form]`;
+
+/** Whether a DOM change can change a declarative tool, which a rescan then picks up. */
+function affectsTools(record: MutationRecord): boolean {
+  const target = record.target instanceof Element ? record.target : record.target.parentElement;
+  if (target?.closest(TOOL_PARTS)) return true;
+  // A form that just lost its toolname, or a form's id that a field's `form` attribute names.
+  if (record.attributeName === 'toolname') return true;
+  if (record.attributeName === 'id' && record.target instanceof HTMLFormElement) return true;
+  const touches = (node: Node) =>
+    node instanceof Element && (node.matches(TOOL_PARTS) || !!node.querySelector(TOOL_PARTS));
+  return [...record.addedNodes, ...record.removedNodes].some(touches);
+}
 
 /** The form's fields that become tool parameters, grouped by name (radio buttons share one). */
 function fieldsOf(form: HTMLFormElement): Map<string, Element[]> {
@@ -382,9 +465,16 @@ function submitForm(
       setTimeout(() => {
         if (response)
           response.then(
-            output => resolve(output === undefined ? { status: 'Completed' } : { status: 'Completed', output }),
-            (thrown: unknown) => resolve({ status: 'Error', errorText: '', exception: thrown })
+            output => resolve(completed(output)),
+            // Chrome reports only the fact, not the rejection's value.
+            () => resolve({ status: 'Error', errorText: 'respondWith promise was rejected' })
           );
+        else if (event.defaultPrevented)
+          resolve({
+            status: 'Error',
+            errorText:
+              "The site has a programming error: it called preventDefault() on the 'submit' event, without also calling respondWith() with the tool result",
+          });
         else resolve({ status: 'Completed' });
       });
     };

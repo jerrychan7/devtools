@@ -1,11 +1,12 @@
 import type { Protocol } from 'devtools-protocol';
 import { EXECUTION_CONTEXT_ID, FRAME_ID, type Context } from '../core/context';
+import { CdpError } from '../core/server';
 import { parseStack } from '../core/stack';
 import type { LogEntry } from '../probe/types';
 
 // Indirect eval runs in the global scope, like code typed into the console.
 // oxlint-disable-next-line no-eval -- evaluating console input is the point.
-const globalEval = eval;
+const globalEval: (code: string) => unknown = eval;
 
 const isThenable = (v: unknown): v is PromiseLike<unknown> =>
   v !== null && (typeof v === 'object' || typeof v === 'function') && typeof Reflect.get(v, 'then') === 'function';
@@ -21,11 +22,15 @@ function run(expression: string, allowAwait: boolean): { value: unknown; isAsync
   } catch (e) {
     if (!(e instanceof SyntaxError) || !allowAwait || !/\bawait\b/.test(expression)) throw e;
   }
+  // A trailing `;` (`await foo();`) still leaves a single expression whose value is the result.
+  const trimmed = expression.replace(/[\s;]+$/, '');
   try {
-    return { value: globalEval(`(async () => (${expression}\n))()`), isAsync: true };
+    return { value: globalEval(`(async () => (${trimmed}\n))()`), isAsync: true };
   } catch (e) {
     if (!(e instanceof SyntaxError)) throw e;
   }
+  // Several statements: their result and top-level declarations are not kept (that needs
+  // V8's REPL mode rewrite).
   return { value: globalEval(`(async () => {${expression}\n})()`), isAsync: true };
 }
 
@@ -49,14 +54,66 @@ function hideEvalFrames(error: unknown) {
   }
 }
 
+const isNative = (fn: unknown) =>
+  typeof fn === 'function' && /\{\s*\[native code\]\s*\}$/.test(Function.prototype.toString.call(fn));
+
+/**
+ * Reads `key` of `target` unless that would run page code: a getter defined by the page
+ * (built-in getters such as `document.body` are fine, like in V8). `done` stops the walk.
+ */
+function readSafely(target: unknown, key: string): { unsafe: boolean; done: boolean; value?: unknown } {
+  if (target === null || target === undefined) return { unsafe: false, done: true };
+  for (let o: object | null = Object(target); o; o = Object.getPrototypeOf(o)) {
+    const desc = Object.getOwnPropertyDescriptor(o, key);
+    if (!desc) continue;
+    if ('value' in desc) return { unsafe: false, done: false, value: desc.value };
+    if (!isNative(desc.get)) return { unsafe: true, done: true };
+    return { unsafe: false, done: false, value: Reflect.get(Object(target), key) };
+  }
+  return { unsafe: false, done: true };
+}
+
+/** Whether reading a property path such as `a.b?.c[0]` could run a getter of the page. */
+function pathRunsCode(path: string): boolean {
+  const [head = '', ...rest] = path.match(/[A-Za-z_$][\w$]*|\d+/g) ?? [];
+  let found = readSafely(globalThis, head);
+  if (found.unsafe) return true;
+  if (found.done) {
+    // Not a property of the global object: a top-level `let`/`const`, read without side effects.
+    try {
+      found = { unsafe: false, done: false, value: globalEval(head) };
+    } catch {
+      return false;
+    }
+  }
+  for (const key of rest) {
+    found = readSafely(found.value, key);
+    if (found.unsafe) return true;
+    if (found.done) return false;
+  }
+  return false;
+}
+
+const LITERALS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity', 'typeof', 'void']);
+
 /**
  * Conservative check for eager evaluation (results previewed while typing). V8 tracks side
  * effects precisely; here anything that could call code or assign is refused: calls,
- * assignments, increments, `new`, `delete`, `await`, `yield`, `import` and template tags.
+ * assignments, increments, `new`, `delete`, `await`, `yield`, `import` and template tags,
+ * getters defined by the page, and operators applied to anything but literals (`a + ''` calls
+ * `valueOf`/`toString`). Proxies cannot be told apart and are read as plain objects.
  */
 function mayHaveSideEffects(expression: string): boolean {
   const code = expression.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""');
-  return /[(`]|\+\+|--|(?<![=!<>])=(?!=)|\b(?:new|delete|await|yield|import)\b/.test(code);
+  if (/[(`]|\+\+|--|(?<![=!<>])=(?!=)|\b(?:new|delete|await|yield|import)\b/.test(code)) return true;
+  // Property paths with names or numeric indexes; other computed keys are refused.
+  const paths = (
+    code.match(/(?<![\w$.])[A-Za-z_$][\w$]*(?:\s*\??\.\s*[A-Za-z_$][\w$]*|\s*\[\s*\d+\s*\])*/g) ?? []
+  ).filter(path => !LITERALS.has(path));
+  if (!paths.length) return false;
+  const rest = code.replace(/(?<![\w$.])[A-Za-z_$][\w$]*(?:\s*\??\.\s*[A-Za-z_$][\w$]*|\s*\[\s*\d+\s*\])*/g, ' ');
+  if (/[-+*/%<>&|^~?[]|[=!]=|\b(?:in|instanceof)\b/.test(rest)) return true;
+  return paths.some(pathRunsCode);
 }
 
 function parseUnserializable(value: string): unknown {
@@ -77,14 +134,32 @@ function copyToClipboard(value: unknown) {
   }
 }
 
+/**
+ * Copies through a hidden textarea where the Clipboard API is missing (insecure contexts).
+ * Read-only with a 16px font so iOS neither opens the keyboard nor zooms; `select()` selects
+ * nothing there, hence `setSelectionRange`. The page's focus and selection are restored.
+ */
 function fallbackCopy(text: string) {
+  const focused = document.activeElement;
+  const selection = document.getSelection();
+  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i)) : [];
   const textarea = document.createElement('textarea');
   textarea.value = text;
-  textarea.style.cssText = 'position:fixed;opacity:0';
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand('copy');
-  textarea.remove();
+  textarea.readOnly = true;
+  textarea.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+  (document.body ?? document.documentElement).appendChild(textarea);
+  textarea.focus({ preventScroll: true });
+  textarea.setSelectionRange(0, text.length);
+  try {
+    document.execCommand('copy');
+  } finally {
+    textarea.remove();
+    if (focused instanceof HTMLElement || focused instanceof SVGElement) focused.focus({ preventScroll: true });
+    if (selection) {
+      selection.removeAllRanges();
+      ranges.forEach(range => selection.addRange(range));
+    }
+  }
 }
 
 export function registerRuntime({ server, objects, nodes, probe }: Context) {
@@ -111,27 +186,33 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
     };
   }
 
-  function withCommandLineApi<T>(fn: () => T): T {
+  /** Keeps the utilities until `fn` settles, so code after an `await` can use them too. */
+  async function withCommandLineApi<T>(fn: () => Promise<T>): Promise<T> {
     const added = Object.entries(commandLineApi()).filter(([name]) => !(name in window));
     for (const [name, value] of added) Reflect.set(window, name, value);
     try {
-      return fn();
+      return await fn();
     } finally {
       for (const [name] of added) Reflect.deleteProperty(window, name);
     }
   }
 
-  function exceptionResult(error: unknown, group?: string, generatePreview = false) {
+  function exceptionResult(error: unknown, group?: string, generatePreview = false, inPromise = false) {
     hideEvalFrames(error);
     const frames = error instanceof Error ? parseStack(error.stack) : [];
+    // One object for both places, like V8.
+    const exception = objects.wrap(error, { generatePreview, group });
     return {
-      result: objects.wrap(error, { generatePreview, group }),
+      result: exception,
       exceptionDetails: {
         exceptionId: ++exceptionId,
-        text: 'Uncaught',
+        // Like V8, a rejection names the error: "Uncaught (in promise) Error: no".
+        text: inPromise
+          ? `Uncaught (in promise)${error instanceof Error ? ` ${error.name}: ${error.message}` : ''}`
+          : 'Uncaught',
         lineNumber: 0,
         columnNumber: 0,
-        exception: objects.wrap(error, { generatePreview, group }),
+        exception,
         executionContextId: EXECUTION_CONTEXT_ID,
         ...(frames.length ? { stackTrace: { callFrames: frames } } : {}),
       },
@@ -196,11 +277,17 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
       if (params.throwOnSideEffect && mayHaveSideEffects(params.expression)) {
         return exceptionResult(new EvalError('Possible side-effect in debug-evaluate'), group, params.generatePreview);
       }
+      // Whether the error is the rejection of a promise the expression returned.
+      let inPromise = false;
       try {
         const allowAwait = !!(params.replMode || params.awaitPromise);
-        const evaluate = () => run(params.expression, allowAwait);
-        let { value, isAsync } = params.includeCommandLineAPI ? withCommandLineApi(evaluate) : evaluate();
-        if ((isAsync || params.awaitPromise) && isThenable(value)) value = await value;
+        const evaluate = async () => {
+          const { value, isAsync } = run(params.expression, allowAwait);
+          if (!(isAsync || params.awaitPromise) || !isThenable(value)) return value;
+          inPromise = !isAsync;
+          return await value;
+        };
+        const value = params.includeCommandLineAPI ? await withCommandLineApi(evaluate) : await evaluate();
         if (!params.silent) lastResult = value;
         return {
           result: objects.wrap(value, {
@@ -210,7 +297,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
           }),
         };
       } catch (e) {
-        return exceptionResult(e, group, params.generatePreview);
+        return exceptionResult(e, group, params.generatePreview, inPromise);
       }
     },
 
@@ -223,10 +310,16 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
         if (arg.unserializableValue !== undefined) return parseUnserializable(arg.unserializableValue);
         return arg.value;
       });
+      let inPromise = false;
       try {
         const fn = globalEval(`(${params.functionDeclaration}\n)`);
-        let value = fn.apply(self, args);
-        if (params.awaitPromise && isThenable(value)) value = await value;
+        // Same error as V8 for a declaration that is not a function, a response error.
+        if (typeof fn !== 'function') throw new CdpError('Given expression does not evaluate to a function');
+        let value: unknown = Reflect.apply(fn, self, args);
+        if (params.awaitPromise && isThenable(value)) {
+          inPromise = true;
+          value = await value;
+        }
         return {
           result: objects.wrap(value, {
             generatePreview: params.generatePreview,
@@ -235,7 +328,8 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
           }),
         };
       } catch (e) {
-        return exceptionResult(e, params.objectGroup, params.generatePreview);
+        if (e instanceof CdpError) throw e;
+        return exceptionResult(e, params.objectGroup, params.generatePreview, inPromise);
       }
     },
 
@@ -244,7 +338,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
       try {
         new Function(params.expression);
         return {};
-      } catch (e) {
+      } catch {
         if (/\bawait\b/.test(params.expression)) {
           try {
             new Function(`return (async () => {${params.expression}\n})`);
@@ -253,7 +347,17 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
             // Fall through to report the original error.
           }
         }
-        return { exceptionDetails: exceptionResult(e).exceptionDetails };
+        // Only the details, like V8: no exception object is kept for a check that is made
+        // on every key press.
+        return {
+          exceptionDetails: {
+            exceptionId: ++exceptionId,
+            text: 'Uncaught',
+            lineNumber: 0,
+            columnNumber: 0,
+            executionContextId: EXECUTION_CONTEXT_ID,
+          },
+        };
       }
     },
 
