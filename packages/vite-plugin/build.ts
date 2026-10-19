@@ -9,7 +9,7 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node18',
+  target: 'node22',
   outdir: 'dist',
   packages: 'external',
   logLevel: 'info',

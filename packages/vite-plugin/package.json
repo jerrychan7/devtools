@@ -14,7 +14,7 @@
   },
   "files": ["dist"],
   "scripts": {
-    "build": "node build.mjs && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
