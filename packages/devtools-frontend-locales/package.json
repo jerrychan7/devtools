@@ -3,9 +3,11 @@
   "version": "0.0.0",
   "description": "UI translations of @devtools-anywhere/devtools-frontend beyond English and Chinese",
   "license": "MIT",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     "./*": "./dist/*"
-  },
-  "files": ["dist"]
+  }
 }

@@ -3,11 +3,14 @@
   "version": "0.0.0",
   "description": "Chrome DevTools frontend built from the official sources for devtools-anywhere",
   "license": "MIT",
+  "files": [
+    "dist",
+    "REVISION"
+  ],
   "type": "module",
   "exports": {
     "./*": "./dist/*"
   },
-  "files": ["dist", "REVISION"],
   "scripts": {
     "build:frontend": "node scripts/build.ts",
     "update": "node scripts/build.ts --latest"

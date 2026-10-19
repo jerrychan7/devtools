@@ -1,15 +1,15 @@
-import type { Protocol } from 'devtools-protocol'
-import { FRAME_ID, LOADER_ID, type Context } from '../core/context'
-import { CdpError } from '../core/server'
-import { parseStack } from '../core/stack'
-import type { RequestRecord } from '../probe/types'
+import type { Protocol } from 'devtools-protocol';
+import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
+import { CdpError } from '../core/server';
+import { parseStack } from '../core/stack';
+import type { RequestRecord } from '../probe/types';
 
 export function parseCookies(): Protocol.Network.Cookie[] {
-  if (!document.cookie) return []
+  if (!document.cookie) return [];
   return document.cookie.split(';').map(pair => {
-    const i = pair.indexOf('=')
-    const name = (i < 0 ? pair : pair.slice(0, i)).trim()
-    const value = i < 0 ? '' : pair.slice(i + 1).trim()
+    const i = pair.indexOf('=');
+    const name = (i < 0 ? pair : pair.slice(0, i)).trim();
+    const value = i < 0 ? '' : pair.slice(i + 1).trim();
     return {
       name,
       value,
@@ -24,55 +24,55 @@ export function parseCookies(): Protocol.Network.Cookie[] {
       sameParty: false,
       sourceScheme: location.protocol === 'https:' ? 'Secure' : 'NonSecure',
       sourcePort: Number(location.port) || (location.protocol === 'https:' ? 443 : 80),
-    }
-  })
+    };
+  });
 }
 
-const withoutHash = (url: string) => url.split('#')[0]
+const withoutHash = (url: string) => url.split('#')[0];
 
 /** Whether the request is one of devtools-anywhere's own (its bundle, the frontend, …). */
 export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => {
-  const url = withoutHash(rec.url)
-  for (const own of probe.ownUrls) if (withoutHash(own) === url) return true
-  return false
-}
+  const url = withoutHash(rec.url);
+  for (const own of probe.ownUrls) if (withoutHash(own) === url) return true;
+  return false;
+};
 
 /** Base64 of a binary response body. */
 async function base64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer())
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-  return btoa(binary)
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 export function registerNetwork({ server, probe }: Context) {
-  let unsubscribe: (() => void) | null = null
-  const sent = new Map<string, Set<'request' | 'response' | 'end'>>()
+  let unsubscribe: (() => void) | null = null;
+  const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
 
   function find(requestId: string) {
-    return probe.requests.find(r => r.requestId === requestId)
+    return probe.requests.find(r => r.requestId === requestId);
   }
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
-    if (isOwnRequest(probe, rec)) return
-    let done = sent.get(rec.requestId)
-    if (!done) sent.set(rec.requestId, (done = new Set()))
+    if (isOwnRequest(probe, rec)) return;
+    let done = sent.get(rec.requestId);
+    if (!done) sent.set(rec.requestId, (done = new Set()));
 
     if (!done.has('request')) {
-      done.add('request')
+      done.add('request');
       const request: Protocol.Network.Request = {
         url: rec.url,
         method: rec.method,
         headers: rec.requestHeaders,
         initialPriority: 'High',
         referrerPolicy: 'strict-origin-when-cross-origin',
-      }
+      };
       if (rec.postData !== undefined) {
-        request.postData = rec.postData
-        request.hasPostData = true
+        request.postData = rec.postData;
+        request.hasPostData = true;
       }
-      const callFrames = parseStack(rec.stack, 1)
+      const callFrames = parseStack(rec.stack, 1);
       server.emit('Network.requestWillBeSent', {
         requestId: rec.requestId,
         loaderId: LOADER_ID,
@@ -85,11 +85,11 @@ export function registerNetwork({ server, probe }: Context) {
         redirectHasExtraInfo: false,
         type: rec.type,
         frameId: FRAME_ID,
-      } satisfies Protocol.Network.RequestWillBeSentEvent)
+      } satisfies Protocol.Network.RequestWillBeSentEvent);
     }
 
     if ((rec.state === 'headers' || rec.state === 'done') && !done.has('response')) {
-      done.add('response')
+      done.add('response');
       server.emit('Network.responseReceived', {
         requestId: rec.requestId,
         loaderId: LOADER_ID,
@@ -109,70 +109,75 @@ export function registerNetwork({ server, probe }: Context) {
         },
         hasExtraInfo: false,
         frameId: FRAME_ID,
-      } satisfies Protocol.Network.ResponseReceivedEvent)
+      } satisfies Protocol.Network.ResponseReceivedEvent);
     }
 
     if (rec.state === 'done' && !done.has('end')) {
-      done.add('end')
+      done.add('end');
       server.emit('Network.loadingFinished', {
         requestId: rec.requestId,
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         encodedDataLength: rec.encodedDataLength ?? 0,
-      } satisfies Protocol.Network.LoadingFinishedEvent)
+      } satisfies Protocol.Network.LoadingFinishedEvent);
     } else if (rec.state === 'failed' && !done.has('end')) {
-      done.add('end')
+      done.add('end');
       server.emit('Network.loadingFailed', {
         requestId: rec.requestId,
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         type: rec.type,
         errorText: rec.errorText ?? '',
         canceled: false,
-      } satisfies Protocol.Network.LoadingFailedEvent)
+      } satisfies Protocol.Network.LoadingFailedEvent);
     }
   }
 
   server.register('Network', {
     enable() {
-      if (unsubscribe) return
+      if (unsubscribe) return;
       // Report requests made before the client connected, including early ones.
-      probe.requests.forEach(emit)
-      unsubscribe = probe.onRequest(emit)
+      probe.requests.forEach(emit);
+      unsubscribe = probe.onRequest(emit);
     },
 
     disable() {
-      unsubscribe?.()
-      unsubscribe = null
-      sent.clear()
+      unsubscribe?.();
+      unsubscribe = null;
+      sent.clear();
     },
 
-    async getResponseBody(params: Protocol.Network.GetResponseBodyRequest): Promise<Protocol.Network.GetResponseBodyResponse> {
-      const rec = find(params.requestId)
-      if (rec?.body !== undefined) return { body: rec.body, base64Encoded: false }
+    async getResponseBody(
+      params: Protocol.Network.GetResponseBodyRequest
+    ): Promise<Protocol.Network.GetResponseBodyResponse> {
+      const rec = find(params.requestId);
+      if (rec?.body !== undefined) return { body: rec.body, base64Encoded: false };
       // Requests known from Resource Timing: load the body again, from the HTTP cache when
       // possible (unhooked, so it does not show up as a new request).
       if (rec?.initiatorType && rec.method === 'GET') {
-        const res = await probe.fetch(rec.url, { cache: 'force-cache', credentials: 'include' }).catch(() => null)
+        const res = await probe.fetch(rec.url, { cache: 'force-cache', credentials: 'include' }).catch(() => null);
         if (res?.ok) {
-          const type = res.headers.get('content-type') || ''
-          if (/^text\/|json|javascript|xml|svg/.test(type)) return { body: await res.text(), base64Encoded: false }
-          return { body: await base64(await res.blob()), base64Encoded: true }
+          const type = res.headers.get('content-type') || '';
+          if (/^text\/|json|javascript|xml|svg/.test(type)) return { body: await res.text(), base64Encoded: false };
+          return { body: await base64(await res.blob()), base64Encoded: true };
         }
       }
-      throw new CdpError('No data found for resource with given identifier')
+      throw new CdpError('No data found for resource with given identifier');
     },
 
-    getRequestPostData(params: Protocol.Network.GetRequestPostDataRequest): Protocol.Network.GetRequestPostDataResponse {
-      const rec = find(params.requestId)
-      if (rec?.postData === undefined) throw new CdpError('No post data available for the request')
-      return { postData: rec.postData, base64Encoded: false }
+    getRequestPostData(
+      params: Protocol.Network.GetRequestPostDataRequest
+    ): Protocol.Network.GetRequestPostDataResponse {
+      const rec = find(params.requestId);
+      if (rec?.postData === undefined) throw new CdpError('No post data available for the request');
+      return { postData: rec.postData, base64Encoded: false };
     },
 
     getCookies: (): Protocol.Network.GetCookiesResponse => ({ cookies: parseCookies() }),
 
     deleteCookies(params: Protocol.Network.DeleteCookiesRequest) {
-      const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT'
-      document.cookie = `${params.name}=; ${expires}; path=${params.path || '/'}`
-      if (params.domain) document.cookie = `${params.name}=; ${expires}; path=${params.path || '/'}; domain=${params.domain}`
+      const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      document.cookie = `${params.name}=; ${expires}; path=${params.path || '/'}`;
+      if (params.domain)
+        document.cookie = `${params.name}=; ${expires}; path=${params.path || '/'}; domain=${params.domain}`;
     },
 
     setCacheDisabled: () => {},
@@ -182,5 +187,5 @@ export function registerNetwork({ server, probe }: Context) {
     setBypassServiceWorker: () => {},
     setExtraHTTPHeaders: () => {},
     setBlockedURLs: () => {},
-  })
+  });
 }

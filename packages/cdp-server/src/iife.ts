@@ -1,6 +1,6 @@
 // Entry of cdp-server.iife.js: exposes the API as `window.DevtoolsAnywhereCdp`, and
 // installs the probe right away in case probe.iife.js was not loaded earlier.
-import { createCdpServer, installProbe } from './index'
+import { createCdpServer, installProbe } from './index';
 
-installProbe()
-;(window as any).DevtoolsAnywhereCdp = { createCdpServer, installProbe }
+installProbe();
+(window as any).DevtoolsAnywhereCdp = { createCdpServer, installProbe };

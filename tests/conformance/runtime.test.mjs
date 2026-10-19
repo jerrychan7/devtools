@@ -1,24 +1,24 @@
-import { after, before, describe, test } from 'node:test'
-import assert from 'node:assert/strict'
-import { diffSubset, launch, openPage, waitForBoth } from './harness.mjs'
+import { after, before, describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { diffSubset, launch, openPage, waitForBoth } from './harness.mjs';
 
-let env
-let t
+let env;
+let t;
 
 before(async () => {
-  env = await launch()
-  t = await openPage(env, ['Runtime.consoleAPICalled', 'Runtime.exceptionThrown'])
-  await t.chrome.send('Runtime.enable')
-  await t.ours.send('Runtime.enable')
-})
-after(() => env?.close())
+  env = await launch();
+  t = await openPage(env, ['Runtime.consoleAPICalled', 'Runtime.exceptionThrown']);
+  await t.chrome.send('Runtime.enable');
+  await t.ours.send('Runtime.enable');
+});
+after(() => env?.close());
 
 async function logged(expression) {
-  t.chrome.clear()
-  await t.ours.clear()
-  await t.page.evaluate(expression)
-  const [[ours], [chrome]] = await waitForBoth(t, 'Runtime.consoleAPICalled')
-  return { ours, chrome }
+  t.chrome.clear();
+  await t.ours.clear();
+  await t.page.evaluate(expression);
+  const [[ours], [chrome]] = await waitForBoth(t, 'Runtime.consoleAPICalled');
+  return { ours, chrome };
 }
 
 const VALUES = {
@@ -41,16 +41,16 @@ const VALUES = {
   symbol: "Symbol('s')",
   element: "document.getElementById('app')",
   typedArray: 'new Uint8Array(3)',
-}
+};
 
 describe('Runtime.consoleAPICalled arguments', () => {
   for (const [name, expr] of Object.entries(VALUES)) {
     test(name, async () => {
-      const { ours, chrome } = await logged(`console.log(${expr})`)
-      assert.deepEqual(diffSubset(ours.args, chrome.args), [])
-    })
+      const { ours, chrome } = await logged(`console.log(${expr})`);
+      assert.deepEqual(diffSubset(ours.args, chrome.args), []);
+    });
   }
-})
+});
 
 describe('Runtime.consoleAPICalled types', () => {
   const cases = {
@@ -65,21 +65,21 @@ describe('Runtime.consoleAPICalled types', () => {
     table: 'console.table([1])',
     dir: 'console.dir({})',
     trace: "console.trace('t')",
-  }
+  };
   for (const [name, expr] of Object.entries(cases)) {
     test(name, async () => {
-      const { ours, chrome } = await logged(expr)
-      assert.equal(ours.type, chrome.type)
-      assert.deepEqual(diffSubset(ours.args, chrome.args), [])
-    })
+      const { ours, chrome } = await logged(expr);
+      assert.equal(ours.type, chrome.type);
+      assert.deepEqual(diffSubset(ours.args, chrome.args), []);
+    });
   }
 
   test('stack points at the caller', async () => {
-    const { ours, chrome } = await logged("(function caller() { console.log('x') })()")
+    const { ours, chrome } = await logged("(function caller() { console.log('x') })()");
     // Chrome also reports the probe's console wrapper as the top frame; we hide it.
-    assert.equal(ours.stackTrace.callFrames[0].functionName, chrome.stackTrace.callFrames[1].functionName)
-  })
-})
+    assert.equal(ours.stackTrace.callFrames[0].functionName, chrome.stackTrace.callFrames[1].functionName);
+  });
+});
 
 describe('Runtime.evaluate', () => {
   const cases = {
@@ -90,66 +90,66 @@ describe('Runtime.evaluate', () => {
     awaitPromise: { expression: 'Promise.resolve(5)', awaitPromise: true },
     returnByValue: { expression: '({ a: [1, 2] })', returnByValue: true },
     throws: { expression: "throw new Error('x')" },
-  }
+  };
   for (const [name, params] of Object.entries(cases)) {
     test(name, async () => {
-      const ours = await t.ours.send('Runtime.evaluate', params)
-      const chrome = await t.chrome.send('Runtime.evaluate', params)
-      assert.deepEqual(diffSubset(ours, chrome), [])
-    })
+      const ours = await t.ours.send('Runtime.evaluate', params);
+      const chrome = await t.chrome.send('Runtime.evaluate', params);
+      assert.deepEqual(diffSubset(ours, chrome), []);
+    });
   }
-})
+});
 
 describe('Runtime.getProperties', () => {
   async function properties(expression, params) {
     const [ours, chrome] = await Promise.all([
       t.ours.send('Runtime.evaluate', { expression }),
       t.chrome.send('Runtime.evaluate', { expression }),
-    ])
+    ]);
     return {
       ours: await t.ours.send('Runtime.getProperties', { objectId: ours.result.objectId, ...params }),
       chrome: await t.chrome.send('Runtime.getProperties', { objectId: chrome.result.objectId, ...params }),
-    }
+    };
   }
-  const byName = list => Object.fromEntries((list || []).map(p => [p.name, p]))
+  const byName = list => Object.fromEntries((list || []).map(p => [p.name, p]));
 
   test('own properties of a plain object', async () => {
-    const { ours, chrome } = await properties("({ a: 1, b: { c: 2 }, get g() { return 1 } })", { ownProperties: true })
-    assert.deepEqual(Object.keys(byName(ours.result)), Object.keys(byName(chrome.result)))
-    assert.deepEqual(diffSubset(byName(ours.result), byName(chrome.result)), [])
+    const { ours, chrome } = await properties('({ a: 1, b: { c: 2 }, get g() { return 1 } })', { ownProperties: true });
+    assert.deepEqual(Object.keys(byName(ours.result)), Object.keys(byName(chrome.result)));
+    assert.deepEqual(diffSubset(byName(ours.result), byName(chrome.result)), []);
     assert.deepEqual(
       (ours.internalProperties || []).map(p => p.name),
       (chrome.internalProperties || []).map(p => p.name)
-    )
-  })
+    );
+  });
 
   test('map entries', async () => {
-    const { ours, chrome } = await properties("new Map([['k', 1]])", { ownProperties: true })
+    const { ours, chrome } = await properties("new Map([['k', 1]])", { ownProperties: true });
     assert.deepEqual(
       (ours.internalProperties || []).map(p => p.name),
       (chrome.internalProperties || []).map(p => p.name)
-    )
-  })
-})
+    );
+  });
+});
 
 describe('Runtime.exceptionThrown', () => {
   async function thrown(expression) {
-    t.chrome.clear()
-    await t.ours.clear()
-    await t.page.evaluate(expression)
-    const [[ours], [chrome]] = await waitForBoth(t, 'Runtime.exceptionThrown')
-    return { ours, chrome }
+    t.chrome.clear();
+    await t.ours.clear();
+    await t.page.evaluate(expression);
+    const [[ours], [chrome]] = await waitForBoth(t, 'Runtime.exceptionThrown');
+    return { ours, chrome };
   }
 
   test('uncaught error', async () => {
-    const { ours, chrome } = await thrown("setTimeout(() => { throw new Error('late') })")
-    assert.equal(ours.exceptionDetails.text, chrome.exceptionDetails.text)
-    assert.deepEqual(diffSubset(ours.exceptionDetails.exception, chrome.exceptionDetails.exception), [])
-  })
+    const { ours, chrome } = await thrown("setTimeout(() => { throw new Error('late') })");
+    assert.equal(ours.exceptionDetails.text, chrome.exceptionDetails.text);
+    assert.deepEqual(diffSubset(ours.exceptionDetails.exception, chrome.exceptionDetails.exception), []);
+  });
 
   test('unhandled rejection', async () => {
-    const { ours, chrome } = await thrown("void Promise.reject(new Error('rejected'))")
-    assert.equal(ours.exceptionDetails.text, chrome.exceptionDetails.text)
-    assert.deepEqual(diffSubset(ours.exceptionDetails.exception, chrome.exceptionDetails.exception), [])
-  })
-})
+    const { ours, chrome } = await thrown("void Promise.reject(new Error('rejected'))");
+    assert.equal(ours.exceptionDetails.text, chrome.exceptionDetails.text);
+    assert.deepEqual(diffSubset(ours.exceptionDetails.exception, chrome.exceptionDetails.exception), []);
+  });
+});

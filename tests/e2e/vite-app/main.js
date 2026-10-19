@@ -1,2 +1,2 @@
-document.getElementById('app').textContent = 'vite app'
-console.log('vite module')
+document.getElementById('app').textContent = 'vite app';
+console.log('vite module');

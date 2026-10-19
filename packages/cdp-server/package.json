@@ -3,7 +3,13 @@
   "version": "0.0.0",
   "description": "In-page Chrome DevTools Protocol server with an early-capture probe",
   "license": "MIT",
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "sideEffects": [
+    "./dist/*.iife.js"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/types/index.d.ts",
   "exports": {
@@ -18,12 +24,6 @@
     "./probe.iife.js": "./dist/probe.iife.js",
     "./cdp-server.iife.js": "./dist/cdp-server.iife.js"
   },
-  "files": [
-    "dist"
-  ],
-  "sideEffects": [
-    "./dist/*.iife.js"
-  ],
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit",

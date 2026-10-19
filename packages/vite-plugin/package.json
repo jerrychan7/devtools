@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "description": "Vite plugin that injects devtools-anywhere in development",
   "license": "MIT",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/types/index.d.ts",
@@ -12,28 +15,25 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "node build.ts --watch"
   },
   "dependencies": {
-    "devtools-anywhere": "workspace:*",
-    "@devtools-anywhere/devtools-frontend": "workspace:*"
-  },
-  "peerDependencies": {
-    "vite": ">=5",
-    "@devtools-anywhere/devtools-frontend-locales": "workspace:*"
+    "@devtools-anywhere/devtools-frontend": "workspace:*",
+    "devtools-anywhere": "workspace:*"
   },
   "devDependencies": {
+    "@devtools-anywhere/devtools-frontend-locales": "workspace:*",
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^7.0.2",
-    "vite": "^7.0.0",
-    "@devtools-anywhere/devtools-frontend-locales": "workspace:*"
+    "vite": "^7.0.0"
+  },
+  "peerDependencies": {
+    "@devtools-anywhere/devtools-frontend-locales": "workspace:*",
+    "vite": ">=5"
   },
   "peerDependenciesMeta": {
     "@devtools-anywhere/devtools-frontend-locales": {

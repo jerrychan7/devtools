@@ -1,15 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <title>shell page</title>
-  <script src="/packages/cdp-server/dist/probe.iife.js"></script>
-  <script>console.log('early', location.search)</script>
-</head>
-<body>
-  <p id="content">page content</p>
-  <script>window.__pageScriptRan = true</script>
-  <script src="/packages/devtools-anywhere/dist/devtools-anywhere.iife.js"></script>
-  <devtools-anywhere frontend="/tests/e2e/fake-frontend.html" open></devtools-anywhere>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>shell page</title>
+    <script src="/packages/cdp-server/dist/probe.iife.js"></script>
+    <script>
+      console.log('early', location.search);
+    </script>
+  </head>
+  <body>
+    <p id="content">page content</p>
+    <script>
+      window.__pageScriptRan = true;
+    </script>
+    <script src="/packages/devtools-anywhere/dist/devtools-anywhere.iife.js"></script>
+    <devtools-anywhere frontend="/tests/e2e/fake-frontend.html" open></devtools-anywhere>
+  </body>
 </html>

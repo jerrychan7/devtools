@@ -1,5 +1,5 @@
-import type { Protocol } from 'devtools-protocol'
-import type { CdpServer } from '../core/server'
+import type { Protocol } from 'devtools-protocol';
+import type { CdpServer } from '../core/server';
 
 /**
  * Commands the frontend sends at startup that have no in-page equivalent (or are not
@@ -47,20 +47,20 @@ const NOOPS: Record<string, string[]> = {
     'setStorageBucketTracking',
   ],
   Target: ['setAutoAttach', 'setDiscoverTargets', 'setRemoteLocations'],
-}
+};
 
 export function registerStubs(server: CdpServer) {
   for (const [domain, methods] of Object.entries(NOOPS)) {
-    server.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])))
+    server.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])));
   }
   // Throttling cannot be emulated in the page: the rules are accepted but never applied.
   server.register('Network', {
     emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({
       ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`),
     }),
-  })
+  });
   // env() values are not readable from the page.
-  server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) })
+  server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
   server.register('Debugger', {
     enable: () => ({ debuggerId: 'devtools-anywhere' }),
     disable: () => {},
@@ -68,5 +68,5 @@ export function registerStubs(server: CdpServer) {
     setBlackboxPatterns: () => {},
     setPauseOnExceptions: () => {},
     setBreakpointsActive: () => {},
-  })
+  });
 }
