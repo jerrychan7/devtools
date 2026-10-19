@@ -22,9 +22,11 @@
 ```bash
 git clone https://github.com/jerrychan7/devtools.git
 cd devtools
-pnpm install
+pnpm install     # 同时启用 pre-commit 钩子（core.hooksPath = .githooks）
 pnpm test        # 构建所有包，然后在真实 Chrome 上跑全部测试
 ```
+
+如果钩子没有生效（`git config core.hooksPath` 没有输出），运行 `pnpm run prepare`。
 
 需要 DevTools 前端的测试在前端构建出来之前会跳过（见下一步）。
 
@@ -122,9 +124,13 @@ pnpm --filter @devtools-anywhere/devtools-frontend update
 ### 提交之前
 
 ```bash
+pnpm lint        # oxlint
+pnpm fmt         # oxfmt：直接改写文件（Markdown 不格式化）
 pnpm typecheck
 pnpm test        # 前端需已构建，真实前端测试才会运行
 ```
+
+pre-commit 钩子会运行 `pnpm lint` 和 `pnpm fmt:check`，任一失败就中止提交；`git commit --no-verify` 可以跳过一次。lint 规则：oxlint 的 correctness 规则，禁止 `any`，禁止非空断言（`!`）。代码风格：2 空格缩进、加分号、单引号、行宽 120。`packages/devtools-frontend/src` 沿用 Chromium 的风格，不做 lint 和格式化。
 
 行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本）。
 
