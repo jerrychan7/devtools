@@ -81,6 +81,10 @@ test('DevTools survives a page reload and gets the new page output', async () =>
   const state = await waitFor(s => earlyLogs(s).length >= 2);
   assert.ok(state.received.some(m => m.method === 'Runtime.executionContextsCleared'));
   assert.ok(state.received.some(m => m.method === 'Page.frameNavigated'));
+  assert.ok(state.received.some(m => m.method === 'DOM.documentUpdated'));
+  // The shell re-sends the frontend's enables to the new page; their answers stay in the shell.
+  assert.ok(!state.received.some(m => JSON.stringify(m).includes('"id":"shell-')));
+  assert.equal(state.received.filter(m => m.id === 1).length, 1, 'Runtime.enable is answered once');
 });
 
 test('navigation inside the page updates the address bar', async () => {
@@ -98,13 +102,6 @@ test("closing (DevTools' own close button) leaves shell mode", async () => {
   const devtools = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));
   assert.ok(devtools, 'the DevTools frame');
   await devtools.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*'));
-  await new Promise(r => setTimeout(r, 1000));
-  const state = await page.evaluate(() => ({
-    inShell: !!document.getElementById('devtools-anywhere-page'),
-    ran: !!window.__pageScriptRan,
-    url: location.href,
-  }));
-  assert.equal(state.inShell, false);
-  assert.equal(state.ran, true);
+  const state = await waitFor(s => !s.inShell && s.shellRanPageScript);
   assert.match(state.url, /\?second$/);
 });

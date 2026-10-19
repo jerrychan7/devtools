@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from './harness.ts';
-import type { Env, EventName, TestPage } from './harness.ts';
+import type { Env, EventName, Side, TestPage } from './harness.ts';
 
 type DomNode = Protocol.DOM.Node;
 type Commands = ProtocolMapping.Commands;
@@ -266,5 +266,138 @@ describe('shadow DOM', () => {
     });
     const [[ours], [chrome]] = await waitForBoth(t, 'DOM.shadowRootPushed');
     assert.deepEqual(diffSubset(ours, chrome), []);
+  });
+});
+
+describe('long text and own elements', () => {
+  before(async () => {
+    await t.page.evaluate(() => {
+      // Text up to 500 characters is sent with its element; node values are cut at 10000.
+      for (const [id, length] of [
+        ['text-500', 500],
+        ['text-501', 501],
+        ['text-10001', 10001],
+      ] as const) {
+        const div = document.createElement('div');
+        div.id = id;
+        div.textContent = 'x'.repeat(length);
+        document.body.append(div);
+      }
+      const own = document.createElement('div');
+      own.setAttribute('data-devtools-anywhere', '');
+      own.id = 'own';
+      document.body.append(own);
+    });
+  });
+
+  test('getDocument', async () => {
+    // Down to the <div>s: their text only follows when it is short enough to be inlined.
+    const [{ root: o }, { root: c }] = await both('DOM.getDocument', { depth: 3 });
+    const body = (root: DomNode) => find(root, n => n.localName === 'body');
+    for (const id of ['text-500', 'text-501']) {
+      const node = (root: DomNode) => find(root, n => attr(n, 'id') === id);
+      assert.deepEqual(diffSubset(node(o), node(c)), [], id);
+    }
+    // Chrome shows devtools-anywhere's element like any other; ours must leave it out.
+    assert.ok(find(o, n => attr(n, 'id') === 'own') === null);
+    assert.equal(body(o)?.childNodeCount, (body(c)?.childNodeCount ?? 0) - 1);
+  });
+
+  test('long node values are cut', async () => {
+    const [{ root: o }, { root: c }] = await both('DOM.getDocument', { depth: -1 });
+    const text = (root: DomNode) => find(root, n => attr(n, 'id') === 'text-10001')?.children?.[0];
+    assert.deepEqual(diffSubset(text(o), text(c)), []);
+    assert.equal(text(o)?.nodeValue.length, 10001);
+  });
+});
+
+/**
+ * Two identical subtrees, #edit-ours and #edit-chrome: each side edits its own the way the
+ * Elements panel does, then the two must end up with the same markup.
+ */
+describe('editing', () => {
+  before(async () => {
+    await t.page.evaluate(() => {
+      for (const id of ['edit-ours', 'edit-chrome']) {
+        const div = document.createElement('div');
+        div.id = id;
+        div.innerHTML = '<ul><li class="x" title="t">one</li><li>two</li></ul><p>text</p>';
+        document.body.append(div);
+      }
+    });
+  });
+
+  /** Runs `edit` on each side within its own subtree, then compares the subtrees' markup. */
+  async function edit<T>(run: (side: Side, scope: DomNode) => Promise<T>): Promise<[T, T]> {
+    const [{ root: o }, { root: c }] = await both('DOM.getDocument', { depth: -1 });
+    const scope = (root: DomNode, id: string) => {
+      const node = find(root, n => attr(n, 'id') === id);
+      assert.ok(node);
+      return node;
+    };
+    const ours = await run(t.ours, scope(o, 'edit-ours'));
+    const chrome = await run(t.chrome, scope(c, 'edit-chrome'));
+    const [html, expected] = await t.page.evaluate(() =>
+      ['edit-ours', 'edit-chrome'].map(id => document.getElementById(id)?.innerHTML)
+    );
+    assert.equal(html, expected);
+    return [ours, chrome];
+  }
+  const within = (scope: DomNode, predicate: (n: DomNode) => boolean) => {
+    const node = find(scope, predicate);
+    assert.ok(node);
+    return node;
+  };
+  const tag = (name: string) => (n: DomNode) => n.localName === name;
+
+  test('setAttributesAsText replacing an attribute', async () => {
+    await edit(async (side, scope) => {
+      const li = within(scope, n => attr(n, 'class') === 'x');
+      await side.send('DOM.setAttributesAsText', { nodeId: li.nodeId, name: 'title', text: 'data-a="1" title="u"' });
+    });
+  });
+
+  test('setNodeValue', async () => {
+    await edit(async (side, scope) => {
+      const text = within(scope, n => n.nodeValue === 'two');
+      await side.send('DOM.setNodeValue', { nodeId: text.nodeId, value: 'deux' });
+    });
+  });
+
+  test('setNodeName returns a node the client knows', async () => {
+    const [ours, chrome] = await edit(async (side, scope) => {
+      const li = within(scope, n => attr(n, 'class') === 'x');
+      const { nodeId } = await side.send('DOM.setNodeName', { nodeId: li.nodeId, name: 'dt' });
+      return (await side.send('DOM.describeNode', { nodeId, depth: 1 })).node;
+    });
+    assert.deepEqual(diffSubset(ours, chrome), []);
+  });
+
+  test('moveTo', async () => {
+    await edit(async (side, scope) => {
+      const [ul, p] = [within(scope, tag('ul')), within(scope, tag('p'))];
+      const first = ul.children?.[0];
+      assert.ok(first);
+      await side.send('DOM.moveTo', { nodeId: p.nodeId, targetNodeId: ul.nodeId, insertBeforeNodeId: first.nodeId });
+    });
+  });
+
+  test('copyTo', async () => {
+    await edit(async (side, scope) => {
+      await side.send('DOM.copyTo', { nodeId: within(scope, tag('ul')).nodeId, targetNodeId: scope.nodeId });
+    });
+  });
+
+  test('setOuterHTML', async () => {
+    await edit(async (side, scope) => {
+      const p = within(scope, tag('p'));
+      await side.send('DOM.setOuterHTML', { nodeId: p.nodeId, outerHTML: '<p class="y">new</p>' });
+    });
+  });
+
+  test('removeNode', async () => {
+    await edit(async (side, scope) => {
+      await side.send('DOM.removeNode', { nodeId: within(scope, tag('ul')).nodeId });
+    });
   });
 });

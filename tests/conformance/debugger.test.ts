@@ -31,6 +31,16 @@ after(() => env?.close());
 const parsed = async (side: Side, query: string) =>
   (await side.events('Debugger.scriptParsed')).find(e => e.url.endsWith(`resource.js?${query}`));
 
+/** Waits until `side` has reported the script added with `query`. */
+async function waitParsed(side: Side, query: string) {
+  for (let i = 0; i < 50; i++) {
+    const event = await parsed(side, query);
+    if (event) return event;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error(`timed out waiting for scriptParsed of resource.js?${query}`);
+}
+
 test('scripts loaded before enable are reported', async () => {
   await waitForBoth(t, 'Debugger.scriptParsed');
   const chrome = await parsed(t.chrome, 'before');
@@ -43,9 +53,7 @@ test('scripts loaded before enable are reported', async () => {
 
 test('scripts added later are reported', async () => {
   await addScript('later');
-  for (let i = 0; i < 50 && !(await parsed(t.ours, 'later')); i++) await new Promise(r => setTimeout(r, 100));
-  assert.ok(await parsed(t.chrome, 'later'));
-  assert.ok(await parsed(t.ours, 'later'));
+  await Promise.all([waitParsed(t.chrome, 'later'), waitParsed(t.ours, 'later')]);
 });
 
 test('getScriptSource returns the script text', async () => {
@@ -59,9 +67,40 @@ test('getScriptSource returns the script text', async () => {
   assert.equal(b.scriptSource, a.scriptSource);
 });
 
-test('inline scripts and DevTools itself are not reported', async () => {
+test('getScriptSource rejects an unknown scriptId', async () => {
+  await assert.rejects(t.ours.send('Debugger.getScriptSource', { scriptId: '999999' }));
+});
+
+test('inline scripts are not reported', async () => {
+  const pageUrl = t.page.url();
+  await t.page.evaluate(() => {
+    const s = document.createElement('script');
+    s.textContent = 'window.__inlineRan = true;';
+    document.head.append(s);
+  });
+  // Chrome reports a script-inserted inline script with an empty URL; we cannot locate it, so leave it out.
+  for (let i = 0; i < 50 && !(await t.chrome.events('Debugger.scriptParsed')).some(e => e.url === ''); i++)
+    await new Promise(r => setTimeout(r, 100));
+  assert.ok((await t.chrome.events('Debugger.scriptParsed')).some(e => e.url === ''));
+  await addScript('after-inline');
+  await waitParsed(t.ours, 'after-inline');
   const urls = (await t.ours.events('Debugger.scriptParsed')).map(e => e.url);
-  assert.ok(urls.every(url => /^https?:/.test(url)));
+  assert.ok(urls.length > 0);
+  assert.ok(urls.every(url => /^https?:/.test(url) && url !== pageUrl));
+});
+
+test('scripts are reported again after disable and enable', async () => {
+  await t.ours.send('Debugger.disable');
+  await t.ours.clear();
+  await t.ours.send('Debugger.enable');
+  const ours = await waitParsed(t.ours, 'before');
+  const chrome = await parsed(t.chrome, 'before');
+  assert.ok(chrome);
+  const [a, b] = await Promise.all([
+    t.chrome.send('Debugger.getScriptSource', { scriptId: chrome.scriptId }),
+    t.ours.send('Debugger.getScriptSource', { scriptId: ours.scriptId }),
+  ]);
+  assert.equal(b.scriptSource, a.scriptSource);
 });
 
 test('breakpoint commands are accepted', async () => {

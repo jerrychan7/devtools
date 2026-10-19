@@ -34,8 +34,22 @@ declare global {
     /** The harness's CDP server in the page, and the events it emitted. */
     __server: CdpServer;
     __ours: { method: string; params: unknown }[];
+    /** A CDP server with a stand-in snapDOM, the frames it sent and the scales it rendered at. */
+    __screencast?: {
+      server: CdpServer;
+      frames: { sessionId: number; data: string; deviceWidth: number }[];
+      scales: number[];
+    };
+    /** Page.screencastFrame messages the real frontend received. */
+    __screencastFrames?: number;
+    /** Input events the input conformance page saw, as `type:targetId`. */
+    __inputEvents?: string[];
     /** Messages the fake frontend received. */
     received?: ReceivedMessage[];
+    /** The real frontend's postMessage targets, the page's original postMessage, and the messages the frontend dispatched. */
+    __targets?: string[];
+    __postMessage?: typeof window.postMessage;
+    __received?: unknown[];
     /** Markers set by test pages and fixtures. */
     __pageScriptRan?: boolean;
     __frame?: HTMLIFrameElement;

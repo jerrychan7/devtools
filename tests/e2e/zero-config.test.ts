@@ -93,6 +93,55 @@ test('the Service Worker adds headers to requests known from Resource Timing', a
   assert.ok(Object.keys(rec.requestHeaders).length, 'request headers');
 });
 
+/** Navigates the shell's page frame and waits for the new document to finish loading. */
+async function navigatePageFrame(url: string) {
+  await page.evaluate(url => {
+    const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+    if (!pageWindow) throw new Error('no page frame');
+    pageWindow.location.href = url;
+  }, url);
+  await waitFor(() =>
+    page.evaluate(url => {
+      const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+      return pageWindow?.location.pathname === url && pageWindow.document.readyState === 'complete';
+    }, url)
+  );
+}
+
+/** The `src` of every script element in the shell's page frame. */
+const pageScripts = () =>
+  page.evaluate(() => {
+    const pageDocument = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentDocument;
+    if (!pageDocument) throw new Error('no page frame');
+    return [...pageDocument.querySelectorAll('script')].map(s => s.src);
+  });
+
+test('the Service Worker injects the probe exactly once into a short page without <head>', async () => {
+  await navigatePageFrame('/tests/e2e/no-head.html');
+  await waitFor(async () => logged(await received(), 'no-head early'));
+  // The probe, inserted once when the response ended (it then loads devtools-anywhere.iife.js).
+  const scripts = await pageScripts();
+  assert.equal(scripts.filter(src => src.endsWith('/probe.iife.js')).length, 1, scripts.join(', '));
+  const messages = await received();
+  assert.equal(
+    messages.filter(m => m.method === 'Runtime.consoleAPICalled' && firstArg(m) === 'no-head early').length,
+    1
+  );
+});
+
+test('the Service Worker passes non-HTML responses through unchanged', async () => {
+  await navigatePageFrame('/tests/e2e/not-html.json');
+  const { contentType, text } = await page.evaluate(() => {
+    const pageDocument = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentDocument;
+    if (!pageDocument) throw new Error('no page frame');
+    // Chrome shows a JSON response as text in a <pre>.
+    return { contentType: pageDocument.contentType, text: pageDocument.querySelector('pre')?.textContent };
+  });
+  assert.equal(contentType, 'application/json');
+  assert.equal(text?.trimEnd(), '{ "page": "<head> in a non-HTML response" }');
+  assert.deepEqual(await pageScripts(), []);
+});
+
 test('leaving shell mode unregisters the Service Worker', async () => {
   await page.evaluate(() => {
     const devtools = document.querySelector<DevtoolsAnywhereElement>('devtools-anywhere[shell]');

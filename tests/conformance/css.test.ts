@@ -72,6 +72,8 @@ describe('CSS', () => {
     ['#app', () => byId('app')],
     ['section', () => byTag('section')],
     ['p', () => byTag('p')],
+    // Escapes, non-ASCII names, quoted attribute values and selector-list pseudo-classes.
+    ['#spec', () => byId('spec')],
   ] as const) {
     test(`getMatchedStylesForNode ${name}`, async () => {
       const [o, c] = pick();
@@ -166,5 +168,174 @@ describe('CSS', () => {
       return getComputedStyle(span).outlineStyle;
     });
     assert.equal(outline, 'solid');
+  });
+
+  /**
+   * The fixture has two style sheets that differ only in the class name (twin-o, twin-c). Each
+   * side edits its own, so the responses can be compared without one edit seeing the other's.
+   */
+  describe('editing, compared with Chrome', () => {
+    type Twin = { side: TestPage['ours']; root: DomNode; name: string };
+    const twins = (): [Twin, Twin] => [
+      { side: t.ours, root: ours, name: 'twin-o' },
+      { side: t.chrome, root: chrome, name: 'twin-c' },
+    ];
+    /** The twin's element, or its `.k` child with `inner`. */
+    const nodeOf = ({ root, name }: Twin, inner = false) => {
+      const outer = find(root, n => attr(n, 'class') === name);
+      const node = outer && inner ? find(outer, n => attr(n, 'class') === 'k') : outer;
+      assert.ok(node);
+      return node.nodeId;
+    };
+    /** The twin's rule with this selector (`%` stands for the class name). */
+    const ruleOf = async (twin: Twin, selector: string, inner = false) => {
+      const { side, name } = twin;
+      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId: nodeOf(twin, inner) });
+      const rule = matchedCSSRules?.find(m => m.rule.selectorList.text === selector.replace('%', name))?.rule;
+      assert.ok(rule?.styleSheetId && rule.style.range);
+      return {
+        styleSheetId: rule.styleSheetId,
+        range: rule.style.range,
+        selectorRange: rule.selectorList.selectors[0]?.range,
+      };
+    };
+    /** Chrome's result with its class name written as ours. */
+    const asOurs = <T>(value: T): T => JSON.parse(JSON.stringify(value).replaceAll('twin-c', 'twin-o')) as T;
+    /**
+     * Ours serves its own text for a sheet (one rule per line), so text and ranges differ from
+     * Chrome's by design: compare text with whitespace collapsed, and leave ranges out.
+     */
+    const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+    const style = (s: Protocol.CSS.CSSStyle | undefined) => s && declared(s);
+    const selectors = (list: Protocol.CSS.SelectorList) => ({
+      text: list.text,
+      selectors: list.selectors.map(({ text, specificity }) => {
+        assert.ok(specificity);
+        const { a, b, c } = specificity;
+        return { text, specificity: { a, b, c } };
+      }),
+    });
+
+    before(async () => {
+      ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
+      chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
+    });
+
+    test('getStyleSheetText', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { styleSheetId } = await ruleOf(twin, '.%');
+          return flat((await twin.side.send('CSS.getStyleSheetText', { styleSheetId })).text);
+        })
+      );
+      assert.equal(o, asOurs(c));
+    });
+
+    test('collectClassNames', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { styleSheetId } = await ruleOf(twin, '.%');
+          return (await twin.side.send('CSS.collectClassNames', { styleSheetId })).classNames.sort();
+        })
+      );
+      assert.deepEqual(o, asOurs(c));
+    });
+
+    test('setStyleTexts twice on the same rule', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { styleSheetId, range } = await ruleOf(twin, '.%');
+          const first = await twin.side.send('CSS.setStyleTexts', {
+            edits: [{ styleSheetId, range, text: 'color: rgb(1, 2, 3); padding: 1px;' }],
+          });
+          // The next edit uses the range the first one returned, as the Styles pane does.
+          const next = first.styles[0]?.range;
+          assert.ok(next);
+          const second = await twin.side.send('CSS.setStyleTexts', {
+            edits: [{ styleSheetId, range: next, text: 'color: rgb(4, 5, 6);' }],
+          });
+          return [style(first.styles[0]), style(second.styles[0])];
+        })
+      );
+      assert.deepEqual(o, c);
+    });
+
+    test('setStyleTexts on the inline style', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { side } = twin;
+          const { inlineStyle } = await side.send('CSS.getInlineStylesForNode', { nodeId: nodeOf(twin) });
+          assert.ok(inlineStyle?.styleSheetId && inlineStyle.range);
+          const { styles } = await side.send('CSS.setStyleTexts', {
+            edits: [{ styleSheetId: inlineStyle.styleSheetId, range: inlineStyle.range, text: 'width: 6px;' }],
+          });
+          return [style(inlineStyle), style(styles[0])];
+        })
+      );
+      assert.deepEqual(o, c);
+    });
+
+    test('setRuleSelector', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { styleSheetId, selectorRange } = await ruleOf(twin, '.% .k', true);
+          assert.ok(selectorRange);
+          const { selectorList } = await twin.side.send('CSS.setRuleSelector', {
+            styleSheetId,
+            range: selectorRange,
+            selector: `.${twin.name} s.k`,
+          });
+          const { matchedCSSRules } = await twin.side.send('CSS.getMatchedStylesForNode', {
+            nodeId: nodeOf(twin, true),
+          });
+          assert.ok(matchedCSSRules);
+          return { selectorList: selectors(selectorList), matched: summarize(matchedCSSRules) };
+        })
+      );
+      assert.deepEqual(o, asOurs(c));
+    });
+
+    test('addRule at the end of the sheet', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { styleSheetId } = await ruleOf(twin, '.%');
+          const { text } = await twin.side.send('CSS.getStyleSheetText', { styleSheetId });
+          const lines = text.split('\n');
+          const end = { line: lines.length - 1, column: lines.at(-1)?.length ?? 0 };
+          const { rule } = await twin.side.send('CSS.addRule', {
+            styleSheetId,
+            ruleText: `.${twin.name} { outline-width: 2px; }`,
+            location: { startLine: end.line, startColumn: end.column, endLine: end.line, endColumn: end.column },
+          });
+          return {
+            origin: rule.origin,
+            selector: rule.selectorList.text,
+            style: style(rule.style),
+          };
+        })
+      );
+      assert.deepEqual(o, asOurs(c));
+    });
+
+    test('setStyleSheetText', async () => {
+      const [o, c] = await Promise.all(
+        twins().map(async twin => {
+          const { styleSheetId } = await ruleOf(twin, '.%');
+          await twin.side.send('CSS.setStyleSheetText', {
+            styleSheetId,
+            text: `.${twin.name} {\n  color: rgb(7, 8, 9);\n}\n`,
+          });
+          const { matchedCSSRules } = await twin.side.send('CSS.getMatchedStylesForNode', {
+            nodeId: nodeOf(twin),
+          });
+          assert.ok(matchedCSSRules);
+          return {
+            text: flat((await twin.side.send('CSS.getStyleSheetText', { styleSheetId })).text),
+            matched: summarize(matchedCSSRules),
+          };
+        })
+      );
+      assert.deepEqual(o, asOurs(c));
+    });
   });
 });

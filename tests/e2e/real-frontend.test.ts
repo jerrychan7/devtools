@@ -70,6 +70,26 @@ async function showPanel(id: string) {
   await (tab.asElement() as ElementHandle<Element> | null)?.click();
 }
 
+/** Whether a panel is the main tabbed pane's selected tab, loaded and shown. */
+const panelShowing = (id: string) =>
+  frontend.evaluate(async id => {
+    // The built frontend has no type declarations; only this much of it is used.
+    const {
+      InspectorView,
+    }: {
+      InspectorView: {
+        InspectorView: {
+          instance(): {
+            tabbedPane: { selectedTabId: string | null };
+            panel(id: string): Promise<{ isShowing(): boolean }>;
+          };
+        };
+      };
+    } = await import(new URL('ui/legacy/legacy.js', location.href).href);
+    const inspectorView = InspectorView.InspectorView.instance();
+    return inspectorView.tabbedPane.selectedTabId === id && (await inspectorView.panel(id)).isShowing();
+  }, id);
+
 test('the Elements panel shows the page', { skip }, async () => {
   await showPanel('elements');
   await waitFor(async () => (await text()).includes('real-frontend-marker'));
@@ -119,8 +139,10 @@ test('only the panels that work in the page are offered', { skip }, async () => 
 test('every panel opens without uncaught errors', { skip }, async () => {
   for (const panel of ['elements', 'console', 'sources', 'network', 'resources']) {
     await showPanel(panel);
-    await new Promise(r => setTimeout(r, 300));
+    await waitFor(() => panelShowing(panel));
   }
+  // Panels load lazily: errors from their first round trips come a little later.
+  await new Promise(r => setTimeout(r, 1000));
   assert.deepEqual(errors, []);
 });
 
@@ -154,6 +176,17 @@ test(
           .uiSourceCodes()
           .map(code => ({ url: code.url(), ignored: ignoreList.isUserIgnoreListedURL(code.url()) }));
       });
+    /** Whether the frontend ignore-lists each URL. */
+    const ignored = (urls: string[]) =>
+      frontend.evaluate(async urls => {
+        const {
+          IgnoreListManager,
+        }: {
+          IgnoreListManager: { IgnoreListManager: { instance(): { isUserIgnoreListedURL(url: string): boolean } } };
+        } = await import(new URL('models/workspace/workspace.js', location.href).href);
+        const ignoreList = IgnoreListManager.IgnoreListManager.instance();
+        return urls.map(url => ignoreList.isUserIgnoreListedURL(url));
+      }, urls);
     const sources = await waitFor(async () => {
       const list = await files();
       return list.some(file => file.url.endsWith('real-frontend.js')) &&
@@ -166,19 +199,30 @@ test(
     assert.ok(find('/assets/real-frontend.css'), 'the style sheet');
     assert.equal(find('real-frontend.js')?.ignored, false, "the page's script");
     assert.equal(find('devtools-anywhere.iife.js')?.ignored, true, "the bundle is DevTools' own");
+    assert.equal(find('probe.iife.js')?.ignored, true, "the probe is DevTools' own");
+    // Where other pages load the rest of DevTools' own scripts from, and look-alikes of the page's.
+    const origin = new URL(env?.baseUrl ?? '').origin;
+    assert.deepEqual(
+      await ignored([
+        `${origin}/vendor/cdp-server.iife.js`,
+        `${origin}/assets/snapdom.js`,
+        `${origin}/assets/my-probe.iife.js`,
+        `${origin}/assets/snapdom.js.html`,
+      ]),
+      [true, true, false, false]
+    );
   }
 );
 
 test('the screencast is off by default and shows the page when turned on', { skip }, async () => {
   await frontend.evaluate(() => {
-    const state = { frames: 0 };
-    Object.assign(window, { __screencast: state });
+    window.__screencastFrames = 0;
     addEventListener('message', e => {
-      if (typeof e.data === 'string' && e.data.includes('"Page.screencastFrame"')) state.frames++;
+      if (typeof e.data === 'string' && e.data.includes('"Page.screencastFrame"'))
+        window.__screencastFrames = (window.__screencastFrames ?? 0) + 1;
     });
   });
-  const frames = () =>
-    frontend.evaluate(() => (window as unknown as { __screencast: { frames: number } }).__screencast.frames);
+  const frames = () => frontend.evaluate(() => window.__screencastFrames);
   await new Promise(r => setTimeout(r, 1000));
   assert.equal(await frames(), 0);
   const toggle = await frontend.evaluateHandle(() => {
@@ -197,9 +241,230 @@ test('the screencast is off by default and shows the page when turned on', { ski
   const button = toggle.asElement() as ElementHandle<Element> | null;
   assert.ok(button, 'the toolbar offers the screencast');
   await button.click();
-  await waitFor(async () => (await frames()) > 0);
+  await waitFor(async () => ((await frames()) ?? 0) > 0);
   await button.click();
+  // A frame already on its way may still come; none after that.
+  await new Promise(r => setTimeout(r, 500));
+  const stopped = await frames();
+  await new Promise(r => setTimeout(r, 1500));
+  assert.equal(await frames(), stopped, 'turned off');
+
+  // snapDOM was loaded for the frames, but the Network panel does not list it.
+  await showPanel('network');
+  await waitFor(async () => (await panelShowing('network')) && (await text()).includes('real-frontend.css'));
   assert.ok(!(await text()).includes('snapdom.js'), "snapDOM is DevTools' own");
+});
+
+test('revealing the Console in a minimized or dragged-down drawer makes room for it', { skip }, async () => {
+  /** Reveals the Console as `console.log` links and the Console shortcut do, after `before` ran on the drawer. */
+  const reveal = (before: 'minimize' | 'shrink') =>
+    frontend.evaluate(async before => {
+      // The built frontend has no type declarations; only this much of it is used.
+      const {
+        InspectorView,
+      }: {
+        InspectorView: {
+          InspectorView: {
+            instance(): { setDrawerMinimized(minimized: boolean): void; setDrawerSize(size: number): void };
+          };
+        };
+      } = await import(new URL('ui/legacy/legacy.js', location.href).href);
+      const {
+        Console,
+        Revealer,
+      }: { Console: { Console: { instance(): object } }; Revealer: { reveal(object: object): Promise<void> } } =
+        await import(new URL('core/common/common.js', location.href).href);
+      const inspectorView = InspectorView.InspectorView.instance();
+      if (before === 'minimize') inspectorView.setDrawerMinimized(true);
+      else inspectorView.setDrawerSize(20);
+      await Revealer.reveal(Console.Console.instance());
+    }, before);
+  /** The size of the Console view and whether the drawer is minimized. */
+  const consoleSize = () =>
+    frontend.evaluate(async () => {
+      const { InspectorView }: { InspectorView: { InspectorView: { instance(): { isDrawerMinimized(): boolean } } } } =
+        await import(new URL('ui/legacy/legacy.js', location.href).href);
+      const {
+        ConsoleView,
+      }: { ConsoleView: { ConsoleView: { instance(): { element: HTMLElement; isShowing(): boolean } } } } =
+        await import(new URL('panels/console/console.js', location.href).href);
+      const view = ConsoleView.ConsoleView.instance();
+      return {
+        showing: view.isShowing(),
+        minimized: InspectorView.InspectorView.instance().isDrawerMinimized(),
+        width: view.element.offsetWidth,
+        height: view.element.offsetHeight,
+      };
+    });
+  const hasRoom = async () => {
+    const size = await consoleSize();
+    return size.showing && !size.minimized && size.width >= 50 && size.height >= 50;
+  };
+  // The Console in the drawer, under another panel.
+  await showPanel('elements');
+  await frontend.evaluate(async () => {
+    const { ViewManager }: { ViewManager: { ViewManager: { instance(): { showView(id: string): Promise<void> } } } } =
+      await import(new URL('ui/legacy/legacy.js', location.href).href);
+    await ViewManager.ViewManager.instance().showView('console-view');
+  });
+  try {
+    await waitFor(hasRoom);
+    await reveal('minimize');
+    await waitFor(hasRoom);
+    await reveal('shrink');
+    await waitFor(hasRoom);
+  } finally {
+    await frontend.evaluate(async () => {
+      const { InspectorView }: { InspectorView: { InspectorView: { instance(): { closeDrawer(): void } } } } =
+        await import(new URL('ui/legacy/legacy.js', location.href).href);
+      InspectorView.InspectorView.instance().closeDrawer();
+    });
+  }
+});
+
+test(
+  "a declarative tabbed pane shows the content of a tab selected later (WebMCP's call details)",
+  { skip },
+  async () => {
+    /** The second tab's content: whether its widget is showing, its classes and its height. */
+    const second = () =>
+      frontend.evaluate(async () => {
+        // The built frontend has no type declarations; only this much of it is used.
+        const { Widget }: { Widget: { Widget: { get(element: Element): { isShowing(): boolean } | undefined } } } =
+          await import(new URL('ui/legacy/legacy.js', location.href).href);
+        const el = document.getElementById('anywhere-test-tab-b');
+        return (
+          el && {
+            showing: Widget.Widget.get(el)?.isShowing(),
+            hidden: el.classList.contains('hidden'),
+            height: el.offsetHeight,
+          }
+        );
+      });
+    await frontend.evaluate(async () => {
+      const {
+        InspectorView,
+        Widget,
+      }: {
+        InspectorView: { InspectorView: { instance(): { contentElement: HTMLElement } } };
+        Widget: {
+          Widget: new (element: HTMLElement) => object;
+          widgetConfig(factory: (element: HTMLElement) => object): object;
+          registerWidgetConfig(element: HTMLElement, config: object): void;
+        };
+      } = await import(new URL('ui/legacy/legacy.js', location.href).href);
+      // As WebMCP's call details render it: <devtools-widget> tabs, the first one selected.
+      const pane = document.createElement('devtools-tabbed-pane');
+      pane.id = 'anywhere-test-tabs';
+      pane.style.height = '200px';
+      for (const id of ['a', 'b']) {
+        const tab = document.createElement('devtools-widget');
+        tab.id = `anywhere-test-tab-${id}`;
+        tab.setAttribute('label', id);
+        if (id === 'a') tab.setAttribute('selected', '');
+        tab.textContent = `tab ${id}`;
+        Widget.registerWidgetConfig(
+          tab,
+          Widget.widgetConfig(element => new Widget.Widget(element))
+        );
+        pane.append(tab);
+      }
+      InspectorView.InspectorView.instance().contentElement.append(pane);
+    });
+    try {
+      // The second tab starts hidden, then is selected as by a click on its header.
+      await waitFor(async () => (await second())?.hidden);
+      await frontend.evaluate(async () => {
+        const {
+          Widget,
+        }: { Widget: { Widget: { get(element: Element): { selectTab(id: string): void } | undefined } } } =
+          await import(new URL('ui/legacy/legacy.js', location.href).href);
+        const pane = document.getElementById('anywhere-test-tabs');
+        if (!pane) throw new Error('no tabbed pane');
+        Widget.Widget.get(pane)?.selectTab('anywhere-test-tab-b');
+      });
+      await waitFor(async () => {
+        const tab = await second();
+        return tab?.showing && !tab.hidden && tab.height > 0;
+      });
+    } finally {
+      await frontend.evaluate(() => document.getElementById('anywhere-test-tabs')?.remove());
+    }
+  }
+);
+
+test('CDP messages go only to the embedder, and only its messages are taken', { skip }, async () => {
+  const origin = new URL(env?.baseUrl ?? '').origin;
+  const hash = await frontend.evaluate(() => location.hash);
+  const embedded = new URLSearchParams(hash.replace(/^#\??/, '')).get('embedded');
+  assert.equal(embedded, origin, 'the embedder passes its origin');
+
+  // What the frontend sends: the target origin it gives postMessage (the test message is not
+  // passed on to the page's CDP server).
+  const MARKER = 'devtools-anywhere-test-marker';
+  // The frontend calls the page's postMessage (window.parent.postMessage), which is replaced here.
+  await page.evaluate(MARKER => {
+    const postMessage = window.postMessage;
+    const targets: string[] = [];
+    window.__targets = targets;
+    window.__postMessage = postMessage;
+    window.postMessage = function (this: Window, message: unknown, options?: string | WindowPostMessageOptions) {
+      if (message !== MARKER)
+        return postMessage.call(this, message, typeof options === 'string' ? { targetOrigin: options } : options);
+      targets.push(typeof options === 'string' ? options : (options?.targetOrigin ?? '/'));
+    } as typeof window.postMessage;
+  }, MARKER);
+  try {
+    await frontend.evaluate(async MARKER => {
+      // The built frontend has no type declarations; only this much of it is used.
+      const {
+        InspectorFrontendHost,
+      }: {
+        InspectorFrontendHost: { InspectorFrontendHostInstance: { sendMessageToBackend(message: string): void } };
+      } = await import(new URL('core/host/host.js', location.href).href);
+      InspectorFrontendHost.InspectorFrontendHostInstance.sendMessageToBackend(MARKER);
+    }, MARKER);
+    assert.deepEqual(await page.evaluate(() => window.__targets), [origin]);
+  } finally {
+    await page.evaluate(() => {
+      if (window.__postMessage) window.postMessage = window.__postMessage;
+    });
+  }
+
+  // What the frontend takes: messages from the embedder, not from another window.
+  const forged = JSON.stringify({ method: 'AnywhereTest.forged', params: {} });
+  const sent = JSON.stringify({ method: 'AnywhereTest.sent', params: {} });
+  await frontend.evaluate(async () => {
+    const {
+      InspectorFrontendHost,
+      InspectorFrontendHostAPI,
+    }: {
+      InspectorFrontendHost: {
+        InspectorFrontendHostInstance: {
+          events: { addEventListener(type: string, listener: (event: { data: unknown }) => void): void };
+        };
+      };
+      InspectorFrontendHostAPI: { Events: { DispatchMessage: string } };
+    } = await import(new URL('core/host/host.js', location.href).href);
+    const received: unknown[] = [];
+    window.__received = received;
+    InspectorFrontendHost.InspectorFrontendHostInstance.events.addEventListener(
+      InspectorFrontendHostAPI.Events.DispatchMessage,
+      event => received.push(event.data)
+    );
+  });
+  // From the frontend's own window, then from the embedder.
+  await frontend.evaluate(forged => postMessage(forged, '*'), forged);
+  await page.evaluate(sent => {
+    const iframe = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('iframe');
+    iframe?.contentWindow?.postMessage(sent, '*');
+  }, sent);
+  const received = () =>
+    frontend.evaluate(() =>
+      (window.__received ?? []).filter(data => typeof data === 'string' && data.includes('AnywhereTest.'))
+    );
+  await waitFor(async () => (await received()).includes(sent));
+  assert.deepEqual(await received(), [sent]);
 });
 
 test('the Dock side menu moves the panel to each side, and floats it', { skip }, async () => {
@@ -267,6 +532,94 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
   assert.equal(rect.width, width);
 });
 
+test("DevTools' own scripts are ignore-listed once, next to the user's rules", { skip }, async () => {
+  const KEY = 'skip-stack-frames-pattern';
+  const SEEDED = 'devtools-anywhere-ignore-list-seeded';
+  const OWN = '/(probe|devtools-anywhere|cdp-server)\\.iife\\.js$|/snapdom\\.js$';
+  /** Reloads the page with these preferences, and returns the rules the new frontend uses. */
+  const reloadWith = async (prefs: Record<string, string | null>) => {
+    // The frontend's preferences are the localStorage of its origin, the page's.
+    await page.evaluate(prefs => {
+      for (const [key, value] of Object.entries(prefs)) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      }
+    }, prefs);
+    await page.reload();
+    frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
+    return waitFor(() =>
+      frontend.evaluate(async KEY => {
+        // The built frontend has no type declarations; only this much of it is used.
+        const {
+          Settings,
+        }: {
+          Settings: {
+            Settings: { instance(): { moduleSetting(name: string): { getAsArray(): { pattern: string }[] } } };
+          };
+        } = await import(new URL('core/common/common.js', location.href).href);
+        return Settings.Settings.instance()
+          .moduleSetting(KEY)
+          .getAsArray()
+          .map(rule => rule.pattern);
+      }, KEY)
+    );
+  };
+  const saved = await page.evaluate(
+    (KEY, SEEDED) => [localStorage.getItem(KEY), localStorage.getItem(SEEDED)],
+    KEY,
+    SEEDED
+  );
+  try {
+    // The user's rules are kept.
+    assert.deepEqual(
+      await reloadWith({ [KEY]: JSON.stringify([{ pattern: 'user-rule', disabled: false }]), [SEEDED]: null }),
+      ['user-rule', OWN]
+    );
+    // Rules that cannot be read are the setting's default.
+    assert.deepEqual(await reloadWith({ [KEY]: 'not json', [SEEDED]: null }), ['/node_modules/|^node:', OWN]);
+    // Once added, the rule is not added again: the user removed it.
+    assert.deepEqual(
+      await reloadWith({ [KEY]: JSON.stringify([{ pattern: 'user-rule', disabled: false }]), [SEEDED]: 'true' }),
+      ['user-rule']
+    );
+  } finally {
+    await reloadWith({ [KEY]: saved[0] ?? null, [SEEDED]: saved[1] ?? null });
+  }
+});
+
+test('right-clicking a node in the Elements panel opens the soft context menu', { skip }, async () => {
+  await showPanel('elements');
+  // The tree's first element row (inside shadow DOM).
+  const row = await waitFor(async () => {
+    const handle = await frontend.evaluateHandle(() => {
+      const find = (root: Document | ShadowRoot): Element | null => {
+        const found = root.querySelector('.elements-tree-outline [role="treeitem"]');
+        if (found) return found;
+        for (const el of root.querySelectorAll('*')) {
+          const inShadow = el.shadowRoot && find(el.shadowRoot);
+          if (inShadow) return inShadow;
+        }
+        return null;
+      };
+      return find(document);
+    });
+    // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+    return handle.asElement() as ElementHandle<Element> | null;
+  });
+  await row.click({ button: 'right' });
+  // Without SetUseSoftMenu the frontend asks the host for a native menu and nothing shows.
+  const menuShown = () =>
+    frontend.evaluate(() => {
+      const find = (root: Document | ShadowRoot): boolean =>
+        !!root.querySelector('.soft-context-menu') ||
+        Array.from(root.querySelectorAll('*')).some(el => !!el.shadowRoot && find(el.shadowRoot));
+      return find(document);
+    });
+  await waitFor(menuShown);
+  await frontend.page().keyboard.press('Escape');
+  await waitFor(async () => !(await menuShown()));
+});
+
 // Last: it reloads the page into shell mode and back.
 test('the toolbar keeps DevTools open across reloads, and reloads the page', { skip }, async () => {
   /** A button of the frontend whose label starts with `label`, and the frontend currently shown. */
@@ -292,11 +645,37 @@ test('the toolbar keeps DevTools open across reloads, and reloads the page', { s
   const inShell = () => page.evaluate(() => !!document.getElementById('devtools-anywhere-page'));
 
   assert.ok(await button('Reload page'), 'the reload button');
-  // A dialog explains the mode first (no tooltip: touch screens have no hover).
+  // A dialog explains the mode first (no tooltip: touch screens have no hover). Cancelling it
+  // keeps the page as it is.
   await (await waitFor(() => button('Keep DevTools open'))).click();
-  await (await waitFor(() => button('Reload and keep open'))).click();
+  await (await waitFor(() => button('Cancel'))).click();
+  await waitFor(async () => !(await button('Reload and keep open')));
+  await new Promise(r => setTimeout(r, 500));
+  assert.equal(await inShell(), false);
+  // Confirming with "Don't ask again" checked enters shell mode.
+  await (await waitFor(() => button('Keep DevTools open'))).click();
+  const confirm = await waitFor(() => button('Reload and keep open'));
+  await confirm.evaluate(ok => {
+    // The dialog's only checkbox, next to its buttons.
+    const root = ok.getRootNode();
+    const checkbox =
+      root instanceof ShadowRoot || root instanceof Document ? root.querySelector('devtools-checkbox') : null;
+    if (!checkbox) throw new Error('no checkbox in the dialog');
+    checkbox.setAttribute('checked', '');
+  });
+  await confirm.click();
   await waitFor(inShell);
   // While it is on, an info bar says so.
+  await waitFor(async () => {
+    frontend = await waitFor(() => page.frames().find(f => f.url().includes('anywhere_app.html')));
+    return (await text()).includes('DevTools stays open across reloads');
+  });
+  await (await waitFor(() => button('Stop keeping DevTools open'))).click();
+  await waitFor(async () => !(await inShell()));
+  // Asked not to, the dialog is skipped the next time.
+  await (await waitFor(() => button('Keep DevTools open'))).click();
+  await waitFor(inShell);
+  assert.equal(await button('Reload and keep open'), null);
   await waitFor(async () => {
     frontend = await waitFor(() => page.frames().find(f => f.url().includes('anywhere_app.html')));
     return (await text()).includes('DevTools stays open across reloads');

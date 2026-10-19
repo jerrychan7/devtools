@@ -27,6 +27,63 @@ test('the viewport size shows briefly after a resize when enabled', async () => 
   await new Promise(r => setTimeout(r, 1200));
   assert.equal(await label(), null);
   await t.ours.send('Overlay.setShowViewportSizeOnResize', { show: false });
+  // Wait for the resize to reach the page, or the check passes before it could fail.
+  const resized = t.page.evaluate(() => new Promise(r => addEventListener('resize', r, { once: true })));
   await t.page.setViewport({ width: 800, height: 600 });
+  await resized;
   assert.equal(await label(), null);
+});
+
+/** Boxes drawn by highlightNode: margin, border, padding, content, then the info label. */
+const highlightBoxes = () =>
+  t.page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-devtools-anywhere="overlay"] > div'), d => {
+      const r = d.getBoundingClientRect();
+      return [r.left, r.top, r.width, r.height];
+    })
+  );
+
+const quadRect = (q: number[]) => {
+  const [left = 0, top = 0, , , right = 0, bottom = 0] = q;
+  return [left, top, right - left, bottom - top];
+};
+
+test('highlightNode draws the box model, hideHighlight removes it', async () => {
+  const { root } = await t.ours.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await t.ours.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.box' });
+  const { model } = await t.ours.send('DOM.getBoxModel', { nodeId });
+  await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: {} });
+  const boxes = await highlightBoxes();
+  assert.deepEqual(boxes.slice(0, 4), [model.margin, model.border, model.padding, model.content].map(quadRect));
+  await t.ours.send('Overlay.hideHighlight');
+  assert.deepEqual(await highlightBoxes(), []);
+});
+
+test('highlightRect and highlightQuad draw one box', async () => {
+  await t.ours.send('Overlay.highlightRect', { x: 10, y: 20, width: 30, height: 40 });
+  assert.deepEqual(await highlightBoxes(), [[10, 20, 30, 40]]);
+  await t.ours.send('Overlay.highlightQuad', { quad: [5, 6, 25, 6, 25, 16, 5, 16] });
+  assert.deepEqual(await highlightBoxes(), [[5, 6, 20, 10]]);
+  await t.ours.send('Overlay.hideHighlight');
+  assert.deepEqual(await highlightBoxes(), []);
+});
+
+test('inspect mode swallows the click and requests the clicked node', async () => {
+  const { root } = await t.ours.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await t.ours.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#app' });
+  const { node } = await t.ours.send('DOM.describeNode', { nodeId });
+  await t.page.evaluate(() => {
+    let clicks = 0;
+    addEventListener('click', () => (document.body.dataset['clicks'] = String(++clicks)));
+  });
+  await t.ours.clear();
+  await t.ours.send('Overlay.setInspectMode', { mode: 'searchForNode', highlightConfig: {} });
+  await t.page.click('#app');
+  assert.deepEqual(await t.ours.events('Overlay.inspectNodeRequested'), [{ backendNodeId: node.backendNodeId }]);
+  const clicks = () => t.page.evaluate(() => document.body.dataset['clicks'] ?? '0');
+  assert.equal(await clicks(), '0');
+  await t.ours.send('Overlay.setInspectMode', { mode: 'none' });
+  await t.page.click('#app');
+  assert.equal(await clicks(), '1');
+  assert.equal((await t.ours.events('Overlay.inspectNodeRequested')).length, 1);
 });

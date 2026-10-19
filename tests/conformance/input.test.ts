@@ -48,7 +48,7 @@ before(async () => {
     const events: string[] = [];
     for (const type of RECORDED)
       addEventListener(type, e => events.push(`${type}:${e.target instanceof Element ? e.target.id : ''}`), true);
-    Object.assign(window, { __inputEvents: events });
+    window.__inputEvents = events;
   }, RECORDED);
 });
 after(() => env?.close());
@@ -60,17 +60,27 @@ async function run(side: Side, steps: (side: Side) => Promise<unknown>) {
     if (field instanceof HTMLInputElement) field.value = '';
     document.getElementById('scroller')?.scrollTo(0, 0);
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    (window as unknown as { __inputEvents: string[] }).__inputEvents.length = 0;
+    if (window.__inputEvents) window.__inputEvents.length = 0;
   });
   await steps(side);
-  // Chrome dispatches some input asynchronously (wheel scrolling).
-  await new Promise(r => setTimeout(r, 300));
-  return t.page.evaluate(() => ({
-    events: (window as unknown as { __inputEvents: string[] }).__inputEvents.slice(),
-    value: (document.getElementById('field') as HTMLInputElement).value,
-    scrollTop: Math.round(document.getElementById('scroller')?.scrollTop ?? 0),
-    focused: document.activeElement?.id ?? '',
-  }));
+  // Chrome dispatches some input asynchronously (wheel scrolling): wait until what the page
+  // saw has not changed for 300 ms, for at most two seconds.
+  const read = () =>
+    t.page.evaluate(() => ({
+      events: window.__inputEvents?.slice() ?? [],
+      value: (document.getElementById('field') as HTMLInputElement).value,
+      scrollTop: Math.round(document.getElementById('scroller')?.scrollTop ?? 0),
+      focused: document.activeElement?.id ?? '',
+    }));
+  const start = Date.now();
+  let result = await read();
+  for (let stable = 0; stable < 6 && Date.now() - start < 2000;) {
+    await new Promise(r => setTimeout(r, 50));
+    const next = await read();
+    stable = JSON.stringify(next) === JSON.stringify(result) ? stable + 1 : 0;
+    result = next;
+  }
+  return result;
 }
 
 async function same(steps: (side: Side) => Promise<unknown>, oursSteps = steps) {

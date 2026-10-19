@@ -75,6 +75,21 @@ test('forwards live output', async () => {
   await waitFor(m => logs(m).includes('live'));
 });
 
+/**
+ * Sends a command from the frontend's own realm (so the message's source is its window) and
+ * waits for the answer: messages posted to the page before it have been handled by then.
+ */
+async function roundTrip(id: number) {
+  await page.evaluate(id => {
+    const frontend = window.__frame?.contentWindow;
+    if (!frontend) throw new Error('no frontend frame');
+    const script = frontend.document.createElement('script');
+    script.textContent = `parent.postMessage(JSON.stringify({ id: ${id}, method: 'Runtime.evaluate', params: { expression: '1' } }), '*')`;
+    frontend.document.body.appendChild(script);
+  }, id);
+  await waitFor(m => m.some(message => message.id === id && message.result));
+}
+
 test('ignores messages from other windows', async () => {
   await page.evaluate(() => {
     // Same origin, but not the frontend's window: must be ignored.
@@ -83,7 +98,28 @@ test('ignores messages from other windows', async () => {
       '*'
     );
   });
-  await new Promise(r => setTimeout(r, 200));
+  await roundTrip(100);
+  assert.equal(await page.evaluate(() => window.__hacked), undefined);
+});
+
+test('ignores messages from a frontend window of another origin', async () => {
+  // The frame is the connected window, but connected for another origin than its own.
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        const frame = document.createElement('iframe');
+        frame.srcdoc = `<script>parent.postMessage(JSON.stringify({ id: 98, method: 'Runtime.evaluate', params: { expression: 'window.__hacked = 1' } }), '*')</script>`;
+        frame.addEventListener('load', () => resolve(), { once: true });
+        document.body.appendChild(frame);
+        const disconnect = window.DevtoolsAnywhere.connectFrontend(window.__server, frame, 'https://other.example');
+        frame.id = 'other-frontend';
+        frame.addEventListener('cleanup', () => (disconnect(), frame.remove()), { once: true });
+      })
+  );
+  // The other frame posted before the frontend does, so it was handled first. Only disconnect
+  // after that: load and the posted message come from different task sources.
+  await roundTrip(101);
+  await page.evaluate(() => document.getElementById('other-frontend')?.dispatchEvent(new Event('cleanup')));
   assert.equal(await page.evaluate(() => window.__hacked), undefined);
 });
 
@@ -91,9 +127,10 @@ test('replays again after the frontend reloads', async () => {
   await page.evaluate(() => {
     const frontend = window.__frame?.contentWindow;
     if (!frontend) throw new Error('no frontend frame');
+    // Until the new instance sets its own, waitFor sees nothing: not the old instance's messages.
+    delete frontend.received;
     frontend.location.reload();
   });
-  await new Promise(r => setTimeout(r, 300));
   const messages = await waitFor(m => logs(m).includes('logged before connecting') && logs(m).includes('live'));
   assert.equal(logs(messages).filter(v => v === 'live').length, 1, 'no duplicates after reload');
 });

@@ -77,3 +77,35 @@ test('once listeners are gone after they run', async () => {
   assert.deepEqual(ours, await listeners(t.chrome));
   assert.ok(!ours.some(l => l.startsWith('keydown')));
 });
+
+test('depth and pierce collect subtree listeners like Chrome', async () => {
+  await t.page.evaluate(() => {
+    const root = document.createElement('div');
+    root.id = 'deep';
+    root.addEventListener('click', function onRoot() {});
+    const child = root.appendChild(document.createElement('div'));
+    child.addEventListener('click', function onChild() {});
+    const grandchild = child.appendChild(document.createElement('span'));
+    grandchild.addEventListener('click', function onGrandchild() {});
+    const shadow = child.attachShadow({ mode: 'open' });
+    shadow.addEventListener('click', function onShadowRoot() {});
+    const inShadow = shadow.appendChild(document.createElement('b'));
+    inShadow.addEventListener('click', function onInShadow() {});
+    document.body.append(root);
+  });
+  const collect = async (side: Side, params: { depth: number; pierce?: boolean }) => {
+    const { result } = await side.send('Runtime.evaluate', {
+      expression: "document.getElementById('deep')",
+      objectGroup: 'test',
+    });
+    assert.ok(result.objectId);
+    const { listeners } = await side.send('DOMDebugger.getEventListeners', {
+      objectId: result.objectId,
+      ...params,
+    });
+    return listeners.map(l => `${l.type} ${l.handler?.description?.split('(')[0]}`).sort();
+  };
+  for (const params of [{ depth: -1 }, { depth: 2 }, { depth: -1, pierce: true }]) {
+    assert.deepEqual(await collect(t.ours, params), await collect(t.chrome, params), JSON.stringify(params));
+  }
+});

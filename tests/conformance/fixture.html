@@ -21,6 +21,41 @@
           color: green;
         }
       }
+      /* Specificity edge cases, all matching #spec. */
+      .a\,b,
+      .zzz {
+        order: 1;
+      }
+      .日本 {
+        order: 2;
+      }
+      [data-q='a]b'] {
+        order: 3;
+      }
+      :is(#spec, em):not(.zzz) {
+        order: 4;
+      }
+      :where(#spec) em,
+      :nth-child(1 of .c) {
+        order: 5;
+      }
+    </style>
+    <!-- Identical sheets apart from the class name, edited one per side. -->
+    <style>
+      .twin-o {
+        color: red;
+      }
+      .twin-o .k {
+        margin: 1px;
+      }
+    </style>
+    <style>
+      .twin-c {
+        color: red;
+      }
+      .twin-c .k {
+        margin: 1px;
+      }
     </style>
   </head>
   <body>
@@ -30,5 +65,8 @@
       <p class="note">hello <b>world</b></p>
       <span>inline</span>
     </section>
+    <em id="spec" class="a,b 日本 c" data-q="a]b">spec</em>
+    <s class="twin-o" style="width: 5px"><s class="k">o</s></s>
+    <s class="twin-c" style="width: 5px"><s class="k">c</s></s>
   </body>
 </html>
