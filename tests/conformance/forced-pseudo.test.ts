@@ -2,10 +2,14 @@
 // measures and un-forces in turn.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Protocol } from 'devtools-protocol';
 import { launch, openPage } from './harness.ts';
+import type { Env, Side, TestPage } from './harness.ts';
 
-let env;
-let t;
+type DomNode = Protocol.DOM.Node;
+
+let env: Env | undefined;
+let t: TestPage;
 
 const STYLE = `
   #fo:hover { outline-color: rgb(1, 2, 3) }
@@ -35,7 +39,7 @@ before(async () => {
 });
 after(() => env?.close());
 
-function find(node, predicate) {
+function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;
   for (const child of node.children || []) {
     const found = find(child, predicate);
@@ -43,15 +47,18 @@ function find(node, predicate) {
   }
   return null;
 }
-const attr = (node, name) => {
+const attr = (node: DomNode, name: string): string | undefined => {
   const a = node.attributes || [];
   for (let i = 0; i < a.length; i += 2) if (a[i] === name) return a[i + 1];
+  return undefined;
 };
 
 /** Forces `classes` on #id through one side, runs `measure`, then un-forces. */
-async function withForced(side, id, classes, measure) {
+async function withForced<T>(side: Side, id: string, classes: string[], measure: (nodeId: number) => Promise<T> | T) {
   const { root } = await side.send('DOM.getDocument', { depth: -1 });
-  const nodeId = find(root, n => attr(n, 'id') === id).nodeId;
+  const node = find(root, n => attr(n, 'id') === id);
+  assert.ok(node);
+  const nodeId = node.nodeId;
   await side.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: classes });
   try {
     return await measure(nodeId);
@@ -60,10 +67,12 @@ async function withForced(side, id, classes, measure) {
   }
 }
 
-const computed = (id, pseudo) =>
+const computed = (id: string, pseudo?: string) =>
   t.page.evaluate(
     (id, pseudo) => {
-      const style = getComputedStyle(document.getElementById(id), pseudo);
+      const el = document.getElementById(id);
+      if (!el) throw new Error(`#${id} not found`);
+      const style = getComputedStyle(el, pseudo);
       return {
         color: style.color,
         background: style.backgroundColor,
@@ -75,7 +84,7 @@ const computed = (id, pseudo) =>
     pseudo ?? null
   );
 
-async function both(id, classes, measure) {
+async function both<T>(id: string, classes: string[], measure: (side: Side, nodeId: number) => Promise<T>) {
   return {
     ours: await withForced(t.ours, id, classes, nodeId => measure(t.ours, nodeId)),
     chrome: await withForced(t.chrome, id, classes, nodeId => measure(t.chrome, nodeId)),
@@ -103,10 +112,12 @@ test('a forced :focus creates the ::before it selects', async () => {
 });
 
 test('the Styles pane shows the forced rules as matching', async () => {
-  const summarize = r =>
-    r.matchedCSSRules
+  const summarize = (r: Protocol.CSS.GetMatchedStylesForNodeResponse) => {
+    assert.ok(r.matchedCSSRules);
+    return r.matchedCSSRules
       .filter(m => m.rule.origin === 'regular')
       .map(m => [m.rule.selectorList.text, m.matchingSelectors]);
+  };
   const { ours, chrome } = await both('fo', ['hover'], (side, nodeId) =>
     side.send('CSS.getMatchedStylesForNode', { nodeId }).then(summarize)
   );

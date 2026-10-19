@@ -1,9 +1,11 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Protocol } from 'devtools-protocol';
 import { diffSubset, launch, openPage, waitForBoth } from './harness.ts';
+import type { Env, TestPage } from './harness.ts';
 
-let env;
-let t;
+let env: Env | undefined;
+let t: TestPage;
 
 before(async () => {
   env = await launch();
@@ -13,11 +15,12 @@ before(async () => {
 });
 after(() => env?.close());
 
-async function logged(expression) {
-  t.chrome.clear();
+async function logged(expression: string) {
+  await t.chrome.clear();
   await t.ours.clear();
   await t.page.evaluate(expression);
   const [[ours], [chrome]] = await waitForBoth(t, 'Runtime.consoleAPICalled');
+  assert.ok(ours && chrome);
   return { ours, chrome };
 }
 
@@ -77,12 +80,14 @@ describe('Runtime.consoleAPICalled types', () => {
   test('stack points at the caller', async () => {
     const { ours, chrome } = await logged("(function caller() { console.log('x') })()");
     // Chrome also reports the probe's console wrapper as the top frame; we hide it.
-    assert.equal(ours.stackTrace.callFrames[0].functionName, chrome.stackTrace.callFrames[1].functionName);
+    const [ourFrame, chromeFrame] = [ours.stackTrace?.callFrames[0], chrome.stackTrace?.callFrames[1]];
+    assert.ok(ourFrame && chromeFrame);
+    assert.equal(ourFrame.functionName, chromeFrame.functionName);
   });
 });
 
 describe('Runtime.evaluate', () => {
-  const cases = {
+  const cases: Record<string, Protocol.Runtime.EvaluateRequest> = {
     arithmetic: { expression: '1 + 1' },
     objectLiteral: { expression: '{ a: 1 }', generatePreview: true },
     array: { expression: '[1, 2]', generatePreview: true },
@@ -101,17 +106,19 @@ describe('Runtime.evaluate', () => {
 });
 
 describe('Runtime.getProperties', () => {
-  async function properties(expression, params) {
+  async function properties(expression: string, params: Omit<Protocol.Runtime.GetPropertiesRequest, 'objectId'>) {
     const [ours, chrome] = await Promise.all([
       t.ours.send('Runtime.evaluate', { expression }),
       t.chrome.send('Runtime.evaluate', { expression }),
     ]);
+    assert.ok(ours.result.objectId && chrome.result.objectId);
     return {
       ours: await t.ours.send('Runtime.getProperties', { objectId: ours.result.objectId, ...params }),
       chrome: await t.chrome.send('Runtime.getProperties', { objectId: chrome.result.objectId, ...params }),
     };
   }
-  const byName = list => Object.fromEntries((list || []).map(p => [p.name, p]));
+  const byName = (list: Protocol.Runtime.PropertyDescriptor[] | undefined) =>
+    Object.fromEntries((list || []).map(p => [p.name, p]));
 
   test('own properties of a plain object', async () => {
     const { ours, chrome } = await properties('({ a: 1, b: { c: 2 }, get g() { return 1 } })', { ownProperties: true });
@@ -133,11 +140,12 @@ describe('Runtime.getProperties', () => {
 });
 
 describe('Runtime.exceptionThrown', () => {
-  async function thrown(expression) {
-    t.chrome.clear();
+  async function thrown(expression: string) {
+    await t.chrome.clear();
     await t.ours.clear();
     await t.page.evaluate(expression);
     const [[ours], [chrome]] = await waitForBoth(t, 'Runtime.exceptionThrown');
+    assert.ok(ours && chrome);
     return { ours, chrome };
   }
 

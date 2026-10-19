@@ -1,9 +1,10 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { launch, openPage, waitForBoth } from './harness.ts';
+import type { Env, EventName, Side, TestPage } from './harness.ts';
 
-let env;
-let t;
+let env: Env | undefined;
+let t: TestPage;
 
 before(async () => {
   env = await launch();
@@ -18,22 +19,24 @@ before(async () => {
 });
 after(() => env?.close());
 
-const header = (headers, name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+const header = (headers: Record<string, unknown>, name: string) =>
+  Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
 
 /** Runs `expression` in the page and returns both sides' events for the request to `marker`. */
-async function request(expression, marker, finalEvent = 'Network.loadingFinished') {
-  t.chrome.clear();
+async function request(expression: string, marker: string, finalEvent: EventName = 'Network.loadingFinished') {
+  await t.chrome.clear();
   await t.ours.clear();
   await t.page.evaluate(expression);
   await waitForBoth(t, finalEvent);
-  const pick = async side => {
+  const pick = async (side: Side) => {
     const sent = (await side.events('Network.requestWillBeSent')).find(e => e.request.url.includes(marker));
-    const byId = async method => (await side.events(method)).find(e => e.requestId === sent.requestId);
+    assert.ok(sent, `no request to ${marker}`);
+    const ofRequest = (e: { requestId: string }) => e.requestId === sent.requestId;
     return {
       sent,
-      response: await byId('Network.responseReceived'),
-      finished: await byId('Network.loadingFinished'),
-      failed: await byId('Network.loadingFailed'),
+      response: (await side.events('Network.responseReceived')).find(ofRequest),
+      finished: (await side.events('Network.loadingFinished')).find(ofRequest),
+      failed: (await side.events('Network.loadingFailed')).find(ofRequest),
     };
   };
   return { ours: await pick(t.ours), chrome: await pick(t.chrome) };
@@ -45,6 +48,7 @@ describe('Network', () => {
     assert.equal(ours.sent.type, chrome.sent.type);
     assert.equal(ours.sent.request.method, chrome.sent.request.method);
     assert.equal(ours.sent.request.url, chrome.sent.request.url);
+    assert.ok(ours.response && chrome.response);
     assert.equal(ours.response.response.status, chrome.response.response.status);
     assert.equal(ours.response.response.mimeType, chrome.response.response.mimeType);
     assert.equal(ours.response.response.headers['x-echo'], chrome.response.response.headers['x-echo']);
@@ -76,11 +80,13 @@ describe('Network', () => {
       'n=xhr'
     );
     assert.equal(ours.sent.type, chrome.sent.type);
+    assert.ok(ours.response && chrome.response);
     assert.equal(ours.response.response.status, chrome.response.response.status);
   });
 
   test('404', async () => {
     const { ours, chrome } = await request("void fetch('/missing?n=404')", 'n=404');
+    assert.ok(ours.response && chrome.response);
     assert.equal(ours.response.response.status, chrome.response.response.status);
     assert.ok(ours.finished && chrome.finished);
   });
@@ -109,13 +115,14 @@ describe('Network', () => {
       "(() => { const s = document.createElement('script'); s.src = '/tests/conformance/assets/resource.js?n=js'; document.head.append(s) })()",
       'n=js',
     ],
-  ]) {
+  ] as const) {
     test(`${name} (Resource Timing)`, async () => {
       const { ours, chrome } = await request(expression, marker);
       assert.ok(ours.sent, 'ours reports the request');
       assert.equal(ours.sent.type, chrome.sent.type);
       assert.equal(ours.sent.request.url, chrome.sent.request.url);
       assert.equal(ours.sent.request.method, chrome.sent.request.method);
+      assert.ok(ours.response && chrome.response);
       assert.equal(ours.response.response.status, chrome.response.response.status);
       assert.equal(ours.response.response.mimeType, chrome.response.response.mimeType);
       assert.ok(ours.finished);

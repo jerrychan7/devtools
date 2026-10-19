@@ -1,11 +1,16 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Protocol } from 'devtools-protocol';
+import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 import { diffSubset, launch, openPage, waitForBoth } from './harness.ts';
+import type { Env, TestPage } from './harness.ts';
 
-let env;
-let t;
-let origin;
-let storageKey;
+type Commands = ProtocolMapping.Commands;
+
+let env: Env | undefined;
+let t: TestPage;
+let origin: string;
+let storageKey: string;
 
 before(async () => {
   env = await launch();
@@ -21,7 +26,7 @@ before(async () => {
     localStorage.setItem('a', '1');
     localStorage.setItem('b', 'two');
     sessionStorage.setItem('s', 'session');
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const open = indexedDB.open('db1', 3);
       open.onupgradeneeded = () => {
         const store = open.result.createObjectStore('users', { keyPath: 'id' });
@@ -46,7 +51,8 @@ before(async () => {
 });
 after(() => env?.close());
 
-const both = (method, params) => Promise.all([t.ours.send(method, params), t.chrome.send(method, params)]);
+const both = <M extends keyof Commands>(method: M, ...params: Commands[M]['paramsType']) =>
+  Promise.all([t.ours.send(method, ...params), t.chrome.send(method, ...params)]);
 const local = () => ({ storageKey, isLocalStorage: true });
 
 describe('DOMStorage', () => {
@@ -60,9 +66,9 @@ describe('DOMStorage', () => {
     ['item added', "localStorage.setItem('c', '3')", 'DOMStorage.domStorageItemAdded'],
     ['item updated', "localStorage.setItem('c', '4')", 'DOMStorage.domStorageItemUpdated'],
     ['item removed', "localStorage.removeItem('c')", 'DOMStorage.domStorageItemRemoved'],
-  ]) {
+  ] as const) {
     test(name, async () => {
-      t.chrome.clear();
+      await t.chrome.clear();
       await t.ours.clear();
       await t.page.evaluate(expression);
       const [[ours], [chrome]] = await waitForBoth(t, event);
@@ -79,7 +85,10 @@ describe('IndexedDB', () => {
 
   test('requestDatabase', async () => {
     const [ours, chrome] = await both('IndexedDB.requestDatabase', { storageKey, databaseName: 'db1' });
-    const sort = db => ({ ...db, objectStores: [...db.objectStores].sort((x, y) => x.name.localeCompare(y.name)) });
+    const sort = (db: Protocol.IndexedDB.DatabaseWithObjectStores) => ({
+      ...db,
+      objectStores: [...db.objectStores].sort((x, y) => x.name.localeCompare(y.name)),
+    });
     assert.deepEqual(sort(ours.databaseWithObjectStores), sort(chrome.databaseWithObjectStores));
   });
 
@@ -91,7 +100,7 @@ describe('IndexedDB', () => {
   });
 
   test('requestData through an index with a key range', async () => {
-    const params = {
+    const params: Protocol.IndexedDB.RequestDataRequest = {
       storageKey,
       databaseName: 'db1',
       objectStoreName: 'users',
@@ -125,17 +134,23 @@ describe('CacheStorage', () => {
 
   test('requestEntries', async () => {
     const [{ caches: oc }, { caches: cc }] = await both('CacheStorage.requestCacheNames', { storageKey });
+    assert.ok(oc[0] && cc[0]);
     const [ours, chrome] = await Promise.all([
       t.ours.send('CacheStorage.requestEntries', { cacheId: oc[0].cacheId, skipCount: 0, pageSize: 10 }),
       t.chrome.send('CacheStorage.requestEntries', { cacheId: cc[0].cacheId, skipCount: 0, pageSize: 10 }),
     ]);
     assert.equal(ours.returnCount, chrome.returnCount);
-    const pick = e => ({ url: e.requestURL, method: e.requestMethod, status: e.responseStatus });
+    const pick = (e: Protocol.CacheStorage.DataEntry) => ({
+      url: e.requestURL,
+      method: e.requestMethod,
+      status: e.responseStatus,
+    });
     assert.deepEqual(ours.cacheDataEntries.map(pick), chrome.cacheDataEntries.map(pick));
   });
 
   test('requestCachedResponse', async () => {
     const [{ caches: oc }, { caches: cc }] = await both('CacheStorage.requestCacheNames', { storageKey });
+    assert.ok(oc[0] && cc[0]);
     const url = `${origin}/cached?x=1`;
     const [ours, chrome] = await Promise.all([
       t.ours.send('CacheStorage.requestCachedResponse', {
@@ -160,7 +175,7 @@ describe('Storage and cookies', () => {
       t.ours.send('Network.getCookies'),
       t.chrome.send('Network.getCookies', { urls: [origin] }),
     ]);
-    const pick = list => list.cookies.map(c => `${c.name}=${c.value}`).sort();
+    const pick = (list: Protocol.Network.GetCookiesResponse) => list.cookies.map(c => `${c.name}=${c.value}`).sort();
     assert.deepEqual(pick(ours), pick(chrome));
   });
 

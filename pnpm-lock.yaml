@@ -166,9 +166,18 @@ importers:
 
   .:
     devDependencies:
+      '@devtools-anywhere/cdp-server':
+        specifier: workspace:*
+        version: link:packages/cdp-server
+      '@devtools-anywhere/vite-plugin':
+        specifier: workspace:*
+        version: link:packages/vite-plugin
       '@types/node':
         specifier: ^22.18.0
         version: 22.20.5
+      devtools-protocol:
+        specifier: ^0.0.1721318
+        version: 0.0.1721318
       husky:
         specifier: ^9.1.7
         version: 9.1.7

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const port = Number(process.argv[2]) || 8787;
 
-const types = {
+const types: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -27,11 +27,11 @@ const types = {
   '.wasm': 'application/wasm',
 };
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 http
   .createServer(async (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const delay = Number(url.searchParams.get('delay')) || 0;
     if (delay) await sleep(delay);
 

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const types = {
+const types: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -23,12 +23,17 @@ const types = {
   '.wasm': 'application/wasm',
 };
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** Starts the server; resolves with its base URL. Port 0 picks a free port. */
-export function startServer(port = 0) {
+export interface PlaygroundServer {
+  url: string;
+  close(): void;
+}
+
+export function startServer(port = 0): Promise<PlaygroundServer> {
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://localhost');
+    const url = new URL(req.url ?? '/', 'http://localhost');
     const delay = Number(url.searchParams.get('delay')) || 0;
     if (delay) await sleep(delay);
 
@@ -41,7 +46,10 @@ export function startServer(port = 0) {
     }
 
     const file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) return res.writeHead(403).end();
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     try {
       const stat = await fs.stat(file);
       const target = stat.isDirectory() ? path.join(file, 'index.html') : file;
@@ -61,7 +69,9 @@ export function startServer(port = 0) {
   });
   return new Promise(resolve => {
     server.listen(port, () => {
-      resolve({ url: `http://localhost:${server.address().port}`, close: () => server.close() });
+      const address = server.address();
+      const actual = typeof address === 'object' && address ? address.port : port;
+      resolve({ url: `http://localhost:${actual}`, close: () => server.close() });
     });
   });
 }

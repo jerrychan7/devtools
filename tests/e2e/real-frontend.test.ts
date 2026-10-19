@@ -3,21 +3,23 @@
 import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { ElementHandle, Frame } from 'puppeteer-core';
 import { launch } from '../conformance/harness.ts';
+import type { Env } from '../conformance/harness.ts';
 
 const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
 const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first';
 
-let env;
-let frontend;
+let env: Env | undefined;
+let frontend: Frame;
 /** Uncaught errors in the frontend. */
-const errors = [];
+const errors: string[] = [];
 
 before(async () => {
   if (!built) return;
   env = await launch();
   const page = await env.browser.newPage();
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
   // Tall enough for the Network panel to render its rows below the overview.
   await page.setViewport({ width: 1000, height: 1600 });
   await page.goto(env.baseUrl + '/tests/e2e/real-frontend.html');
@@ -25,7 +27,7 @@ before(async () => {
 });
 after(() => env?.close());
 
-async function waitFor(get, timeout = 15000) {
+async function waitFor<T>(get: () => T | Promise<T>, timeout = 15000): Promise<NonNullable<T>> {
   const start = Date.now();
   for (;;) {
     const value = await Promise.resolve()
@@ -40,8 +42,8 @@ async function waitFor(get, timeout = 15000) {
 /** Text of the frontend, including shadow DOM. */
 const text = () =>
   frontend.evaluate(() => {
-    const parts = [];
-    const walk = root => {
+    const parts: (string | null)[] = [];
+    const walk = (root: Document | ShadowRoot) => {
       parts.push(root === document ? document.documentElement.textContent : root.textContent);
       for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
     };
@@ -50,9 +52,9 @@ const text = () =>
   });
 
 /** Clicks a panel's tab in the main tabbed pane (inside shadow DOM). */
-async function showPanel(id) {
+async function showPanel(id: string) {
   const tab = await frontend.evaluateHandle(id => {
-    const find = root => {
+    const find = (root: Document | ShadowRoot): Element | null => {
       const tab = root.querySelector(`#tab-${id}`);
       if (tab) return tab;
       for (const el of root.querySelectorAll('*')) {
@@ -63,7 +65,8 @@ async function showPanel(id) {
     };
     return find(document);
   }, id);
-  await tab.asElement()?.click();
+  // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+  await (tab.asElement() as ElementHandle<Element> | null)?.click();
 }
 
 test('the Elements panel shows the page', { skip }, async () => {
@@ -80,8 +83,8 @@ test('the Console panel shows output from before DevTools loaded', { skip }, asy
 
 test('only the panels that work in the page are offered', { skip }, async () => {
   const tabs = await frontend.evaluate(() => {
-    const ids = [];
-    const walk = root => {
+    const ids: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
       for (const el of root.querySelectorAll('[id^="tab-"]')) ids.push(el.id.slice(4));
       for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
     };

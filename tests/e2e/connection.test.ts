@@ -3,7 +3,10 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Page } from 'puppeteer-core';
+import type { Protocol } from 'devtools-protocol';
 import { launch } from '../conformance/harness.ts';
+import type { Env } from '../conformance/harness.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BUNDLE = path.join(root, 'packages/devtools-anywhere/dist/devtools-anywhere.iife.js');
@@ -15,8 +18,8 @@ const FRONTEND = `<script>
   parent.postMessage(JSON.stringify({ id: 1, method: 'Runtime.enable' }), '*')
 </script>`;
 
-let env;
-let page;
+let env: Env | undefined;
+let page: Page;
 
 before(async () => {
   env = await launch();
@@ -35,8 +38,13 @@ before(async () => {
 });
 after(() => env?.close());
 
-const received = () => page.evaluate(() => window.__frame.contentWindow.received || []);
-async function waitFor(predicate, timeout = 3000) {
+const received = () =>
+  page.evaluate(() => {
+    const frontend = window.__frame?.contentWindow;
+    if (!frontend) throw new Error('no frontend frame');
+    return frontend.received || [];
+  });
+async function waitFor(predicate: (messages: ReceivedMessage[]) => boolean, timeout = 3000) {
   const start = Date.now();
   for (;;) {
     const messages = await received();
@@ -45,7 +53,14 @@ async function waitFor(predicate, timeout = 3000) {
     await new Promise(r => setTimeout(r, 20));
   }
 }
-const logs = messages => messages.filter(m => m.method === 'Runtime.consoleAPICalled').map(m => m.params.args[0].value);
+/** The first argument of a Runtime.consoleAPICalled message. */
+const firstArg = (m: ReceivedMessage) => {
+  const arg = (m.params as Protocol.Runtime.ConsoleAPICalledEvent).args[0];
+  assert.ok(arg);
+  return arg.value;
+};
+const logs = (messages: ReceivedMessage[]) =>
+  messages.filter(m => m.method === 'Runtime.consoleAPICalled').map(firstArg);
 
 test('replays output captured before the frontend connected', async () => {
   const messages = await waitFor(m => logs(m).includes('logged before connecting'));
@@ -73,7 +88,11 @@ test('ignores messages from other windows', async () => {
 });
 
 test('replays again after the frontend reloads', async () => {
-  await page.evaluate(() => window.__frame.contentWindow.location.reload());
+  await page.evaluate(() => {
+    const frontend = window.__frame?.contentWindow;
+    if (!frontend) throw new Error('no frontend frame');
+    frontend.location.reload();
+  });
   await new Promise(r => setTimeout(r, 300));
   const messages = await waitFor(m => logs(m).includes('logged before connecting') && logs(m).includes('live'));
   assert.equal(logs(messages).filter(v => v === 'live').length, 1, 'no duplicates after reload');
