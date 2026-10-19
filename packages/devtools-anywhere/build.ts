@@ -16,7 +16,7 @@ const builds: BuildOptions[] = [
     entryPoints: { index: 'src/index.ts' },
     format: 'esm',
     outdir: 'dist',
-    external: ['@devtools-anywhere/cdp-server'],
+    external: ['@devtools-anywhere/cdp-server', '@zumer/snapdom'],
   },
   {
     ...common,
@@ -28,7 +28,11 @@ const builds: BuildOptions[] = [
     format: 'iife',
     minify: true,
     outdir: 'dist',
+    // snapDOM is loaded from next to the bundle (snapdom.js, below), on demand.
+    external: ['@zumer/snapdom'],
   },
+  // The screencast's renderer, for the IIFE build to load on demand.
+  { ...common, entryPoints: { snapdom: '@zumer/snapdom' }, format: 'esm', minify: true, outdir: 'dist' },
 ];
 
 const contexts = await Promise.all(builds.map(options => context(options)));

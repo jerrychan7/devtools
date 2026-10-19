@@ -19,7 +19,8 @@
     },
     "./devtools-anywhere.iife.js": "./dist/devtools-anywhere.iife.js",
     "./probe.iife.js": "./dist/probe.iife.js",
-    "./devtools-anywhere-sw.js": "./dist/devtools-anywhere-sw.js"
+    "./devtools-anywhere-sw.js": "./dist/devtools-anywhere-sw.js",
+    "./snapdom.js": "./dist/snapdom.js"
   },
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
@@ -27,7 +28,8 @@
     "dev": "node build.ts --watch"
   },
   "dependencies": {
-    "@devtools-anywhere/cdp-server": "workspace:*"
+    "@devtools-anywhere/cdp-server": "workspace:*",
+    "@zumer/snapdom": "^3.3.5"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

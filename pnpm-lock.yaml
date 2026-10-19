@@ -217,6 +217,9 @@ importers:
       '@devtools-anywhere/cdp-server':
         specifier: workspace:*
         version: link:../cdp-server
+      '@zumer/snapdom':
+        specifier: ^3.3.5
+        version: 3.3.5
     devDependencies:
       esbuild:
         specifier: ^0.25.0
@@ -1100,6 +1103,9 @@ packages:
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [win32]
+
+  '@zumer/snapdom@3.3.5':
+    resolution: {integrity: sha512-ACq+jJUArjoOEA36A5Ck0f9UQZ+K2Sty4CRX2LXd1TZHVZTvjISvXg/PTb54Fujjq8EgzjpoTR1s79zKm/TB/A==}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -2020,6 +2026,8 @@ snapshots:
 
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
+
+  '@zumer/snapdom@3.3.5': {}
 
   agent-base@7.1.4: {}
 

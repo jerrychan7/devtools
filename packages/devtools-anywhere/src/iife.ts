@@ -6,6 +6,7 @@ import {
   DevtoolsAnywhereElement,
   connectFrontend,
   connectToShell,
+  createPageServer,
   defineDevtoolsAnywhere,
   setBundleUrl,
 } from './index';
@@ -19,9 +20,10 @@ if (!('DevtoolsAnywhere' in window)) {
     setBundleUrl(script.src);
     // DevTools' own code is not one of the page's requests.
     probe.ownUrls.add(script.src);
+    probe.ownUrls.add(new URL('snapdom.js', script.src).href);
   }
   defineDevtoolsAnywhere();
-  if (isShellPage()) connectToShell(createCdpServer());
+  if (isShellPage()) connectToShell(createPageServer());
   Object.assign(window, {
     DevtoolsAnywhere: { DevtoolsAnywhereElement, connectFrontend, createCdpServer, defineDevtoolsAnywhere },
   });

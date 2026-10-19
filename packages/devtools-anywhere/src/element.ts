@@ -7,6 +7,7 @@ import {
   readShellConfig,
   type CdpServer,
   type ShellConfig,
+  type SnapdomLoader,
 } from '@devtools-anywhere/cdp-server';
 import { connectFrontend, relayShell } from './connection';
 
@@ -18,7 +19,18 @@ let bundleUrl = '';
  */
 export function setBundleUrl(url: string) {
   bundleUrl = url;
+  loadSnapdom = () => import(/* @vite-ignore */ new URL('snapdom.js', url).href);
 }
+
+/**
+ * snapDOM, which renders the screencast, is loaded only when the screencast starts. The ESM
+ * build leaves `import('@zumer/snapdom')` to the bundler; the IIFE build loads the copy
+ * next to itself (snapdom.js).
+ */
+let loadSnapdom: SnapdomLoader = () => import('@zumer/snapdom');
+
+/** The CDP server of a page, with the screencast's renderer. */
+export const createPageServer = () => createCdpServer({ loadSnapdom: () => loadSnapdom() });
 
 const HEIGHT_KEY = 'devtools-anywhere:height';
 const MIN_HEIGHT = 80;
@@ -180,7 +192,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (this.hasAttribute('shell')) {
       this.registerShellWorker();
     } else {
-      this.server ??= createCdpServer();
+      this.server ??= createPageServer();
       this.toggleAttribute('data-can-keep', !!bundleUrl);
     }
     this.update();

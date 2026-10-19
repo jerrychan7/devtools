@@ -1,2 +1,2 @@
 export { connectFrontend, connectToShell, relayShell } from './connection';
-export { DevtoolsAnywhereElement, defineDevtoolsAnywhere, setBundleUrl } from './element';
+export { DevtoolsAnywhereElement, createPageServer, defineDevtoolsAnywhere, setBundleUrl } from './element';
