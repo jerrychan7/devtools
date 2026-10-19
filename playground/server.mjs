@@ -49,6 +49,8 @@ export function startServer(port = 0) {
       res.writeHead(200, {
         'content-type': types[path.extname(target)] || 'application/octet-stream',
         'cache-control': 'no-store',
+        // Lets devtools-anywhere-sw.js control the whole site from its dist directory.
+        ...(target.endsWith('-sw.js') ? { 'service-worker-allowed': '/' } : {}),
       })
       res.end(data)
     } catch {

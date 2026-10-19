@@ -15,6 +15,8 @@ export interface ShellConfig {
   frontend: string
   /** Absolute URL of devtools-anywhere.iife.js. */
   bundle: string
+  /** Absolute URL of devtools-anywhere-sw.js, to inject the probe into iframe pages. */
+  sw?: string
 }
 
 export function readShellConfig(): ShellConfig | null {

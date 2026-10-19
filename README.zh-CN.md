@@ -56,7 +56,7 @@
 
 #### 1. 探针
 
-压缩后约 1–2 KB（min+gzip）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
+压缩后约 3 KB（min+gzip，包含外壳模式和自动挂载）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
 
 - 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch` 和 `XHR`，把事件连同时间戳写入缓冲。
 - CDP 运行时和前端延迟加载。运行时的 Runtime、Network 域直接读取探针的缓冲并订阅新事件，因此每个 API 只被 hook 一次。
@@ -82,8 +82,8 @@
 | 方式 | 适用场景 |
 |---|---|
 | 页面手动引入 `<script>`（必须放在 `<head>` 第一个） | 任意页面 |
-| Vite / webpack 插件，在开发模式下自动注入、生产构建自动移除 | 使用构建工具的项目 |
-| Service Worker 改写外壳内 iframe 的 HTML | 同源、HTTPS、站点没有自己的 SW；可以顺带记录探针执行之前的网络请求 |
+| `@devtools-anywhere/vite-plugin`：只在开发模式（`vite serve`）下注入 | 使用 Vite 的项目（之后可能补充 webpack 插件） |
+| `devtools-anywhere-sw.js`：外壳模式下，给页面 iframe 中加载的、没有引入探针的同源页面注入探针 | 安全上下文（HTTPS 或 localhost）、作用域覆盖这些页面（`Service-Worker-Allowed: /`），并且站点没有自己的 SW |
 
 所有方式共用同一份探针。
 
@@ -93,7 +93,7 @@
 
 | 包 | 内容 |
 |---|---|
-| `devtools-anywhere` | 总包：依赖下面的子包，提供 `<devtools-anywhere>` 组件和最简单的接入方式 |
+| `devtools-anywhere` | 总包：`<devtools-anywhere>` 组件、`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js` 和 `devtools-anywhere-sw.js` |
 | `@devtools-anywhere/cdp-server` | 页面内的 CDP 服务端。探针通过子路径 `@devtools-anywhere/cdp-server/probe` 导出，单独构建成一个很小的文件，供 `<script>` 引入和插件注入使用 |
 | `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，可以自托管，也可以从 CDN 引用 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
@@ -138,29 +138,42 @@ experiments/      验证记录
 2. ✅ **项目骨架和 CDP 核心**：workspace、TypeScript、最新的 `devtools-protocol`；跨域共享的核心状态；基于探针的 Runtime、Network 和 Page 域；对比真实 Chrome 的一致性测试。
 3. ✅ **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
 4. ✅ **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
-5. **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
+5. ✅ **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
 6. **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
 7. **前端定制**：基于官方 devtools-frontend 维护补丁集并定期升级；隐藏用不了的面板，适配小屏。
 
 ## 用法（预览）
 
-各个包尚未发布。使用本仓库构建出的文件：
+各个包尚未发布，下面的路径指本仓库构建出的文件。在 `@devtools-anywhere/devtools-frontend` 发布之前，`data-frontend` 请指向一个已构建的前端，例如 Chii 的 `public/front_end/chii_app.html`。
+
+### 一行 script
 
 ```html
 <head>
   <!-- 第一个同步脚本：从最开始捕获输出。 -->
-  <script src="/path/to/probe.iife.js"></script>
+  <script src="/path/to/devtools-anywhere/dist/probe.iife.js" data-frontend="/path/to/front_end/chii_app.html"></script>
   ...
 </head>
-<body>
-  ...
-  <!-- 可以晚加载，探针捕获的内容都会补上。 -->
-  <script src="/path/to/devtools-anywhere.iife.js"></script>
-  <devtools-anywhere frontend="/path/to/front_end/chii_app.html"></devtools-anywhere>
-</body>
 ```
 
-点击右下角的 F12 悬浮按钮打开面板，拖动面板顶部的横条调整高度。属性：`frontend`、`open`、`height`、`no-launcher`；方法：`show()`、`hide()`、`toggle()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并挂载 `<devtools-anywhere>`。可选属性：`data-open` 立即打开 devtools；`data-sw` 在外壳模式下启用 Service Worker。
+
+### Vite
+
+```js
+// vite.config.js
+import devtoolsAnywhere from '@devtools-anywhere/vite-plugin'
+
+export default {
+  plugins: [devtoolsAnywhere({ frontendDir: 'path/to/front_end' })],
+}
+```
+
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。选项：`frontendDir`、`frontendEntry`（默认 `chii_app.html`）、`frontendUrl`、`open`、`serviceWorker`。
+
+### 组件
+
+点击右下角的 F12 悬浮按钮打开面板；拖动面板顶部的横条调整高度，⟳ 切换到外壳模式，× 关闭。属性：`frontend`、`open`、`height`、`no-launcher`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 ## 开发
 

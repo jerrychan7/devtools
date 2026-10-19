@@ -17,7 +17,11 @@ await Promise.all([
   }),
   build({
     ...common,
-    entryPoints: { 'devtools-anywhere.iife': 'src/iife.ts' },
+    entryPoints: {
+      'devtools-anywhere.iife': 'src/iife.ts',
+      'probe.iife': 'src/probe.ts',
+      'devtools-anywhere-sw': 'src/sw.ts',
+    },
     format: 'iife',
     minify: true,
     outdir: 'dist',

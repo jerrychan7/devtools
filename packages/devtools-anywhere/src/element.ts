@@ -1,4 +1,12 @@
-import { SHELL_KEY, SHELL_PAGE_ID, createCdpServer, isShellPage, type CdpServer } from '@devtools-anywhere/cdp-server'
+import {
+  SHELL_KEY,
+  SHELL_PAGE_ID,
+  createCdpServer,
+  isShellPage,
+  readShellConfig,
+  type CdpServer,
+  type ShellConfig,
+} from '@devtools-anywhere/cdp-server'
 import { connectFrontend, relayShell } from './connection'
 
 let bundleUrl = ''
@@ -60,6 +68,9 @@ iframe { flex: 1; width: 100%; border: 0; }
  * - `height`: panel height as a CSS length (default `50vh`). Dragging the top edge
  *   overrides it and is remembered in localStorage.
  * - `no-launcher`: hides the launcher button.
+ * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
+ *   bundle when the value is empty), which injects the probe into iframe pages that do not
+ *   include it. Needs a secure context and a scope covering the pages.
  * - `shell`: set by shell mode on the element inside the shell document.
  *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
@@ -119,14 +130,36 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   enterShell() {
     const frontend = this.getAttribute('frontend')
     if (!bundleUrl || !frontend) return
-    sessionStorage.setItem(SHELL_KEY, JSON.stringify({ frontend: new URL(frontend, location.href).href, bundle: bundleUrl }))
+    const config: ShellConfig = { frontend: new URL(frontend, location.href).href, bundle: bundleUrl }
+    const sw = this.getAttribute('sw')
+    if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundleUrl).href
+    sessionStorage.setItem(SHELL_KEY, JSON.stringify(config))
     location.reload()
   }
 
   /** Leaves shell mode and reloads the page on its own. */
-  exitShell() {
+  async exitShell() {
+    const config = readShellConfig()
     sessionStorage.removeItem(SHELL_KEY)
+    if (config?.sw) {
+      const registration = await navigator.serviceWorker?.getRegistration(config.sw).catch(() => undefined)
+      await registration?.unregister()
+    }
     location.reload()
+  }
+
+  /** In the shell: registers the Service Worker that injects the probe into iframe pages. */
+  private async registerShellWorker() {
+    const config = readShellConfig()
+    if (!config?.sw || !navigator.serviceWorker) return
+    const url = new URL(config.sw)
+    url.searchParams.set('probe', new URL('probe.iife.js', config.bundle).href)
+    try {
+      await navigator.serviceWorker.register(url.href, { scope: '/' })
+    } catch (e) {
+      // Not a secure context, or the scope is not allowed: shell mode works without it.
+      console.warn('[devtools-anywhere] Service Worker not registered:', e)
+    }
   }
 
   connectedCallback() {
@@ -137,7 +170,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       this.setAttribute('data-shell-page', '')
       return
     }
-    if (!this.hasAttribute('shell')) {
+    if (this.hasAttribute('shell')) {
+      this.registerShellWorker()
+    } else {
       this.server ??= createCdpServer()
       this.toggleAttribute('data-can-keep', !!bundleUrl)
     }

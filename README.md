@@ -56,7 +56,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 #### 1. Probe
 
-A synchronous script of about 1–2 KB (min+gzip) that must be the first script executed in `<head>`.
+A synchronous script of about 3 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
 
 - Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch` and `XHR`, and writes events with timestamps into a buffer.
 - The CDP runtime and the frontend are loaded lazily. The runtime's Runtime and Network domains consume the probe's buffer directly and subscribe to new events, so every API is hooked only once.
@@ -82,8 +82,8 @@ Shell mode is **optional**: inside an iframe, `viewport`, `100vh`, `position: fi
 | Method | When to use |
 |---|---|
 | Add a `<script>` manually (must be the first one in `<head>`) | Any page |
-| Vite / webpack plugin that injects in development and strips in production builds | Projects using a build tool |
-| Service Worker that rewrites the HTML of the page iframe inside the shell | Same-origin, HTTPS, and the site has no Service Worker of its own. It can also record network requests made before the probe runs |
+| `@devtools-anywhere/vite-plugin`: injects in development only (`vite serve`) | Projects using Vite (a webpack plugin may follow) |
+| `devtools-anywhere-sw.js`: in shell mode, injects the probe into same-origin pages loaded in the page iframe that do not include it | Secure context (HTTPS or localhost), a scope covering the pages (`Service-Worker-Allowed: /`), and no Service Worker of the site's own |
 
 All methods share the same probe.
 
@@ -93,7 +93,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | Umbrella package: depends on the packages below and provides the `<devtools-anywhere>` element and the simplest setup |
+| `devtools-anywhere` | Umbrella package: the `<devtools-anywhere>` element, `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js` and `devtools-anywhere-sw.js` |
 | `@devtools-anywhere/cdp-server` | In-page CDP server. The probe ships as the `@devtools-anywhere/cdp-server/probe` subpath export, built as a separate tiny file for `<script>` tags and injection |
 | `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets, self-hostable or served from a CDN |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
@@ -138,29 +138,42 @@ experiments/      validation records
 2. ✅ **Project skeleton and CDP core**: workspace, TypeScript, latest `devtools-protocol`; shared core state; Runtime, Network and Page domains backed by the probe; conformance tests against real Chrome.
 3. ✅ **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
 4. ✅ **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
-5. **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
+5. ✅ **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
 6. **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
 7. **Frontend customization**: patch set on top of the official devtools-frontend with regular upgrades; hide unsupported panels and adapt to small screens.
 
 ## Usage (preview)
 
-The packages are not published yet. With the builds from this repository:
+The packages are not published yet; the paths below refer to the builds in this repository. Until `@devtools-anywhere/devtools-frontend` exists, point `data-frontend` at a built frontend such as Chii's `public/front_end/chii_app.html`.
+
+### One script tag
 
 ```html
 <head>
   <!-- First synchronous script: captures output from the very start. -->
-  <script src="/path/to/probe.iife.js"></script>
+  <script src="/path/to/devtools-anywhere/dist/probe.iife.js" data-frontend="/path/to/front_end/chii_app.html"></script>
   ...
 </head>
-<body>
-  ...
-  <!-- Can load late; it picks up everything the probe captured. -->
-  <script src="/path/to/devtools-anywhere.iife.js"></script>
-  <devtools-anywhere frontend="/path/to/front_end/chii_app.html"></devtools-anywhere>
-</body>
 ```
 
-A floating F12 button opens the panel; drag its top bar to resize. Attributes: `frontend`, `open`, `height`, `no-launcher`; methods: `show()`, `hide()`, `toggle()`. Keep the element in one place, since moving it reloads the iframe.
+After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts `<devtools-anywhere>`. Optional attributes: `data-open` opens DevTools right away; `data-sw` enables the Service Worker in shell mode.
+
+### Vite
+
+```js
+// vite.config.js
+import devtoolsAnywhere from '@devtools-anywhere/vite-plugin'
+
+export default {
+  plugins: [devtoolsAnywhere({ frontendDir: 'path/to/front_end' })],
+}
+```
+
+Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. Options: `frontendDir`, `frontendEntry` (default `chii_app.html`), `frontendUrl`, `open`, `serviceWorker`.
+
+### The element
+
+A floating F12 button opens the panel; drag its top bar to resize, ⟳ switches to shell mode and × closes. Attributes: `frontend`, `open`, `height`, `no-launcher`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
 
 ## Development
 
