@@ -96,6 +96,8 @@ const inModule = (file: string) => {
   return false
 }
 const LOCALES = 'core/i18n/locales/'
+/** UI strings anywhere_app borrows from modules it does not include. */
+const BORROWED_STRINGS = ['panels/browser_debugger/browser_debugger-meta.ts']
 const keep = (file: string) => {
   if (file.endsWith('.js')) return reachable.has(file)
   if (file.endsWith('.html')) return file === 'anywhere_app.html'
@@ -119,7 +121,10 @@ kept.forEach(file => copy(file))
 fs.rmSync(localesDist, { recursive: true, force: true })
 for (const name of fs.readdirSync(path.join(gen, LOCALES)).filter(f => f.endsWith('.json'))) {
   const strings = JSON.parse(fs.readFileSync(path.join(gen, LOCALES, name), 'utf8'))
-  const used = Object.fromEntries(Object.entries(strings).filter(([key]) => inModule(key.split(' | ')[0])))
+  const used = Object.fromEntries(Object.entries(strings).filter(([key]) => {
+    const file = key.split(' | ')[0]
+    return inModule(file) || BORROWED_STRINGS.includes(file)
+  }))
   const target = BUNDLED_LOCALES.includes(name.slice(0, -'.json'.length)) ? dist : localesDist
   fs.mkdirSync(path.join(target, LOCALES), { recursive: true })
   fs.writeFileSync(path.join(target, LOCALES, name), JSON.stringify(used))

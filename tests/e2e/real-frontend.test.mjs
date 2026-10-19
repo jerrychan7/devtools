@@ -10,11 +10,16 @@ const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-fro
 
 let env
 let frontend
+/** Uncaught errors in the frontend. */
+const errors = []
 
 before(async () => {
   if (!built) return
   env = await launch()
   const page = await env.browser.newPage()
+  page.on('pageerror', error => errors.push(error.message))
+  // Tall enough for the Network panel to render its rows below the overview.
+  await page.setViewport({ width: 1000, height: 1600 })
   await page.goto(env.baseUrl + '/tests/e2e/real-frontend.html')
   frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')))
 })
@@ -85,4 +90,20 @@ test('only the panels that work in the page are offered', { skip }, async () => 
   })
   for (const panel of ['elements', 'console', 'sources', 'network', 'resources']) assert.ok(tabs.includes(panel), panel)
   for (const panel of ['timeline', 'heap-profiler', 'lighthouse', 'security']) assert.ok(!tabs.includes(panel), panel)
+})
+
+test('every panel opens without uncaught errors', { skip }, async () => {
+  for (const panel of ['elements', 'console', 'sources', 'network', 'resources']) {
+    await showPanel(panel)
+    await new Promise(r => setTimeout(r, 300))
+  }
+  assert.deepEqual(errors, [])
+})
+
+test('the Network panel lists the document and its resources, but not DevTools itself', { skip }, async () => {
+  await showPanel('network')
+  await waitFor(async () => (await text()).includes('probe.iife.js'))
+  const all = await text()
+  assert.ok(all.includes('real-frontend.html'), 'the document')
+  assert.ok(!all.includes('devtools-anywhere.iife.js'), 'the bundle is DevTools\' own')
 })
