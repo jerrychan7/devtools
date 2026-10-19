@@ -243,7 +243,12 @@ export function registerNetwork({ server, probe }: Context) {
       params: Protocol.Network.GetResponseBodyRequest
     ): Promise<Protocol.Network.GetResponseBodyResponse> {
       const rec = find(params.requestId);
-      if (rec?.body !== undefined) return { body: rec.body, base64Encoded: false };
+      if (typeof rec?.body === 'string') return { body: rec.body, base64Encoded: false };
+      // Captured binary data: text for textual types, like Chrome, base64 otherwise.
+      if (rec?.body)
+        return readBody(
+          new Response(rec.body, { headers: { 'content-type': rec.responseHeaders?.['content-type'] ?? '' } })
+        );
       // Requests known from Resource Timing: load the body again, from the HTTP cache when
       // possible (unhooked, so it does not show up as a new request).
       if (rec?.initiatorType && rec.method === 'GET') {

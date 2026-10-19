@@ -82,8 +82,11 @@ export interface RequestRecord {
   statusText?: string;
   responseHeaders?: Record<string, string>;
   mimeType?: string;
-  /** Response text; absent when it was not captured (binary, streaming or too large). */
-  body?: string | undefined;
+  /**
+   * Response body: text, or the raw data of binary responses (decoded only when asked for);
+   * absent when it was not captured (streaming or too large).
+   */
+  body?: string | Blob | undefined;
   encodedDataLength?: number;
   /** `performance.now()` when the response finished or failed. */
   endTime?: number;

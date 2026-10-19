@@ -481,13 +481,13 @@ function hookFetch(track: Track, update: Update) {
         }
         res
           .clone()
-          .text()
+          .blob()
           .then(
-            text =>
+            blob =>
               update(rec, {
                 state: 'done',
-                body: text.length > MAX_BODY_LENGTH ? undefined : text,
-                encodedDataLength: length || text.length,
+                body: blob.size > MAX_BODY_LENGTH ? undefined : blob,
+                encodedDataLength: length || blob.size,
                 endTime: performance.now(),
               }),
             err => update(rec, { state: 'failed', errorText: String(err?.message || err), endTime: performance.now() })
@@ -575,14 +575,16 @@ function watchXhr(xhr: XMLHttpRequest, rec: RequestRecord, update: Update) {
         update(rec, { state: 'failed', errorText: 'net::ERR_FAILED', endTime: performance.now() });
         return;
       }
-      let text: string | undefined;
-      if (xhr.responseType === '' || xhr.responseType === 'text') text = xhr.responseText;
-      else if (xhr.responseType === 'json') text = JSON.stringify(xhr.response);
+      const type = xhr.responseType;
+      let body: string | Blob | undefined;
+      if (type === '' || type === 'text') body = xhr.responseText;
+      else if (type === 'json') body = JSON.stringify(xhr.response);
+      else if (type === 'blob' || type === 'arraybuffer') body = new Blob([xhr.response]);
       update(rec, {
         state: 'done',
         ...responseMeta(),
-        body: text,
-        encodedDataLength: text?.length || 0,
+        body,
+        encodedDataLength: typeof body === 'string' ? body.length : body?.size || 0,
         endTime: performance.now(),
       });
     }

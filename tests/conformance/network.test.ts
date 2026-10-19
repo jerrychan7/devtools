@@ -60,6 +60,30 @@ describe('Network', () => {
     assert.deepEqual(oursBody, chromeBody);
   });
 
+  // Bodies of every response type: text as is, binary data as base64, like Chrome.
+  for (const [name, expression, marker] of [
+    ['fetch of an image', "void fetch('/tests/conformance/assets/pixel.png?n=fetch-png')", 'n=fetch-png'],
+    [
+      'XHR with responseType blob',
+      "(() => { const x = new XMLHttpRequest(); x.open('GET', '/api/echo?n=xhr-blob'); x.responseType = 'blob'; x.send() })()",
+      'n=xhr-blob',
+    ],
+    [
+      'XHR with responseType arraybuffer',
+      "(() => { const x = new XMLHttpRequest(); x.open('GET', '/tests/conformance/assets/pixel.png?n=xhr-ab'); x.responseType = 'arraybuffer'; x.send() })()",
+      'n=xhr-ab',
+    ],
+  ] as const) {
+    test(`response body: ${name}`, async () => {
+      const { ours, chrome } = await request(expression, marker);
+      const [oursBody, chromeBody] = await Promise.all([
+        t.ours.send('Network.getResponseBody', { requestId: ours.sent.requestId }),
+        t.chrome.send('Network.getResponseBody', { requestId: chrome.sent.requestId }),
+      ]);
+      assert.deepEqual(oursBody, chromeBody);
+    });
+  }
+
   test('fetch POST with a body', async () => {
     const { ours, chrome } = await request(
       "void fetch('/api/echo?n=post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{\"a\":1}' })",
