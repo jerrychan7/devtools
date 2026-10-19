@@ -16,6 +16,10 @@ const color = (c: RGBA | undefined, fallback: string) => (c ? `rgba(${c.r},${c.g
 /** Draws highlights in a fixed, click-through layer that the DOM domain hides from the page tree. */
 class Highlighter {
   private layer: HTMLDivElement | null = null;
+  /** The highlighted element, redrawn when the page scrolls or the viewport changes, like Chrome. */
+  private current: { el: Element; config: Protocol.Overlay.HighlightConfig } | null = null;
+  private tracking: AbortController | null = null;
+  private frame = 0;
 
   private ensureLayer(): HTMLDivElement {
     if (this.layer?.isConnected) return this.layer;
@@ -27,12 +31,52 @@ class Highlighter {
   }
 
   hide() {
+    this.untrack();
     this.layer?.remove();
     this.layer = null;
   }
 
+  /** Whether `el` is highlighted right now. */
+  showing(el: Element): boolean {
+    return this.current?.el === el && !!this.layer?.isConnected;
+  }
+
   /** Highlights an element's margin, border, padding and content boxes, with a size label. */
   element(el: Element, config: Protocol.Overlay.HighlightConfig = {}) {
+    this.current = { el, config };
+    this.track();
+    this.draw(el, config);
+  }
+
+  /** Redraws at most once per frame. */
+  private redraw = () => {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      if (this.current?.el.isConnected) this.draw(this.current.el, this.current.config);
+    });
+  };
+
+  private track() {
+    if (this.tracking) return;
+    this.tracking = new AbortController();
+    const options = { capture: true, passive: true, signal: this.tracking.signal };
+    addEventListener('scroll', this.redraw, options);
+    addEventListener('resize', this.redraw, options);
+    // Pinch zoom and the on-screen keyboard move the visual viewport only.
+    visualViewport?.addEventListener('scroll', this.redraw, options);
+    visualViewport?.addEventListener('resize', this.redraw, options);
+  }
+
+  private untrack() {
+    this.tracking?.abort();
+    this.tracking = null;
+    this.current = null;
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
+  }
+
+  private draw(el: Element, config: Protocol.Overlay.HighlightConfig) {
     const model = boxModel(el);
     const layer = this.ensureLayer();
     layer.replaceChildren();
@@ -47,7 +91,7 @@ class Highlighter {
       layer.appendChild(this.rect(left, top, right - left, bottom - top, fill));
     }
 
-    if (config.showInfo !== false) {
+    if (config.showInfo === true) {
       const label = document.createElement('div');
       const id = el.id ? `#${el.id}` : '';
       const cls = el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
@@ -69,6 +113,7 @@ class Highlighter {
   }
 
   area(x: number, y: number, width: number, height: number, fill: string, outline?: string) {
+    this.untrack();
     const layer = this.ensureLayer();
     layer.replaceChildren(this.rect(x, y, width, height, fill, outline));
   }
@@ -114,9 +159,26 @@ export function registerOverlay(ctx: Context) {
 
   function startInspect(config: Protocol.Overlay.HighlightConfig) {
     stopInspect?.();
+    let hovered: Element | null = null;
+    let next: Element | null = null;
+    let frame = 0;
+    // Pointer events can come faster than frames: handle the latest one once per frame.
+    const onFrame = () => {
+      frame = 0;
+      const el = next;
+      if (!el || (el === hovered && highlighter.showing(el))) return;
+      highlighter.element(el, config);
+      if (el === hovered) return;
+      hovered = el;
+      // Like Chrome, so that the Elements panel reveals the hovered node.
+      const nodeId = nodes.pushToClient?.(el);
+      if (nodeId !== undefined) server.emit('Overlay.nodeHighlightRequested', { nodeId });
+    };
     const onMove = (event: Event) => {
       const el = targetOf(event);
-      if (el) highlighter.element(el, config);
+      if (!el) return;
+      next = el;
+      if (!frame) frame = requestAnimationFrame(onFrame);
     };
     const swallow = (event: Event) => {
       if (!targetOf(event)) return;
@@ -127,23 +189,27 @@ export function registerOverlay(ctx: Context) {
       const el = targetOf(event);
       if (!el) return;
       swallow(event);
+      cancelAnimationFrame(frame);
+      frame = 0;
       highlighter.hide();
       server.emit('Overlay.inspectNodeRequested', { backendNodeId: nodes.backendIdOf(el) });
     };
-    const options = { capture: true };
+    const listening = new AbortController();
+    const options = { capture: true, signal: listening.signal };
     window.addEventListener('pointermove', onMove, options);
     window.addEventListener('pointerdown', swallow, options);
     window.addEventListener('mousedown', swallow, options);
     window.addEventListener('pointerup', swallow, options);
     window.addEventListener('mouseup', swallow, options);
     window.addEventListener('click', onClick, options);
+    // The page gets no touch input either, like in Chrome's inspect mode.
+    const touchOptions = { ...options, passive: false };
+    window.addEventListener('touchstart', swallow, touchOptions);
+    window.addEventListener('touchmove', swallow, touchOptions);
+    window.addEventListener('touchend', swallow, touchOptions);
     stopInspect = () => {
-      window.removeEventListener('pointermove', onMove, options);
-      window.removeEventListener('pointerdown', swallow, options);
-      window.removeEventListener('mousedown', swallow, options);
-      window.removeEventListener('pointerup', swallow, options);
-      window.removeEventListener('mouseup', swallow, options);
-      window.removeEventListener('click', onClick, options);
+      listening.abort();
+      cancelAnimationFrame(frame);
       highlighter.hide();
       stopInspect = null;
     };

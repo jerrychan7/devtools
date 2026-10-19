@@ -94,13 +94,22 @@ export function registerInput({ server }: Context) {
     if (target.dispatchEvent(event)) scrollBy(target, dx, dy);
   }
 
+  /** The held buttons, which only Input.dispatchMouseEvent reports. */
+  const buttonsOf = (p: MouseEventRequest) => ('buttons' in p ? p.buttons : undefined);
+
   function mouse(p: MouseEventRequest) {
     const target = hit(p.x, p.y);
-    if (!target) return;
     const button = p.button ?? 'none';
+    if (!target) {
+      // Released off the page (outside the viewport, over DevTools' own elements): the
+      // pressed element still gets the release, so the button is not left held down.
+      if (p.type === 'mouseReleased' && pressed) fire(pressed, 'up', mouseInit(p, buttonsOf(p) ?? 0));
+      if (p.type === 'mouseReleased') pressed = null;
+      return;
+    }
     switch (p.type) {
       case 'mouseMoved': {
-        const init = mouseInit(p, pressed ? BUTTONS.left : 0);
+        const init = mouseInit(p, buttonsOf(p) ?? (pressed ? BUTTONS.left : 0));
         if (target !== hovered) {
           if (hovered) fire(hovered, 'out', { ...init, relatedTarget: target });
           fire(target, 'over', { ...init, relatedTarget: hovered });
@@ -111,20 +120,25 @@ export function registerInput({ server }: Context) {
       }
       case 'mousePressed': {
         pressed = target;
-        if (fire(target, 'down', mouseInit(p, BUTTONS[button]))) focus(target);
+        if (fire(target, 'down', mouseInit(p, buttonsOf(p) ?? BUTTONS[button]))) focus(target);
         if (button === 'right') target.dispatchEvent(new MouseEvent('contextmenu', mouseInit(p, BUTTONS.right)));
         break;
       }
       case 'mouseReleased': {
-        const init = mouseInit(p, 0);
+        const init = mouseInit(p, buttonsOf(p) ?? 0);
         fire(target, 'up', init);
         const down = pressed;
         pressed = null;
-        if (button !== 'left' || !down) break;
-        // The click goes to the nearest element that contains both the press and the release.
+        if (button === 'none' || !down) break;
+        // The click goes to the nearest element that contains both the press and the release;
+        // other buttons than the left one get an auxclick instead.
         let clicked: Element | null = target;
         while (clicked && !clicked.contains(down)) clicked = clicked.parentElement;
         if (!clicked) break;
+        if (button !== 'left') {
+          clicked.dispatchEvent(new MouseEvent('auxclick', init));
+          break;
+        }
         clicked.dispatchEvent(new MouseEvent('click', init));
         if (p.clickCount === 2) clicked.dispatchEvent(new MouseEvent('dblclick', init));
         break;
@@ -136,10 +150,12 @@ export function registerInput({ server }: Context) {
   }
 
   function touch(p: MouseEventRequest) {
-    const target = hit(p.x, p.y);
+    if (p.type === 'mouseMoved' && !touchStart) return; // hovering does not touch
+    // Once touching, the touch stays with the touched element even off the page, so that
+    // the release still ends it.
+    const target = hit(p.x, p.y) ?? (p.type === 'mousePressed' ? null : pressed);
     if (!target) return;
     if (p.type === 'mouseWheel') return wheel(target, p);
-    if (p.type === 'mouseMoved' && !touchStart) return; // hovering does not touch
     const type = p.type === 'mousePressed' ? 'touchstart' : p.type === 'mouseReleased' ? 'touchend' : 'touchmove';
     if (type === 'touchstart') {
       touchStart = { x: p.x, y: p.y, moved: false };
@@ -159,31 +175,11 @@ export function registerInput({ server }: Context) {
     if (type === 'touchstart') touched.dispatchEvent(new PointerEvent('pointerover', pointerInit));
     const pointerType = type === 'touchstart' ? 'pointerdown' : type === 'touchend' ? 'pointerup' : 'pointermove';
     let proceed = touched.dispatchEvent(new PointerEvent(pointerType, pointerInit));
-    // Touch and TouchEvent cannot be constructed in every browser (desktop Safari).
-    if (typeof Touch === 'function' && typeof TouchEvent === 'function') {
-      const point = new Touch({
-        identifier: 1,
-        target: touched,
-        clientX: p.x,
-        clientY: p.y,
-        pageX: p.x + scrollX,
-        pageY: p.y + scrollY,
-        screenX: p.x + screenX,
-        screenY: p.y + screenY,
-      });
-      const touches = type === 'touchend' ? [] : [point];
-      const event = new TouchEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        view: window,
-        touches,
-        targetTouches: touches,
-        changedTouches: [point],
-        ...modifierKeys(p.modifiers),
-      });
-      proceed = touched.dispatchEvent(event) && proceed;
-    }
+    // Touch and TouchEvent cannot be constructed in every browser: missing in desktop Safari,
+    // present but throwing "Illegal constructor" in iOS Safari and some WebViews. Only the
+    // pointer events are sent there.
+    const event = touchEvent(type, touched, p);
+    if (event) proceed = touched.dispatchEvent(event) && proceed;
     if (type === 'touchend') touched.dispatchEvent(new PointerEvent('pointerout', pointerInit));
     if (type === 'touchmove' && proceed && touchStart?.moved) {
       // Dragging scrolls, unless the page cancelled the touch.
@@ -206,6 +202,35 @@ export function registerInput({ server }: Context) {
         target.dispatchEvent(new MouseEvent('mouseup', init));
         target.dispatchEvent(new MouseEvent('click', init));
       }
+    }
+  }
+
+  function touchEvent(type: 'touchstart' | 'touchmove' | 'touchend', touched: Element, p: MouseEventRequest) {
+    if (typeof Touch !== 'function' || typeof TouchEvent !== 'function') return null;
+    try {
+      const point = new Touch({
+        identifier: 1,
+        target: touched,
+        clientX: p.x,
+        clientY: p.y,
+        pageX: p.x + scrollX,
+        pageY: p.y + scrollY,
+        screenX: p.x + screenX,
+        screenY: p.y + screenY,
+      });
+      const touches = type === 'touchend' ? [] : [point];
+      return new TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        touches,
+        targetTouches: touches,
+        changedTouches: [point],
+        ...modifierKeys(p.modifiers),
+      });
+    } catch {
+      return null;
     }
   }
 
@@ -261,8 +286,13 @@ export function registerInput({ server }: Context) {
         case 'rawKeyDown':
           if (target.dispatchEvent(new KeyboardEvent('keydown', init))) {
             editingKey(target, p.key ?? '');
-            // keyDown may carry the text of the key itself (rawKeyDown never does).
-            if (p.type === 'keyDown' && p.text) insertText(p.text);
+            // keyDown may carry the text of the key itself (rawKeyDown never does): it is
+            // typed like a char event, keypress first.
+            if (p.type === 'keyDown' && p.text) {
+              const charCode = p.text.charCodeAt(0);
+              const keypress = new KeyboardEvent('keypress', { ...init, charCode, keyCode: charCode });
+              if (target.dispatchEvent(keypress)) insertText(p.text);
+            }
           }
           break;
         case 'char':

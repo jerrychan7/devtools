@@ -16,6 +16,7 @@ const STYLE = `
   .f-order:hover { color: rgb(10, 0, 0) }
   .f-order.x { color: rgb(20, 0, 0) }
   .f-order:hover { background-color: rgb(0, 0, 5) }
+  .f-order:not(:hover) { border-left-color: rgb(0, 6, 0) }
   .f-order:focus::before { content: "F" }
   @media (min-width: 1px) { .f-media:active { color: rgb(30, 0, 0) } }
 `;
@@ -122,6 +123,8 @@ test('the Styles pane shows the forced rules as matching', async () => {
     side.send('CSS.getMatchedStylesForNode', { nodeId }).then(summarize)
   );
   assert.deepEqual(ours, chrome);
+  // A forced :hover no longer matches its negation.
+  assert.ok(!ours.some(([selector]) => selector === '.f-order:not(:hover)'));
 });
 
 test('the marker attribute is not visible to the client', async () => {
@@ -138,6 +141,26 @@ test('un-forcing restores the original styles', async () => {
   const before = await computed('fo');
   await withForced(t.ours, 'fo', ['hover'], () => {});
   assert.deepEqual(await computed('fo'), before);
+  const leftovers = await t.page.evaluate(() => document.querySelectorAll('[data-devtools-anywhere]').length);
+  assert.equal(leftovers, 0);
+});
+
+test('a forced element taken out of the document is no longer forced', async () => {
+  const results: Awaited<ReturnType<typeof computed>>[] = [];
+  for (const side of [t.ours, t.chrome]) {
+    const { root } = await side.send('DOM.getDocument', { depth: -1 });
+    const node = find(root, n => attr(n, 'id') === 'fo');
+    assert.ok(node);
+    await side.send('CSS.forcePseudoState', { nodeId: node.nodeId, forcedPseudoClasses: ['hover'] });
+    await t.page.evaluate(() => {
+      const el = document.getElementById('fo');
+      if (!el) throw new Error('#fo not found');
+      el.remove();
+      document.body.prepend(el);
+    });
+    results.push(await computed('fo'));
+  }
+  assert.deepEqual(results[0], results[1]);
   const leftovers = await t.page.evaluate(() => document.querySelectorAll('[data-devtools-anywhere]').length);
   assert.equal(leftovers, 0);
 });

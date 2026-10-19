@@ -38,28 +38,32 @@ self.addEventListener('fetch', event => {
     !request.headers.has('range') &&
     new URL(request.url).origin === self.location.origin
   ) {
-    event.respondWith(report(request, event.clientId));
+    event.respondWith(report(event));
   }
 });
 
 const headersToObject = (headers: Headers) => Object.fromEntries(headers.entries());
 
 /**
- * Passes a subresource through, telling the requesting page first what the response looks
- * like: the message arrives before the request's Resource Timing entry, which only exists
- * once the page has read the response.
+ * Passes a subresource through, then tells the requesting page what the response looks like
+ * (kept alive by `waitUntil`): the message still arrives before the request's Resource Timing
+ * entry, which only exists once the page has read the response.
  */
-async function report(request: Request, clientId: string): Promise<Response> {
+async function report(event: FetchEvent): Promise<Response> {
+  const request = event.request;
   const response = await fetch(request);
-  const client = await self.clients.get(clientId);
-  client?.postMessage({
-    type: DETAILS,
-    url: request.url,
-    requestHeaders: headersToObject(request.headers),
-    status: response.status,
-    statusText: response.statusText,
-    responseHeaders: headersToObject(response.headers),
-  });
+  event.waitUntil(
+    self.clients.get(event.clientId).then(client =>
+      client?.postMessage({
+        type: DETAILS,
+        url: request.url,
+        requestHeaders: headersToObject(request.headers),
+        status: response.status,
+        statusText: response.statusText,
+        responseHeaders: headersToObject(response.headers),
+      })
+    )
+  );
   return response;
 }
 
@@ -68,34 +72,39 @@ async function inject(request: Request, probeUrl: string): Promise<Response> {
   const type = response.headers.get('content-type') || '';
   if (response.type === 'opaqueredirect' || !response.body || !type.includes('text/html')) return response;
 
-  const tag = `<script src="${probeUrl.replace(/"/g, '&quot;')}"></script>`;
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let pending = '';
+  const tag = new TextEncoder().encode(`<script src="${probeUrl.replace(/"/g, '&quot;')}"></script>`);
+  // Searched as single-byte text, so string offsets are byte offsets: the page's bytes pass
+  // through as they are, whatever its encoding (any ASCII-compatible charset finds <head>).
+  const latin1 = new TextDecoder('latin1');
+  let pending = new Uint8Array(0);
   let done = false;
+  const concat = (...parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0));
+    let at = 0;
+    for (const part of parts) out.set(part, (at += part.length) - part.length);
+    return out;
+  };
 
   // Streams the page through, inserting the probe right after <head> (or at the start if
   // there is no <head> early in the document), without buffering the whole response.
   const transform = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       if (done) return controller.enqueue(chunk);
-      pending += decoder.decode(chunk, { stream: true });
-      const head = /<head\b[^>]*>/i.exec(pending);
+      pending = concat(pending, chunk);
+      const head = /<head\b[^>]*>/i.exec(latin1.decode(pending));
       if (head) {
         const at = head.index + head[0].length;
-        pending = pending.slice(0, at) + tag + pending.slice(at);
+        controller.enqueue(concat(pending.subarray(0, at), tag, pending.subarray(at)));
       } else if (pending.length < SNIFF_LIMIT) {
         return;
       } else {
-        pending = tag + pending;
+        controller.enqueue(concat(tag, pending));
       }
       done = true;
-      controller.enqueue(encoder.encode(pending));
-      pending = '';
+      pending = new Uint8Array(0);
     },
     flush(controller) {
-      pending += decoder.decode();
-      if (!done) controller.enqueue(encoder.encode(tag + pending));
+      if (!done) controller.enqueue(concat(tag, pending));
     },
   });
 

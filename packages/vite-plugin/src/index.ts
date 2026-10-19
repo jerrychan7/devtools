@@ -64,7 +64,13 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
   /** `rel` inside `dir`, if it is a file there. */
   function fileIn(dir: string | undefined, rel: string): string | null {
     if (!dir) return null;
-    const file = path.resolve(dir, decodeURIComponent(rel));
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(rel);
+    } catch {
+      return null; // Malformed escape such as `%E0`: not a file of ours.
+    }
+    const file = path.resolve(dir, decoded);
     if (!file.startsWith(dir + path.sep) || !existsSync(file) || !statSync(file).isFile()) return null;
     return file;
   }
@@ -94,7 +100,11 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         res.setHeader('content-type', TYPES[path.extname(file)] ?? 'application/octet-stream');
         // Lets the Service Worker control the whole site from under BASE.
         if (file.endsWith('-sw.js')) res.setHeader('service-worker-allowed', '/');
-        createReadStream(file).pipe(res);
+        // The file can vanish between the check and the read (e.g. a rebuild of dist);
+        // an unhandled stream error would crash the dev server.
+        createReadStream(file)
+          .on('error', err => (res.headersSent ? res.destroy(err) : next(err)))
+          .pipe(res);
       });
     },
 

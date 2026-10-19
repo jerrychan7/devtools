@@ -24,8 +24,10 @@ export * from './shell';
 
 const MAX_LOGS = 1000;
 const MAX_REQUESTS = 300;
+const MAX_SOCKETS = 300;
 const MAX_SOCKET_EVENTS = 500;
 const MAX_BODY_LENGTH = 5 * 1024 * 1024;
+const MAX_TOOL_OUTCOMES = 50;
 
 export function installProbe(): Probe {
   const w = window;
@@ -62,7 +64,8 @@ export function installProbe(): Probe {
     shadowRoots: new WeakMap(),
     listeners: new WeakMap(),
     ownUrls: new Set(),
-    fetch: w.fetch?.bind(w),
+    // Old WebViews without fetch: a rejection callers handle like any failed request.
+    fetch: w.fetch ? w.fetch.bind(w) : () => Promise.reject(new TypeError('fetch is not available')),
     tools: new Map(),
   };
   Object.defineProperty(w, PROBE_KEY, { value: probe });
@@ -79,13 +82,15 @@ export function installProbe(): Probe {
   hookWebSocket(rec => {
     if (!rec.requestId) {
       rec.requestId = 'probe.' + ++seq;
-      if (sockets.push(rec) > MAX_REQUESTS) sockets.shift();
+      if (sockets.push(rec) > MAX_SOCKETS) sockets.shift();
     }
     socketListeners.forEach(fn => fn(rec));
   });
   hookConsole(addLog, now);
   hookErrors(addLog, now);
   hookShadowRoots(probe.shadowRoots);
+  // The XHR hook's own listeners are not the page's either.
+  const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
   hookModelContext(probe.tools);
 
@@ -95,18 +100,17 @@ export function installProbe(): Probe {
     requestListeners.forEach(fn => fn(rec));
     return rec;
   }
-  function track(record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>): RequestRecord {
-    return add({ ...record, requestId: '', startTime: performance.now(), wallTime: Date.now(), state: 'pending' });
-  }
+  const track: Track = record =>
+    add({ ...record, requestId: '', startTime: performance.now(), wallTime: Date.now(), state: 'pending' });
   function update(rec: RequestRecord, patch: Partial<RequestRecord>) {
     Object.assign(rec, patch);
     requestListeners.forEach(fn => fn(rec));
   }
   hookFetch(track, update);
-  hookXhr(track, update);
-  observeResources(add, update, requests);
-
+  hookXhr(track, update, listen);
   const shell = readShellConfig();
+  observeResources(add, update, requests, shell?.sw);
+
   if (shell && window === top) {
     writeShellDocument(shell);
   } else if (shell && isShellPage()) {
@@ -157,17 +161,45 @@ function resourceType(entry: PerformanceResourceTiming, mimeType: string): Reque
  * fonts, …) from Resource Timing. Entries are only created once a request has finished, and
  * `buffered` also delivers those from before the probe ran, such as the document itself.
  */
-function observeResources(add: (rec: RequestRecord) => void, update: Update, requests: RequestRecord[]) {
+function observeResources(
+  add: (rec: RequestRecord) => void,
+  update: Update,
+  requests: RequestRecord[],
+  swUrl: string | undefined
+) {
   if (typeof PerformanceObserver === 'undefined') return;
   // In shell mode with the Service Worker, it reports what Resource Timing does not expose
   // (headers, status text) of same-origin subresources, before the request's entry exists.
   // They are matched by URL; a late report still completes the record.
   const details = new Map<string, Partial<RequestRecord>[]>();
   const sw = navigator.serviceWorker;
-  if (sw) {
+  if (sw && swUrl) {
+    // Only reports from our own worker (its URL differs in the query only), and only the
+    // fields it sends: the page's own worker must not rewrite the records.
+    const ours = new URL(swUrl, location.href);
+    const isOurs = (source: unknown) => {
+      if (!(source instanceof ServiceWorker)) return false;
+      const url = new URL(source.scriptURL);
+      return url.origin === ours.origin && url.pathname === ours.pathname;
+    };
+    const headers = (value: unknown): Record<string, string> | undefined => {
+      if (!value || typeof value !== 'object') return undefined;
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(value)) if (typeof v === 'string') out[k] = v;
+      return out;
+    };
     sw.addEventListener('message', event => {
-      const { type, url, ...patch } = event.data || {};
-      if (type !== 'devtools-anywhere:response') return;
+      const data: unknown = event.data;
+      if (!data || typeof data !== 'object' || !isOurs(event.source)) return;
+      const { type, url, requestHeaders, status, statusText, responseHeaders } = data as Record<string, unknown>;
+      if (type !== 'devtools-anywhere:response' || typeof url !== 'string') return;
+      const patch: Partial<RequestRecord> = {};
+      const req = headers(requestHeaders);
+      if (req) patch.requestHeaders = req;
+      if (typeof status === 'number') patch.status = status;
+      if (typeof statusText === 'string') patch.statusText = statusText;
+      const res = headers(responseHeaders);
+      if (res) patch.responseHeaders = res;
       const rec = requests.find(r => r.url === url && r.initiatorType && !Object.keys(r.responseHeaders || {}).length);
       if (rec) update(rec, patch);
       else {
@@ -176,13 +208,16 @@ function observeResources(add: (rec: RequestRecord) => void, update: Update, req
         list.push(patch);
       }
     });
-    sw.startMessages();
+    // No startMessages(): that would start delivering before the page's own listeners exist,
+    // and its Service Worker's early messages would be lost. The queue starts by itself once
+    // the document is parsed, and late reports still complete their records.
   }
-  // The navigation entry can be delivered again once the page has loaded.
-  const seen = new Set<PerformanceEntry>();
+  // The navigation entry can be delivered again once the page has loaded. Only it is kept:
+  // resource entries are delivered once, and keeping them all would grow without bound.
+  const seen = new WeakSet<PerformanceEntry>();
   const record = (entry: PerformanceResourceTiming) => {
     if (seen.has(entry)) return;
-    seen.add(entry);
+    if (entry.entryType === 'navigation') seen.add(entry);
     // fetch() and XHR are hooked, with more detail; DevTools' own fetches are unhooked.
     if (entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') return;
     // The browser's own favicon request is not the page's, and Chrome does not report it.
@@ -282,7 +317,18 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
     Reflect.set(console, name, function (this: unknown, ...args: unknown[]) {
       const captured = capture(args);
       if (captured) {
-        addLog({ kind: 'console', type: captured.type, args: captured.args, time: now(), stack: new Error().stack });
+        // V8 formats a stack only when it is read: most entries are never shown, and
+        // formatting one on every call slows down pages that log a lot.
+        const error = new Error();
+        addLog({
+          kind: 'console',
+          type: captured.type,
+          args: captured.args,
+          time: now(),
+          get stack() {
+            return error.stack;
+          },
+        });
       }
       return orig.apply(this, args);
     });
@@ -320,22 +366,29 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
     counts[label] = (counts[label] || 0) + 1;
     return { type: 'count', args: [`${label}: ${counts[label]}`] };
   });
-  wrap('countReset', ([label = 'default']) => {
-    counts[String(label)] = 0;
+  // Misuses are reported as V8 does, with a warning naming the label.
+  const warn = (text: string) => ({ type: 'warning' as const, args: [text] });
+  wrap('countReset', ([value = 'default']) => {
+    const label = String(value);
+    if (!(label in counts)) return warn(`Count for '${label}' does not exist`);
+    counts[label] = 0;
     return null;
   });
-  wrap('time', ([label = 'default']) => {
-    timers[String(label)] = performance.now();
+  wrap('time', ([value = 'default']) => {
+    const label = String(value);
+    // An existing timer keeps its start.
+    if (label in timers) return warn(`Timer '${label}' already exists`);
+    timers[label] = performance.now();
     return null;
   });
   const elapsed = (label: string) => `${label}: ${performance.now() - (timers[label] ?? 0)} ms`;
   wrap('timeLog', ([value = 'default', ...rest]) => {
     const label = String(value);
-    return label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : null;
+    return label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : warn(`Timer '${label}' does not exist`);
   });
   wrap('timeEnd', ([value = 'default']) => {
     const label = String(value);
-    if (!(label in timers)) return null;
+    if (!(label in timers)) return warn(`Timer '${label}' does not exist`);
     const args = [elapsed(label)];
     delete timers[label];
     return { type: 'timeEnd', args };
@@ -368,32 +421,62 @@ function hookModelContext(tools: Probe['tools']) {
   if (!proto || typeof registerTool !== 'function') return;
   Reflect.set(proto, 'registerTool', function (this: unknown, tool: unknown, ...rest: unknown[]) {
     const execute: unknown = tool && typeof tool === 'object' ? Reflect.get(tool, 'execute') : undefined;
+    let kept: { name: string; record: ToolRecord } | undefined;
     if (tool && typeof tool === 'object' && typeof execute === 'function') {
-      const record: ToolRecord = { stack: new Error().stack };
-      tools.set(String(Reflect.get(tool, 'name')), record);
+      const record: ToolRecord = { stack: new Error().stack, outcomes: [] };
+      kept = { name: String(Reflect.get(tool, 'name')), record };
+      const settle = (threw: boolean, value: unknown) => {
+        // Calls nobody takes the outcome of (another agent's) must not pile up.
+        if (record.outcomes.push({ threw, value }) > MAX_TOOL_OUTCOMES) record.outcomes.shift();
+      };
       const done = (value: unknown) => {
-        record.outcome = { threw: false, value };
+        settle(false, value);
         return value;
       };
       const fail = (value: unknown) => {
-        record.outcome = { threw: true, value };
+        settle(true, value);
         throw value;
       };
-      tool = {
-        ...tool,
-        execute(this: unknown, ...args: unknown[]) {
-          record.outcome = undefined;
-          try {
-            const result: unknown = Reflect.apply(execute, this, args);
-            return result instanceof Promise ? result.then(done, fail) : done(result);
-          } catch (error) {
-            return fail(error);
-          }
-        },
+      const wrapped = function (this: unknown, ...args: unknown[]) {
+        try {
+          const result: unknown = Reflect.apply(execute, this, args);
+          return result instanceof Promise ? result.then(done, fail) : done(result);
+        } catch (error) {
+          return fail(error);
+        }
       };
+      // Only `execute` is replaced: the other fields are read from the page's object as is,
+      // including getters and fields on its prototype (a class instance).
+      tool = new Proxy(tool, {
+        get: (target, key) => (key === 'execute' ? wrapped : Reflect.get(target, key)),
+      });
     }
-    return Reflect.apply(registerTool, this, [tool, ...rest]);
+    const registered: unknown = Reflect.apply(registerTool, this, [tool, ...rest]);
+    // Kept only once the browser accepted the tool, and only while it stays registered: the
+    // record holds the tool's last results, and a later tool of the same name needs its own.
+    if (kept) {
+      const { name, record } = kept;
+      tools.set(name, record);
+      const options = rest[0];
+      const signal: unknown = options && typeof options === 'object' ? Reflect.get(options, 'signal') : undefined;
+      if (signal instanceof AbortSignal) {
+        if (signal.aborted) forgetTool(tools, name, record);
+        else signal.addEventListener('abort', () => forgetTool(tools, name, record), { once: true });
+      }
+    }
+    return registered;
   });
+  const unregisterTool: unknown = Reflect.get(proto, 'unregisterTool');
+  if (typeof unregisterTool === 'function')
+    Reflect.set(proto, 'unregisterTool', function (this: unknown, name: unknown, ...rest: unknown[]) {
+      const result: unknown = Reflect.apply(unregisterTool, this, [name, ...rest]);
+      tools.delete(String(name));
+      return result;
+    });
+}
+
+function forgetTool(tools: Probe['tools'], name: string, record: ToolRecord) {
+  if (tools.get(name) === record) tools.delete(name);
 }
 
 // ---- event listeners ----
@@ -406,6 +489,8 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
   const proto = EventTarget.prototype;
   const add = proto.addEventListener;
   const remove = proto.removeEventListener;
+  // Undoes what was added alongside a record (see below), for when the page removes it first.
+  const cleanups = new WeakMap<ListenerRecord, () => void>();
   const captureOf = (options?: boolean | EventListenerOptions) =>
     typeof options === 'boolean' ? options : !!options?.capture;
 
@@ -430,8 +515,14 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
         if (i >= 0) list.splice(i, 1);
       },
     }.devtoolsAnywhereForget;
+    const signal = opts?.signal;
     if (record.once) add.call(target, type, forget, { capture, once: true });
-    if (opts?.signal) add.call(opts.signal, 'abort', forget, { once: true });
+    if (signal) add.call(signal, 'abort', forget, { once: true });
+    if (record.once || signal)
+      cleanups.set(record, () => {
+        if (record.once) remove.call(target, type, forget, { capture });
+        if (signal) remove.call(signal, 'abort', forget);
+      });
   };
 
   proto.removeEventListener = function (this: EventTarget, type, listener, options) {
@@ -439,11 +530,23 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
     const list = listeners.get(this ?? globalThis);
     const capture = captureOf(options);
     const i = list ? list.findIndex(r => r.type === type && r.listener === listener && r.capture === capture) : -1;
-    if (list && i >= 0) list.splice(i, 1);
+    if (!list || i < 0) return;
+    const [record] = list.splice(i, 1);
+    if (record) cleanups.get(record)?.();
   };
 }
 
 // ---- uncaught errors ----
+
+/** The stack of a thrown value, if it has a string one: page values may have anything there. */
+function stackOf(value: unknown): string | undefined {
+  try {
+    const stack: unknown = (value as { stack?: unknown } | null | undefined)?.stack;
+    return typeof stack === 'string' ? stack : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
   window.addEventListener('error', e => {
@@ -453,7 +556,7 @@ function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
       text: 'Uncaught',
       error: e.error !== undefined ? e.error : e.message,
       time: now(),
-      stack: e.error?.stack,
+      stack: stackOf(e.error),
       url: e.filename,
       line: e.lineno,
       column: e.colno,
@@ -465,7 +568,7 @@ function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
       text: 'Uncaught (in promise)',
       error: e.reason,
       time: now(),
-      stack: e.reason?.stack,
+      stack: stackOf(e.reason),
     });
   });
 }
@@ -494,18 +597,63 @@ function mimeTypeOf(contentType: string | null | undefined) {
 function hookFetch(track: Track, update: Update) {
   const origFetch = window.fetch;
   if (!origFetch) return;
+  const failed = (rec: RequestRecord, err: unknown) =>
+    update(rec, {
+      state: 'failed',
+      // Like Chrome, a request stopped through its AbortSignal is reported as canceled.
+      ...(err instanceof DOMException && err.name === 'AbortError'
+        ? { errorText: 'net::ERR_ABORTED', canceled: true }
+        : // The page only sees a TypeError; the net error behind it is not exposed.
+          { errorText: 'net::ERR_FAILED' }),
+      endTime: performance.now(),
+    });
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
     const req = input instanceof Request ? input : null;
     const headers = init?.headers || req?.headers;
+    let url: string;
+    let requestHeaders: Record<string, string>;
+    try {
+      url = new URL(req ? req.url : String(input), location.href).href;
+      requestHeaders = headers ? headersToObject(new Headers(headers)) : {};
+    } catch {
+      // An invalid URL or header: fetch itself rejects, without making a request.
+      return origFetch.call(this, input, init);
+    }
+    const postData = bodyToString(init?.body);
+    // Other bodies (in a Request, FormData, Blob, buffers) are read from a copy, afterwards.
+    let copy: Request | undefined;
+    if (postData === undefined) {
+      const body = init?.body;
+      try {
+        if (body instanceof Blob || body instanceof FormData || body instanceof ArrayBuffer || ArrayBuffer.isView(body))
+          copy = new Request(url, { method: 'POST', body });
+        else if (body == null && req?.body) copy = req.clone();
+      } catch {
+        // A body already used: fetch rejects it.
+      }
+    }
     const rec = track({
       type: 'Fetch',
       method: String(init?.method || req?.method || 'GET').toUpperCase(),
-      url: new URL(req ? req.url : String(input), location.href).href,
-      requestHeaders: headers ? headersToObject(new Headers(headers)) : {},
-      postData: bodyToString(init?.body),
+      url,
+      requestHeaders,
+      postData,
+      ...(copy ? { hasPostData: true } : {}),
       stack: new Error().stack,
     });
-    const promise = origFetch.call(this, input, init);
+    copy?.text().then(
+      text => {
+        if (text.length <= MAX_BODY_LENGTH) update(rec, { postData: text });
+      },
+      () => {}
+    );
+    let promise: Promise<Response>;
+    try {
+      promise = origFetch.call(this, input, init);
+    } catch (err) {
+      failed(rec, err);
+      return Promise.reject(err);
+    }
     promise.then(
       res => {
         const contentType = res.headers.get('content-type');
@@ -523,24 +671,47 @@ function hookFetch(track: Track, update: Update) {
           update(rec, { state: 'done', endTime: performance.now(), encodedDataLength: length || 0 });
           return;
         }
-        res
-          .clone()
-          .blob()
-          .then(
-            blob =>
-              update(rec, {
-                state: 'done',
-                body: blob.size > MAX_BODY_LENGTH ? undefined : blob,
-                encodedDataLength: length || blob.size,
-                endTime: performance.now(),
-              }),
-            err => update(rec, { state: 'failed', errorText: String(err?.message || err), endTime: performance.now() })
-          );
+        const copy = res.clone().body;
+        if (!copy) return;
+        readCapped(copy, contentType ?? '').then(
+          ({ blob, size }) =>
+            update(rec, {
+              state: 'done',
+              body: blob,
+              encodedDataLength: length || size,
+              endTime: performance.now(),
+            }),
+          err => failed(rec, err)
+        );
       },
-      err => update(rec, { state: 'failed', errorText: String(err?.message || err), endTime: performance.now() })
+      err => failed(rec, err)
     );
     return promise;
   };
+}
+
+/**
+ * Reads a copy of a response body chunk by chunk, up to MAX_BODY_LENGTH: past it the copy is
+ * cancelled, so a body without content-length that turns out large, or a stream that does not
+ * end, is never buffered whole (neither here nor in the tee feeding the page's copy).
+ */
+async function readCapped(
+  body: ReadableStream<Uint8Array<ArrayBuffer>>,
+  type: string
+): Promise<{ blob?: Blob; size: number }> {
+  const reader = body.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { blob: new Blob(chunks, { type }), size };
+    size += value.byteLength;
+    if (size > MAX_BODY_LENGTH) {
+      void reader.cancel().catch(() => {});
+      return { size };
+    }
+    chunks.push(value);
+  }
 }
 
 function parseRawHeaders(raw: string): Record<string, string> {
@@ -558,17 +729,26 @@ interface XhrInfo {
   headers: Record<string, string>;
 }
 
-function hookXhr(track: Track, update: Update) {
+function hookXhr(track: Track, update: Update, listen: EventTarget['addEventListener']) {
   const proto = XMLHttpRequest.prototype;
   const origOpen = proto.open;
   const origSend = proto.send;
   const origSetRequestHeader = proto.setRequestHeader;
   const infos = new WeakMap<XMLHttpRequest, XhrInfo>();
+  // The record of the request each XHR is making now: an XHR can be reused for another one.
+  const current = new WeakMap<XMLHttpRequest, RequestRecord>();
+  const watched = new WeakSet<XMLHttpRequest>();
 
   proto.open = function (
     this: XMLHttpRequest,
     ...args: [method: string, url: string | URL, async?: boolean, username?: string | null, password?: string | null]
   ) {
+    // open() stops the request in progress without any event.
+    const rec = current.get(this);
+    if (rec) {
+      current.delete(this);
+      update(rec, { state: 'failed', errorText: 'net::ERR_ABORTED', canceled: true, endTime: performance.now() });
+    }
     infos.set(this, {
       method: String(args[0]).toUpperCase(),
       url: new URL(String(args[1]), location.href).href,
@@ -586,6 +766,8 @@ function hookXhr(track: Track, update: Update) {
   proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = infos.get(this);
     if (info) {
+      const previous = current.get(this);
+      // Tracked before sending: a synchronous request completes within send().
       const rec = track({
         type: 'XHR',
         method: info.method,
@@ -594,14 +776,42 @@ function hookXhr(track: Track, update: Update) {
         postData: bodyToString(body),
         stack: new Error().stack,
       });
-      watchXhr(this, rec, update);
+      if (!watched.has(this)) {
+        watched.add(this);
+        watchXhr(this, current, update, listen);
+      }
+      current.set(this, rec);
+      try {
+        return origSend.call(this, body);
+      } catch (err) {
+        // Not sent (sent twice, …): the request in progress, if any, goes on.
+        if (previous) current.set(this, previous);
+        else if (current.get(this) === rec) current.delete(this);
+        update(rec, {
+          state: 'failed',
+          errorText: String((err instanceof Error && err.message) || err),
+          endTime: performance.now(),
+        });
+        throw err;
+      }
     }
     return origSend.call(this, body);
   };
 }
 
-/** Updates `rec` as the request progresses. */
-function watchXhr(xhr: XMLHttpRequest, rec: RequestRecord, update: Update) {
+/** Updates the record of the XHR's current request as it progresses. */
+function watchXhr(
+  xhr: XMLHttpRequest,
+  current: WeakMap<XMLHttpRequest, RequestRecord>,
+  update: Update,
+  listen: EventTarget['addEventListener']
+) {
+  const finish = (patch: Partial<RequestRecord>) => {
+    const rec = current.get(xhr);
+    if (!rec) return;
+    current.delete(xhr);
+    update(rec, { ...patch, endTime: performance.now() });
+  };
   const responseMeta = () => {
     const responseHeaders = parseRawHeaders(xhr.getAllResponseHeaders());
     return {
@@ -611,26 +821,38 @@ function watchXhr(xhr: XMLHttpRequest, rec: RequestRecord, update: Update) {
       mimeType: mimeTypeOf(responseHeaders['content-type']),
     };
   };
-  xhr.addEventListener('readystatechange', () => {
+  listen.call(xhr, 'readystatechange', () => {
+    const rec = current.get(xhr);
+    if (!rec) return;
     if (xhr.readyState === 2) {
       update(rec, { state: 'headers', responseTime: performance.now(), ...responseMeta() });
     } else if (xhr.readyState === 4) {
-      if (!xhr.status) {
-        update(rec, { state: 'failed', errorText: 'net::ERR_FAILED', endTime: performance.now() });
-        return;
-      }
+      // Failures are told apart by the event that follows: abort, timeout or error.
+      if (!xhr.status) return;
       const type = xhr.responseType;
       let body: string | Blob | undefined;
       if (type === '' || type === 'text') body = xhr.responseText;
       else if (type === 'json') body = JSON.stringify(xhr.response);
-      else if (type === 'blob' || type === 'arraybuffer') body = new Blob([xhr.response]);
-      update(rec, {
+      else if (type === 'blob' && xhr.response instanceof Blob) body = xhr.response;
+      // Bytes on the wire, as fetch() reports them: the header, else the body's UTF-8 size.
+      const length = Number(xhr.getResponseHeader('content-length'));
+      let size = typeof body === 'string' ? new Blob([body]).size : body?.size || 0;
+      if (type === 'arraybuffer' && xhr.response instanceof ArrayBuffer) {
+        // Copied only when kept: the page may still change its buffer.
+        size = xhr.response.byteLength;
+        if (size <= MAX_BODY_LENGTH) body = new Blob([xhr.response]);
+      }
+      // Like fetch(), bodies too large to keep are left out; only their length is reported.
+      finish({
         state: 'done',
         ...responseMeta(),
-        body,
-        encodedDataLength: typeof body === 'string' ? body.length : body?.size || 0,
-        endTime: performance.now(),
+        body: size > MAX_BODY_LENGTH ? undefined : body,
+        encodedDataLength: length || size,
       });
     }
   });
+  listen.call(xhr, 'abort', () => finish({ state: 'failed', errorText: 'net::ERR_ABORTED', canceled: true }));
+  // Chrome reports a timed-out XHR as aborted too.
+  listen.call(xhr, 'timeout', () => finish({ state: 'failed', errorText: 'net::ERR_ABORTED', canceled: true }));
+  listen.call(xhr, 'error', () => finish({ state: 'failed', errorText: 'net::ERR_FAILED' }));
 }

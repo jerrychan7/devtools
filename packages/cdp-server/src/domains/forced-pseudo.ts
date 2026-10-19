@@ -1,6 +1,8 @@
 import { FORCE_ATTRIBUTE, OWN_ATTRIBUTE } from '../core/nodes';
 
-const FORCEABLE = /:(hover|focus-within|focus-visible|focus|active|visited|target)(?![\w-])/g;
+/** Pseudo-classes CSS.forcePseudoState can force (longer names first, for the alternation). */
+const FORCEABLE_CLASSES = ['hover', 'focus-within', 'focus-visible', 'focus', 'active', 'visited', 'target'];
+const FORCEABLE = new RegExp(`:(${FORCEABLE_CLASSES.join('|')})(?![\\w-])`, 'g');
 
 /**
  * Emulates CSS.forcePseudoState. Page scripts cannot put an element into :hover (or
@@ -28,17 +30,23 @@ export class ForcedPseudoClasses {
     return all;
   }
 
-  /** `selector` with forced pseudo-classes replaced by the marker attribute. */
+  /**
+   * `selector` with forced pseudo-classes extended by the marker attribute: `:hover` becomes
+   * `:is(:hover, [marker~="hover"])`, which matches elements really hovered or forced, so
+   * negations like `:not(:hover)` stop matching forced elements, as in Chrome. The rewritten
+   * selector alone decides whether a rule matches; the page's own copy of a negated rule
+   * still applies, as its style sheets are not modified.
+   */
   rewrite(selector: string): string {
     const active = this.active();
     if (!active.size) return selector;
     return selector.replace(FORCEABLE, (match, name: string) =>
-      active.has(name) ? `[${FORCE_ATTRIBUTE}~="${name}"]` : match
+      active.has(name) ? `:is(${match}, [${FORCE_ATTRIBUTE}~="${name}"])` : match
     );
   }
 
   set(el: Element, classes: string[]) {
-    const known = classes.filter(c => /^(hover|focus-within|focus-visible|focus|active|visited|target)$/.test(c));
+    const known = classes.filter(c => FORCEABLE_CLASSES.includes(c));
     if (known.length) {
       this.forced.set(el, new Set(known));
       el.setAttribute(FORCE_ATTRIBUTE, known.join(' '));
@@ -56,13 +64,43 @@ export class ForcedPseudoClasses {
   }
 
   get isActive() {
+    if (this.prune() && !this.forced.size) this.rebuild();
     return this.forced.size > 0;
+  }
+
+  /**
+   * Forgets elements removed from the document, as Chrome does when a node is removed: they
+   * are no longer held, and are not forced if they come back. Returns whether any was removed.
+   */
+  private prune(): boolean {
+    let pruned = false;
+    for (const el of this.forced.keys()) {
+      if (el.isConnected) continue;
+      this.forced.delete(el);
+      el.removeAttribute(FORCE_ATTRIBUTE);
+      pruned = true;
+    }
+    return pruned;
+  }
+
+  /** After `removed` left the tree: un-forces the elements among them, like Chrome. */
+  removed(removed: Node[]) {
+    if (!this.forced.size || !removed.length) return;
+    let changed = false;
+    for (const el of this.forced.keys()) {
+      if (!removed.some(node => node.contains(el))) continue;
+      this.forced.delete(el);
+      el.removeAttribute(FORCE_ATTRIBUTE);
+      changed = true;
+    }
+    if (changed) this.rebuild();
   }
 
   /** Recreates the companion sheets, e.g. after the page's style sheets changed. */
   rebuild() {
     this.companions.forEach(style => style.remove());
     this.companions = [];
+    this.prune();
     if (!this.forced.size) return;
     for (const sheet of this.sheets()) {
       const owner = sheet.ownerNode;

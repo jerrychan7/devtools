@@ -7,6 +7,22 @@ type EventListener = Protocol.DOMDebugger.EventListener;
 export function registerDomDebugger(ctx: Context) {
   const { server, objects, nodes, probe } = ctx;
 
+  /** The on* handler property names of each prototype, enumerated once rather than per node. */
+  const handlerKeys = new WeakMap<object, string[]>();
+  function handlerKeysOf(target: EventTarget): string[] {
+    const proto: object | null = Object.getPrototypeOf(target);
+    if (!proto) return [];
+    let keys = handlerKeys.get(proto);
+    if (!keys) {
+      keys = [];
+      for (const key in proto) if (key.startsWith('on')) keys.push(key);
+      handlerKeys.set(proto, keys);
+    }
+    // Window is a [Global] interface: its on* handlers are own properties of the instance.
+    const own = Object.keys(target).filter(key => key.startsWith('on') && !keys.includes(key));
+    return own.length ? keys.concat(own) : keys;
+  }
+
   /** Listeners of one target: addEventListener ones (recorded by the probe) and on* handlers. */
   function listenersOf(target: EventTarget, group: string | undefined): EventListener[] {
     const base = (type: string, handler: unknown) => {
@@ -36,8 +52,7 @@ export function registerDomDebugger(ctx: Context) {
       passive: r.passive,
       once: r.once,
     }));
-    for (const key in target) {
-      if (!key.startsWith('on')) continue;
+    for (const key of handlerKeysOf(target)) {
       let handler: unknown;
       try {
         handler = Reflect.get(target, key);
@@ -59,10 +74,25 @@ export function registerDomDebugger(ctx: Context) {
       const group = objects.groupOf(params.objectId);
       const listeners = listenersOf(target, group);
       // With a depth, descendants' listeners are included too (tagged with their node).
+      // Like Chrome, pierce also descends into shadow roots and frame documents.
+      const childrenOf = (node: Node): Node[] => {
+        const children: Node[] = Array.from(node.childNodes);
+        if (!params.pierce || !(node instanceof Element)) return children;
+        const shadowRoot = nodes.shadowRootOf(node);
+        if (shadowRoot) children.unshift(shadowRoot);
+        if (node instanceof HTMLIFrameElement || node instanceof HTMLFrameElement) {
+          let doc: Document | null = null;
+          try {
+            doc = node.contentDocument;
+          } catch {}
+          if (doc) children.unshift(doc);
+        }
+        return children;
+      };
       if (target instanceof Node && depth !== 1 && depth !== 0) {
         const visit = (node: Node, level: number) => {
-          if (depth !== -1 && level > depth) return;
-          for (const child of Array.from(node.childNodes)) {
+          if (depth !== -1 && level >= depth) return;
+          for (const child of childrenOf(node)) {
             listeners.push(...listenersOf(child, group));
             visit(child, level + 1);
           }

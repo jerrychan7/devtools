@@ -27,6 +27,7 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
+import * as Workspace from '../../models/workspace/workspace.js';
 import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Main from '../main/main.js';
@@ -106,9 +107,10 @@ Common.Settings.registerSettingExtension({
 // The embedder is the parent window: CDP messages travel as strings through postMessage,
 // in place of Chrome's native DevToolsHost bindings. Every other host method keeps the
 // hosted-mode stub implementation (preferences in localStorage, no file system, …).
-// The embedder passes its origin as `#?embedded=<origin>`; messages go only there.
+// The embedder passes its origin as `#?embedded=<origin>`; messages go only there. Without it,
+// only an embedder of the frontend's own origin is trusted, never any page that frames it.
 const params = new URLSearchParams(location.hash.replace(/^#\??/, ''));
-const embedder = params.get('embedded') ?? '*';
+const embedder = params.get('embedded') ?? location.origin;
 const host = Host.InspectorFrontendHost.InspectorFrontendHostInstance;
 host.isHostedMode = () => false;
 host.sendMessageToBackend = (message: string) => window.parent.postMessage(message, embedder);
@@ -116,9 +118,11 @@ host.sendMessageToBackend = (message: string) => window.parent.postMessage(messa
 // Docking: the main menu's "Dock side" moves the panel in the embedding page, which owns the
 // side (`#?dock=`, the side it shows the panel on now). Requests to the embedder are objects,
 // so they never mix with CDP messages, which are strings.
-const notifyEmbedder = (request: {type: 'dock', side: string}|{type: 'close'}|{type: 'keep-open', keep: boolean}|
-                        {type: 'theme', toolbar: string, divider: string, icon: string}) =>
-    window.parent.postMessage({devtoolsAnywhere: request}, embedder);
+// The embedder (packages/devtools-anywhere/src/element.ts) checks each field of these: the two
+// sides are built separately, so keep them in step by hand.
+type EmbedderRequest = {type: 'dock', side: UI.DockController.DockState}|{type: 'close'}|
+    {type: 'keep-open', keep: boolean}|{type: 'theme', toolbar: string, divider: string, icon: string};
+const notifyEmbedder = (request: EmbedderRequest) => window.parent.postMessage({devtoolsAnywhere: request}, embedder);
 Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
 const dock = params.get('dock');
 
@@ -137,8 +141,8 @@ function withOwnScriptsIgnored(prefs: Record<string, string>): Record<string, st
   try {
     rules = JSON.parse(prefs[IGNORE_LIST] ?? '');
   } catch {
-    // Never set: the setting's default.
-    rules = [{pattern: '/node_modules/|^node:'}];
+    // Never set: the setting's default, as RegExpSetting stores it.
+    rules = [{pattern: Workspace.IgnoreListManager.skipStackFramesPatternSettingDescriptor.defaultValue}];
   }
   const value = JSON.stringify([...(Array.isArray(rules) ? rules : []), {pattern: OWN_SCRIPTS, disabled: false}]);
   host.setPreference(IGNORE_LIST, value);
@@ -194,6 +198,8 @@ async function confirmKeepOpen(): Promise<boolean> {
       event.consume();
       resolve(false);
     });
+    // Escape closes the dialog without any of the callbacks above.
+    dialog.setOnHideCallback(() => resolve(false));
     dialog.show();
     ok.focus();
   });
@@ -270,15 +276,18 @@ window.addEventListener('message', event => {
 const defaultTheme = document.createElement('style');
 defaultTheme.textContent = ':root { --user-color-source: baseline-default; }';
 document.head.append(defaultTheme);
-new MutationObserver(records => {
+// The link is added once, at startup: watching stops then, not to run on every node DevTools adds.
+const themeColorsObserver = new MutationObserver(records => {
   for (const record of records) {
     for (const node of record.addedNodes) {
       if (node instanceof HTMLLinkElement && node.href.startsWith('devtools://theme/colors.css')) {
         node.dispatchEvent(new Event('load'));
+        themeColorsObserver.disconnect();
       }
     }
   }
-}).observe(document, {childList: true, subtree: true});
+});
+themeColorsObserver.observe(document, {childList: true, subtree: true});
 
 // The embedder's bar sits on top of the toolbar: it takes the toolbar's colors, sent whenever
 // the theme is applied (which sets classes on the root element).

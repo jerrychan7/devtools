@@ -54,7 +54,14 @@ export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoad
   let snapdom: Promise<Snapdom> | null = null;
 
   async function frame(current: number) {
-    const capture = await (snapdom ??= load().then(m => m.snapdom));
+    // A failed load is not kept, so that the retry loads snapDOM again.
+    const capture = await (snapdom ??= load().then(
+      m => m.snapdom,
+      (e: unknown) => {
+        snapdom = null;
+        throw e;
+      }
+    ));
     const start = performance.now();
     const width = innerWidth;
     const height = innerHeight;
