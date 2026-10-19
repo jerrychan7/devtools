@@ -1,0 +1,171 @@
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { launch, openPage } from './harness.ts';
+import type { Env, Side, TestPage } from './harness.ts';
+
+let env: Env | undefined;
+let t: TestPage;
+
+/** Events the page sees, as `type:targetId`. */
+const RECORDED = [
+  'pointerover',
+  'pointerdown',
+  'pointerup',
+  'mouseover',
+  'mousedown',
+  'mouseup',
+  'click',
+  'dblclick',
+  'contextmenu',
+  'wheel',
+  'keydown',
+  'keypress',
+  'keyup',
+  'input',
+  'touchstart',
+  'touchmove',
+  'touchend',
+  'submit',
+];
+
+before(async () => {
+  env = await launch();
+  t = await openPage(env, []);
+  await t.page.setViewport({ width: 800, height: 600 });
+  await t.page.evaluate(RECORDED => {
+    document.body.insertAdjacentHTML(
+      'afterbegin',
+      `<div id="input-test" style="position: fixed; inset: 0; background: #fff; z-index: 1">
+        <button id="btn" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 40px">button</button>
+        <form id="form" onsubmit="event.preventDefault()">
+          <input id="field" style="position: absolute; left: 10px; top: 70px; width: 200px; height: 30px" />
+        </form>
+        <div id="scroller" style="position: absolute; left: 10px; top: 120px; width: 200px; height: 100px; overflow: auto">
+          <div style="height: 1000px">tall</div>
+        </div>
+      </div>`
+    );
+    const events: string[] = [];
+    for (const type of RECORDED)
+      addEventListener(type, e => events.push(`${type}:${e.target instanceof Element ? e.target.id : ''}`), true);
+    Object.assign(window, { __inputEvents: events });
+  }, RECORDED);
+});
+after(() => env?.close());
+
+/** Resets the page, runs the steps through one side and returns what the page saw. */
+async function run(side: Side, steps: (side: Side) => Promise<unknown>) {
+  await t.page.evaluate(() => {
+    const field = document.getElementById('field');
+    if (field instanceof HTMLInputElement) field.value = '';
+    document.getElementById('scroller')?.scrollTo(0, 0);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    (window as unknown as { __inputEvents: string[] }).__inputEvents.length = 0;
+  });
+  await steps(side);
+  // Chrome dispatches some input asynchronously (wheel scrolling).
+  await new Promise(r => setTimeout(r, 300));
+  return t.page.evaluate(() => ({
+    events: (window as unknown as { __inputEvents: string[] }).__inputEvents.slice(),
+    value: (document.getElementById('field') as HTMLInputElement).value,
+    scrollTop: Math.round(document.getElementById('scroller')?.scrollTop ?? 0),
+    focused: document.activeElement?.id ?? '',
+  }));
+}
+
+async function same(steps: (side: Side) => Promise<unknown>, oursSteps = steps) {
+  const chrome = await run(t.chrome, steps);
+  const ours = await run(t.ours, oursSteps);
+  assert.deepEqual(ours, chrome);
+  return ours;
+}
+
+const click = async (side: Side, x: number, y: number, clickCount = 1) => {
+  await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await side.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount });
+  await side.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount });
+};
+
+const KEY_CODES: Record<string, number> = { Backspace: 8, Enter: 13 };
+
+/** A key press as the screencast view sends it: keyDown, then char with the text, then keyUp. */
+const press = async (side: Side, key: string, code: string, text?: string) => {
+  await side.send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key,
+    code,
+    windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
+  });
+  if (text) await side.send('Input.dispatchKeyEvent', { type: 'char', key, code, text });
+  await side.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code });
+};
+
+test('a click', async () => {
+  const result = await same(side => click(side, 50, 30));
+  assert.ok(result.events.includes('click:btn'));
+});
+
+test('a double click', async () => {
+  await same(async side => {
+    await click(side, 50, 30, 1);
+    await click(side, 50, 30, 2);
+  });
+});
+
+test('a right click opens the context menu event', async () => {
+  await same(async side => {
+    await side.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 50, y: 30, button: 'right', clickCount: 1 });
+    await side.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: 50,
+      y: 30,
+      button: 'right',
+      clickCount: 1,
+    });
+  });
+});
+
+test('typing into a field', async () => {
+  const result = await same(async side => {
+    await click(side, 100, 85);
+    await press(side, 'h', 'KeyH', 'h');
+    await press(side, 'i', 'KeyI', 'i');
+    await press(side, 'Backspace', 'Backspace');
+  });
+  assert.equal(result.value, 'h');
+  assert.equal(result.focused, 'field');
+});
+
+test('Enter submits the form', async () => {
+  const result = await same(async side => {
+    await click(side, 100, 85);
+    await press(side, 'Enter', 'Enter', '\r');
+  });
+  assert.ok(result.events.includes('submit:form'));
+});
+
+test('the wheel scrolls', async () => {
+  const result = await same(side =>
+    side.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 100, y: 170, deltaX: 0, deltaY: 120 })
+  );
+  assert.equal(result.scrollTop, 120);
+});
+
+// With touch emulation on, Chrome's Input.dispatchMouseEvent waits for a gesture that never
+// completes in headless mode; a real tap (Input.dispatchTouchEvent) is the reference.
+test('a tap while touch is emulated (the screencast\'s "Use touch")', async () => {
+  const result = await same(
+    async chrome => {
+      await chrome.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 50, y: 30 }] });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await chrome.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    },
+    async ours => {
+      await ours.send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+      await click(ours, 50, 30);
+      await ours.send('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+    }
+  );
+  assert.ok(result.events.includes('touchstart:btn'));
+});
