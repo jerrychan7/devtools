@@ -131,7 +131,7 @@ pnpm typecheck                                # builds, then checks packages, bu
 
 - `REVISION`: the pinned upstream commit.
 - `src/anywhere_app/`: our entrypoint, copied into `front_end/entrypoints/` before each build.
-- `patches/*.patch`: changes to upstream files, applied in order. Keep them as few and as small as possible.
+- `patches/*.patch`: changes to upstream files, one patch per change. Each touches its own files, so the order they are applied in does not matter. Keep them as few and as small as possible.
 - `locales/<locale>.json`: translations of anywhere_app's own UI strings (keys of its `UIStrings`), which upstream's translations do not have; merged into that locale's file by the build. Other locales show them in English.
 - `scripts/build.ts`: the build.
 
@@ -141,11 +141,11 @@ node scripts/build.ts --no-sync     # rebuild after changing src/ (incremental, 
 node scripts/build.ts --no-sync --copy-only   # only redo the copy to dist/ (after changing the copy logic)
 ```
 
-To change a patch, edit the upstream file in the checkout, then regenerate the patch from the checkout's diff:
+To change a patch, edit the upstream files in the checkout, then regenerate the patch from the diff of the files it touches:
 
 ```bash
 cd devtools-frontend.ignore/devtools-frontend
-git diff > ../../packages/devtools-frontend/patches/0001-register-anywhere_app-entrypoint.patch
+git diff -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
 To move to the latest upstream:

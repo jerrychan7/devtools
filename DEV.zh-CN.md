@@ -131,7 +131,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 
 - `REVISION`：钉住的上游提交。
 - `src/anywhere_app/`：我们自己的入口，每次构建前复制到 `front_end/entrypoints/`。
-- `patches/*.patch`：对上游文件的修改，按顺序打上。数量和改动都尽量少。
+- `patches/*.patch`：对上游文件的修改，一个补丁对应一处改动。各补丁改的是不同的文件，打的先后顺序无关紧要。数量和改动都尽量少。
 - `locales/<语言>.json`：`anywhere_app` 自己的界面文字（其 `UIStrings` 的键）的翻译。上游的翻译里没有这些文字，构建时合并进对应语言的文件；其他语言显示英文。
 - `scripts/build.ts`：构建脚本。
 
@@ -141,11 +141,11 @@ node scripts/build.ts --no-sync     # 修改 src/ 后重新构建（增量，不
 node scripts/build.ts --no-sync --copy-only   # 只重新复制到 dist/（修改了复制逻辑时）
 ```
 
-要修改补丁，先在检出目录里改上游文件，再用检出目录的 diff 重新生成补丁：
+要修改补丁，先在检出目录里改上游文件，再用该补丁所涉及文件的 diff 重新生成补丁：
 
 ```bash
 cd devtools-frontend.ignore/devtools-frontend
-git diff > ../../packages/devtools-frontend/patches/0001-register-anywhere_app-entrypoint.patch
+git diff -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
 升级到上游最新版：
