@@ -1,0 +1,10 @@
+
+# 忽略根目录下所有.开头的目录
+/.*/
+
+# System Files
+.DS_Store
+Thumbs.db
+
+*.ignore.*
+*.ignore
