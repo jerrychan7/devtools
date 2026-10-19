@@ -31,7 +31,7 @@ Goals:
 | Frontend | Prototype: Chii's prebuilt `front_end`. Production: official devtools-frontend plus this project's patch set | Chii's build is ready to use and ideal for quick validation. The production build pins an official version and keeps patches as `.patch` files that are replayed on upgrade, instead of maintaining a long-lived fork branch |
 | Isolation | iframe | Keeps DevTools' own DOM, logs and requests out of the inspected page, and prevents the two global environments from interfering with each other |
 
-This project depends on neither Chii nor chobitsu; it uses them only as references.
+This project depends on neither Chii nor chobitsu. Their source is read as a reference for edge cases, but no code is copied; real Chrome's CDP output and the protocol definition are the source of truth.
 
 ### Limitations
 
@@ -136,12 +136,24 @@ experiments/      validation records
 ## Roadmap
 
 1. ✅ **Validate early capture**: probe, buffering and replay ([results](experiments/early-capture/RESULTS.md)).
-2. **Project skeleton and CDP core**: workspace, TypeScript, latest `devtools-protocol`; shared core state; Runtime and Network domains backed by the probe; conformance tests against real Chrome.
+2. ✅ **Project skeleton and CDP core**: workspace, TypeScript, latest `devtools-protocol`; shared core state; Runtime, Network and Page domains backed by the probe; conformance tests against real Chrome.
 3. **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
 4. **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
 5. **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
 6. **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
 7. **Frontend customization**: patch set on top of the official devtools-frontend with regular upgrades; hide unsupported panels and adapt to small screens.
+
+## Development
+
+Requires Node.js, pnpm and a local Google Chrome (set `CHROME_PATH` if it is not in the default macOS location).
+
+```bash
+pnpm install
+pnpm test          # build, then run the conformance tests against real Chrome
+pnpm playground    # http://localhost:8788/playground/
+```
+
+The playground loads the frontend from a local Chii build in `chii.ignore/public/front_end` until this project builds its own.
 
 ## References
 

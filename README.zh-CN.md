@@ -31,7 +31,7 @@
 | 前端 | 原型阶段：Chii 已构建好的 `front_end`；正式阶段：官方 devtools-frontend 加本项目的补丁集 | Chii 的版本可以直接使用，适合快速验证。正式版本钉住官方的某个版本，补丁以 `.patch` 文件维护，升级时逐个重放，不维护长期 fork 分支 |
 | 隔离 | iframe | 隔离 devtools 自身的 DOM、日志和请求，避免它们出现在被调试页面中，也避免与页面的全局环境互相干扰 |
 
-本项目不依赖 Chii 和 chobitsu，只把它们作为参考。
+本项目不依赖 Chii 和 chobitsu。遇到边界情况时会阅读它们的源码作为参考，但不复制代码；以真实 Chrome 的 CDP 输出和协议定义为准。
 
 ### 能力边界
 
@@ -136,12 +136,24 @@ experiments/      验证记录
 ## 路线图
 
 1. ✅ **验证早期捕获**：探针、缓冲和回放（[结果](experiments/early-capture/RESULTS.md)）。
-2. **项目骨架和 CDP 核心**：workspace、TypeScript、最新的 `devtools-protocol`；跨域共享的核心状态；基于探针的 Runtime 和 Network 域；对比真实 Chrome 的一致性测试。
+2. ✅ **项目骨架和 CDP 核心**：workspace、TypeScript、最新的 `devtools-protocol`；跨域共享的核心状态；基于探针的 Runtime、Network 和 Page 域；对比真实 Chrome 的一致性测试。
 3. **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
 4. **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
 5. **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
 6. **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
 7. **前端定制**：基于官方 devtools-frontend 维护补丁集并定期升级；隐藏用不了的面板，适配小屏。
+
+## 开发
+
+需要 Node.js、pnpm 和本机安装的 Google Chrome（如果不在 macOS 的默认位置，请设置 `CHROME_PATH`）。
+
+```bash
+pnpm install
+pnpm test          # 构建后运行对比真实 Chrome 的一致性测试
+pnpm playground    # http://localhost:8788/playground/
+```
+
+在本项目自己构建前端之前，playground 从本地 Chii 构建产物 `chii.ignore/public/front_end` 加载前端。
 
 ## 参考
 
