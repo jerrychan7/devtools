@@ -8,20 +8,23 @@
   <script src="/packages/cdp-server/dist/probe.iife.js"></script>
   <script src="/experiments/early-capture/scenario-early.js"></script>
   <script src="/experiments/early-capture/scenario-throw.js"></script>
-  <script src="./bridge.js"></script>
 </head>
 <body>
   <h1>devtools-anywhere playground</h1>
-  <p>Early output is captured by the probe; the CDP server and DevTools load 1s after <code>load</code>.</p>
+  <p>Early output is captured by the probe; <code>&lt;devtools-anywhere&gt;</code> loads 1s after <code>load</code>.
+    Tap the F12 button to open DevTools.</p>
   <script>
     console.log('[body] end of body')
     window.addEventListener('load', function () {
       console.log('[body] load')
       setTimeout(function () {
         var s = document.createElement('script')
-        s.src = '/packages/cdp-server/dist/cdp-server.iife.js'
+        s.src = '/packages/devtools-anywhere/dist/devtools-anywhere.iife.js'
         s.onload = function () {
-          window.attachDevtools()
+          var devtools = document.createElement('devtools-anywhere')
+          devtools.setAttribute('frontend', '/chii.ignore/public/front_end/chii_app.html')
+          if (location.hash === '#open') devtools.setAttribute('open', '')
+          document.body.appendChild(devtools)
           setTimeout(function () {
             console.log('[late] after attach', { late: true })
             fetch('/api/echo?n=fetch-late')

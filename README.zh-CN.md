@@ -137,11 +137,31 @@ experiments/      验证记录
 
 1. ✅ **验证早期捕获**：探针、缓冲和回放（[结果](experiments/early-capture/RESULTS.md)）。
 2. ✅ **项目骨架和 CDP 核心**：workspace、TypeScript、最新的 `devtools-protocol`；跨域共享的核心状态；基于探针的 Runtime、Network 和 Page 域；对比真实 Chrome 的一致性测试。
-3. **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
+3. ✅ **连接层和默认模式**：完成握手时序、两端缓冲和 origin 校验；`<devtools-anywhere>` 直接嵌在页面中。
 4. **外壳模式**：用原地改写实现，验证刷新、跳转后 devtools 仍然保留。
 5. **零配置接入**：Vite 插件、单行 `<script>`，最后是可选的 Service Worker 注入。
 6. **其余的域**：先做 DOM 和 Overlay，然后是 CSS，最后是各种存储相关的域（DOMStorage、Storage、IndexedDB、CacheStorage）。
 7. **前端定制**：基于官方 devtools-frontend 维护补丁集并定期升级；隐藏用不了的面板，适配小屏。
+
+## 用法（预览）
+
+各个包尚未发布。使用本仓库构建出的文件：
+
+```html
+<head>
+  <!-- 第一个同步脚本：从最开始捕获输出。 -->
+  <script src="/path/to/probe.iife.js"></script>
+  ...
+</head>
+<body>
+  ...
+  <!-- 可以晚加载，探针捕获的内容都会补上。 -->
+  <script src="/path/to/devtools-anywhere.iife.js"></script>
+  <devtools-anywhere frontend="/path/to/front_end/chii_app.html"></devtools-anywhere>
+</body>
+```
+
+点击右下角的 F12 悬浮按钮打开面板，拖动面板顶部的横条调整高度。属性：`frontend`、`open`、`height`、`no-launcher`；方法：`show()`、`hide()`、`toggle()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 ## 开发
 

@@ -137,11 +137,31 @@ experiments/      validation records
 
 1. ✅ **Validate early capture**: probe, buffering and replay ([results](experiments/early-capture/RESULTS.md)).
 2. ✅ **Project skeleton and CDP core**: workspace, TypeScript, latest `devtools-protocol`; shared core state; Runtime, Network and Page domains backed by the probe; conformance tests against real Chrome.
-3. **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
+3. ✅ **Connection layer and default mode**: handshake timing, buffering on both ends and origin checks; `<devtools-anywhere>` embedded in the page.
 4. **Shell mode**: implement the in-place rewrite and verify that DevTools survive reloads and navigations.
 5. **Zero-config setup**: Vite plugin and single `<script>` setup, then the optional Service Worker injection.
 6. **Remaining domains**: DOM and Overlay, then CSS, then storage domains (DOMStorage, Storage, IndexedDB, CacheStorage).
 7. **Frontend customization**: patch set on top of the official devtools-frontend with regular upgrades; hide unsupported panels and adapt to small screens.
+
+## Usage (preview)
+
+The packages are not published yet. With the builds from this repository:
+
+```html
+<head>
+  <!-- First synchronous script: captures output from the very start. -->
+  <script src="/path/to/probe.iife.js"></script>
+  ...
+</head>
+<body>
+  ...
+  <!-- Can load late; it picks up everything the probe captured. -->
+  <script src="/path/to/devtools-anywhere.iife.js"></script>
+  <devtools-anywhere frontend="/path/to/front_end/chii_app.html"></devtools-anywhere>
+</body>
+```
+
+A floating F12 button opens the panel; drag its top bar to resize. Attributes: `frontend`, `open`, `height`, `no-launcher`; methods: `show()`, `hide()`, `toggle()`. Keep the element in one place, since moving it reloads the iframe.
 
 ## Development
 
