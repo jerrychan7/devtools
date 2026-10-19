@@ -5,11 +5,11 @@ import type { Plugin } from 'vite'
 
 export interface DevtoolsAnywhereOptions {
   /**
-   * Directory of a built DevTools frontend to serve (e.g. a Chii build's `public/front_end`).
-   * It is served under `/@devtools-anywhere/front_end/`.
+   * Directory of a built DevTools frontend to serve, under `/@devtools-anywhere/front_end/`.
+   * Default: the build of `@devtools-anywhere/devtools-frontend`.
    */
   frontendDir?: string
-  /** Entry page inside `frontendDir`. Default: `chii_app.html`. */
+  /** Entry page inside `frontendDir`. Default: `anywhere_app.html`. */
   frontendEntry?: string
   /** URL of a frontend hosted elsewhere; used instead of `frontendDir`. */
   frontendUrl?: string
@@ -33,6 +33,14 @@ const TYPES: Record<string, string> = {
   '.wasm': 'application/wasm',
 }
 
+function defaultFrontendDir(require: NodeJS.Require): string | undefined {
+  try {
+    return path.dirname(require.resolve('@devtools-anywhere/devtools-frontend/anywhere_app.html'))
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Injects devtools-anywhere into every page during development (`vite serve` only):
  * the probe becomes the first script in <head>, and DevTools mounts after the page loads.
@@ -41,8 +49,9 @@ const TYPES: Record<string, string> = {
 export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}): Plugin {
   const require = createRequire(import.meta.url)
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'))
-  const frontendDir = options.frontendDir && path.resolve(options.frontendDir)
-  const frontend = options.frontendUrl ?? (frontendDir ? `${BASE}front_end/${options.frontendEntry ?? 'chii_app.html'}` : undefined)
+  const dir = options.frontendUrl ? undefined : (options.frontendDir ?? defaultFrontendDir(require))
+  const frontendDir = dir && path.resolve(dir)
+  const frontend = options.frontendUrl ?? (frontendDir ? `${BASE}front_end/${options.frontendEntry ?? 'anywhere_app.html'}` : undefined)
 
   /** Maps a request path under BASE to a file on disk, or null. */
   function resolveFile(urlPath: string): string | null {
@@ -58,7 +67,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
     apply: 'serve',
 
     configResolved(config) {
-      if (!frontend) config.logger.warn('[devtools-anywhere] Set `frontendDir` or `frontendUrl`; DevTools will not mount.')
+      if (!frontend) config.logger.warn('[devtools-anywhere] No DevTools frontend found: install @devtools-anywhere/devtools-frontend, or set `frontendDir` or `frontendUrl`.')
     },
 
     configureServer(server) {

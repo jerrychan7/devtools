@@ -12,13 +12,16 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "devtools-anywhere": "workspace:*"
+    "devtools-anywhere": "workspace:*",
+    "@devtools-anywhere/devtools-frontend": "workspace:*"
   },
   "peerDependencies": {
     "vite": ">=5"

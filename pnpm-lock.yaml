@@ -177,7 +177,7 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^7.3.7
-        version: 7.3.7(@types/node@26.6.5)
+        version: 7.3.7(@types/node@22.20.5)
 
   packages/cdp-server:
     devDependencies:
@@ -204,8 +204,17 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/devtools-frontend:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.5
+
   packages/vite-plugin:
     dependencies:
+      '@devtools-anywhere/devtools-frontend':
+        specifier: workspace:*
+        version: link:../devtools-frontend
       devtools-anywhere:
         specifier: workspace:*
         version: link:../devtools-anywhere
@@ -1834,18 +1843,6 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 22.20.5
-      fsevents: 2.3.3
-
-  vite@7.3.7(@types/node@26.6.5):
-    dependencies:
-      esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
-      postcss: 8.5.30
-      rollup: 4.64.9
-      tinyglobby: 0.2.17
-    optionalDependencies:
-      '@types/node': 26.6.5
       fsevents: 2.3.3
 
   webdriver-bidi-protocol@0.4.1: {}
