@@ -47,6 +47,21 @@ export function registerPage({ server, probe }: Context) {
       return { content: body, base64Encoded };
     },
 
+    /**
+     * The manifest the page links to, as text; the frontend parses it. `manifest` holds only
+     * what page scripts can tell without Chrome's parser: nothing.
+     */
+    async getAppManifest(): Promise<Protocol.Page.GetAppManifestResponse> {
+      const link = document.querySelector<HTMLLinkElement>('link[rel~="manifest"][href]');
+      if (!link) return { url: '', errors: [], data: '', manifest: {} };
+      const res = await probe.fetch(link.href, {
+        cache: 'force-cache',
+        credentials: link.crossOrigin === 'use-credentials' ? 'include' : 'omit',
+      });
+      if (!res.ok) throw new Error(`Failed to load ${link.href}: ${res.status}`);
+      return { url: link.href, errors: [], data: await res.text(), manifest: {} };
+    },
+
     getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({
       currentIndex: 0,
       entries: [
@@ -64,7 +79,6 @@ export function registerPage({ server, probe }: Context) {
     addScriptToEvaluateOnNewDocument: (): Protocol.Page.AddScriptToEvaluateOnNewDocumentResponse => ({
       identifier: '0',
     }),
-    getAppManifest: () => ({ url: '', errors: [] }),
     getInstallabilityErrors: (): Protocol.Page.GetInstallabilityErrorsResponse => ({ installabilityErrors: [] }),
     getManifestIcons: () => ({}),
     getAppId: () => ({}),
@@ -72,5 +86,8 @@ export function registerPage({ server, probe }: Context) {
     setAdBlockingEnabled: () => {},
     setLifecycleEventsEnabled: () => {},
     stopLoading: () => {},
+    getPermissionsPolicyState: (): Protocol.Page.GetPermissionsPolicyStateResponse => ({ states: [] }),
+    getOriginTrials: (): Protocol.Page.GetOriginTrialsResponse => ({ originTrials: [] }),
+    getSpellCheckCustomDictionary: (): Protocol.Page.GetSpellCheckCustomDictionaryResponse => ({ words: [] }),
   });
 }

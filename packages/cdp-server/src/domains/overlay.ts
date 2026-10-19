@@ -74,10 +74,37 @@ class Highlighter {
   }
 }
 
+/** Shows the viewport size in the top right corner for a moment after each resize, like Chrome. */
+function viewportSizeOnResize() {
+  let label: HTMLDivElement | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onResize = () => {
+    if (!label) {
+      label = document.createElement('div');
+      label.setAttribute(OWN_ATTRIBUTE, 'viewport-size');
+      label.style.cssText = `position:fixed;top:0;right:0;z-index:2147483647;pointer-events:none;padding:2px 6px;
+        background:rgba(255,255,255,.85);color:#222;font:11px/16px system-ui,sans-serif;border-radius:0 0 0 2px`;
+    }
+    label.textContent = `${innerWidth}px × ${innerHeight}px`;
+    if (!label.isConnected) document.documentElement.appendChild(label);
+    clearTimeout(timer);
+    timer = setTimeout(() => label?.remove(), 1000);
+  };
+  return (show: boolean) => {
+    if (show) addEventListener('resize', onResize);
+    else {
+      removeEventListener('resize', onResize);
+      clearTimeout(timer);
+      label?.remove();
+    }
+  };
+}
+
 export function registerOverlay(ctx: Context) {
   const { server, nodes } = ctx;
   const highlighter = new Highlighter();
   let stopInspect: (() => void) | null = null;
+  const showViewportSize = viewportSizeOnResize();
 
   /** Element under a pointer event, ignoring devtools-anywhere's own UI. */
   function targetOf(event: Event): Element | null {
@@ -127,7 +154,11 @@ export function registerOverlay(ctx: Context) {
     disable() {
       stopInspect?.();
       highlighter.hide();
+      showViewportSize(false);
     },
+
+    setShowViewportSizeOnResize: (params: Protocol.Overlay.SetShowViewportSizeOnResizeRequest) =>
+      showViewportSize(params.show),
 
     highlightNode(params: Protocol.Overlay.HighlightNodeRequest) {
       const node = resolveNode(ctx, params);

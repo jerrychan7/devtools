@@ -1,0 +1,6 @@
+{
+  "name": "devtools-anywhere test",
+  "short_name": "test",
+  "start_url": "/tests/conformance/fixture.html",
+  "display": "standalone"
+}

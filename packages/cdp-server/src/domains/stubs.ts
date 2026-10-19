@@ -32,9 +32,8 @@ const NOOPS: Record<string, string[]> = {
     'setShowScrollSnapOverlays',
     'setShowContainerQueryOverlays',
     'setShowIsolatedElements',
-    'setShowViewportSizeOnResize',
   ],
-  Network: ['overrideNetworkState'],
+  Network: ['overrideNetworkState', 'enableReportingApi'],
   Preload: ['enable'],
   Profiler: ['enable'],
   ServiceWorker: ['enable'],
@@ -45,8 +44,13 @@ const NOOPS: Record<string, string[]> = {
     'setInterestGroupTracking',
     'setSharedStorageTracking',
     'setStorageBucketTracking',
+    'untrackCacheStorageForOrigin',
+    'untrackCacheStorageForStorageKey',
+    'untrackIndexedDBForOrigin',
+    'untrackIndexedDBForStorageKey',
   ],
   Target: ['setAutoAttach', 'setDiscoverTargets', 'setRemoteLocations'],
+  WebMCP: ['enable'],
 };
 
 export function registerStubs(server: CdpServer) {
@@ -58,6 +62,14 @@ export function registerStubs(server: CdpServer) {
     emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({
       ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`),
     }),
+  });
+  // Feature flags of the browser are not readable from the page: report them as off.
+  server.register('SystemInfo', {
+    getFeatureState: (): Protocol.SystemInfo.GetFeatureStateResponse => ({ featureEnabled: false }),
+  });
+  // COOP, COEP and CSP are response headers of the document, unknown to the page.
+  server.register('Network', {
+    getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
   });
   // env() values are not readable from the page.
   server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
