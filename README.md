@@ -36,7 +36,11 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 ### Limitations
 
 - An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels should be hidden rather than shown and found broken.
-- Known gaps of the in-page implementation: user-agent styles, pseudo-elements and forced pseudo-classes (`:hover` in the Styles pane) are not shown; event listeners cannot be listed; mutations inside shadow roots are not tracked; cross-origin style sheets cannot be read.
+- Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
+  - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
+  - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
+  - Cross-origin style sheets are read through a fetched copy, which needs CORS headers; their rules are read-only.
+  - Forced pseudo-classes (`:hover`, `:focus`, … from the Styles pane) are emulated with companion style sheets that keep the cascade order; sheets from `@import` and `adoptedStyleSheets` are not covered.
 - Host the frontend on a different origin from the page. On the same origin, DevTools' own settings share the page's `localStorage` and show up in the Application panel.
 - The page side uses only standard web APIs and works in any modern browser. The DevTools UI is developed and tested by Google for Chrome; Firefox and Safari are not verified yet, and newer frontend versions may need extra compatibility patches.
 
