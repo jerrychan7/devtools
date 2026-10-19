@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, waitForBoth } from './harness.mjs';
+import { launch, openPage, waitForBoth } from './harness.ts';
 
 let env;
 let t;

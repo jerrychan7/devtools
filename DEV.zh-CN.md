@@ -75,14 +75,14 @@ playground 的服务器以仓库根目录为根，所以仓库里任何页面都
 | 早期捕获（console、异常、请求） | `packages/cdp-server/src/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积（min+gzip） |
 | CDP 域 | `packages/cdp-server/src/domains/` | playground，并加一致性测试 |
 | 组件、连接、外壳模式、Service Worker | `packages/devtools-anywhere/src/` | playground、端到端测试 |
-| Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.mjs`（示例应用在 `tests/e2e/vite-app/`） |
+| Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts`（示例应用在 `tests/e2e/vite-app/`） |
 | DevTools 前端 | `packages/devtools-frontend/` | 见下文 |
 
 ### 测试
 
 ```bash
 pnpm test                                     # 构建并运行全部测试
-node --test tests/conformance/css.test.mjs    # 只跑一个文件（需先构建，或 pnpm dev 正在运行）
+node --test tests/conformance/css.test.ts     # 只跑一个文件（需先构建，或 pnpm dev 正在运行）
 pnpm typecheck                                # 所有包和构建脚本的类型检查
 ```
 

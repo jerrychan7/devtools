@@ -1,7 +1,7 @@
 // Shell mode in real Chrome, with a fake frontend that records what it receives.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch } from '../conformance/harness.mjs';
+import { launch } from '../conformance/harness.ts';
 
 let env;
 let page;

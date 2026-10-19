@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch } from '../conformance/harness.mjs';
+import { launch } from '../conformance/harness.ts';
 
 const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
 const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first';

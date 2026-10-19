@@ -75,14 +75,14 @@ The playground server serves the repository root, so any page in it can be opene
 | Early capture (console, errors, requests) | `packages/cdp-server/src/probe/` | Keep it small: it runs synchronously before the page's code. Check `probe.iife.js` size (min+gzip) |
 | A CDP domain | `packages/cdp-server/src/domains/` | Playground, plus a conformance test |
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
-| Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.mjs` (app in `tests/e2e/vite-app/`) |
+| Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |
 | DevTools frontend | `packages/devtools-frontend/` | See below |
 
 ### Tests
 
 ```bash
 pnpm test                                     # build + all tests
-node --test tests/conformance/css.test.mjs    # one file (after a build or with pnpm dev running)
+node --test tests/conformance/css.test.ts     # one file (after a build or with pnpm dev running)
 pnpm typecheck                                # all packages and build scripts
 ```
 

@@ -3,7 +3,7 @@
 import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startServer } from '../../playground/server.mjs';
+import { startServer } from '../../playground/server.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CDP_BUNDLE = path.join(root, 'packages/cdp-server/dist/cdp-server.iife.js');

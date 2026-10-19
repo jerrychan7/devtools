@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from './harness.mjs';
+import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from './harness.ts';
 
 // Node ids differ between implementations; compare everything else.
 for (const key of ['nodeId', 'backendNodeId', 'parentId', 'parentNodeId', 'previousNodeId', 'frameId', 'hostId'])

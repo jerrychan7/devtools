@@ -5,7 +5,7 @@
 ## 运行
 
 ```bash
-node experiments/early-capture/server.mjs 8787
+node experiments/early-capture/server.ts 8787
 ```
 
 打开 `http://localhost:8787/experiments/early-capture/`。依赖本地 `chii.ignore/` 中已构建的 `public/front_end` 和 `node_modules/chobitsu`。

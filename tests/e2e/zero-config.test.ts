@@ -1,7 +1,7 @@
 // The single-script setup, and the Service Worker that injects the probe in shell mode.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch } from '../conformance/harness.mjs';
+import { launch } from '../conformance/harness.ts';
 
 let env;
 let page;

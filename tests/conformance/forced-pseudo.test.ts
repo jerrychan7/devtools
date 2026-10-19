@@ -2,7 +2,7 @@
 // measures and un-forces in turn.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from './harness.mjs';
+import { launch, openPage } from './harness.ts';
 
 let env;
 let t;

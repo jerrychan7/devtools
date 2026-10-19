@@ -1,20 +1,24 @@
-// Static server for the playground and the tests. Serves the repository root.
+// Static server for the early-capture experiment.
+// Serves the repository root so the pages can reach the local Chii build
+// (chii.ignore/public/front_end) and chobitsu (chii.ignore/node_modules/chobitsu).
 //
-//   node playground/server.mjs [port]
+//   node experiments/early-capture/server.ts [port]
 //
-// Any request accepts `?delay=<ms>`. `/api/echo` returns the request as JSON.
+// Any request accepts `?delay=<ms>` to simulate a slow network.
+// `/api/echo` returns the request as JSON.
+
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const port = Number(process.argv[2]) || 8787;
 
 const types = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
@@ -25,10 +29,9 @@ const types = {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/** Starts the server; resolves with its base URL. Port 0 picks a free port. */
-export function startServer(port = 0) {
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://localhost');
+http
+  .createServer(async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
     const delay = Number(url.searchParams.get('delay')) || 0;
     if (delay) await sleep(delay);
 
@@ -41,7 +44,10 @@ export function startServer(port = 0) {
     }
 
     const file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) return res.writeHead(403).end();
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     try {
       const stat = await fs.stat(file);
       const target = stat.isDirectory() ? path.join(file, 'index.html') : file;
@@ -49,24 +55,10 @@ export function startServer(port = 0) {
       res.writeHead(200, {
         'content-type': types[path.extname(target)] || 'application/octet-stream',
         'cache-control': 'no-store',
-        // Lets devtools-anywhere-sw.js control the whole site from its dist directory.
-        ...(target.endsWith('-sw.js') ? { 'service-worker-allowed': '/' } : {}),
-        // Style sheets are readable from other origins (the tests load them cross-origin).
-        ...(target.endsWith('.css') ? { 'access-control-allow-origin': '*' } : {}),
       });
       res.end(data);
     } catch {
       res.writeHead(404).end('not found');
     }
-  });
-  return new Promise(resolve => {
-    server.listen(port, () => {
-      resolve({ url: `http://localhost:${server.address().port}`, close: () => server.close() });
-    });
-  });
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { url } = await startServer(Number(process.argv[2]) || 8788);
-  console.log(`${url}/playground/`);
-}
+  })
+  .listen(port, () => console.log(`http://localhost:${port}/experiments/early-capture/`));

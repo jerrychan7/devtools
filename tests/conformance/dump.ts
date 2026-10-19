@@ -1,8 +1,8 @@
 // Prints Chrome's and our CDP output side by side for one action.
-//   node tests/conformance/dump.mjs log "<expr>"       console.log(expr)
-//   node tests/conformance/dump.mjs run "<code>"       run code, show console/exception events
-//   node tests/conformance/dump.mjs props "<expr>"     getProperties(ownProperties) of expr
-import { launch, openPage } from './harness.mjs';
+//   node tests/conformance/dump.ts log "<expr>"       console.log(expr)
+//   node tests/conformance/dump.ts run "<code>"       run code, show console/exception events
+//   node tests/conformance/dump.ts props "<expr>"     getProperties(ownProperties) of expr
+import { launch, openPage } from './harness.ts';
 
 const [mode, code] = process.argv.slice(2);
 const env = await launch();
