@@ -61,12 +61,4 @@ export function registerStubs(server: CdpServer) {
   });
   // env() values are not readable from the page.
   server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
-  server.register('Debugger', {
-    enable: () => ({ debuggerId: 'devtools-anywhere' }),
-    disable: () => {},
-    setAsyncCallStackDepth: () => {},
-    setBlackboxPatterns: () => {},
-    setPauseOnExceptions: () => {},
-    setBreakpointsActive: () => {},
-  });
 }

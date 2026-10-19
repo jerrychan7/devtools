@@ -3,6 +3,7 @@ import { NodeRegistry } from './core/nodes';
 import { ObjectRegistry } from './core/objects';
 import { CdpServer } from './core/server';
 import { registerCss } from './domains/css';
+import { registerDebugger } from './domains/debugger';
 import { registerDom } from './domains/dom';
 import { registerDomDebugger } from './domains/dom-debugger';
 import { registerNetwork } from './domains/network';
@@ -40,5 +41,6 @@ export function createCdpServer(): CdpServer {
   registerCss(ctx);
   registerStorage(ctx);
   registerDomDebugger(ctx);
+  registerDebugger(ctx);
   return ctx.server;
 }

@@ -111,3 +111,29 @@ test('the Network panel lists the document and its resources, but not DevTools i
   assert.ok(all.includes('real-frontend.html'), 'the document');
   assert.ok(!all.includes('devtools-anywhere.iife.js'), "the bundle is DevTools' own");
 });
+
+test("the Sources panel lists the page's scripts and style sheets, but not DevTools itself", { skip }, async () => {
+  await showPanel('sources');
+  const files = () =>
+    frontend.evaluate(async () => {
+      // The frontend's own module, loaded from its location: its workspace backs the Sources panel.
+      // The built frontend has no type declarations; only this much of it is used.
+      const {
+        Workspace,
+      }: {
+        Workspace: { WorkspaceImpl: { instance(): { uiSourceCodes(): { url(): string }[] } } };
+      } = await import(new URL('models/workspace/workspace.js', location.href).href);
+      return Workspace.WorkspaceImpl.instance()
+        .uiSourceCodes()
+        .map(code => code.url());
+    });
+  const urls = await waitFor(async () => {
+    const urls = await files();
+    return urls.some(url => url.endsWith('real-frontend.js')) ? urls : null;
+  });
+  assert.ok(
+    urls.some(url => url.endsWith('/assets/real-frontend.css')),
+    'the style sheet'
+  );
+  assert.ok(!urls.some(url => url.endsWith('devtools-anywhere.iife.js')), "the bundle is DevTools' own");
+});

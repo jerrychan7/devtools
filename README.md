@@ -35,7 +35,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 ### Limitations
 
-- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. The Sources panel's Page tab lists the page's documents, images and fonts but not yet its scripts and style sheets (these need `Debugger.scriptParsed` and `CSS.styleSheetAdded`); snippets work.
+- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
 - Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.

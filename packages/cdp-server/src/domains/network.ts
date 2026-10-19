@@ -31,11 +31,12 @@ export function parseCookies(): Protocol.Network.Cookie[] {
 const withoutHash = (url: string) => url.split('#')[0];
 
 /** Whether the request is one of devtools-anywhere's own (its bundle, the frontend, …). */
-export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => {
-  const url = withoutHash(rec.url);
-  for (const own of probe.ownUrls) if (withoutHash(own) === url) return true;
+export const isOwnUrl = (probe: Context['probe'], url: string) => {
+  const target = withoutHash(url);
+  for (const own of probe.ownUrls) if (withoutHash(own) === target) return true;
   return false;
 };
+export const isOwnRequest = (probe: Context['probe'], rec: RequestRecord) => isOwnUrl(probe, rec.url);
 
 /** Base64 of a binary response body. */
 async function base64(blob: Blob): Promise<string> {
