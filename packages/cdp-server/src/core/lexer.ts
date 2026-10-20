@@ -66,6 +66,8 @@ export interface Token {
 export interface LexOptions {
   /** Module code: no HTML-like comments. */
   module?: boolean;
+  /** The tokens of the source, already lexed with the same options: reused instead of lexing again. */
+  tokens?: Token[];
 }
 
 interface OpenToken {
@@ -76,7 +78,7 @@ interface OpenToken {
 
 /** Tokenizes `source`. Never throws: on a syntax error it recovers and goes on. */
 export function tokenize(source: string, options: LexOptions = {}): Token[] {
-  return new Lexer(source, options.module === true).run();
+  return options.tokens ?? new Lexer(source, options.module === true).run();
 }
 
 class Lexer {
@@ -86,16 +88,20 @@ class Lexer {
   private pos = 0;
   private lastTokenPos = -1;
   private lastSlashWasDivision = false;
-  private nextBraceIsClass = false;
+  /** The depth of a `class` keyword whose body brace is still to come (-1 for none). */
+  private classDepth = -1;
   private readonly stack: OpenToken[] = [];
   private depth = 0;
   private newline = false;
   private readonly tokens: Token[] = [];
+  /** Takes each token instead of the token list. */
+  private readonly sink: ((token: Token) => void) | undefined;
 
-  constructor(source: string, module: boolean) {
+  constructor(source: string, module: boolean, sink?: (token: Token) => void) {
     this.src = source;
     this.module = module;
     this.end = source.length;
+    this.sink = sink;
   }
 
   /** The code unit at `i`, 0 outside the source (lexer.c pads its buffer the same way). */
@@ -113,14 +119,16 @@ class Lexer {
   }
 
   private emit(kind: TokenKind, start: number, end: number, depth: number) {
-    this.tokens.push({
+    const token: Token = {
       kind,
       start,
       end,
       depth,
       parent: depth > 0 ? this.top(depth - 1).token : Open.None,
       newline: this.newline,
-    });
+    };
+    if (this.sink) this.sink(token);
+    else this.tokens.push(token);
     this.newline = false;
   }
 
@@ -148,8 +156,14 @@ class Lexer {
     let depth = this.depth;
     switch (ch) {
       case 99 /* c */:
-        if (this.src.startsWith('class', this.pos) && this.keywordStart(this.pos) && isBrOrWs(this.c(this.pos + 5)))
-          this.nextBraceIsClass = true;
+        // `class{` too (minified code). Only the brace at the keyword's depth is the body, not one
+        // in the heritage (`class A extends f({}) {`).
+        if (
+          this.src.startsWith('class', this.pos) &&
+          this.keywordStart(this.pos) &&
+          (isBrOrWs(this.c(this.pos + 5)) || this.c(this.pos + 5) === 123) /* { */
+        )
+          this.classDepth = this.depth;
         kind = 'word';
         this.skipTokenRun();
         break;
@@ -165,8 +179,10 @@ class Lexer {
         depth = this.depth;
         break;
       case 123 /* { */:
-        this.push(this.nextBraceIsClass ? Open.ClassBrace : Open.AnyBrace, this.lastTokenPos);
-        this.nextBraceIsClass = false;
+        if (this.classDepth === this.depth) {
+          this.classDepth = -1;
+          this.push(Open.ClassBrace, this.lastTokenPos);
+        } else this.push(Open.AnyBrace, this.lastTokenPos);
         break;
       case 125 /* } */:
         if (this.depth === 0) break;
@@ -879,13 +895,16 @@ export function returnOutsideFunction(source: string, options: LexOptions = {}):
     // Directly in a class body, any word is part of a member's name or modifiers.
     if (token.parent === Open.ClassBrace) continue;
     if (isPunct(source, tokens[i - 1], '.') || isPunct(source, tokens[i + 1], ':')) continue;
-    if (isPunct(source, tokens[i + 1], '(')) {
-      let close = i + 2;
-      while (close < tokens.length && !(tokens[close]?.depth === token.depth && isPunct(source, tokens[close], ')')))
-        close++;
-      if (isPunct(source, tokens[close + 1], '{')) continue;
+    if (value === 'return' && !inside(token.depth, true)) {
+      // `return(…) {` is a method named return; only scanned for that word, not every call.
+      if (isPunct(source, tokens[i + 1], '(')) {
+        let close = i + 2;
+        while (close < tokens.length && !(tokens[close]?.depth === token.depth && isPunct(source, tokens[close], ')')))
+          close++;
+        if (isPunct(source, tokens[close + 1], '{')) continue;
+      }
+      return true;
     }
-    if (value === 'return' && !inside(token.depth, true)) return true;
     if (
       value === 'new' &&
       isPunct(source, tokens[i + 1], '.') &&
@@ -963,10 +982,13 @@ function readArrayPattern(source: string, tokens: Token[], open: number, names: 
       i++;
       continue;
     }
+    // A token nothing reads (a `;` in `let [a;`) ends the pattern, which is invalid code.
+    const from = i;
     i = readBindingTarget(source, tokens, skipSpread(source, tokens, i), names);
     if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
     if (!isPunct(source, tokens[i], ',') && !isCloser(source, tokens[i], depth))
       i = skipExpression(source, tokens, i, depth + 1);
+    if (i === from) return i;
   }
   return i + 1;
 }
@@ -979,6 +1001,8 @@ function readObjectPattern(source: string, tokens: Token[], open: number, names:
       i++;
       continue;
     }
+    // A token nothing reads (a `;` in `let [a;`) ends the pattern, which is invalid code.
+    const from = i;
     const spread = skipSpread(source, tokens, i);
     if (spread !== i) {
       i = readBindingTarget(source, tokens, spread, names);
@@ -996,6 +1020,7 @@ function readObjectPattern(source: string, tokens: Token[], open: number, names:
     if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
     if (!isPunct(source, tokens[i], ',') && !isCloser(source, tokens[i], depth))
       i = skipExpression(source, tokens, i, depth + 1);
+    if (i === from) return i;
   }
   return i + 1;
 }
@@ -1036,16 +1061,31 @@ export function debuggerStatementSites(
   source: string,
   options: LexOptions = {}
 ): { start: number; semicolon: boolean }[] {
-  const tokens = tokenize(source, options);
   const sites: { start: number; semicolon: boolean }[] = [];
-  tokens.forEach((token, i) => {
-    if (token.kind !== 'word' || text(source, token) !== 'debugger') return;
-    if (token.parent === Open.ClassBrace) return;
-    if (isPunct(source, tokens[i - 1], '.') || source[token.start - 1] === '#') return;
-    const next = tokens[i + 1];
+  // Streamed: a whole bundle's tokens are not kept, only the previous one and a candidate.
+  let prev: Token | undefined;
+  let candidate: Token | undefined;
+  const decide = (keyword: Token, next: Token | undefined) => {
     if (isPunct(source, next, ':')) return;
     if (isPunct(source, next, '(') && next?.newline === false) return;
-    sites.push({ start: token.start, semicolon: isPunct(source, next, ';') });
-  });
+    sites.push({ start: keyword.start, semicolon: isPunct(source, next, ';') });
+  };
+  const take = (token: Token) => {
+    if (candidate) decide(candidate, token);
+    candidate = undefined;
+    if (
+      token.kind === 'word' &&
+      token.parent !== Open.ClassBrace &&
+      // Cheap check first: most words are shorter (an escaped `debugger` is longer).
+      token.end - token.start >= 8 &&
+      text(source, token) === 'debugger' &&
+      !isPunct(source, prev, '.') &&
+      source[token.start - 1] !== '#'
+    )
+      candidate = token;
+    prev = token;
+  };
+  new Lexer(source, options.module === true, take).run();
+  if (candidate) decide(candidate, undefined);
   return sites;
 }
