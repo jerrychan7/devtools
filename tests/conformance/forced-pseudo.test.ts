@@ -395,14 +395,30 @@ test('the layer order follows a @media condition changing while forced', async (
       if (!el) throw new Error('#fw not found');
       return getComputedStyle(el).color;
     });
+  // The probe rebuilds on the MediaQueryList change event, which fires on a later rendering
+  // update: poll for the expected value (bounded) instead of a fixed delay, then read it.
+  const settle = (expected: string) =>
+    t.page
+      .waitForFunction(
+        (want: string) => {
+          const el = document.getElementById('fw');
+          return el !== null && getComputedStyle(el).color === want;
+        },
+        { timeout: 2000 },
+        expected
+      )
+      .then(
+        () => undefined,
+        () => undefined
+      );
   // Narrow, `vw` is named before the anonymous layer, which then wins; wide, after it.
   const measure = async () => {
     const wide = await color();
     await t.page.setViewport({ width: 400, height: 600 });
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await settle('rgb(2, 0, 0)');
     const narrow = await color();
     await t.page.setViewport({ width: 800, height: 600 });
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await settle('rgb(4, 0, 0)');
     return [wide, narrow, await color()];
   };
   try {
