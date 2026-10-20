@@ -12,7 +12,18 @@ interface Companion {
 
 /** Pseudo-classes CSS.forcePseudoState can force (longer names first, for the alternation). */
 const FORCEABLE_CLASSES = ['hover', 'focus-within', 'focus-visible', 'focus', 'active', 'visited', 'target'];
+/** The properties a `:visited` rule can change in Chrome. */
+const VISITED =
+  /^(color|background-color|border-(top|right|bottom|left|block-start|block-end|inline-start|inline-end)-color|column-rule-color|outline-color|text-decoration-color|text-emphasis-color|caret-color|fill|stroke|-webkit-text-(fill|stroke)-color)$/;
 const FORCEABLE = new RegExp(`:(${FORCEABLE_CLASSES.join('|')})(?![\\w-])`, 'g');
+
+/** Whether `el` is `node` or inside it, in its shadow trees too. */
+function containsAcrossShadow(node: Node, el: Element): boolean {
+  for (let n: Node | null = el; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
+    if (n === node) return true;
+  }
+  return false;
+}
 
 /**
  * Emulates CSS.forcePseudoState. Page scripts cannot put an element into :hover (or
@@ -36,6 +47,8 @@ export class ForcedPseudoClasses {
   private queries = new Map<string, { list: MediaQueryList; listener: () => void }>();
   private queried = new Set<string>();
   private mediaLists = new Map<string, MediaQueryList>();
+  /** Media queries the last rebuild looked at: the others are let go. */
+  private usedMedia = new Set<string>();
 
   /** `trees`: the document and shadow roots, each with its top-level sheets in cascade order. */
   constructor(
@@ -60,13 +73,13 @@ export class ForcedPseudoClasses {
    * `:is(:hover, [marker~="hover"])`, which matches elements really hovered or forced, so
    * negations like `:not(:hover)` stop matching forced elements, as in Chrome. The rewritten
    * selector alone decides whether a rule matches; the page's own copy of a negated rule
-   * still applies, as its style sheets are not modified.
+   * still applies, as its style sheets are not modified. `skip`: a class left as it is.
    */
-  rewrite(selector: string): string {
+  rewrite(selector: string, skip?: string): string {
     const active = this.active();
     if (!active.size) return selector;
     return selector.replace(FORCEABLE, (match, name: string) =>
-      active.has(name) ? `:is(${match}, [${FORCE_ATTRIBUTE}~="${name}"])` : match
+      active.has(name) && name !== skip ? `:is(${match}, [${FORCE_ATTRIBUTE}~="${name}"])` : match
     );
   }
 
@@ -113,7 +126,7 @@ export class ForcedPseudoClasses {
     if (!this.forced.size || !removed.length) return;
     let changed = false;
     for (const el of this.forced.keys()) {
-      if (!removed.some(node => node.contains(el))) continue;
+      if (!removed.some(node => containsAcrossShadow(node, el))) continue;
       this.forced.delete(el);
       el.removeAttribute(FORCE_ATTRIBUTE);
       changed = true;
@@ -126,6 +139,7 @@ export class ForcedPseudoClasses {
     this.prune();
     const seen = new Set<TreeScope>();
     this.queried.clear();
+    this.usedMedia.clear();
     if (this.forced.size) {
       for (const { tree, sheets } of this.trees()) {
         const text = this.companionText(sheets);
@@ -147,9 +161,13 @@ export class ForcedPseudoClasses {
       this.companions.delete(tree);
     }
     this.watch();
+    for (const text of this.mediaLists.keys()) {
+      if (!this.usedMedia.has(text) && !this.queries.has(text)) this.mediaLists.delete(text);
+    }
   }
 
   private mediaList(text: string): MediaQueryList {
+    this.usedMedia.add(text);
     let list = this.mediaLists.get(text);
     if (!list) {
       list = matchMedia(text);
@@ -341,7 +359,20 @@ export class ForcedPseudoClasses {
           // carries its own declarations once copying started.
           const rewritten = this.rewrite(rule.selectorText);
           if (rewritten !== rule.selectorText) started = true;
-          const declarations = started || all ? rule.style.cssText : '';
+          // A rule matching only through a forced `:visited` applies only the properties Chrome
+          // lets `:visited` change (colors), for privacy.
+          const visitedOnly =
+            rewritten !== rule.selectorText && this.rewrite(rule.selectorText, 'visited') === rule.selectorText;
+          const declarations = !(started || all)
+            ? ''
+            : visitedOnly
+              ? Array.from(rule.style)
+                  .filter(p => VISITED.test(p))
+                  .map(
+                    p => `${p}: ${rule.style.getPropertyValue(p)} ${rule.style.getPropertyPriority(p) && '!important'};`
+                  )
+                  .join(' ')
+              : rule.style.cssText;
           const [nested] = walk(this.rulesOf(rule), layer, conditions, live);
           if (declarations || nested) {
             const text = `${rewritten} { ${declarations}${nested ? `\n${nested}` : ''} }\n`;

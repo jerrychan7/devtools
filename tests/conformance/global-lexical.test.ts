@@ -33,3 +33,31 @@ test('globalLexicalScopeNames lists the names Chrome lists', async () => {
   const chrome = (await t.chrome.send('Runtime.globalLexicalScopeNames', {})).names.toSorted();
   assert.deepEqual(ours, chrome);
 });
+
+test('a script no longer in the document is not fetched again from the network', async () => {
+  const url = `${env?.baseUrl}/tests/conformance/assets/lexical-classic.js?_=${Date.now()}`;
+  await t.page.evaluate(
+    src =>
+      new Promise(resolve => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = script.onerror = () => {
+          script.remove();
+          resolve(null);
+        };
+        document.head.append(script);
+      }),
+    url
+  );
+  const fetched: string[] = [];
+  const onResponse = (res: { url(): string; fromCache(): boolean }) => {
+    if (res.url() === url && !res.fromCache()) fetched.push(res.url());
+  };
+  t.page.on('response', onResponse);
+  try {
+    await t.ours.send('Runtime.globalLexicalScopeNames', {});
+  } finally {
+    t.page.off('response', onResponse);
+  }
+  assert.deepEqual(fetched, []);
+});
