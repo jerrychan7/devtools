@@ -1,0 +1,22 @@
+diff --git a/front_end/panels/elements/elements-meta.ts b/front_end/panels/elements/elements-meta.ts
+index fcea95556e..e2e8134cb2 100644
+--- a/front_end/panels/elements/elements-meta.ts
++++ b/front_end/panels/elements/elements-meta.ts
+@@ -9,7 +9,7 @@ import * as SDK from '../../core/sdk/sdk.js';
+ import * as UI from '../../ui/legacy/legacy.js';
+ import * as SettingsUI from '../../ui/settings/settings.js';
+ 
+-import * as Elements from './elements.js';
++import type * as Elements from './elements.js';
+ 
+ const UIStrings = {
+   /**
+@@ -663,7 +663,7 @@ Common.Revealer.registerRevealer({
+       SDK.DOMModel.DeferredDOMNode,
+       SDK.RemoteObject.RemoteObject,
+       SDK.DOMModel.AdoptedStyleSheet,
+-      Elements.ElementsPanel.NodeComputedStyles,
++      ...maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.NodeComputedStyles]),
+     ];
+   },
+   destination: Common.Revealer.RevealerDestination.ELEMENTS_PANEL,
