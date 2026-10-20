@@ -173,6 +173,10 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     const query = token === false ? '' : `?token=${token}`;
     const ws = secure(req) ? 'wss' : 'ws';
     const frontend = options.frontendUrl ?? `${base}front_end/anywhere_app.html`;
+    // The frontend's URL may have a query (a version) and a fragment of its own.
+    const hash = frontend.indexOf('#');
+    const page = hash < 0 ? frontend : frontend.slice(0, hash);
+    const fragment = hash < 0 ? '' : frontend.slice(hash);
     return [...targets.values()].map(target => {
       const socket = `${req.headers.host ?? 'localhost'}${base}client/${target.id}${query}`;
       return {
@@ -185,7 +189,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
         since: target.since,
         connected: target.connected,
         clients: target.clients,
-        devtoolsFrontendUrl: `${frontend}?${ws}=${encodeURIComponent(socket)}`,
+        devtoolsFrontendUrl: `${page}${page.includes('?') ? '&' : '?'}${ws}=${encodeURIComponent(socket)}${fragment}`,
         webSocketDebuggerUrl: `${ws}://${socket}`,
       };
     });
@@ -221,6 +225,22 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     res.setHeader('cache-control', rel.startsWith('front_end/bundle/') ? 'max-age=31536000, immutable' : 'no-cache');
     // Pages on any origin load the probe and its bundle (and the bundle loads snapDOM).
     res.setHeader('access-control-allow-origin', '*');
+    // What revalidation goes by: unchanged, the file is not sent again.
+    const { mtime, size } = statSync(file);
+    const etag = `W/"${size.toString(16)}-${Math.floor(mtime.getTime()).toString(16)}"`;
+    res.setHeader('etag', etag);
+    res.setHeader('last-modified', mtime.toUTCString());
+    const ifNoneMatch = req.headers['if-none-match'];
+    const ifModifiedSince = Date.parse(req.headers['if-modified-since'] ?? '');
+    const fresh =
+      ifNoneMatch !== undefined
+        ? ifNoneMatch.split(',').some(tag => tag.trim() === etag || tag.trim() === '*')
+        : ifModifiedSince >= Math.floor(mtime.getTime() / 1000) * 1000;
+    if (fresh) {
+      res.writeHead(304);
+      res.end();
+      return true;
+    }
     createReadStream(file)
       .on('error', () => (res.headersSent ? res.destroy() : send(500, 'text/plain', 'Read failed')))
       .pipe(res);
@@ -243,7 +263,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
       const relay = target;
       if (kind === 'target') {
         relay.attachPage(peer);
-        ws.on('message', data => relay.fromPage(data.toString()));
+        ws.on('message', data => relay.fromPage(peer, data.toString()));
         ws.on('close', () => {
           relay.detachPage(peer);
           forget(relay);
@@ -295,7 +315,9 @@ export async function startRemoteServer(options: RemoteServerOptions = {}): Prom
   const scheme = options.https ? 'https' : 'http';
   const base = `/${(options.basePath ?? '/').replace(/^\/+|\/+$/g, '')}/`.replace('//', '/');
   const anyHost = !options.host || options.host === '0.0.0.0' || options.host === '::';
-  const local = `${scheme}://${anyHost ? 'localhost' : options.host}:${port}${base}`;
+  // An IPv6 address is bracketed in a URL.
+  const host = anyHost ? 'localhost' : options.host?.includes(':') ? `[${options.host}]` : options.host;
+  const local = `${scheme}://${host}:${port}${base}`;
   const lan = anyHost ? lanAddress() : undefined;
   const publicUrl = options.publicUrl
     ? new URL(options.publicUrl).href.replace(/\/?$/, '/')

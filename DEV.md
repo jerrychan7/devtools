@@ -160,7 +160,7 @@ To move to the latest upstream:
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-It builds the tip of upstream `main` and pins it in `REVISION` on success. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync`. Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
+It builds the tip of upstream `main` and pins it in `REVISION` on success. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
 
 ## 3. Finishing a change
 

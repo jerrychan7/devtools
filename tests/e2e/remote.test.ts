@@ -117,7 +117,7 @@ test('DevTools stays connected across a reload, and the new page replays its out
   const before = await page.evaluate(() => performance.timeOrigin);
   client.messages.length = 0;
   await page.reload();
-  await waitFor(() => client.messages.some(m => m.method === 'Page.frameNavigated'));
+  await waitFor(() => client.messages.some(m => m.method === 'Runtime.executionContextsCleared'));
   // Replayed by the new page instance: its own early output, logged with its time origin.
   await waitFor(() =>
     client.messages.some(
@@ -164,7 +164,7 @@ test('the handlers mount in a server of its own, under a base path, with a publi
     basePath: '/devtools/',
     token: false,
     publicUrl: 'https://debug.example/devtools/',
-    frontendUrl: 'https://cdn.example/anywhere_app.html',
+    frontendUrl: 'https://cdn.example/anywhere_app.html?v=1#x',
   });
   const server = createServer((req, res) => {
     if (!handler.handleRequest(req, res)) res.end('app');
@@ -191,7 +191,7 @@ test('the handlers mount in a server of its own, under a base path, with a publi
     );
     assert.equal(
       listed.devtoolsFrontendUrl,
-      `https://cdn.example/anywhere_app.html?ws=${encodeURIComponent(`${host}/devtools/client/mounted`)}`
+      `https://cdn.example/anywhere_app.html?v=1&ws=${encodeURIComponent(`${host}/devtools/client/mounted`)}#x`
     );
     // A page that went away stays listed for a while, to come back.
     ws.close();
@@ -202,6 +202,145 @@ test('the handlers mount in a server of its own, under a base path, with a publi
   } finally {
     handler.close();
     server.close();
+  }
+});
+
+/** A stand-in page: keeps every message the relay sends it. */
+async function fakePage(id: string) {
+  const socket = new WebSocket(`${origin().replace('http', 'ws')}/target/${id}`);
+  const received: string[] = [];
+  socket.onmessage = event => received.push(String(event.data));
+  await new Promise(resolve => (socket.onopen = resolve));
+  const hello = (loaderId: string) =>
+    socket.send(JSON.stringify({ method: 'DevtoolsAnywhere.hello', params: { loaderId, title: id } }));
+  return { socket, received, hello };
+}
+const clientUrl = (id: string) => `${origin().replace('http', 'ws')}/client/${id}?token=${TOKEN}`;
+
+test('a page back from the back/forward cache gets the enables and detaches of while it was away', async () => {
+  const fake = await fakePage('bfcache');
+  fake.hello('l1');
+  await waitFor(async () => (await targets()).find(t => t.id === 'bfcache'));
+  const first = await Client.connect(clientUrl('bfcache'));
+  const second = await Client.connect(clientUrl('bfcache'));
+  fake.socket.send(JSON.stringify({ method: 'DevtoolsAnywhere.pagehide' }));
+  // Answered while the page is away, and sent to it when it comes back.
+  assert.deepEqual((await first.call('Runtime.enable')).result, {});
+  second.socket.close();
+  await waitFor(async () => (await targets()).find(t => t.id === 'bfcache')?.clients === 1);
+  fake.hello('l1');
+  await waitFor(() => fake.received.some(m => m.includes('DevtoolsAnywhere.detach')));
+  await waitFor(() => fake.received.some(m => m.includes('"method":"Runtime.enable"')));
+  first.socket.close();
+  fake.socket.close();
+});
+
+test("a new page instance is told only to the domains each client enabled, with Chrome's frame", async () => {
+  const fake = await fakePage('navigated');
+  fake.hello('l1');
+  await waitFor(async () => (await targets()).find(t => t.id === 'navigated'));
+  const network = await Client.connect(clientUrl('navigated'));
+  const all = await Client.connect(clientUrl('navigated'));
+  // The stand-in page never answers: the commands are only sent.
+  network.socket.send(JSON.stringify({ id: 1, method: 'Network.enable' }));
+  for (const [id, method] of ['Runtime.enable', 'Page.enable', 'DOM.enable'].entries()) {
+    all.socket.send(JSON.stringify({ id: id + 1, method }));
+  }
+  await waitFor(() => fake.received.filter(m => m.includes('.enable')).length === 4);
+  const navigate = (loaderId: string, url: string) =>
+    fake.socket.send(
+      JSON.stringify({ method: 'DevtoolsAnywhere.hello', params: { loaderId, url, secure: true, title: 'navigated' } })
+    );
+  const frames = () =>
+    all.messages.flatMap(m => (m.method === 'Page.frameNavigated' ? [JSON.stringify(m.params)] : []));
+  navigate('l2', 'http://localhost:5173/');
+  await waitFor(() => all.messages.some(m => m.method === 'DOM.documentUpdated'));
+  assert.ok(all.messages.some(m => m.method === 'Runtime.executionContextsCleared'));
+  assert.ok(frames()[0]?.includes('"secureContextType":"SecureLocalhost"'));
+  assert.ok(!network.messages.some(m => typeof m.method === 'string' && !m.method.startsWith('Network.')));
+  navigate('l3', 'file:///index.html');
+  await waitFor(() => frames().length === 2);
+  assert.ok(frames()[1]?.includes('"securityOrigin":"file://"'));
+  assert.ok(frames()[1]?.includes('"secureContextType":"Secure"'));
+  network.socket.close();
+  all.socket.close();
+  fake.socket.close();
+});
+
+test('a page that reconnects gets what was queued before anything sent after', async () => {
+  const fake = await fakePage('order');
+  fake.hello('l1');
+  await waitFor(async () => (await targets()).find(t => t.id === 'order'));
+  const client = await Client.connect(clientUrl('order'));
+  fake.socket.close();
+  await waitFor(async () => (await targets()).find(t => t.id === 'order')?.connected === false);
+  client.socket.send(JSON.stringify({ id: 1, method: 'DOM.enable' }));
+  const back = await fakePage('order');
+  await waitFor(async () => (await targets()).find(t => t.id === 'order')?.connected === true);
+  // Before the hello of the new connection: queued too, behind the first.
+  client.socket.send(JSON.stringify({ id: 2, method: 'DOM.getDocument' }));
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(back.received.length, 0);
+  back.hello('l1');
+  await waitFor(() => back.received.length === 2);
+  assert.ok(back.received[0]?.includes('DOM.enable'));
+  assert.ok(back.received[1]?.includes('DOM.getDocument'));
+  client.socket.close();
+  back.socket.close();
+});
+
+test('a page back on a new relay has the sessions it does not know detached', async () => {
+  const fake = await fakePage('stale');
+  fake.socket.send(
+    JSON.stringify({
+      method: 'DevtoolsAnywhere.hello',
+      params: { loaderId: 'l', title: 'stale', sessions: ['1', '2'] },
+    })
+  );
+  await waitFor(() => fake.received.filter(m => m.includes('DevtoolsAnywhere.detach')).length === 2);
+  assert.ok(fake.received.some(m => m.includes('"session":"1"')));
+  fake.socket.close();
+});
+
+test('a page whose id another page took connects under a new one', async () => {
+  const { id } = await target();
+  const fake = await fakePage(id);
+  let replaced = 0;
+  fake.socket.addEventListener('close', () => replaced++);
+  fake.hello('other');
+  await waitFor(async () => (await targets()).find(t => t.title === 'remote page' && t.id !== id && t.connected));
+  await new Promise(r => setTimeout(r, 1500));
+  assert.equal(replaced, 0);
+  fake.socket.close();
+});
+
+test('files are revalidated without being sent again', async () => {
+  const first = await fetch(`${origin()}/probe.iife.js`);
+  const etag = first.headers.get('etag');
+  assert.ok(etag && first.headers.get('last-modified'));
+  await first.arrayBuffer();
+  assert.equal((await fetch(`${origin()}/probe.iife.js`, { headers: { 'if-none-match': etag } })).status, 304);
+  assert.equal((await fetch(`${origin()}/probe.iife.js`, { headers: { 'if-none-match': 'W/"x"' } })).status, 200);
+});
+
+test('commands dropped from the queue for the page get an error', async () => {
+  const fake = await fakePage('overflow');
+  await waitFor(async () => (await targets()).find(t => t.id === 'overflow'));
+  const client = await Client.connect(clientUrl('overflow'));
+  // The page has not said hello: everything is queued, and the oldest command goes.
+  for (let id = 0; id <= 10_000; id++) client.socket.send(JSON.stringify({ id, method: 'Runtime.evaluate' }));
+  const dropped = await waitFor(() => client.messages.find(m => m.id === 0));
+  assert.ok(dropped.error);
+  client.socket.close();
+  fake.socket.close();
+});
+
+test('the URL printed for an IPv6 host is bracketed', async () => {
+  const server = await startRemoteServer({ port: 0, host: '::1', token: false });
+  try {
+    assert.match(server.url, /^http:\/\/\[::1\]:\d+\/$/);
+  } finally {
+    await server.close();
   }
 });
 

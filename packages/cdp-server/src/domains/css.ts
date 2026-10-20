@@ -276,6 +276,21 @@ function importedLayer(sheet: CSSStyleSheet): string[] {
 }
 
 /**
+ * Whether a sheet's own conditions hold: the media of its <link>, <style> or @import, and the
+ * supports() of its @import, up through the sheets that import it.
+ */
+function sheetApplies(sheet: CSSStyleSheet): boolean {
+  for (let s: CSSStyleSheet | null = sheet; s; s = s.ownerRule?.parentStyleSheet ?? null) {
+    if (s.media.mediaText && !matchMedia(s.media.mediaText).matches) return false;
+    const owner = s.ownerRule;
+    if (owner instanceof CSSImportRule && owner.supportsText && !CSS.supports(owner.supportsText)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Tracks the page's style sheets. Every style rule gets a stable id within its sheet, which
  * also serves as its line in the text served by CSS.getStyleSheetText (one rule per line),
  * so ranges the client sends back keep pointing at the same rule even if the page adds or
@@ -283,7 +298,8 @@ function importedLayer(sheet: CSSStyleSheet): string[] {
  */
 class SheetRegistry {
   private sheetIds = new WeakMap<CSSStyleSheet, string>();
-  private sheets = new Map<string, CSSStyleSheet>();
+  /** Weak, so that sheets the page drops can be collected. */
+  private sheets = new Map<string, WeakRef<CSSStyleSheet>>();
   private ruleIds = new WeakMap<StyleRule, number>();
   private nextRuleId = new WeakMap<CSSStyleSheet, number>();
   private seq = 0;
@@ -303,7 +319,7 @@ class SheetRegistry {
     if (!id) {
       id = `sheet-${++this.seq}`;
       this.sheetIds.set(sheet, id);
-      this.sheets.set(id, sheet);
+      this.sheets.set(id, new WeakRef(sheet));
     }
     return id;
   }
@@ -315,13 +331,16 @@ class SheetRegistry {
   rebind(sheet: CSSStyleSheet, replacement: CSSStyleSheet) {
     const id = this.idOf(sheet);
     this.sheetIds.set(replacement, id);
-    this.sheets.set(id, replacement);
+    this.sheets.set(id, new WeakRef(replacement));
     if (this.inspectorSheet === sheet) this.inspectorSheet = replacement;
   }
 
   get(styleSheetId: string): CSSStyleSheet {
-    const sheet = this.sheets.get(styleSheetId);
-    if (!sheet) throw new CdpError('No style sheet with given id found');
+    const sheet = this.sheets.get(styleSheetId)?.deref();
+    if (!sheet) {
+      this.sheets.delete(styleSheetId);
+      throw new CdpError('No style sheet with given id found');
+    }
     return sheet;
   }
 
@@ -1052,7 +1071,7 @@ export function registerCss(ctx: Context) {
     const layerOrders = new Map<TreeScope, Map<string, number>>();
     const pending: { sheet: CSSStyleSheet; tree: TreeScope; entry: Entry }[] = [];
     for (const { sheet, tree } of sheets.scoped()) {
-      if (sheet.disabled) continue;
+      if (sheet.disabled || !sheetApplies(sheet)) continue;
       let layerOrder = layerOrders.get(tree);
       if (!layerOrder) layerOrders.set(tree, (layerOrder = new Map()));
       for (const entry of sheets.entries(sheet, true, layerOrder)) pending.push({ sheet, tree, entry });
@@ -1159,15 +1178,17 @@ export function registerCss(ctx: Context) {
     const elRoot = el.getRootNode();
     const groups: [Candidate[] | undefined, 'own' | 'host' | 'slotted', HTMLSlotElement | null, number][] = [
       [byTree.get(elRoot instanceof ShadowRoot ? elRoot : document), 'own', null, 0],
-      [ownShadow ? byTree.get(ownShadow) : undefined, 'host', null, 0],
     ];
     // A slot can itself be assigned to a slot further in: `::slotted()` of each of those trees
     // matches, the trees further in losing to those closer to the element, like in Chrome.
-    let depth = 0;
+    // Rules of inner trees lose to those of the element's own tree, whatever their layer or
+    // specificity (the context of the cascade), and like in Chrome, `:host` ones lose to all.
+    let depth = 1;
     for (let slot = el.assignedSlot; slot; slot = slot.assignedSlot) {
       const slotTree = slot.getRootNode();
       if (slotTree instanceof ShadowRoot) groups.push([byTree.get(slotTree), 'slotted', slot, -depth++]);
     }
+    groups.push([ownShadow ? byTree.get(ownShadow) : undefined, 'host', null, -depth]);
     for (const [group, kind, slot, rank] of groups)
       for (const candidate of group ?? []) {
         const { sheet, tree, rule, order, layer, containers, scope, selectors } = candidate;
@@ -1210,7 +1231,7 @@ export function registerCss(ctx: Context) {
           rank,
         });
       }
-    // Layers, then specificity, then scope proximity (nearer roots win), then order of
+    // Context, then layers, then specificity, then scope proximity (nearer roots win), then order of
     // appearance. Inspector rules win over regular ones of equal specificity, as they come last.
     return matches
       .sort(
@@ -1518,14 +1539,16 @@ export function registerCss(ctx: Context) {
         throw new CdpError('Failed to parse rule text');
       }
       const text = rule.cssText;
+      // Redo inserts a new rule object, which the next undo removes.
+      let added: CSSRule = rule;
       history.record({
         undo: () => {
-          const at = Array.from(target.cssRules).indexOf(rule);
+          const at = Array.from(target.cssRules).indexOf(added);
           if (at >= 0) target.deleteRule(at);
           stylesChanged();
         },
         redo: () => {
-          target.insertRule(text, Math.min(index, target.cssRules.length));
+          added = target.cssRules[target.insertRule(text, Math.min(index, target.cssRules.length))] ?? added;
           stylesChanged();
         },
       });

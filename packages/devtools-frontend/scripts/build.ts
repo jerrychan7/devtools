@@ -10,7 +10,9 @@
 //
 // Flags:
 //   --latest     build the tip of origin/main instead of REVISION, and pin it on success
-//   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout)
+//                (with --no-sync: pin the checkout's HEAD)
+//   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout): builds
+//                and labels the checkout's HEAD, whatever REVISION says
 //   --reset      discard edits to upstream files in the checkout that the patches do not
 //                account for, instead of stopping (see "Patches" below)
 //   --copy-only  implies --no-sync and also skips the build: only bundle the last build's
@@ -54,7 +56,13 @@ if (!fs.existsSync(path.join(src, '.git'))) {
 }
 
 let revision = fs.readFileSync(revisionFile, 'utf8').trim();
-if (!noSync) {
+if (noSync) {
+  // What is built is the checkout as it stands, e.g. upstream's tip left by a failed --latest.
+  const head = read('git', ['rev-parse', 'HEAD']);
+  if (head !== revision && !args.has('--latest'))
+    console.warn(`The checkout is at ${head}, not REVISION ${revision}: add --latest to pin it.`);
+  revision = head;
+} else {
   run('git', ['fetch', 'origin', 'main']);
   if (args.has('--latest')) revision = read('git', ['rev-parse', 'origin/main']);
   run('git', ['checkout', '--force', '--detach', revision]);

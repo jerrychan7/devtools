@@ -18,9 +18,9 @@ function newId() {
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function targetId() {
+function targetId(fresh = false) {
   try {
-    const id = sessionStorage.getItem(ID_KEY) ?? newId();
+    const id = (!fresh && sessionStorage.getItem(ID_KEY)) || newId();
     sessionStorage.setItem(ID_KEY, id);
     return id;
   } catch {
@@ -42,8 +42,12 @@ function favicon() {
  * sends meanwhile is queued. Returns a function that disconnects.
  */
 export function connectRemote(createServer: () => CdpServer, serverUrl: string): () => void {
-  const url = new URL(`target/${targetId()}`, new URL(serverUrl, location.href));
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const targetUrl = (id: string) => {
+    const url = new URL(`target/${id}`, new URL(serverUrl, location.href));
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return url;
+  };
+  let url = targetUrl(targetId());
   // The page's own WebSocket: the connection is not one of the page's.
   const Socket = installProbe().WebSocket;
   const queue: string[] = [];
@@ -68,6 +72,8 @@ export function connectRemote(createServer: () => CdpServer, serverUrl: string):
         favicon: favicon(),
         userAgent: navigator.userAgent,
         secure: isSecureContext,
+        // For a new relay (the server restarted) to end the sessions it does not know.
+        sessions: [...sessions.keys()],
       },
     });
 
@@ -82,8 +88,10 @@ export function connectRemote(createServer: () => CdpServer, serverUrl: string):
     ws.onmessage = event => {
       if (typeof event.data === 'string') receive(event.data);
     };
-    ws.onclose = () => {
+    ws.onclose = event => {
       if (closed || socket !== ws) return;
+      // Another page took the id (a duplicated tab copies sessionStorage): this one gets a new one.
+      if (event.code === 4001) url = targetUrl(targetId(true));
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, MAX_DELAY);
     };

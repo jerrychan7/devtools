@@ -68,10 +68,12 @@ const shellKey = (id: string) =>
   new URL(`/__devtools-anywhere-shell/${encodeURIComponent(id)}`, self.location.href).href;
 
 /**
- * Same-origin scripts with an integrity hash in the pages this worker passed through (see
- * `inject`): not rewritten, or the check would fail.
+ * The documents this worker gave the probe (by client id), each with the same-origin scripts its
+ * markup has an integrity hash for (see `inject`): not rewritten, or the check would fail. Only
+ * these documents' scripts are rewritten: elsewhere (an about:blank or srcdoc frame, the DevTools
+ * frontend) there is no probe to define the hook. Documents that are gone are dropped.
  */
-const integrityUrls = new Set<string>();
+const probed = new Map<string, Set<string>>();
 
 /** Client ids of shell documents that made the handshake (loaded lazily from the cache). */
 let shells: Promise<Set<string>> | undefined;
@@ -124,7 +126,9 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') {
     // Only iframe navigations: top-level pages pass through untouched.
     if (request.destination !== 'iframe') return;
-    event.respondWith(shellOpen().then(open => (open ? inject(request, probe) : fetch(request))));
+    event.respondWith(
+      shellOpen().then(open => (open ? inject(request, probe, event.resultingClientId) : fetch(request)))
+    );
   } else if (
     DESTINATIONS.has(request.destination) &&
     request.method === 'GET' &&
@@ -149,8 +153,13 @@ const headersToObject = (headers: Headers) => Object.fromEntries(headers.entries
 async function report(event: FetchEvent, fromWindow: boolean): Promise<Response> {
   const request = event.request;
   const original = await fetch(request);
+  const integrityUrls = probed.get(event.clientId);
   const response =
-    fromWindow && request.destination === 'script' && !request.integrity && !integrityUrls.has(request.url)
+    fromWindow &&
+    integrityUrls &&
+    request.destination === 'script' &&
+    !request.integrity &&
+    !integrityUrls.has(request.url)
       ? await rewriteDebugger(original)
       : original;
   event.waitUntil(
@@ -210,9 +219,15 @@ function decodeScript(
     offsets[text.length] = at;
     return { text, byteOffset: index => offsets[index] ?? at };
   }
-  // One character per byte: the offsets are the byte offsets.
-  if (SINGLE_BYTE.test(charset)) return { text: new TextDecoder('latin1').decode(bytes), byteOffset: index => index };
-  return undefined;
+  // One character per byte: the offsets are the byte offsets. Decoded in its own charset, since
+  // the letters differ (0xD7 is `Ч` in windows-1251, `×` in latin1); a label this browser does
+  // not know is left alone.
+  if (!SINGLE_BYTE.test(charset)) return undefined;
+  try {
+    return { text: new TextDecoder(charset).decode(bytes), byteOffset: index => index };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -253,10 +268,12 @@ async function rewriteDebugger(response: Response): Promise<Response> {
   return new Response(bytes, { status: response.status, statusText: response.statusText, headers });
 }
 
-async function inject(request: Request, probeUrl: string): Promise<Response> {
+async function inject(request: Request, probeUrl: string, clientId: string): Promise<Response> {
   const response = await fetch(request);
   const type = response.headers.get('content-type') || '';
   if (response.type === 'opaqueredirect' || !response.body || !type.includes('text/html')) return response;
+  for (const id of probed.keys()) if (!(await self.clients.get(id))) probed.delete(id);
+  const integrityUrls = new Set<string>();
 
   // Scripts with an integrity hash, as the page's markup has them: Chrome leaves `integrity` out
   // of the requests the parser makes for them.
@@ -292,7 +309,10 @@ async function inject(request: Request, probeUrl: string): Promise<Response> {
     for (const part of parts) out.set(part, (at += part.length) - part.length);
     return out;
   };
-  const injectAt = (at: number) => concat(pending.subarray(0, at), tag, pending.subarray(at));
+  const injectAt = (at: number) => {
+    if (clientId) probed.set(clientId, integrityUrls);
+    return concat(pending.subarray(0, at), tag, pending.subarray(at));
+  };
 
   // Streams the page through, deciding as soon as <head> and the tag after it arrive: the
   // DevTools frontend (its marker already received) passes through untouched, other pages get

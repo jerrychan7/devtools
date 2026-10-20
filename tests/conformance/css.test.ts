@@ -170,6 +170,30 @@ describe('CSS', () => {
     assert.equal(outline, 'solid');
   });
 
+  test('an added rule is taken back by undo after undo and redo', async () => {
+    const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', { frameId: 'x' });
+    const count = () =>
+      t.page.evaluate(
+        () =>
+          Array.from(document.styleSheets)
+            .flatMap(s => Array.from(s.cssRules))
+            .filter(r => r.cssText.includes('.undo-twice')).length
+      );
+    await t.ours.send('DOM.markUndoableState');
+    await t.ours.send('CSS.addRule', {
+      styleSheetId,
+      ruleText: '.undo-twice { color: rgb(5, 5, 5); }',
+      location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    });
+    await t.ours.send('DOM.markUndoableState');
+    const seen = [await count()];
+    for (const step of ['DOM.undo', 'DOM.redo', 'DOM.undo'] as const) {
+      await t.ours.send(step);
+      seen.push(await count());
+    }
+    assert.deepEqual(seen, [1, 0, 1, 0]);
+  });
+
   /**
    * The fixture has two style sheets that differ only in the class name (twin-o, twin-c). Each
    * side edits its own, so the responses can be compared without one edit seeing the other's.

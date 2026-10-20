@@ -160,7 +160,7 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync`。之后跑 `pnpm test`：新版前端可能会调用 CDP 服务端尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`）。之后跑 `pnpm test`：新版前端可能会调用 CDP 服务端尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
 
 ## 3. 开发完成
 

@@ -180,14 +180,18 @@ function observeResources(
   if (typeof PerformanceObserver === 'undefined') return;
   // In shell mode with the Service Worker, it reports what Resource Timing does not expose
   // (headers, status text) of same-origin subresources, before the request's entry exists.
-  // They are matched by URL; a late report still completes the record.
+  // They are matched by URL; a late report still completes the record, but only one that was
+  // loaded under our worker and has had no report yet, the latest first: an older one of the
+  // same URL (from before the worker took over) must not take the next request's report.
   const details = new Map<string, Partial<ProbeRequest>[]>();
+  const awaiting = new WeakSet<ProbeRequest>();
+  let isOurs = (_source: unknown) => false;
   const sw = navigator.serviceWorker;
   if (sw && swUrl) {
     // Only reports from our own worker (its URL differs in the query only), and only the
     // fields it sends: the page's own worker must not rewrite the records.
     const ours = new URL(swUrl, location.href);
-    const isOurs = (source: unknown) => {
+    isOurs = (source: unknown) => {
       if (!(source instanceof ServiceWorker)) return false;
       const url = new URL(source.scriptURL);
       return url.origin === ours.origin && url.pathname === ours.pathname;
@@ -210,9 +214,15 @@ function observeResources(
       if (typeof statusText === 'string') patch.statusText = statusText;
       const res = headers(responseHeaders);
       if (res) patch.responseHeaders = res;
-      const rec = requests.find(r => r.url === url && r.initiatorType && !Object.keys(r.responseHeaders || {}).length);
-      if (rec) update(rec, patch);
-      else {
+      let rec: ProbeRequest | undefined;
+      for (let i = requests.length; i-- && !rec;) {
+        const r = requests[i];
+        if (r && r.url === url && awaiting.has(r)) rec = r;
+      }
+      if (rec) {
+        awaiting.delete(rec);
+        update(rec, patch);
+      } else {
         let list = details.get(url);
         if (!list) details.set(url, (list = []));
         list.push(patch);
@@ -235,7 +245,8 @@ function observeResources(
     // Not in TypeScript's DOM types yet (Chrome 129+).
     const mimeType = (entry as PerformanceResourceTiming & { contentType?: string }).contentType || '';
     const status = entry.responseStatus || 0;
-    add({
+    const patch = details.get(entry.name)?.shift();
+    const rec: ProbeRequest = {
       requestId: '',
       type: resourceType(entry, mimeType),
       initiatorType: entry.entryType === 'navigation' ? 'navigation' : entry.initiatorType,
@@ -252,8 +263,10 @@ function observeResources(
       mimeType,
       encodedDataLength: entry.transferSize,
       endTime: entry.responseEnd,
-      ...details.get(entry.name)?.shift(),
-    });
+      ...patch,
+    };
+    if (!patch && isOurs(navigator.serviceWorker?.controller)) awaiting.add(rec);
+    add(rec);
   };
   for (const type of ['navigation', 'resource']) {
     try {

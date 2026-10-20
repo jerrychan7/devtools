@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import {
   lastExpressionStatement,
   returnOutsideFunction,
   topLevelLexicalNames,
+  topLevelVarNames,
   tokenize,
 } from '../../packages/cdp-server/src/core/lexer.ts';
 
@@ -163,9 +164,25 @@ test('recovers from syntax errors', () => {
   assert.deepEqual(debuggerStatements('`unterminated ${ debugger'), [17]);
 });
 
+test('a pattern cut short by a semicolon ends', () => {
+  // These used to loop forever.
+  assert.deepEqual(topLevelLexicalNames('let [a;'), ['a']);
+  assert.deepEqual(topLevelLexicalNames('let [a = 1;'), ['a']);
+  assert.deepEqual(topLevelLexicalNames('let {a;'), ['a']);
+  assert.deepEqual(topLevelVarNames('var [a;'), ['a']);
+});
+
+test('class bodies: without a space, and not a brace in the heritage', () => {
+  assert.deepEqual(debuggerStatements('x=class{debugger=1}'), []);
+  assert.deepEqual(debuggerStatements('class A extends f({}) { debugger = 1 }'), []);
+  assert.deepEqual(debuggerStatements('class A extends f({ m() { debugger } }) {}'), [26]);
+});
+
 // Corpus comparison with acorn.
 
 function collect(dir: string, out: string[], limit: number) {
+  // es-module-lexer.ignore is a local, git-ignored checkout: the corpus goes without it when absent.
+  if (!existsSync(dir)) return;
   for (const name of readdirSync(dir).sort()) {
     if (out.length >= limit) return;
     const path = join(dir, name);

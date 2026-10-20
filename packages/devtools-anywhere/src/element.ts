@@ -324,10 +324,19 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     }
   }
 
+  /**
+   * Back from the back/forward cache: the worker did not see this shell while it was there and
+   * forgot it, and connectedCallback does not run again, so the handshake is made again.
+   */
+  private onShellPageshow = (event: PageTransitionEvent) => {
+    if (event.persisted) navigator.serviceWorker?.controller?.postMessage({ type: SHELL_HANDSHAKE });
+  };
+
   /** In the shell: registers the Service Worker that injects the probe into iframe pages. */
   private async registerShellWorker() {
     const config = readShellConfig();
     if (!config?.sw || !navigator.serviceWorker) return;
+    window.addEventListener('pageshow', this.onShellPageshow);
     // A worker already active controls this shell: tell it right away, before the page frame
     // navigates, instead of after register() and ready.
     navigator.serviceWorker.controller?.postMessage({ type: SHELL_HANDSHAKE });
@@ -375,6 +384,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect = null;
     this.loadedUrl = '';
     window.removeEventListener('message', this.onFrontendRequest);
+    window.removeEventListener('pageshow', this.onShellPageshow);
   }
 
   attributeChangedCallback() {
