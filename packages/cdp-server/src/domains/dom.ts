@@ -1,9 +1,21 @@
 import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, type Context } from '../core/context';
 import { FORCE_ATTRIBUTE, PseudoElement, closestOwn, isOwn, truncateNodeValue, visibleAttributes } from '../core/nodes';
-import { editAttributes, editNodeValue, editPosition, editReplace, historyOf } from '../core/history';
+import { editAttributes, editNodeValue, editPosition, editReplace, historyOf, patchOuterHTML } from '../core/history';
 import { CdpError } from '../core/server';
-import { type Box, type Quad, hasTransformedAncestor, localToViewport, mapQuad } from '../core/geometry';
+import {
+  type Box,
+  type Quad,
+  hasTransformedAncestor,
+  isInlineBox,
+  lineContentBoxes,
+  localToViewport,
+  mapQuad,
+  svgLayout,
+  svgRootLayout,
+  unmapRects,
+  untransformedBoxes,
+} from '../core/geometry';
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string };
 
@@ -50,6 +62,7 @@ const quad = (r: { left: number; top: number; right: number; bottom: number }) =
  * null for plain layouts, where the bounding rectangle is exact.
  */
 function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: number; height: number } | null {
+  if (el instanceof SVGSVGElement && hasTransformedAncestor(el)) return svgRootLayout(el);
   if (!(el instanceof HTMLElement) || !hasTransformedAncestor(el)) return null;
   const m = localToViewport(el);
   if (!m || (m.is2D && m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1)) return null;
@@ -59,12 +72,14 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
   const xs: number[] = [];
   const ys: number[] = [];
   mapQuad(m, { left: 0, top: 0, right: width, bottom: height }).forEach((v, i) => (i % 2 ? ys : xs).push(v));
-  const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+  // The line boxes of an inline element can fall short of its bounds, when transformed.
+  const inline = getComputedStyle(el).display === 'inline';
+  const near = (a: number, b: number, inside: number) => (inline ? (b - a) * inside >= -1 : Math.abs(a - b) <= 1);
   const ok =
-    near(Math.min(...xs), rect.left) &&
-    near(Math.max(...xs), rect.right) &&
-    near(Math.min(...ys), rect.top) &&
-    near(Math.max(...ys), rect.bottom);
+    near(Math.min(...xs), rect.left, 1) &&
+    near(Math.max(...xs), rect.right, -1) &&
+    near(Math.min(...ys), rect.top, 1) &&
+    near(Math.max(...ys), rect.bottom, -1);
   return ok ? { m, width, height } : null;
 }
 
@@ -73,6 +88,11 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
  * quads like Chrome's, with the untransformed layout size as width and height.
  */
 export function boxModel(el: Element): Protocol.DOM.BoxModel {
+  const svg = svgLayout(el);
+  if (svg) {
+    const { quad: q, width, height } = svg;
+    return { content: q, padding: q, border: q, margin: q, width, height };
+  }
   const rect = el.getBoundingClientRect();
   const style = getComputedStyle(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
@@ -118,14 +138,31 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
   };
 }
 
-/** Border quads of an element for DOM.getContentQuads: transformed when it is. */
+/** Quads of an element for DOM.getContentQuads: its border box, or its line boxes; transformed when it is. */
 function elementQuads(el: Element): Quad[] {
+  const svg = svgLayout(el);
+  if (svg) return [svg.quad];
   const rects = Array.from(el.getClientRects());
-  if (rects.length === 1 && rects[0]) {
+  const inline = isInlineBox(el);
+  let boxes: Box[] = rects.map(r => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
+  let m: DOMMatrix | null = null;
+  if (rects.length === 1 && rects[0] && !inline) {
     const layout = transformedLayout(el, rects[0]);
-    if (layout) return [mapQuad(layout.m, { left: 0, top: 0, right: layout.width, bottom: layout.height })];
+    if (layout) {
+      m = layout.m;
+      boxes = [{ left: 0, top: 0, right: layout.width, bottom: layout.height }];
+    }
+  } else if (rects.length) {
+    const layout = transformedLayout(el, el.getBoundingClientRect());
+    // When the bounds do not tell the line boxes apart, they are measured untransformed.
+    const local = layout && (unmapRects(layout.m, rects) ?? (inline ? untransformedBoxes(el) : null));
+    if (layout && local) {
+      m = layout.m;
+      boxes = local;
+    }
   }
-  return rects.map(quad);
+  if (inline) boxes = lineContentBoxes(el, boxes);
+  return boxes.map(b => (m ? mapQuad(m, b) : quad(b)));
 }
 
 /**
@@ -276,6 +313,19 @@ export function registerDom(ctx: Context) {
     // nodes inserted by a later record must not serve as the position of an earlier one.
     const pending = new Set<Node>();
     for (const record of records) record.addedNodes.forEach(node => pending.add(node));
+    // Like Chrome, each attribute change is reported with the value it set: the old value of the
+    // next change to the attribute, or its current value.
+    const valueAfter = new Map<MutationRecord, string | null>();
+    const later = new Map<Node, Map<string, string | null>>();
+    for (let i = records.length - 1; i >= 0; i--) {
+      const record = records[i];
+      const name = record?.attributeName;
+      if (!record || record.type !== 'attributes' || !name || !(record.target instanceof Element)) continue;
+      const values = later.get(record.target) ?? new Map<string, string | null>();
+      later.set(record.target, values);
+      valueAfter.set(record, values.has(name) ? (values.get(name) ?? null) : record.target.getAttribute(name));
+      values.set(name, record.oldValue);
+    }
     for (const record of records) {
       const target = record.target;
       const targetId = nodes.knownId(target);
@@ -295,10 +345,13 @@ export function registerDom(ctx: Context) {
           server.emit('DOM.childNodeRemoved', { parentNodeId: targetId, nodeId });
           nodes.forget(node);
         });
-        record.addedNodes.forEach(node => {
+        record.addedNodes.forEach((node, k) => {
           pending.delete(node);
           if (!nodes.isVisible(node) || node.parentNode !== target) return;
-          const previous = previousVisibleSibling(node, pending);
+          // The sibling it was inserted after, as Chrome reports it right away, if the client has it.
+          let previous = k ? (record.addedNodes[k - 1] ?? null) : record.previousSibling;
+          if (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
+            previous = previousVisibleSibling(node, pending);
           server.emit('DOM.childNodeInserted', {
             parentNodeId: targetId,
             previousNodeId: previous ? nodes.idOf(previous) : 0,
@@ -308,7 +361,7 @@ export function registerDom(ctx: Context) {
       } else if (record.type === 'attributes' && targetId !== undefined && target instanceof Element) {
         const name = record.attributeName;
         if (name === null || name === FORCE_ATTRIBUTE) continue;
-        const value = target.getAttribute(name);
+        const value = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
         if (value === null) server.emit('DOM.attributeRemoved', { nodeId: targetId, name });
         else server.emit('DOM.attributeModified', { nodeId: targetId, name, value });
       } else if (record.type === 'characterData' && targetId !== undefined) {
@@ -325,7 +378,13 @@ export function registerDom(ctx: Context) {
     if (observer) onMutations(observer.takeRecords());
   }
 
-  const OBSERVE: MutationObserverInit = { subtree: true, childList: true, attributes: true, characterData: true };
+  const OBSERVE: MutationObserverInit = {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeOldValue: true,
+    characterData: true,
+  };
 
   function observe() {
     observer?.disconnect();
@@ -465,11 +524,7 @@ export function registerDom(ctx: Context) {
 
     setOuterHTML(params: Protocol.DOM.SetOuterHTMLRequest) {
       const el = element(params);
-      history.record(
-        editReplace(el, () => {
-          el.outerHTML = params.outerHTML;
-        })
-      );
+      history.record(patchOuterHTML(el, params.outerHTML));
     },
 
     setNodeName(params: Protocol.DOM.SetNodeNameRequest): Protocol.DOM.SetNodeNameResponse {

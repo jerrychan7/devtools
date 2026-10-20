@@ -136,11 +136,37 @@ test('highlightNode follows a rotated element and labels its layout size', async
   await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: { showInfo: true } });
   const drawn = await t.page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>('[data-devtools-anywhere="overlay"] > div'), d => ({
-      clip: d.style.clipPath,
+      points: d.querySelector('polygon')?.getAttribute('points') ?? null,
       text: d.textContent,
     }))
   );
-  assert.match(drawn[1]?.clip ?? '', /^polygon\(/);
+  assert.ok(drawn[1]?.points);
   assert.match(drawn[4]?.text ?? '', /60 × 30$/);
+  await t.ours.send('Overlay.hideHighlight');
+});
+
+test('highlightQuad outlines a rotated quad', async () => {
+  await t.ours.send('Overlay.highlightQuad', {
+    quad: [20, 10, 40, 30, 20, 50, 0, 30],
+    color: { r: 255, g: 0, b: 0, a: 0.5 },
+    outlineColor: { r: 0, g: 0, b: 255 },
+  });
+  const drawn = await t.page.evaluate(() => {
+    const div = document.querySelector<HTMLElement>('[data-devtools-anywhere="overlay"] > div');
+    const polygon = div?.querySelector('polygon');
+    const r = div?.getBoundingClientRect();
+    return {
+      box: r ? [r.left, r.top, r.width, r.height] : null,
+      points: polygon?.getAttribute('points'),
+      fill: polygon ? getComputedStyle(polygon).fill : null,
+      stroke: polygon ? getComputedStyle(polygon).stroke : null,
+    };
+  });
+  assert.deepEqual(drawn, {
+    box: [0, 10, 40, 40],
+    points: '20,0 40,20 20,40 0,20',
+    fill: 'rgba(255, 0, 0, 0.5)',
+    stroke: 'rgb(0, 0, 255)',
+  });
   await t.ours.send('Overlay.hideHighlight');
 });

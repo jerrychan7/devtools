@@ -117,15 +117,26 @@ class Highlighter {
     return div;
   }
 
-  /** Fills any quad: its bounding rectangle, clipped to the quad when transformed. */
+  /** Fills any quad: a rectangle, or else a polygon over its bounding rectangle, outlined like Chrome. */
   quad(q: number[], fill: string, outline?: string) {
     const { left, top, right, bottom } = bounds(q);
-    const div = this.rect(left, top, right - left, bottom - top, fill, isRect(q) ? outline : undefined);
-    if (!isRect(q)) {
-      const points: string[] = [];
-      for (let i = 0; i + 1 < q.length; i += 2) points.push(`${(q[i] ?? 0) - left}px ${(q[i + 1] ?? 0) - top}px`);
-      div.style.clipPath = `polygon(${points.join(',')})`;
-    }
+    if (isRect(q)) return this.rect(left, top, right - left, bottom - top, fill, outline);
+    const div = this.rect(left, top, right - left, bottom - top, 'transparent');
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('width', String(right - left));
+    svg.setAttribute('height', String(bottom - top));
+    // Inline, so that the page's own rules for svg and polygon do not apply.
+    svg.style.cssText = `position:absolute;left:0;top:0;display:block;overflow:visible;margin:0;padding:0;border:0;
+      width:${right - left}px;height:${bottom - top}px;max-width:none;max-height:none;transform:none;opacity:1;visibility:visible`;
+    const polygon = document.createElementNS(ns, 'polygon');
+    const points: string[] = [];
+    for (let i = 0; i + 1 < q.length; i += 2) points.push(`${(q[i] ?? 0) - left},${(q[i + 1] ?? 0) - top}`);
+    polygon.setAttribute('points', points.join(' '));
+    polygon.style.cssText = `display:inline;transform:none;opacity:1;visibility:visible;stroke-dasharray:none;fill:${fill};
+      stroke:${outline || 'none'};stroke-width:1px`;
+    svg.appendChild(polygon);
+    div.appendChild(svg);
     return div;
   }
 

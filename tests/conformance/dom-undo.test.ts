@@ -13,7 +13,13 @@ const MARKUP =
 
 before(async () => {
   env = await launch();
-  t = await openPage(env, []);
+  t = await openPage(env, [
+    'DOM.childNodeRemoved',
+    'DOM.childNodeInserted',
+    'DOM.attributeModified',
+    'DOM.attributeRemoved',
+    'DOM.characterDataModified',
+  ]);
   for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
 });
 after(() => env?.close());
@@ -224,4 +230,115 @@ test('DOM.undo and DOM.redo take back CSS edits too', async () => {
   });
   assert.deepEqual(cssStates.ours, cssStates.chrome);
   assert.deepEqual(ours, chrome);
+});
+
+type DomNode = { nodeId: number; nodeName: string; nodeValue: string; attributes?: string[]; children?: DomNode[] };
+
+/** A name for a node that is the same on both sides. */
+const labelOf = (n: DomNode) => {
+  const attrs = n.attributes ?? [];
+  const id = attrs[attrs.indexOf('id') + 1];
+  return attrs.includes('id') && id ? `${n.nodeName}#${id}` : n.nodeValue ? `${n.nodeName}:${n.nodeValue}` : n.nodeName;
+};
+
+/** The DOM mutation events of one side, in order per kind, with node ids as labels. */
+async function mutations(side: Side, labels: Map<number, string>) {
+  await new Promise(r => setTimeout(r, 100));
+  const name = (id: number | undefined) => (id ? (labels.get(id) ?? `?${id}`) : null);
+  const learn = (n: DomNode) => {
+    labels.set(n.nodeId, labelOf(n));
+    n.children?.forEach(learn);
+  };
+  const inserted = (await side.events('DOM.childNodeInserted')).map(e => {
+    learn(e.node as DomNode);
+    return [name(e.parentNodeId), name(e.previousNodeId), labelOf(e.node as DomNode)];
+  });
+  const removed = (await side.events('DOM.childNodeRemoved')).map(e => [name(e.parentNodeId), name(e.nodeId)]);
+  const modified = (await side.events('DOM.attributeModified')).map(e => [name(e.nodeId), e.name, e.value]);
+  const attrRemoved = (await side.events('DOM.attributeRemoved')).map(e => [name(e.nodeId), e.name]);
+  const data = (await side.events('DOM.characterDataModified')).map(e => [name(e.nodeId), e.characterData]);
+  await side.clear();
+  return { inserted, removed, modified, attrRemoved, data };
+}
+
+for (const [selector, markup] of [
+  ['#a', '<div id="a" class="z" title="t"><span id="s">one</span><i>new</i></div>'],
+  ['#b', '<section><b id="b">two</b></section>'],
+  ['#b', '<i id="i1">x</i><u>y</u>'],
+  ['#p', '<p id="p">other</p>'],
+  ['#a', '<div id="a"><b id="b">two</b><span id="s">one</span></div>'],
+] as const) {
+  test(`setOuterHTML patches like Chrome, and undo and redo too: ${markup}`, async () => {
+    const result: Record<string, unknown[]> = { ours: [], chrome: [] };
+    for (const key of ['chrome', 'ours'] as const) {
+      const side = t[key];
+      await side.send('DOM.disable');
+      await side.send('DOM.enable');
+      await t.page.evaluate(html => {
+        const root = document.getElementById('undo-root') ?? document.body.appendChild(document.createElement('main'));
+        root.id = 'undo-root';
+        root.innerHTML = html;
+      }, MARKUP);
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const labels = new Map<number, string>();
+      const learn = (n: DomNode) => {
+        labels.set(n.nodeId, labelOf(n));
+        n.children?.forEach(learn);
+      };
+      learn(root as DomNode);
+      await side.clear();
+      const out = result[key] ?? [];
+      const snap = async () => out.push(await t.page.evaluate(() => document.getElementById('undo-root')?.innerHTML));
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+      await side.send('DOM.setOuterHTML', { nodeId, outerHTML: markup });
+      await side.send('DOM.markUndoableState');
+      await snap();
+      out.push(await mutations(side, labels));
+      await side.send('DOM.undo');
+      await snap();
+      out.push(await mutations(side, labels));
+      await side.send('DOM.redo');
+      await snap();
+      out.push(await mutations(side, labels));
+    }
+    assert.deepEqual(result['ours'], result['chrome']);
+  });
+}
+
+test('setOuterHTML on the document element patches the document like Chrome', async () => {
+  const result: Record<string, unknown[]> = { ours: [], chrome: [] };
+  for (const key of ['chrome', 'ours'] as const) {
+    const side = t[key];
+    await side.send('DOM.disable');
+    await side.send('DOM.enable');
+    await t.page.evaluate(html => {
+      const root = document.getElementById('undo-root') ?? document.body.appendChild(document.createElement('main'));
+      root.id = 'undo-root';
+      root.innerHTML = html;
+    }, MARKUP);
+    const { root } = await side.send('DOM.getDocument', { depth: -1 });
+    const labels = new Map<number, string>();
+    const learn = (n: DomNode) => {
+      labels.set(n.nodeId, labelOf(n));
+      n.children?.forEach(learn);
+    };
+    learn(root as DomNode);
+    await side.clear();
+    const out = result[key] ?? [];
+    const html = () => t.page.evaluate(() => document.documentElement.outerHTML);
+    const markup = (await html())
+      .replace('<html', '<html data-patched="1"')
+      .replace('<p id="p">text</p>', '<p id="p">changed</p><hr>');
+    const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'html' });
+    await side.send('DOM.setOuterHTML', { nodeId, outerHTML: markup });
+    await side.send('DOM.markUndoableState');
+    out.push(await html(), await mutations(side, labels));
+    await side.send('DOM.undo');
+    out.push(await html(), await mutations(side, labels));
+    await side.send('DOM.redo');
+    out.push(await html(), await mutations(side, labels));
+    await side.send('DOM.undo');
+    await mutations(side, labels);
+  }
+  assert.deepEqual(result['ours'], result['chrome']);
 });
