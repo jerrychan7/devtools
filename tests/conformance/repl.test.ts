@@ -131,6 +131,11 @@ test('a declaration whose initializer throws is not kept', async () => {
   await both('late');
 });
 
+test('a SyntaxError thrown while running keeps the declarations made before it', async () => {
+  await both('let parsed = 1; JSON.parse("{")');
+  await both('parsed');
+});
+
 test('top-level await with declarations', async () => {
   await both('let g = await Promise.resolve(5); g');
   await both('await 1; 2 + 3');
@@ -168,4 +173,14 @@ test('globalLexicalScopeNames includes the console declarations', async () => {
   const names = async (side: Side) =>
     [...new Set((await side.send('Runtime.globalLexicalScopeNames', {})).names)].sort();
   assert.deepEqual(await names(oursPage.ours), await names(chromePage.chrome));
+});
+
+test('strict input does not list the declarations it keeps to itself', async () => {
+  // Unlike Chrome's REPL, strict input is evaluated as it is: its declarations end with it. They are
+  // not listed then, and the name stays free to declare.
+  const send = (expression: string) => oursPage.ours.send('Runtime.evaluate', { expression, replMode: true });
+  await send("'use strict'; let strictOnly = 1; var strictVar = 2");
+  const { names } = await oursPage.ours.send('Runtime.globalLexicalScopeNames', {});
+  assert.ok(!names.includes('strictOnly'));
+  assert.equal(outcome(await send('let strictVar = 3; strictVar')).value, 3);
 });

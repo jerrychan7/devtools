@@ -6,6 +6,8 @@ import {
   topLevelLexicalNames,
   returnOutsideFunction,
   topLevelVarNames,
+  tokenize,
+  type LexOptions,
 } from '../core/lexer';
 import { CdpError } from '../core/server';
 import { parseStack } from '../core/stack';
@@ -70,8 +72,8 @@ function compiles(script: string, asyncBody?: string): boolean {
 }
 
 /** `code` with its last statement returned when it is an expression statement. */
-function returnLast(code: string): string {
-  const at = lastExpressionStatement(code);
+function returnLast(code: string, options?: LexOptions): string {
+  const at = lastExpressionStatement(code, options);
   return at === undefined ? code : `${code.slice(0, at)}return ${code.slice(at)}`;
 }
 
@@ -346,11 +348,19 @@ function replBindings() {
      * SyntaxError for a name the page declared.
      */
     rewrite(expression: string): { script: string; body: string; commit: () => void } {
-      const declarations = topLevelLexicalDeclarations(expression);
+      // Lexed once for every query below.
+      const lexed = { tokens: tokenize(expression) };
+      const declarations = topLevelLexicalDeclarations(expression, lexed);
       pending = declarations.flatMap(declaration => declaration.names);
-      pendingVars = topLevelVarNames(expression);
-      const plain = { script: expression, body: returnLast(expression), commit: () => {} };
-      if (!declarations.length || /^\s*(['"])use strict\1/.test(expression)) return plain;
+      pendingVars = topLevelVarNames(expression, lexed);
+      const plain = () => ({ script: expression, body: returnLast(expression, lexed), commit: () => {} });
+      if (/^\s*(['"])use strict\1/.test(expression)) {
+        // Strict eval code keeps its declarations to itself: none is left to list.
+        pending = [];
+        pendingVars = [];
+        return plain();
+      }
+      if (!declarations.length) return plain();
       for (const name of pending)
         if (!bindings.has(name) && declaredByPage(name)) {
           pending = [];
@@ -396,7 +406,7 @@ function replBindings() {
         body = splice(body, start, kind.length, '0,');
       }
       // The completion value is the original's last expression statement, not a rewritten declaration.
-      const last = lastExpressionStatement(expression);
+      const last = lastExpressionStatement(expression, lexed);
       if (last !== undefined) inserts.push({ at: last, text: 'return ' });
       for (const { at, text } of inserts.sort((x, y) => y.at - x.at)) body = body.slice(0, at) + text + body.slice(at);
       // On a line of its own after the input: no column moves.
@@ -420,9 +430,14 @@ function replBindings() {
  * module's name). The console's declarations (see `replBindings`) are added by the caller.
  */
 function globalLexicalNames(probe: Context['probe']) {
-  /** Names per external script URL, and per inline script text. */
-  const external = new Map<string, Promise<string[]>>();
-  const inline = new Map<string, string[]>();
+  /**
+   * Names per external script URL, and per inline script text. Each pass keeps only the entries it
+   * used, so scripts gone from the page and from `probe.requests` do not stay in memory.
+   */
+  let external = new Map<string, Promise<string[]>>();
+  let inline = new Map<string, string[]>();
+  let nextExternal = new Map<string, Promise<string[]>>();
+  let nextInline = new Map<string, string[]>();
 
   const lex = (source: string) => {
     try {
@@ -435,14 +450,25 @@ function globalLexicalNames(probe: Context['probe']) {
   const isClassic = (script: HTMLScriptElement) =>
     !script.type || /^(?:text|application)\/(?:x-)?(?:java|ecma)script$/i.test(script.type.trim());
 
-  function fromUrl(url: string): Promise<string[]> {
-    let names = external.get(url);
+  /**
+   * `cachedOnly`: a script no longer in the document (often JSONP, or a URL with a timestamp) is
+   * read only from the HTTP cache, and left out when it cannot be: fetching it again would hit the
+   * network and run the server's side effects again.
+   */
+  function fromUrl(url: string, cachedOnly = false): Promise<string[]> {
+    let names = nextExternal.get(url) ?? external.get(url);
     if (!names) {
-      names = refetch(probe, url)
-        .then(res => res.text())
-        .then(lex, () => []);
-      external.set(url, names);
+      const res = cachedOnly
+        ? url.startsWith(`${location.origin}/`)
+          ? probe.fetch(url, { cache: 'only-if-cached', mode: 'same-origin' }).then(res => {
+              if (!res.ok) throw new Error(`${res.status}`);
+              return res;
+            })
+          : Promise.reject(new Error('cross-origin'))
+        : refetch(probe, url);
+      names = res.then(res => res.text()).then(lex, () => []);
     }
+    nextExternal.set(url, names);
     return names;
   }
 
@@ -505,15 +531,19 @@ function globalLexicalNames(probe: Context['probe']) {
             lists.push(fromUrl(script.src));
         } else if (isClassic(script)) {
           const text = script.text;
-          let names = inline.get(text);
-          if (!names) inline.set(text, (names = lex(text)));
+          const names = nextInline.get(text) ?? inline.get(text) ?? lex(text);
+          nextInline.set(text, names);
           lists.push(names);
         }
       }
       // Scripts added and removed again, or loaded by other means.
       for (const rec of probe.requests)
         if (rec.type === 'Script' && rec.state === 'done' && !modules.has(rec.url) && !probe.ownUrls.has(rec.url))
-          lists.push(fromUrl(rec.url));
+          lists.push(fromUrl(rec.url, true));
+      external = nextExternal;
+      inline = nextInline;
+      nextExternal = new Map();
+      nextInline = new Map();
       const names = new Set<string>();
       for (const list of await Promise.all(lists)) for (const name of list) names.add(name);
       return [...names].filter(declared);
@@ -648,14 +678,17 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
           const body = rewritten?.body ?? returnLast(params.expression);
           // Like V8, input that does not compile declares nothing: the bindings (properties of
           // window that cannot be removed) are only made for input that does.
-          if (rewritten && compiles(script, allowAwait ? body : undefined)) rewritten.commit();
+          const compiled = rewritten !== undefined && compiles(script, allowAwait ? body : undefined);
+          if (compiled) rewritten.commit();
           let ran: ReturnType<typeof run>;
           try {
             ran = run(script, allowAwait, body);
           } catch (e) {
+            // Whether it compiled, not the error's type: a SyntaxError is also thrown while running
+            // (`let x = 1; JSON.parse('{')`), after the declarations were made.
             if (params.replMode) {
-              if (e instanceof SyntaxError) repl.failed();
-              else repl.compiled();
+              if (compiled) repl.compiled();
+              else repl.failed();
             }
             throw e;
           }

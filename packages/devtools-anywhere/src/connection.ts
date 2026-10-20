@@ -197,6 +197,8 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
     } catch {
       // Cross-origin page: assume it is like the shell.
     }
+    const { protocol, hostname, origin } = new URL(url);
+    const localhost = /^(.+\.)?localhost$|^127(\.\d+){3}$|^\[::1\]$/.test(hostname);
     postFrontend(JSON.stringify({ method: 'Runtime.executionContextsCleared', params: {} }));
     postFrontend(
       JSON.stringify({
@@ -207,9 +209,10 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
             loaderId,
             url,
             domainAndRegistry: '',
-            securityOrigin: new URL(url).origin,
+            // As Chrome serializes it (location.origin), where the URL standard says "null".
+            securityOrigin: protocol === 'file:' ? 'file://' : origin,
             mimeType: 'text/html',
-            secureContextType: secure ? 'Secure' : 'InsecureScheme',
+            secureContextType: !secure ? 'InsecureScheme' : localhost ? 'SecureLocalhost' : 'Secure',
             crossOriginIsolatedContextType: 'NotIsolated',
             gatedAPIFeatures: [],
           },

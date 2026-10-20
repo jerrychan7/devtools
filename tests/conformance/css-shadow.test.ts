@@ -15,7 +15,8 @@ before(async () => {
   t = await openPage(env, ['CSS.styleSheetAdded']);
   await t.page.evaluate(() => {
     const doc = new CSSStyleSheet();
-    doc.replaceSync('.sh-adopted { color: rgb(9, 9, 9); }');
+    // Less specific than `:host(.sh-h)` and `::slotted(#sh-light)`, yet win over them (outer tree).
+    doc.replaceSync('.sh-adopted { color: rgb(9, 9, 9); } div.sh-h { margin: 1px; }');
     document.adoptedStyleSheets = [doc];
     document.body.insertAdjacentHTML(
       'beforeend',
@@ -29,6 +30,7 @@ before(async () => {
       :host(.sh-h) { padding: 1px; }
       :host(.sh-x) { padding: 2px; }
       ::slotted(span) { color: rgb(2, 2, 2); }
+      ::slotted(#sh-light) { margin: 2px; }
       .sh-in { color: rgb(3, 3, 3); }
       .sh-in:hover { color: rgb(4, 4, 4); }
     </style><p class="sh-in" id="sh-in">in</p><slot></slot>`;
@@ -202,4 +204,25 @@ test('a custom element defined after CSS.enable brings the rules of its shadow t
     const [o, c] = await matched(id);
     assert.deepEqual(o, c);
   }
+});
+
+test('moving a host takes forced pseudo-classes off the elements of its shadow tree', async () => {
+  const result: unknown[] = [];
+  for (const side of [t.ours, t.chrome]) {
+    await side.send('CSS.forcePseudoState', { nodeId: await nodeId(side, 'sh-in'), forcedPseudoClasses: ['hover'] });
+    // Removed and inserted again in the same task: still connected afterwards.
+    await t.page.evaluate(() => {
+      const host = document.getElementById('sh-host');
+      if (!host?.parentNode) throw new Error('no host');
+      host.parentNode.insertBefore(host, host.nextSibling);
+    });
+    const id = await nodeId(side, 'sh-in');
+    const m = await side.send('CSS.getMatchedStylesForNode', { nodeId: id });
+    const color = (await side.send('CSS.getComputedStyleForNode', { nodeId: id })).computedStyle.find(
+      p => p.name === 'color'
+    );
+    result.push({ matched: selectors(m.matchedCSSRules ?? []), color: color?.value });
+    await side.send('CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: [] });
+  }
+  assert.deepEqual(result[0], result[1]);
 });

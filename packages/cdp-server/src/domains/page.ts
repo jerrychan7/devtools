@@ -16,7 +16,11 @@ export function registerPage({ server, probe }: Context) {
           domainAndRegistry: '',
           securityOrigin: location.origin,
           mimeType: 'text/html',
-          secureContextType: isSecureContext ? 'Secure' : 'InsecureScheme',
+          secureContextType: !isSecureContext
+            ? 'InsecureScheme'
+            : /^(.+\.)?localhost$|^127(\.\d+){3}$|^\[::1\]$/.test(location.hostname)
+              ? 'SecureLocalhost'
+              : 'Secure',
           crossOriginIsolatedContextType: 'NotIsolated',
           gatedAPIFeatures: [],
         },
