@@ -159,7 +159,7 @@ export interface SocketRecord {
   openTime?: number;
   /** `performance.now()` when the connection closed. */
   closeTime?: number;
-  /** Frames and errors, oldest first; the oldest are dropped past a limit. */
+  /** Frames and errors, oldest first; the oldest are dropped past `Probe.limits.socketEvents`. */
   events: SocketEvent[];
 }
 
@@ -173,11 +173,11 @@ export interface ListenerRecord {
 
 export interface Probe {
   version: 1;
-  /** Ring buffer of console calls and uncaught exceptions. */
+  /** Console calls and uncaught exceptions. */
   logs: ProbeLog[];
-  /** Ring buffer of fetch/XHR requests and the others seen by Resource Timing; records are updated in place. */
+  /** Fetch/XHR requests and the others seen by Resource Timing; records are updated in place. */
   requests: ProbeRequest[];
-  /** Ring buffer of WebSockets; records are updated in place. */
+  /** WebSockets; records are updated in place. */
   sockets: SocketRecord[];
   /** Subscribes to new log entries. Returns an unsubscribe function. */
   onLog(listener: (entry: ProbeLog) => void): () => void;
@@ -198,6 +198,19 @@ export interface Probe {
   fetch: typeof fetch;
   /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
   tools: Map<string, ToolRecord>;
+  /**
+   * How many entries each list keeps, the oldest dropped first: a coarse bound until a server
+   * mounts and sets its own.
+   */
+  limits: ProbeLimits;
+}
+
+export interface ProbeLimits {
+  logs: number;
+  requests: number;
+  sockets: number;
+  /** Per WebSocket. */
+  socketEvents: number;
 }
 
 export interface ToolRecord {

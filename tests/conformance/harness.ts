@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from '../../playground/server.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const CDP_BUNDLE = path.join(root, 'packages/cdp-server/dist/cdp-server.iife.js');
+export const CDP_BUNDLE = path.join(root, 'packages/cdp-server/dist/cdp-server.iife.js');
+export const PROBE_BUNDLE = path.join(root, 'packages/cdp-server/dist/probe.iife.js');
 const CHROME = process.env['CHROME_PATH'] || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 /** Keys whose values legitimately differ between implementations. */

@@ -20,12 +20,15 @@ import { isShellPage, readShellConfig, writeShellDocument } from './shell';
 export * from './types';
 export * from './shell';
 
-const MAX_LOGS = 1000;
-const MAX_REQUESTS = 300;
-const MAX_SOCKETS = 300;
-const MAX_SOCKET_EVENTS = 500;
+/** The probe keeps everything up to a coarse bound, for pages that never load a server. */
+const LIMIT = 10_000;
 const MAX_BODY_LENGTH = 5 * 1024 * 1024;
 const MAX_TOOL_OUTCOMES = 50;
+
+/** Drops the oldest entries of `list` past `max`. */
+export function keep(list: unknown[], max: number): void {
+  if (list.length > max) list.splice(0, list.length - max);
+}
 
 export function installProbe(): Probe {
   const w = window;
@@ -70,20 +73,23 @@ export function installProbe(): Probe {
     // Old WebViews without fetch: a rejection callers handle like any failed request.
     fetch: w.fetch ? w.fetch.bind(w) : () => Promise.reject(new TypeError('fetch is not available')),
     tools: new Map(),
+    limits: { logs: LIMIT, requests: LIMIT, sockets: LIMIT, socketEvents: LIMIT },
   };
   Object.defineProperty(w, PROBE_KEY, { value: probe });
 
   function addLog(entry: ProbeLog) {
-    if (logs.push(entry) > MAX_LOGS) logs.shift();
+    logs.push(entry);
+    keep(logs, probe.limits.logs);
     logListeners.forEach(fn => fn(entry));
   }
 
   let seq = 0;
   // Before hookListeners: the socket's own listeners are not the page's.
-  hookWebSocket(rec => {
+  hookWebSocket(probe, rec => {
     if (!rec.requestId) {
       rec.requestId = 'probe.' + ++seq;
-      if (sockets.push(rec) > MAX_SOCKETS) sockets.shift();
+      sockets.push(rec);
+      keep(sockets, probe.limits.sockets);
     }
     socketListeners.forEach(fn => fn(rec));
   });
@@ -98,7 +104,8 @@ export function installProbe(): Probe {
 
   function add(rec: ProbeRequest) {
     rec.requestId = 'probe.' + ++seq;
-    if (requests.push(rec) > MAX_REQUESTS) requests.shift();
+    requests.push(rec);
+    keep(requests, probe.limits.requests);
     requestListeners.forEach(fn => fn(rec));
     return rec;
   }
@@ -265,13 +272,14 @@ function observeResources(
  * Replaces WebSocket with a subclass that records connection, frames and close. `notify`
  * assigns the record an id the first time and publishes every change.
  */
-function hookWebSocket(notify: (rec: SocketRecord) => void) {
+function hookWebSocket(probe: Probe, notify: (rec: SocketRecord) => void) {
   const WS = window.WebSocket;
   if (!WS) return;
   const listen = EventTarget.prototype.addEventListener;
   const records = new WeakMap<WebSocket, SocketRecord>();
   const push = (rec: SocketRecord, type: 'sent' | 'received' | 'error', data?: unknown) => {
-    if (rec.events.push({ type, time: performance.now(), data }) > MAX_SOCKET_EVENTS) rec.events.shift();
+    rec.events.push({ type, time: performance.now(), data });
+    keep(rec.events, probe.limits.socketEvents);
     notify(rec);
   };
   window.WebSocket = class WebSocket extends WS {

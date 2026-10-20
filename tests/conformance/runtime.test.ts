@@ -2,7 +2,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { parseStack } from '../../packages/cdp-server/src/core/stack.ts';
-import { diffSubset, launch, openPage, waitForBoth } from './harness.ts';
+import { CDP_BUNDLE, PROBE_BUNDLE, diffSubset, launch, openPage, waitForBoth } from './harness.ts';
 import type { Env, TestPage } from './harness.ts';
 
 let env: Env | undefined;
@@ -439,5 +439,25 @@ describe('probe buffers', () => {
       return { length: logs.length, first: logs[0].args[1], last: logs[logs.length - 1].args[1] };
     })()`);
     assert.deepEqual(result, { length: 1000, first: 100, last: 1099 });
+  });
+
+  test('keeps up to 10000 entries until a server mounts, which keeps the last 1000', async () => {
+    assert.ok(env);
+    const page = await env.browser.newPage();
+    try {
+      await page.goto(env.baseUrl + '/tests/conformance/fixture.html');
+      await page.addScriptTag({ path: PROBE_BUNDLE });
+      const logs = `(() => {
+        const logs = window.__devtoolsAnywhereProbe__.logs;
+        return { length: logs.length, first: logs[0].args[1] };
+      })()`;
+      await page.evaluate(`for (let i = 0; i < 10100; i++) console.debug('flood', i)`);
+      assert.deepEqual(await page.evaluate(logs), { length: 10000, first: 100 });
+      await page.addScriptTag({ path: CDP_BUNDLE });
+      await page.evaluate(() => void window.DevtoolsAnywhereCdp.createCdpServer());
+      assert.deepEqual(await page.evaluate(logs), { length: 1000, first: 9100 });
+    } finally {
+      await page.close();
+    }
   });
 });

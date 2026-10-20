@@ -16,7 +16,7 @@ import { registerScreencast, type SnapdomLoader } from './domains/screencast';
 import { registerStorage } from './domains/storage';
 import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp';
-import { installProbe } from './probe';
+import { installProbe, keep } from './probe';
 
 export { CdpError, CdpServer } from './core/server';
 export { installProbe } from './probe';
@@ -42,12 +42,18 @@ export interface CdpServerOptions {
   loadSnapdom?: SnapdomLoader;
 }
 
+/** How many console messages V8 keeps (V8ConsoleMessageStorage's limit). */
+const MAX_CONSOLE_MESSAGES = 1000;
+
 /**
  * Creates an in-page CDP server. Reuses the probe if probe.iife.js already ran;
  * otherwise installs it now, so output from this point on is captured.
  */
 export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
   const probe = installProbe();
+  // The server sets how much the probe keeps: V8 keeps the last 1000 console messages.
+  probe.limits = { ...probe.limits, logs: MAX_CONSOLE_MESSAGES };
+  keep(probe.logs, MAX_CONSOLE_MESSAGES);
   const ctx: Context = {
     server: new CdpServer(),
     objects: new ObjectRegistry(),
