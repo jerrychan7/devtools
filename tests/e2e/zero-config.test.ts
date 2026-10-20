@@ -197,6 +197,62 @@ test('the Service Worker passes non-HTML responses through unchanged', async () 
   assert.deepEqual(await pageScripts(), []);
 });
 
+test('the Service Worker makes debugger statements log a warning', async () => {
+  await navigatePageFrame('/tests/e2e/debugger-page.html');
+  const text = 'debugger statement hit (pausing is not supported)';
+  const hits = async () =>
+    (await received()).filter(
+      m =>
+        m.method === 'Runtime.consoleAPICalled' &&
+        (m.params as Protocol.Runtime.ConsoleAPICalledEvent).type === 'warning' &&
+        firstArg(m) === text
+    );
+  await waitFor(async () => (await hits()).length >= 5);
+  const frames = (await hits()).map(
+    m => (m.params as Protocol.Runtime.ConsoleAPICalledEvent).stackTrace?.callFrames[0]
+  );
+  const at = (file: string) => frames.find(f => f?.url.endsWith(file));
+  // The position of the `debugger` keyword (0-based), then its caller below it.
+  // Columns count characters (`é` is two bytes); a `(` on the next line does not make it a call.
+  assert.deepEqual(
+    frames.filter(f => f?.url.endsWith('debugger-classic.js')).map(f => [f?.lineNumber, f?.columnNumber]),
+    [
+      [5, 15],
+      [7, 9],
+      [8, 9],
+      [9, 9],
+    ]
+  );
+  assert.deepEqual([at('debugger-module.js')?.lineNumber, at('debugger-module.js')?.columnNumber], [1, 12]);
+  assert.equal((await hits()).length, 5, 'the property named debugger is left alone');
+  const result = await page.evaluate(
+    () =>
+      (
+        document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow as {
+          __debuggerResult?: unknown;
+        }
+      )?.__debuggerResult
+  );
+  assert.deepEqual(result, ['debugger'], 'the script still runs as written');
+  // Left alone: a script with an integrity hash, and one a worker imports (no probe there).
+  const pageWindowValue = (name: string) =>
+    page.evaluate(
+      name =>
+        Reflect.get(document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow ?? {}, name),
+      name
+    );
+  assert.equal(await pageWindowValue('__sriRan'), true, 'a script with integrity still runs');
+  await waitFor(async () => (await pageWindowValue('__workerResult')) !== undefined);
+  assert.equal(await pageWindowValue('__workerResult'), true, 'the worker imported its script');
+  // The Sources panel fetches the script itself and gets the original.
+  const source = await page.evaluate(() => {
+    const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+    if (!pageWindow) throw new Error('no page frame');
+    return pageWindow.fetch('/tests/e2e/assets/debugger-classic.js').then(r => r.text());
+  });
+  assert.match(source, /^ {2}const é = x; debugger$/m);
+});
+
 test('the Service Worker leaves the same-origin DevTools frontend alone', async () => {
   // The worker controls the shell by now, so it sees the frontend frame's navigation.
   await page.evaluate(() => {

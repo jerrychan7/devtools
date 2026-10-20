@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>debugger statements</title>
+  </head>
+  <body>
+    <script src="/tests/e2e/assets/debugger-classic.js"></script>
+    <script type="module" src="/tests/e2e/assets/debugger-module.js"></script>
+    <script
+      src="/tests/e2e/assets/debugger-sri.js"
+      integrity="sha256-mFQ2u7PxmrFLKBFQCfd1h1cHeIDY9qZWN6DD/qSMYIw="
+    ></script>
+    <script>
+      new Worker('/tests/e2e/assets/debugger-worker.js').onmessage = event => {
+        window.__workerResult = event.data;
+      };
+    </script>
+  </body>
+</html>

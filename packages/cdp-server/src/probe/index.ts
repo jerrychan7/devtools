@@ -92,6 +92,7 @@ export function installProbe(): Probe {
     socketListeners.forEach(fn => fn(rec));
   });
   hookConsole(addLog, now);
+  hookDebugger(addLog, now);
   hookErrors(addLog, now);
   hookShadowRoots(probe.shadowRoots, shadowRootListeners);
   // The XHR hook's own listeners are not the page's either.
@@ -308,6 +309,30 @@ function hookWebSocket(notify: (rec: SocketRecord) => void) {
       if (rec && this.readyState === 1) push(rec, 'sent', data);
     }
   };
+}
+
+// ---- debugger ----
+
+/** Called instead of each `debugger` statement by the shell's Service Worker (sw.ts DEBUGGER_CALL). */
+const DEBUGGER_HOOK = '_$dbg';
+
+/** Statements cannot be paused at: the shell's Service Worker makes each `debugger` log a warning. */
+function hookDebugger(addLog: (entry: LogEntry) => void, now: () => number) {
+  Object.defineProperty(window, DEBUGGER_HOOK, {
+    value() {
+      const error = new Error();
+      addLog({
+        kind: 'console',
+        type: 'warning',
+        args: ['debugger statement hit (pausing is not supported)'],
+        time: now(),
+        // The hook's own frame is dropped like the console wrapper's.
+        get stack() {
+          return error.stack;
+        },
+      });
+    },
+  });
 }
 
 // ---- console ----
