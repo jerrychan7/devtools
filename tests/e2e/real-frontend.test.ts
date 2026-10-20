@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ElementHandle, Frame, Page } from 'puppeteer-core';
+import type { ElementHandle, Frame, JSHandle, Page } from 'puppeteer-core';
 import { launch } from '../conformance/harness.ts';
 import type { Env } from '../conformance/harness.ts';
 
@@ -91,8 +91,19 @@ const panelShowing = (id: string) =>
   }, id);
 
 test('the Elements panel shows the page', { skip }, async () => {
+  // The page can set devtools-anywhere's attribute itself: that does not hide an element.
+  await page.evaluate(() => {
+    const forged = document.createElement('div');
+    forged.id = 'forged-own';
+    forged.setAttribute('data-devtools-anywhere', '');
+    document.body.append(forged);
+  });
   await showPanel('elements');
   await waitFor(async () => (await text()).includes('real-frontend-marker'));
+  await waitFor(async () => (await text()).includes('forged-own'));
+  // devtools-anywhere's own element stays hidden.
+  assert.ok((await text()).includes('<body'));
+  assert.ok(!(await text()).includes('<devtools-anywhere'));
 });
 
 test('the Console panel shows output from before DevTools loaded', { skip }, async () => {
@@ -134,6 +145,131 @@ test('only the panels that work in the page are offered', { skip }, async () => 
   for (const panel of ['elements', 'console', 'sources', 'network', 'resources'])
     assert.ok(tabs.includes(panel), panel);
   for (const panel of ['timeline', 'heap-profiler', 'lighthouse', 'security']) assert.ok(!tabs.includes(panel), panel);
+});
+
+test('only the breakpoint panes the page supports are offered', { skip }, async () => {
+  const views = await frontend.evaluate(async () => {
+    // The built frontend has no type declarations; only this much of it is used.
+    const { ViewManager }: { ViewManager: { ViewManager: { instance(): { hasView(id: string): boolean } } } } =
+      await import(new URL('ui/legacy/legacy.js', location.href).href);
+    const ids = [
+      'elements.event-listeners',
+      'sources.xhr-breakpoints',
+      'sources.dom-breakpoints',
+      'elements.dom-breakpoints',
+      'sources.global-listeners',
+      'sources.event-listener-breakpoints',
+      'sources.csp-violation-breakpoints',
+    ];
+    return Object.fromEntries(ids.map(id => [id, ViewManager.ViewManager.instance().hasView(id)]));
+  });
+  assert.deepEqual(views, {
+    'elements.event-listeners': true,
+    'sources.xhr-breakpoints': false,
+    'sources.dom-breakpoints': false,
+    'elements.dom-breakpoints': false,
+    'sources.global-listeners': false,
+    'sources.event-listener-breakpoints': false,
+    'sources.csp-violation-breakpoints': false,
+  });
+});
+
+// The page's debugger cannot pause: the Sources panel has no debugger sidebar (pause and step
+// buttons, Breakpoints with "Pause on exceptions", Call Stack, Scope, Watch) and its editor sets no
+// breakpoints, but still shows the source.
+test('the Sources panel shows source and Watch, without breakpoints or pausing controls', { skip }, async () => {
+  await showPanel('sources');
+  await waitFor(() => panelShowing('sources'));
+  // Opens the page's script in the editor.
+  await waitFor(() =>
+    frontend.evaluate(async () => {
+      // The built frontend has no type declarations; only this much of it is used.
+      const { Workspace }: { Workspace: { WorkspaceImpl: { instance(): { uiSourceCodes(): { url(): string }[] } } } } =
+        await import(new URL('models/workspace/workspace.js', location.href).href);
+      const { Revealer }: { Revealer: { reveal(revealable: unknown): Promise<void> } } = await import(
+        new URL('core/common/common.js', location.href).href
+      );
+      const code = Workspace.WorkspaceImpl.instance()
+        .uiSourceCodes()
+        .find(code => code.url().startsWith('http') && code.url().endsWith('real-frontend.js'));
+      if (!code) return false;
+      await Revealer.reveal(code);
+      return true;
+    })
+  );
+  /** The first element matching `selector` in the frontend, including shadow DOM. */
+  const query = (selector: string): Promise<JSHandle<Element | null>> =>
+    frontend.evaluateHandle(selector => {
+      const find = (root: Document | ShadowRoot): Element | null => {
+        const found = root.querySelector(selector);
+        if (found) return found;
+        for (const el of root.querySelectorAll('*')) {
+          const inShadow = el.shadowRoot && find(el.shadowRoot);
+          if (inShadow) return inShadow;
+        }
+        return null;
+      };
+      return find(document);
+    }, selector);
+  const content = await waitFor(async () => {
+    const value = await (await query('.cm-content')).evaluate(el => el?.textContent ?? '');
+    return value.includes('realFrontendScript') ? value : null;
+  });
+  assert.ok(content.includes("return 'loaded'"), content);
+
+  for (const selector of [
+    '.scripts-debug-toolbar',
+    '[aria-label="Breakpoints"]',
+    '[aria-label="Call Stack"]',
+    '[aria-label="Scope"]',
+    '[aria-label^="Pause on"]',
+    '[aria-label="Deactivate breakpoints"]',
+  ])
+    assert.equal(await (await query(selector)).evaluate(el => el === null), true, selector);
+  const all = await text();
+  for (const label of ['Pause on uncaught exceptions', 'Call Stack', 'Not paused'])
+    assert.ok(!all.includes(label), label);
+
+  // Watch stays: without pausing, its expressions are evaluated in the global scope.
+  assert.equal(await (await query('[aria-label="Watch"]')).evaluate(el => el === null), false, 'Watch');
+  const addWatch = async () =>
+    // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+    (await query('[aria-label="Add watch expression"]')).asElement() as ElementHandle<Element> | null;
+  await (await waitFor(addWatch)).click();
+  const prompt = async () =>
+    // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+    (await query('.text-prompt[contenteditable]')).asElement() as ElementHandle<Element> | null;
+  await (await waitFor(prompt)).click();
+  await frontend.page().keyboard.type('document.title');
+  await frontend.page().keyboard.press('Enter');
+  await waitFor(async () => (await text()).includes('document.title: "real frontend"'));
+
+  // Clicking a line number sets no breakpoint.
+  const lineNumber = async () =>
+    // asElement() is typed as a handle to any Node; the page function returns an Element or null.
+    (await query('.cm-lineNumbers .cm-gutterElement:nth-child(2)')).asElement() as ElementHandle<Element> | null;
+  await (await waitFor(lineNumber)).click();
+  await new Promise(r => setTimeout(r, 500));
+  assert.equal(await (await query('.cm-breakpoint')).evaluate(el => el === null), true);
+  const breakpoints = await frontend.evaluate(async () => {
+    const {
+      BreakpointManager,
+    }: { BreakpointManager: { BreakpointManager: { instance(): { allBreakpointLocations(): unknown[] } } } } =
+      await import(new URL('models/breakpoints/breakpoints.js', location.href).href);
+    return BreakpointManager.BreakpointManager.instance().allBreakpointLocations().length;
+  });
+  assert.equal(breakpoints, 0);
+
+  // Its context menu offers no breakpoints or logpoints.
+  await (await waitFor(lineNumber)).click({ button: 'right' });
+  const menuText = await waitFor(async () => {
+    const value = await (await query('.soft-context-menu')).evaluate(el => el?.textContent ?? '');
+    return value || null;
+  });
+  for (const item of ['breakpoint', 'logpoint', 'Never pause here'])
+    assert.ok(!menuText.toLowerCase().includes(item.toLowerCase()), menuText);
+  await frontend.page().keyboard.press('Escape');
+  await waitFor(async () => (await query('.soft-context-menu')).evaluate(el => el === null));
 });
 
 test('every panel opens without uncaught errors', { skip }, async () => {
@@ -589,11 +725,13 @@ test("DevTools' own scripts are ignore-listed once, next to the user's rules", {
 
 test('right-clicking a node in the Elements panel opens the soft context menu', { skip }, async () => {
   await showPanel('elements');
-  // The tree's first element row (inside shadow DOM).
+  // The tree's <body> row (inside shadow DOM): element nodes are the ones with a "Break on" submenu in Chrome.
   const row = await waitFor(async () => {
     const handle = await frontend.evaluateHandle(() => {
       const find = (root: Document | ShadowRoot): Element | null => {
-        const found = root.querySelector('.elements-tree-outline [role="treeitem"]');
+        const found = Array.from(root.querySelectorAll('.elements-tree-outline [role="treeitem"]')).find(el =>
+          el.textContent?.startsWith('<body')
+        );
         if (found) return found;
         for (const el of root.querySelectorAll('*')) {
           const inShadow = el.shadowRoot && find(el.shadowRoot);
@@ -616,6 +754,21 @@ test('right-clicking a node in the Elements panel opens the soft context menu', 
       return find(document);
     });
   await waitFor(menuShown);
+  // DOM breakpoints need a debugger that pauses, which the page cannot have: no "Break on" submenu.
+  const menuText = await frontend.evaluate(() => {
+    const find = (root: Document | ShadowRoot): string | null => {
+      const menu = root.querySelector('.soft-context-menu');
+      if (menu) return menu.textContent;
+      for (const el of root.querySelectorAll('*')) {
+        const found = el.shadowRoot && find(el.shadowRoot);
+        if (found) return found;
+      }
+      return null;
+    };
+    return find(document) ?? '';
+  });
+  assert.ok(menuText.includes('Copy'), menuText);
+  assert.ok(!menuText.includes('Break on'), menuText);
   await frontend.page().keyboard.press('Escape');
   await waitFor(async () => !(await menuShown()));
 });

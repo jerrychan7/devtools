@@ -1,0 +1,114 @@
+diff --git a/front_end/panels/sources/DebuggerPlugin.ts b/front_end/panels/sources/DebuggerPlugin.ts
+index f5c2141d16..6432f3f4be 100644
+--- a/front_end/panels/sources/DebuggerPlugin.ts
++++ b/front_end/panels/sources/DebuggerPlugin.ts
+@@ -33,7 +33,7 @@ import {BreakpointEditDialog} from './BreakpointEditDialog.js';
+ import {BreakpointsSidebarController} from './BreakpointsView.js';
+ import {convertMissingDebugInfo} from './CallStackSidebarPane.js';
+ import {Plugin} from './Plugin.js';
+-import {SourcesPanel} from './SourcesPanel.js';
++import {canPause, SourcesPanel} from './SourcesPanel.js';
+ 
+ const {EMPTY_BREAKPOINT_CONDITION, NEVER_PAUSE_HERE_CONDITION} = Breakpoints.BreakpointManager;
+ 
+@@ -332,21 +332,21 @@ export class DebuggerPlugin extends Plugin {
+ 
+     return UI.ShortcutRegistry.ShortcutRegistry.instance().getShortcutListener({
+       'debugger.toggle-breakpoint': async () => {
+-        if (this.muted || !this.editor) {
++        if (this.muted || !this.editor || !canPause()) {
+           return false;
+         }
+         await this.toggleBreakpoint(selectionLine(this.editor), false);
+         return true;
+       },
+       'debugger.toggle-breakpoint-enabled': async () => {
+-        if (this.muted || !this.editor) {
++        if (this.muted || !this.editor || !canPause()) {
+           return false;
+         }
+         await this.toggleBreakpoint(selectionLine(this.editor), true);
+         return true;
+       },
+       'debugger.breakpoint-input-window': async () => {
+-        if (this.muted || !this.editor) {
++        if (this.muted || !this.editor || !canPause()) {
+           return false;
+         }
+         const line = selectionLine(this.editor);
+@@ -488,7 +488,7 @@ export class DebuggerPlugin extends Plugin {
+   override populateLineGutterContextMenu(contextMenu: UI.ContextMenu.ContextMenu, editorLineNumber: number): void {
+     const uiLocation = new Workspace.UISourceCode.UILocation(this.uiSourceCode, editorLineNumber, 0);
+     this.scriptsPanel.appendUILocationItems(contextMenu, uiLocation);
+-    if (this.muted || !this.editor) {
++    if (this.muted || !this.editor || !canPause()) {
+       return;
+     }
+     const line = this.editor.state.doc.line(editorLineNumber + 1);
+@@ -1600,7 +1600,7 @@ export class DebuggerPlugin extends Plugin {
+   }
+ 
+   private handleGutterClick(line: CodeMirror.Line, event: MouseEvent): boolean {
+-    if (this.muted || event.button !== 0 || event.altKey) {
++    if (this.muted || event.button !== 0 || event.altKey || !canPause()) {
+       return false;
+     }
+     if (event.metaKey || event.ctrlKey) {
+diff --git a/front_end/panels/sources/SourcesPanel.ts b/front_end/panels/sources/SourcesPanel.ts
+index 623e058293..ba07a35f05 100644
+--- a/front_end/panels/sources/SourcesPanel.ts
++++ b/front_end/panels/sources/SourcesPanel.ts
+@@ -211,6 +211,7 @@ export interface ViewInput {
+   isNavigatorSidebarOpen: boolean;
+   isDebuggerSidebarOpen: boolean;
+   isTraceApp: boolean;
++  canPause: boolean;
+   navigatorTabbedPane: UI.TabbedPane.TabbedPane;
+   sourcesView: SourcesView|null;
+   debuggerPausedMessage: DebuggerPausedMessage;
+@@ -293,7 +294,7 @@ export const DEFAULT_VIEW: View = (input, _output, target) => {
+ function renderDebugPaneContent(input: ViewInput): LitTemplate {
+   // clang-format off
+   return html`
+-    ${input.isDebuggerSidebarOpen ? html`
++    ${input.isDebuggerSidebarOpen && input.canPause ? html`
+       <devtools-toolbar
+           class="scripts-debug-toolbar"
+           jslog=${VisualLogging.toolbar('debug').track({
+@@ -333,6 +334,15 @@ function renderDebugPaneContent(input: ViewInput): LitTemplate {
+   // clang-format on
+ }
+ 
++/**
++ * Whether the debugger can pause. An embedder whose backend cannot pause sets `can_pause=false`:
++ * then the debugger sidebar keeps only Watch (evaluated in the global scope), and pausing, stepping,
++ * breakpoints, call stack, scope and the editor's breakpoint gutter are left out.
++ */
++export function canPause(): boolean {
++  return Root.Runtime.Runtime.queryParam('can_pause') !== 'false';
++}
++
+ export class SourcesPanel extends UI.Panel.Panel implements
+     UI.ContextMenu.Provider<Workspace.UISourceCode.UISourceCode|Workspace.UISourceCode.UILocation|
+                             SDK.RemoteObject.RemoteObject|SDK.NetworkRequest.NetworkRequest|UISourceCodeFrame>,
+@@ -479,6 +489,7 @@ export class SourcesPanel extends UI.Panel.Panel implements
+           isNavigatorSidebarOpen: this.#isNavigatorSidebarOpen,
+           isDebuggerSidebarOpen: this.#isDebuggerSidebarOpen,
+           isTraceApp: Root.Runtime.Runtime.isTraceApp(),
++          canPause: canPause(),
+           navigatorTabbedPane: this.navigatorTabbedLocation.tabbedPane(),
+           sourcesView: this.#showSourcesViewInWrapper ? null : this.#sourcesView,
+           debuggerPausedMessage: this.#debuggerPausedMessage,
+@@ -1333,6 +1344,12 @@ export class SourcesPanel extends UI.Panel.Panel implements
+     this.sidebarPaneStack = UI.ViewManager.ViewManager.instance().createStackLocation(
+         this.#revealDebuggerSidebar.bind(this), undefined, 'debug');
+     this.sidebarPaneStack.widget().element.classList.add('y-overflow-only');
++    if (!canPause()) {
++      this.#debuggerSidebarTabbedLocation = null;
++      void this.sidebarPaneStack.showView(this.watchSidebarPane);
++      this.performUpdate();
++      return;
++    }
+     this.sidebarPaneStack.appendApplicableItems('sources.sidebar-top');
+ 
+     if (this.threadsSidebarPane) {

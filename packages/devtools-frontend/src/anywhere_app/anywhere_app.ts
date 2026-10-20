@@ -27,7 +27,6 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
-import * as Workspace from '../../models/workspace/workspace.js';
 import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Main from '../main/main.js';
@@ -124,6 +123,11 @@ type EmbedderRequest = {type: 'dock', side: UI.DockController.DockState}|{type: 
     {type: 'keep-open', keep: boolean}|{type: 'theme', toolbar: string, divider: string, icon: string};
 const notifyEmbedder = (request: EmbedderRequest) => window.parent.postMessage({devtoolsAnywhere: request}, embedder);
 Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
+// The page's debugger cannot pause (Debugger.setBreakpointByUrl only hands out ids): the Sources
+// panel leaves out the parts of its debugger sidebar that need a pause (pause and step buttons,
+// Breakpoints with "Pause on exceptions", Call Stack, Scope, Threads) and its breakpoint gutter;
+// Watch stays, evaluating in the global scope (patches/sources-without-pausing.patch).
+Root.Runtime.Runtime.setQueryParamForTesting('can_pause', 'false');
 const dock = params.get('dock');
 
 // devtools-anywhere's own scripts (the probe, the bundle, snapDOM) are listed in Sources, since
@@ -141,8 +145,9 @@ function withOwnScriptsIgnored(prefs: Record<string, string>): Record<string, st
   try {
     rules = JSON.parse(prefs[IGNORE_LIST] ?? '');
   } catch {
-    // Never set: the setting's default, as RegExpSetting stores it.
-    rules = [{pattern: Workspace.IgnoreListManager.skipStackFramesPatternSettingDescriptor.defaultValue}];
+    // Never set: the setting's default, as RegExpSetting stores it. models/workspace's
+    // bundle is not visible to this entrypoint, so the default is spelled out here.
+    rules = [{pattern: '/node_modules/|^node:'}];
   }
   const value = JSON.stringify([...(Array.isArray(rules) ? rules : []), {pattern: OWN_SCRIPTS, disabled: false}]);
   host.setPreference(IGNORE_LIST, value);
