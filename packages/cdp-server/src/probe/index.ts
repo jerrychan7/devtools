@@ -72,6 +72,7 @@ export function installProbe(): Probe {
     ownUrls: new Set(),
     // Old WebViews without fetch: a rejection callers handle like any failed request.
     fetch: w.fetch ? w.fetch.bind(w) : () => Promise.reject(new TypeError('fetch is not available')),
+    WebSocket: w.WebSocket,
     tools: new Map(),
     limits: { logs: LIMIT, requests: LIMIT, sockets: LIMIT, socketEvents: LIMIT },
   };

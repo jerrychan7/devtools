@@ -196,6 +196,8 @@ export interface Probe {
   ownUrls: Set<string>;
   /** The page's fetch before it was hooked: DevTools' own requests stay out of the Network panel. */
   fetch: typeof fetch;
+  /** The page's WebSocket before it was hooked: DevTools' own connections are not recorded. */
+  WebSocket: typeof WebSocket;
   /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
   tools: Map<string, ToolRecord>;
   /**

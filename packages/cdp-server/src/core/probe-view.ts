@@ -3,7 +3,7 @@
 import type { ConsoleEntry, ConsoleType, LogEntry, Probe, ProbeLog, ProbeRequest, RequestRecord } from '../probe/types';
 
 /** The probe as the domains see it: log entries and request records in their final form. */
-export interface ProbeView extends Omit<Probe, 'logs' | 'requests' | 'onLog' | 'onRequest' | 'limits'> {
+export interface ProbeView extends Omit<Probe, 'logs' | 'requests' | 'onLog' | 'onRequest' | 'limits' | 'WebSocket'> {
   readonly logs: LogEntry[];
   readonly requests: RequestRecord[];
   onLog(listener: (entry: LogEntry) => void): () => void;
