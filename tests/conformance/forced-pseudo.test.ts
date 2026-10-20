@@ -19,6 +19,7 @@ const STYLE = `
   .f-order:not(:hover) { border-left-color: rgb(0, 6, 0) }
   .f-order:focus::before { content: "F" }
   @media (min-width: 1px) { .f-media:active { color: rgb(30, 0, 0) } }
+  #fv:visited { color: rgb(40, 0, 0); font-weight: 700; display: none }
 `;
 
 before(async () => {
@@ -30,7 +31,7 @@ before(async () => {
     document.head.appendChild(s);
     document.body.insertAdjacentHTML(
       'beforeend',
-      '<div id="fo" class="f-order x">fo</div><div id="fm" class="f-media">fm</div>'
+      '<div id="fo" class="f-order x">fo</div><div id="fm" class="f-media">fm</div><a id="fv" href="#fv-never">fv</a>'
     );
   }, STYLE);
   for (const side of [t.ours, t.chrome]) {
@@ -110,6 +111,19 @@ test('a forced :focus creates the ::before it selects', async () => {
   const { ours, chrome } = await both('fo', ['focus'], () => computed('fo', '::before'));
   assert.deepEqual(ours, chrome);
   assert.equal(ours.content, '"F"');
+});
+
+test('a forced :visited changes only the properties Chrome lets :visited change', async () => {
+  const layout = () =>
+    t.page.evaluate(() => {
+      const el = document.getElementById('fv');
+      if (!el) throw new Error('#fv not found');
+      const style = getComputedStyle(el);
+      return { weight: style.fontWeight, display: style.display };
+    });
+  const { ours, chrome } = await both('fv', ['visited'], () => layout());
+  assert.deepEqual(ours, chrome);
+  assert.deepEqual(ours, { weight: '400', display: 'inline' });
 });
 
 test('the Styles pane shows the forced rules as matching', async () => {
