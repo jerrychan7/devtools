@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="devtools-anywhere-frontend" />
+    <meta charset="utf-8" />
+    <title>fake frontend (directory index)</title>
+  </head>
+  <body>
+    <script>
+      // Stands in for the DevTools frontend: enables Runtime and records what it receives.
+      window.received = [];
+      addEventListener('message', e => received.push(JSON.parse(e.data)));
+      parent.postMessage(JSON.stringify({ id: 1, method: 'Runtime.enable' }), '*');
+    </script>
+  </body>
+</html>

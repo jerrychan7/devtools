@@ -4,6 +4,9 @@ import {
   SHELL_PAGE_ID,
   createCdpServer,
   isShellPage,
+  isTrustedShellConfig,
+  markOwn,
+  OWN_ATTRIBUTE,
   readShellConfig,
   type CdpServer,
   type ShellConfig,
@@ -42,6 +45,8 @@ const VW = typeof CSS !== 'undefined' && CSS.supports('width', '1dvw') ? 'dvw' :
 /** `part` as a percentage of `whole`, to one decimal. */
 const percent = (part: number, whole: number) => Math.round((part / whole) * 1000) / 10;
 const DOCK_KEY = 'devtools-anywhere:dock';
+/** Handshake the shell posts to devtools-anywhere-sw.js; keep in sync with sw.ts. */
+const SHELL_HANDSHAKE = 'devtools-anywhere:shell';
 const MIN_SIZE = 80;
 
 /**
@@ -295,6 +300,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const config: ShellConfig = { frontend: new URL(frontend, location.href).href, bundle: bundleUrl };
     const sw = this.getAttribute('sw');
     if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundleUrl).href;
+    // The probe ignores (and removes) a config whose URLs are not on its own origin.
+    if (!isTrustedShellConfig(config)) {
+      console.warn('devtools-anywhere: shell mode needs the frontend, bundle and sw on one origin');
+      return;
+    }
     sessionStorage.setItem(SHELL_KEY, JSON.stringify(config));
     location.reload();
   }
@@ -318,13 +328,18 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private async registerShellWorker() {
     const config = readShellConfig();
     if (!config?.sw || !navigator.serviceWorker) return;
+    // A worker already active controls this shell: tell it right away, before the page frame
+    // navigates, instead of after register() and ready.
+    navigator.serviceWorker.controller?.postMessage({ type: SHELL_HANDSHAKE });
     const url = new URL(config.sw);
     url.searchParams.set('probe', new URL('probe.iife.js', config.bundle).href);
-    // The DevTools frontend may be same-origin (the Vite plugin serves it): keep the probe out of it.
-    const frontend = new URL(config.frontend);
-    url.searchParams.set('skip', frontend.origin + frontend.pathname);
+    // Marks the worker as the shell's (see probe.ts), which unregisters a leftover one.
+    url.searchParams.set('shell', '');
     try {
       await navigator.serviceWorker.register(url.href, { scope: '/' });
+      // Tells the worker this window is a shell: it only touches requests while one is open.
+      const registration = await navigator.serviceWorker.ready;
+      registration.active?.postMessage({ type: SHELL_HANDSHAKE });
     } catch (e) {
       // Not a secure context, or the scope is not allowed: shell mode works without it.
       console.warn('[devtools-anywhere] Service Worker not registered:', e);
@@ -332,8 +347,12 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   connectedCallback() {
-    // Marks the element so the DOM domain can hide it from the Elements panel.
-    this.setAttribute('data-devtools-anywhere', '');
+    // Registers the element so the CDP domains hide it from the Elements panel; the
+    // attribute only isolates its styles, as the page can set it too. A page that writes
+    // <devtools-anywhere> itself (a supported way to mount it) gets it hidden too, with
+    // whatever it puts inside.
+    markOwn(this);
+    this.setAttribute(OWN_ATTRIBUTE, '');
     const stored = readStored(DOCK_KEY);
     if (isDockSide(stored)) this.dock = stored;
     window.addEventListener('message', this.onFrontendRequest);

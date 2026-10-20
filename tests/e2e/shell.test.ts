@@ -105,3 +105,23 @@ test("closing (DevTools' own close button) leaves shell mode", async () => {
   const state = await waitFor(s => !s.inShell && s.shellRanPageScript);
   assert.match(state.url, /\?second$/);
 });
+
+test('a shell config pointing to another origin is removed and ignored', async () => {
+  const requested: string[] = [];
+  page.on('request', r => requested.push(r.url()));
+  await page.evaluate(() => {
+    sessionStorage.setItem(
+      'devtools-anywhere:shell',
+      JSON.stringify({ frontend: location.origin + '/x.html', bundle: 'https://evil.invalid/bundle.js' })
+    );
+  });
+  await page.reload();
+  const state = await waitFor(s => s.shellRanPageScript);
+  assert.equal(state.inShell, false);
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell')),
+    null,
+    'the key is removed'
+  );
+  assert.ok(!requested.some(url => url.includes('evil.invalid')), 'the bundle is not loaded');
+});

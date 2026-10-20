@@ -19,13 +19,58 @@ export interface ShellConfig {
   sw?: string;
 }
 
+let trustedOrigin = '';
+
+/**
+ * Sets the origin shell configs must come from: that of the script that read them (the probe,
+ * or the bundle). Its URL is taken while the script runs synchronously. Unset, the page's own
+ * origin is used.
+ */
+export function setShellScriptUrl(url: string) {
+  try {
+    trustedOrigin = new URL(url).origin;
+  } catch {
+    // Keep the previous origin.
+  }
+}
+
+/**
+ * True when every URL of the config is http(s) on the trusted origin. sessionStorage can be
+ * written by any script of the page, so a config pointing elsewhere is not trusted. Only the
+ * origin is checked: the frontend, bundle and probe may sit in different directories (e.g. the
+ * Vite plugin's base vs. a zero-config `data-frontend`).
+ */
+export function isTrustedShellConfig(config: ShellConfig): boolean {
+  const origin = trustedOrigin || location.origin;
+  return [config.frontend, config.bundle, config.sw].every(url => {
+    if (url === undefined) return true;
+    try {
+      const parsed = new URL(url);
+      return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin === origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The stored shell config; an invalid or untrusted one is removed and ignored. */
 export function readShellConfig(): ShellConfig | null {
   try {
-    const config = JSON.parse(sessionStorage.getItem(SHELL_KEY) || 'null');
-    return config && typeof config.frontend === 'string' && typeof config.bundle === 'string' ? config : null;
+    const raw = sessionStorage.getItem(SHELL_KEY);
+    if (raw === null) return null;
+    const config: unknown = JSON.parse(raw);
+    if (isShellConfig(config) && isTrustedShellConfig(config)) return config;
+    sessionStorage.removeItem(SHELL_KEY);
+    return null;
   } catch {
     return null;
   }
+}
+
+function isShellConfig(value: unknown): value is ShellConfig {
+  if (typeof value !== 'object' || value === null) return false;
+  const { frontend, bundle, sw } = value as Record<string, unknown>;
+  return typeof frontend === 'string' && typeof bundle === 'string' && (sw === undefined || typeof sw === 'string');
 }
 
 /** True when this window is the page iframe inside a shell. */
