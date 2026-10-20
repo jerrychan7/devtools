@@ -17,5 +17,5 @@
     "noFallthroughCasesInSwitch": true,
     "noPropertyAccessFromIndexSignature": true
   },
-  "include": ["packages/*/build.ts", "packages/*/scripts/*.ts"]
+  "include": ["packages/*/build.ts", "packages/*/scripts/*.ts", "scripts/*.ts"]
 }

@@ -174,6 +174,8 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本）。
 
+新增或升级会进入产物的依赖、移植其它项目的代码（包括把 DevTools 前端换到新的 `REVISION`）时，运行 `pnpm licenses:update` 重新生成根目录和各包的 `THIRD_PARTY_LICENSES.md`（新增的库先加进 `scripts/third-party-licenses.ts` 的清单）。
+
 ### 提交
 
 - 每个提交只做一步。

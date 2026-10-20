@@ -4,6 +4,7 @@
   "description": "In-page Chrome DevTools Protocol server with an early-capture probe",
   "license": "MIT",
   "files": [
+    "THIRD_PARTY_LICENSES.md",
     "dist"
   ],
   "type": "module",

@@ -166,7 +166,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 `;
 
 /**
- * `<devtools-anywhere frontend="…/chii_app.html" open>`
+ * `<devtools-anywhere frontend="…/anywhere_app.html" open>`
  *
  * Attributes:
  * - `frontend`: URL of the DevTools frontend entry page. Loaded on first open.

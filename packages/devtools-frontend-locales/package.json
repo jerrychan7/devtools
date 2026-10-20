@@ -2,8 +2,9 @@
   "name": "@devtools-anywhere/devtools-frontend-locales",
   "version": "0.0.0",
   "description": "UI translations of @devtools-anywhere/devtools-frontend beyond English and Chinese",
-  "license": "MIT",
+  "license": "MIT AND BSD-3-Clause",
   "files": [
+    "THIRD_PARTY_LICENSES.md",
     "dist"
   ],
   "type": "module",

@@ -2,8 +2,9 @@
   "name": "@devtools-anywhere/devtools-frontend",
   "version": "0.0.0",
   "description": "Chrome DevTools frontend built from the official sources for devtools-anywhere",
-  "license": "MIT",
+  "license": "MIT AND BSD-3-Clause",
   "files": [
+    "THIRD_PARTY_LICENSES.md",
     "dist",
     "REVISION"
   ],

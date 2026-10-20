@@ -35,7 +35,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 ### Limitations
 
-- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. A `debugger;` statement in page scripts cannot pause either. Real breakpoints need the browser's own debugger: a remote debugging mode in the style of Chii, where the page connects to a server and DevTools attaches through it, is planned. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
+- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. A `debugger;` statement in page scripts cannot pause either; in shell mode, each one hit in a same-origin script logs a warning with its stack in the Console instead. Real breakpoints need the browser's own debugger: a remote debugging mode in the style of Chii, where the page connects to a server and DevTools attaches through it, is planned. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
 - Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
@@ -163,4 +163,10 @@ See the [development guide](DEV.md) for setting up the environment, the reposito
 
 ## License
 
-[MIT](LICENSE)
+devtools-anywhere is released under the [MIT](LICENSE) license. Each published package also ships its own `LICENSE` and, where its build contains third-party code, a `THIRD_PARTY_LICENSES.md`.
+
+Third-party code in the published packages, with copyright notices and full license texts, is listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md):
+
+- `@devtools-anywhere/devtools-frontend` and `@devtools-anywhere/devtools-frontend-locales` are built from the Chrome DevTools frontend (BSD-3-Clause, The Chromium Authors), including the libraries it bundles.
+- `devtools-anywhere` bundles [snapDOM](https://github.com/zumerlab/snapdom) (MIT).
+- The module lexer in `packages/cdp-server/src/core/lexer.ts` is ported from [es-module-lexer](https://github.com/guybedford/es-module-lexer) (MIT, Guy Bedford).

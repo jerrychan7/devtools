@@ -4,6 +4,7 @@
   "description": "Real Chrome DevTools inside any web page, with early capture",
   "license": "MIT",
   "files": [
+    "THIRD_PARTY_LICENSES.md",
     "dist"
   ],
   "type": "module",

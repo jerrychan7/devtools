@@ -174,6 +174,8 @@ The pre-commit hook (husky + lint-staged) runs on the staged files only: it form
 
 Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change.
 
+When a dependency that ends up in a build output is added or upgraded, or code is ported from another project (including moving the DevTools frontend to a new `REVISION`), run `pnpm licenses:update` to regenerate `THIRD_PARTY_LICENSES.md` at the root and in the packages (for a new library, add it to the list in `scripts/third-party-licenses.ts` first).
+
 ### Commits
 
 - One logical step per commit.

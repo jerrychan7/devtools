@@ -1,6 +1,6 @@
 // Entry of devtools-anywhere's probe.iife.js: the probe plus zero-config mounting.
 //
-//   <script src="…/devtools-anywhere/dist/probe.iife.js" data-frontend="…/chii_app.html"></script>
+//   <script src="…/devtools-anywhere/dist/probe.iife.js" data-frontend="…/anywhere_app.html"></script>
 //
 // As the first script in <head>, it captures from the very start. With `data-frontend`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after

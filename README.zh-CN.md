@@ -35,7 +35,7 @@
 
 ### 能力边界
 
-- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停。真正的断点要靠浏览器自带的调试器：后续计划加入类似 Chii 的远程调试模式，页面连接到服务端，DevTools 经由服务端接入。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
+- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在 shell 模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器：后续计划加入类似 Chii 的远程调试模式，页面连接到服务端，DevTools 经由服务端接入。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
 - 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
   - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
@@ -163,4 +163,10 @@ export default {
 
 ## 许可证
 
-[MIT](LICENSE)
+devtools-anywhere 以 [MIT](LICENSE) 许可发布。每个发布包都带有自己的 `LICENSE`；产物中含第三方代码的包另附 `THIRD_PARTY_LICENSES.md`。
+
+发布包中的第三方代码及其版权声明、完整许可文本见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)：
+
+- `@devtools-anywhere/devtools-frontend` 与 `@devtools-anywhere/devtools-frontend-locales` 由 Chrome DevTools frontend 构建（BSD-3-Clause，The Chromium Authors），包含它打包的各个库。
+- `devtools-anywhere` 打包了 [snapDOM](https://github.com/zumerlab/snapdom)（MIT）。
+- `packages/cdp-server/src/core/lexer.ts` 中的模块词法分析器移植自 [es-module-lexer](https://github.com/guybedford/es-module-lexer)（MIT，Guy Bedford）。
