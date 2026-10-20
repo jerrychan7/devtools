@@ -6,12 +6,10 @@
 // probe exists, so every API is hooked exactly once either way.
 import {
   PROBE_KEY,
-  type ConsoleEntry,
-  type ConsoleType,
   type ListenerRecord,
-  type LogEntry,
   type Probe,
-  type RequestRecord,
+  type ProbeLog,
+  type ProbeRequest,
   type RequestType,
   type SocketRecord,
   type ToolRecord,
@@ -34,10 +32,10 @@ export function installProbe(): Probe {
   const existing: Probe | undefined = Reflect.get(w, PROBE_KEY);
   if (existing) return existing;
 
-  const logs: LogEntry[] = [];
-  const requests: RequestRecord[] = [];
-  const logListeners = new Set<(entry: LogEntry) => void>();
-  const requestListeners = new Set<(record: RequestRecord) => void>();
+  const logs: ProbeLog[] = [];
+  const requests: ProbeRequest[] = [];
+  const logListeners = new Set<(entry: ProbeLog) => void>();
+  const requestListeners = new Set<(record: ProbeRequest) => void>();
   const sockets: SocketRecord[] = [];
   const socketListeners = new Set<(record: SocketRecord) => void>();
 
@@ -75,9 +73,7 @@ export function installProbe(): Probe {
   };
   Object.defineProperty(w, PROBE_KEY, { value: probe });
 
-  const now = () => performance.timeOrigin + performance.now();
-
-  function addLog(entry: LogEntry) {
+  function addLog(entry: ProbeLog) {
     if (logs.push(entry) > MAX_LOGS) logs.shift();
     logListeners.forEach(fn => fn(entry));
   }
@@ -91,16 +87,16 @@ export function installProbe(): Probe {
     }
     socketListeners.forEach(fn => fn(rec));
   });
-  hookConsole(addLog, now);
-  hookDebugger(addLog, now);
-  hookErrors(addLog, now);
+  hookConsole(addLog);
+  hookDebugger(addLog);
+  hookErrors(addLog);
   hookShadowRoots(probe.shadowRoots, shadowRootListeners);
   // The XHR hook's own listeners are not the page's either.
   const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
   hookModelContext(probe.tools);
 
-  function add(rec: RequestRecord) {
+  function add(rec: ProbeRequest) {
     rec.requestId = 'probe.' + ++seq;
     if (requests.push(rec) > MAX_REQUESTS) requests.shift();
     requestListeners.forEach(fn => fn(rec));
@@ -108,7 +104,7 @@ export function installProbe(): Probe {
   }
   const track: Track = record =>
     add({ ...record, requestId: '', startTime: performance.now(), wallTime: Date.now(), state: 'pending' });
-  function update(rec: RequestRecord, patch: Partial<RequestRecord>) {
+  function update(rec: ProbeRequest, patch: Partial<ProbeRequest>) {
     Object.assign(rec, patch);
     requestListeners.forEach(fn => fn(rec));
   }
@@ -168,16 +164,16 @@ function resourceType(entry: PerformanceResourceTiming, mimeType: string): Reque
  * `buffered` also delivers those from before the probe ran, such as the document itself.
  */
 function observeResources(
-  add: (rec: RequestRecord) => void,
+  add: (rec: ProbeRequest) => void,
   update: Update,
-  requests: RequestRecord[],
+  requests: ProbeRequest[],
   swUrl: string | undefined
 ) {
   if (typeof PerformanceObserver === 'undefined') return;
   // In shell mode with the Service Worker, it reports what Resource Timing does not expose
   // (headers, status text) of same-origin subresources, before the request's entry exists.
   // They are matched by URL; a late report still completes the record.
-  const details = new Map<string, Partial<RequestRecord>[]>();
+  const details = new Map<string, Partial<ProbeRequest>[]>();
   const sw = navigator.serviceWorker;
   if (sw && swUrl) {
     // Only reports from our own worker (its URL differs in the query only), and only the
@@ -199,7 +195,7 @@ function observeResources(
       if (!data || typeof data !== 'object' || !isOurs(event.source)) return;
       const { type, url, requestHeaders, status, statusText, responseHeaders } = data as Record<string, unknown>;
       if (type !== 'devtools-anywhere:response' || typeof url !== 'string') return;
-      const patch: Partial<RequestRecord> = {};
+      const patch: Partial<ProbeRequest> = {};
       const req = headers(requestHeaders);
       if (req) patch.requestHeaders = req;
       if (typeof status === 'number') patch.status = status;
@@ -317,15 +313,15 @@ function hookWebSocket(notify: (rec: SocketRecord) => void) {
 const DEBUGGER_HOOK = '_$dbg';
 
 /** Statements cannot be paused at: the shell's Service Worker makes each `debugger` log a warning. */
-function hookDebugger(addLog: (entry: LogEntry) => void, now: () => number) {
+function hookDebugger(addLog: (entry: ProbeLog) => void) {
   Object.defineProperty(window, DEBUGGER_HOOK, {
     value() {
       const error = new Error();
       addLog({
         kind: 'console',
-        type: 'warning',
-        args: ['debugger statement hit (pausing is not supported)'],
-        time: now(),
+        type: 'debugger',
+        args: [],
+        time: performance.now(),
         // The hook's own frame is dropped like the console wrapper's.
         get stack() {
           return error.stack;
@@ -337,24 +333,52 @@ function hookDebugger(addLog: (entry: LogEntry) => void, now: () => number) {
 
 // ---- console ----
 
-function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
+/**
+ * Records console calls as they are made; the CDP server turns them into entries. Only what
+ * cannot be known later is decided here: which calls log nothing (V8 drops calls without
+ * arguments except group, groupCollapsed, groupEnd and trace, and passing asserts), labels
+ * (their toString runs once, at the call), and counter and timer state.
+ */
+function hookConsole(addLog: (entry: ProbeLog) => void) {
   const counts: Record<string, number> = {};
   const timers: Record<string, number> = {};
-
-  const wrap = (name: string, capture: (args: unknown[]) => Pick<ConsoleEntry, 'type' | 'args'> | null) => {
+  const names =
+    'log debug info error warn dir dirxml table trace group groupCollapsed groupEnd clear assert count countReset time timeLog timeEnd';
+  for (const name of names.split(' ')) {
     const orig: unknown = Reflect.get(console, name);
-    if (typeof orig !== 'function') return;
+    if (typeof orig !== 'function') continue;
     Reflect.set(console, name, function (this: unknown, ...args: unknown[]) {
-      const captured = capture(args);
-      if (captured) {
+      const time = performance.now();
+      let entry = args;
+      let fact: number | undefined;
+      let keep: unknown = args.length || /^(group|trace|clear)/.test(name);
+      if (/^(count|time)/.test(name)) {
+        const [value = 'default', ...rest] = args;
+        const label = String(value);
+        entry = [label, ...rest];
+        keep = 1;
+        if (name === 'count') fact = counts[label] = (counts[label] || 0) + 1;
+        // Misuses are logged as warnings; an existing timer keeps its start.
+        else if (name === 'countReset') keep = !(label in counts) || ((counts[label] = 0), 0);
+        else if (name === 'time') keep = label in timers || ((timers[label] = time), 0);
+        else {
+          fact = timers[label];
+          if (name === 'timeEnd') delete timers[label];
+        }
+      } else if (name === 'assert') {
+        keep = !args[0];
+        entry = args.slice(1);
+      }
+      if (keep) {
         // V8 formats a stack only when it is read: most entries are never shown, and
         // formatting one on every call slows down pages that log a lot.
         const error = new Error();
         addLog({
           kind: 'console',
-          type: captured.type,
-          args: captured.args,
-          time: now(),
+          type: name,
+          args: entry,
+          time,
+          fact,
           get stack() {
             return error.stack;
           },
@@ -362,67 +386,7 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
       }
       return orig.apply(this, args);
     });
-  };
-
-  const plain: [string, ConsoleType][] = [
-    ['log', 'log'],
-    ['debug', 'debug'],
-    ['info', 'info'],
-    ['error', 'error'],
-    ['warn', 'warning'],
-    ['dir', 'dir'],
-    ['dirxml', 'dirxml'],
-    ['table', 'table'],
-    ['trace', 'trace'],
-    ['group', 'startGroup'],
-    ['groupCollapsed', 'startGroupCollapsed'],
-    ['groupEnd', 'endGroup'],
-  ];
-  // Like V8: calls without arguments are dropped, except for these, which log their own name.
-  const namedWhenEmpty = new Set(['group', 'groupCollapsed', 'groupEnd', 'trace']);
-  for (const [name, type] of plain) {
-    wrap(name, args => {
-      if (args.length) return { type, args };
-      return namedWhenEmpty.has(name) ? { type, args: ['console.' + name] } : null;
-    });
   }
-
-  wrap('clear', () => ({ type: 'clear', args: [] }));
-  wrap('assert', ([condition, ...rest]) =>
-    condition ? null : { type: 'assert', args: rest.length ? rest : ['console.assert'] }
-  );
-  wrap('count', ([value = 'default']) => {
-    const label = String(value);
-    counts[label] = (counts[label] || 0) + 1;
-    return { type: 'count', args: [`${label}: ${counts[label]}`] };
-  });
-  // Misuses are reported as V8 does, with a warning naming the label.
-  const warn = (text: string) => ({ type: 'warning' as const, args: [text] });
-  wrap('countReset', ([value = 'default']) => {
-    const label = String(value);
-    if (!(label in counts)) return warn(`Count for '${label}' does not exist`);
-    counts[label] = 0;
-    return null;
-  });
-  wrap('time', ([value = 'default']) => {
-    const label = String(value);
-    // An existing timer keeps its start.
-    if (label in timers) return warn(`Timer '${label}' already exists`);
-    timers[label] = performance.now();
-    return null;
-  });
-  const elapsed = (label: string) => `${label}: ${performance.now() - (timers[label] ?? 0)} ms`;
-  wrap('timeLog', ([value = 'default', ...rest]) => {
-    const label = String(value);
-    return label in timers ? { type: 'log', args: [elapsed(label), ...rest] } : warn(`Timer '${label}' does not exist`);
-  });
-  wrap('timeEnd', ([value = 'default']) => {
-    const label = String(value);
-    if (!(label in timers)) return warn(`Timer '${label}' does not exist`);
-    const args = [elapsed(label)];
-    delete timers[label];
-    return { type: 'timeEnd', args };
-  });
 }
 
 // ---- shadow roots ----
@@ -579,14 +543,14 @@ function stackOf(value: unknown): string | undefined {
   }
 }
 
-function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
+function hookErrors(addLog: (entry: ProbeLog) => void) {
   window.addEventListener('error', e => {
     if (!(e instanceof ErrorEvent)) return;
     addLog({
       kind: 'exception',
       text: 'Uncaught',
       error: e.error !== undefined ? e.error : e.message,
-      time: now(),
+      time: performance.now(),
       stack: stackOf(e.error),
       url: e.filename,
       line: e.lineno,
@@ -598,7 +562,7 @@ function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
       kind: 'exception',
       text: 'Uncaught (in promise)',
       error: e.reason,
-      time: now(),
+      time: performance.now(),
       stack: stackOf(e.reason),
     });
   });
@@ -606,14 +570,8 @@ function hookErrors(addLog: (entry: LogEntry) => void, now: () => number) {
 
 // ---- network ----
 
-type Track = (record: Omit<RequestRecord, 'requestId' | 'startTime' | 'wallTime' | 'state'>) => RequestRecord;
-type Update = (rec: RequestRecord, patch: Partial<RequestRecord>) => void;
-
-function headersToObject(headers: Headers): Record<string, string> {
-  const obj: Record<string, string> = {};
-  headers.forEach((v, k) => (obj[k] = v));
-  return obj;
-}
+type Track = (record: Omit<ProbeRequest, 'requestId' | 'startTime' | 'wallTime' | 'state'>) => ProbeRequest;
+type Update = (rec: ProbeRequest, patch: Partial<ProbeRequest>) => void;
 
 function bodyToString(body: unknown): string | undefined {
   if (typeof body === 'string') return body;
@@ -621,14 +579,10 @@ function bodyToString(body: unknown): string | undefined {
   return undefined;
 }
 
-function mimeTypeOf(contentType: string | null | undefined) {
-  return ((contentType || '').split(';')[0] ?? '').trim();
-}
-
 function hookFetch(track: Track, update: Update) {
   const origFetch = window.fetch;
   if (!origFetch) return;
-  const failed = (rec: RequestRecord, err: unknown) =>
+  const failed = (rec: ProbeRequest, err: unknown) =>
     update(rec, {
       state: 'failed',
       // Like Chrome, a request stopped through its AbortSignal is reported as canceled.
@@ -642,10 +596,10 @@ function hookFetch(track: Track, update: Update) {
     const req = input instanceof Request ? input : null;
     const headers = init?.headers || req?.headers;
     let url: string;
-    let requestHeaders: Record<string, string>;
+    let requestHeaders: Headers;
     try {
       url = new URL(req ? req.url : String(input), location.href).href;
-      requestHeaders = headers ? headersToObject(new Headers(headers)) : {};
+      requestHeaders = new Headers(headers);
     } catch {
       // An invalid URL or header: fetch itself rejects, without making a request.
       return origFetch.call(this, input, init);
@@ -693,13 +647,15 @@ function hookFetch(track: Track, update: Update) {
           responseTime: performance.now(),
           status: res.status,
           statusText: res.statusText,
-          responseHeaders: headersToObject(res.headers),
-          mimeType: mimeTypeOf(contentType),
+          headers: res.headers,
         });
-        const length = Number(res.headers.get('content-length'));
         // Never read streams that may not end, or bodies that are too large to keep.
-        if (!res.body || mimeTypeOf(contentType) === 'text/event-stream' || length > MAX_BODY_LENGTH) {
-          update(rec, { state: 'done', endTime: performance.now(), encodedDataLength: length || 0 });
+        if (
+          !res.body ||
+          contentType?.split(';')[0]?.trim() === 'text/event-stream' ||
+          Number(res.headers.get('content-length')) > MAX_BODY_LENGTH
+        ) {
+          update(rec, { state: 'done', endTime: performance.now(), encodedDataLength: 0 });
           return;
         }
         const copy = res.clone().body;
@@ -709,7 +665,7 @@ function hookFetch(track: Track, update: Update) {
             update(rec, {
               state: 'done',
               body: blob,
-              encodedDataLength: length || size,
+              encodedDataLength: size,
               endTime: performance.now(),
             }),
           err => failed(rec, err)
@@ -745,15 +701,6 @@ async function readCapped(
   }
 }
 
-function parseRawHeaders(raw: string): Record<string, string> {
-  const obj: Record<string, string> = {};
-  for (const line of raw.trim().split(/[\r\n]+/)) {
-    const i = line.indexOf(':');
-    if (i > 0) obj[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
-  }
-  return obj;
-}
-
 interface XhrInfo {
   method: string;
   url: string;
@@ -767,7 +714,7 @@ function hookXhr(track: Track, update: Update, listen: EventTarget['addEventList
   const origSetRequestHeader = proto.setRequestHeader;
   const infos = new WeakMap<XMLHttpRequest, XhrInfo>();
   // The record of the request each XHR is making now: an XHR can be reused for another one.
-  const current = new WeakMap<XMLHttpRequest, RequestRecord>();
+  const current = new WeakMap<XMLHttpRequest, ProbeRequest>();
   const watched = new WeakSet<XMLHttpRequest>();
 
   proto.open = function (
@@ -833,25 +780,17 @@ function hookXhr(track: Track, update: Update, listen: EventTarget['addEventList
 /** Updates the record of the XHR's current request as it progresses. */
 function watchXhr(
   xhr: XMLHttpRequest,
-  current: WeakMap<XMLHttpRequest, RequestRecord>,
+  current: WeakMap<XMLHttpRequest, ProbeRequest>,
   update: Update,
   listen: EventTarget['addEventListener']
 ) {
-  const finish = (patch: Partial<RequestRecord>) => {
+  const finish = (patch: Partial<ProbeRequest>) => {
     const rec = current.get(xhr);
     if (!rec) return;
     current.delete(xhr);
     update(rec, { ...patch, endTime: performance.now() });
   };
-  const responseMeta = () => {
-    const responseHeaders = parseRawHeaders(xhr.getAllResponseHeaders());
-    return {
-      status: xhr.status,
-      statusText: xhr.statusText,
-      responseHeaders,
-      mimeType: mimeTypeOf(responseHeaders['content-type']),
-    };
-  };
+  const responseMeta = () => ({ status: xhr.status, statusText: xhr.statusText, headers: xhr.getAllResponseHeaders() });
   listen.call(xhr, 'readystatechange', () => {
     const rec = current.get(xhr);
     if (!rec) return;
@@ -865,8 +804,7 @@ function watchXhr(
       if (type === '' || type === 'text') body = xhr.responseText;
       else if (type === 'json') body = JSON.stringify(xhr.response);
       else if (type === 'blob' && xhr.response instanceof Blob) body = xhr.response;
-      // Bytes on the wire, as fetch() reports them: the header, else the body's UTF-8 size.
-      const length = Number(xhr.getResponseHeader('content-length'));
+      // The body's UTF-8 size: bytes on the wire when content-length is absent, as for fetch().
       let size = typeof body === 'string' ? new Blob([body]).size : body?.size || 0;
       if (type === 'arraybuffer' && xhr.response instanceof ArrayBuffer) {
         // Copied only when kept: the page may still change its buffer.
@@ -878,7 +816,7 @@ function watchXhr(
         state: 'done',
         ...responseMeta(),
         body: size > MAX_BODY_LENGTH ? undefined : body,
-        encodedDataLength: length || size,
+        encodedDataLength: size,
       });
     }
   });

@@ -43,6 +43,27 @@ export interface ExceptionEntry {
 
 export type LogEntry = ConsoleEntry | ExceptionEntry;
 
+/**
+ * A console call as the probe records it; the CDP server turns it into a ConsoleEntry. Calls
+ * that log nothing (no arguments, a passing assert, …) are not recorded.
+ */
+export interface ConsoleCall {
+  kind: 'console';
+  /** The console method called, or `debugger` for a `debugger` statement (shell mode). */
+  type: string;
+  /** Arguments as given; for count, countReset, time, timeLog and timeEnd, the label string first. */
+  args: unknown[];
+  /** `performance.now()` of the call. */
+  time: number;
+  /** Raw `Error().stack` taken inside the console wrapper. */
+  stack?: string | undefined;
+  /** count: the new count; timeLog and timeEnd: the timer's start, if it exists. */
+  fact?: number | undefined;
+}
+
+/** What the probe records: console calls and uncaught exceptions, `time` being `performance.now()`. */
+export type ProbeLog = ConsoleCall | ExceptionEntry;
+
 /** CDP resource types of the requests the probe records. */
 export type RequestType =
   | 'Fetch'
@@ -55,6 +76,25 @@ export type RequestType =
   | 'Media'
   | 'Ping'
   | 'Other';
+
+/**
+ * A request as the probe records it; the CDP server turns it into a RequestRecord. Headers
+ * are kept as the page gives them, and the response's MIME type and size come from them.
+ */
+export interface ProbeRequest extends Omit<
+  RequestRecord,
+  'requestHeaders' | 'responseHeaders' | 'mimeType' | 'encodedDataLength'
+> {
+  requestHeaders: Record<string, string> | Headers;
+  /** From the shell's Service Worker (requests known from Resource Timing). */
+  responseHeaders?: Record<string, string>;
+  /** Response headers of fetch (Headers) and XHR (`getAllResponseHeaders()`). */
+  headers?: Headers | string;
+  /** Requests known from Resource Timing only. */
+  mimeType?: string;
+  /** Bytes on the wire; for fetch and XHR, the body's size, used when content-length is absent. */
+  encodedDataLength?: number;
+}
 
 export interface RequestRecord {
   requestId: string;
@@ -134,15 +174,15 @@ export interface ListenerRecord {
 export interface Probe {
   version: 1;
   /** Ring buffer of console calls and uncaught exceptions. */
-  logs: LogEntry[];
+  logs: ProbeLog[];
   /** Ring buffer of fetch/XHR requests and the others seen by Resource Timing; records are updated in place. */
-  requests: RequestRecord[];
+  requests: ProbeRequest[];
   /** Ring buffer of WebSockets; records are updated in place. */
   sockets: SocketRecord[];
   /** Subscribes to new log entries. Returns an unsubscribe function. */
-  onLog(listener: (entry: LogEntry) => void): () => void;
+  onLog(listener: (entry: ProbeLog) => void): () => void;
   /** Subscribes to request creation and every later state change. */
-  onRequest(listener: (record: RequestRecord) => void): () => void;
+  onRequest(listener: (record: ProbeRequest) => void): () => void;
   /** Subscribes to WebSocket creation and every later change. */
   onSocket(listener: (record: SocketRecord) => void): () => void;
   clearLogs(): void;

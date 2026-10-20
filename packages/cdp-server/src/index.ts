@@ -1,6 +1,7 @@
 import type { Context } from './core/context';
 import { NodeRegistry } from './core/nodes';
 import { ObjectRegistry } from './core/objects';
+import { viewProbe } from './core/probe-view';
 import { CdpServer } from './core/server';
 import { registerCss } from './domains/css';
 import { registerDebugger } from './domains/debugger';
@@ -51,7 +52,7 @@ export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
     server: new CdpServer(),
     objects: new ObjectRegistry(),
     nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
-    probe,
+    probe: viewProbe(probe),
   };
   registerStubs(ctx.server);
   registerRuntime(ctx);

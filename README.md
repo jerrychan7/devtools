@@ -65,7 +65,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 #### 1. Probe
 
-A synchronous script of about 4.2 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
+A synchronous script of about 5.7 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
 
 - Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch`, `XHR` and `WebSocket`, and writes events with timestamps into a buffer. WebSocket frames are kept as given; binary payloads are only converted to base64 by the CDP server.
 - Requests that cannot be hooked (the document, style sheets, scripts, images, fonts, …) are recorded from Resource Timing; a buffered `PerformanceObserver` also delivers those from before the probe ran. They have URL, type, timing, size and (where the browser exposes it) status and MIME type, but no headers; their bodies are loaded again from the HTTP cache on demand. In shell mode with the Service Worker, it adds the request and response headers of same-origin ones. Hooks stay first because they work from the very start, keep call stacks, and need no deployment; a Service Worker only controls pages after it is installed, conflicts with a site's own, and would have to proxy requests to see responses.

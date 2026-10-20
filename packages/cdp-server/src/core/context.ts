@@ -1,6 +1,6 @@
-import type { Probe } from '../probe/types';
 import type { NodeRegistry } from './nodes';
 import type { ObjectRegistry } from './objects';
+import type { ProbeView } from './probe-view';
 import type { CdpServer } from './server';
 
 /** State shared by all domains. */
@@ -8,7 +8,7 @@ export interface Context {
   server: CdpServer;
   objects: ObjectRegistry;
   nodes: NodeRegistry;
-  probe: Probe;
+  probe: ProbeView;
   /** Re-checks which pseudo-elements exist, e.g. after a style edit. Set by the DOM domain. */
   refreshPseudoElements?: (roots?: Node[]) => void;
 }
