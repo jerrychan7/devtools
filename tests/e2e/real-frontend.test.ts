@@ -85,7 +85,9 @@ const panelShowing = (id: string) =>
           };
         };
       };
-    } = await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+    } = await (
+      await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+    ).modules['ui/legacy/legacy.js']();
     const inspectorView = InspectorView.InspectorView.instance();
     return inspectorView.tabbedPane.selectedTabId === id && (await inspectorView.panel(id)).isShowing();
   }, id);
@@ -151,7 +153,7 @@ test('only the breakpoint panes the page supports are offered', { skip }, async 
   const views = await frontend.evaluate(async () => {
     // The built frontend has no type declarations; only this much of it is used.
     const { ViewManager }: { ViewManager: { ViewManager: { instance(): { hasView(id: string): boolean } } } } = await (
-      await import(new URL('bundle/anywhere_app.js', location.href).href)
+      await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
     ).modules['ui/legacy/legacy.js']();
     const ids = [
       'elements.event-listeners',
@@ -187,10 +189,10 @@ test('the Sources panel shows source and Watch, without breakpoints or pausing c
       // The built frontend has no type declarations; only this much of it is used.
       const { Workspace }: { Workspace: { WorkspaceImpl: { instance(): { uiSourceCodes(): { url(): string }[] } } } } =
         await (
-          await import(new URL('bundle/anywhere_app.js', location.href).href)
+          await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
         ).modules['models/workspace/workspace.js']();
       const { Revealer }: { Revealer: { reveal(revealable: unknown): Promise<void> } } = await (
-        await import(new URL('bundle/anywhere_app.js', location.href).href)
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
       ).modules['core/common/common.js']();
       const code = Workspace.WorkspaceImpl.instance()
         .uiSourceCodes()
@@ -258,7 +260,7 @@ test('the Sources panel shows source and Watch, without breakpoints or pausing c
     const {
       BreakpointManager,
     }: { BreakpointManager: { BreakpointManager: { instance(): { allBreakpointLocations(): unknown[] } } } } = await (
-      await import(new URL('bundle/anywhere_app.js', location.href).href)
+      await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
     ).modules['models/breakpoints/breakpoints.js']();
     return BreakpointManager.BreakpointManager.instance().allBreakpointLocations().length;
   });
@@ -311,7 +313,7 @@ test(
           Workspace: { WorkspaceImpl: { instance(): { uiSourceCodes(): { url(): string }[] } } };
           IgnoreListManager: { IgnoreListManager: { instance(): { isUserIgnoreListedURL(url: string): boolean } } };
         } = await (
-          await import(new URL('bundle/anywhere_app.js', location.href).href)
+          await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
         ).modules['models/workspace/workspace.js']();
         const ignoreList = IgnoreListManager.IgnoreListManager.instance();
         return Workspace.WorkspaceImpl.instance()
@@ -326,7 +328,7 @@ test(
         }: {
           IgnoreListManager: { IgnoreListManager: { instance(): { isUserIgnoreListedURL(url: string): boolean } } };
         } = await (
-          await import(new URL('bundle/anywhere_app.js', location.href).href)
+          await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
         ).modules['models/workspace/workspace.js']();
         const ignoreList = IgnoreListManager.IgnoreListManager.instance();
         return urls.map(url => ignoreList.isUserIgnoreListedURL(url));
@@ -412,12 +414,14 @@ test('revealing the Console in a minimized or dragged-down drawer makes room for
             instance(): { setDrawerMinimized(minimized: boolean): void; setDrawerSize(size: number): void };
           };
         };
-      } = await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+      } = await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['ui/legacy/legacy.js']();
       const {
         Console,
         Revealer,
       }: { Console: { Console: { instance(): object } }; Revealer: { reveal(object: object): Promise<void> } } = await (
-        await import(new URL('bundle/anywhere_app.js', location.href).href)
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
       ).modules['core/common/common.js']();
       const inspectorView = InspectorView.InspectorView.instance();
       if (before === 'minimize') inspectorView.setDrawerMinimized(true);
@@ -428,11 +432,13 @@ test('revealing the Console in a minimized or dragged-down drawer makes room for
   const consoleSize = () =>
     frontend.evaluate(async () => {
       const { InspectorView }: { InspectorView: { InspectorView: { instance(): { isDrawerMinimized(): boolean } } } } =
-        await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+        await (
+          await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+        ).modules['ui/legacy/legacy.js']();
       const {
         ConsoleView,
       }: { ConsoleView: { ConsoleView: { instance(): { element: HTMLElement; isShowing(): boolean } } } } = await (
-        await import(new URL('bundle/anywhere_app.js', location.href).href)
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
       ).modules['panels/console/console.js']();
       const view = ConsoleView.ConsoleView.instance();
       return {
@@ -450,7 +456,9 @@ test('revealing the Console in a minimized or dragged-down drawer makes room for
   await showPanel('elements');
   await frontend.evaluate(async () => {
     const { ViewManager }: { ViewManager: { ViewManager: { instance(): { showView(id: string): Promise<void> } } } } =
-      await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+      await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['ui/legacy/legacy.js']();
     await ViewManager.ViewManager.instance().showView('console-view');
   });
   try {
@@ -462,7 +470,7 @@ test('revealing the Console in a minimized or dragged-down drawer makes room for
   } finally {
     await frontend.evaluate(async () => {
       const { InspectorView }: { InspectorView: { InspectorView: { instance(): { closeDrawer(): void } } } } = await (
-        await import(new URL('bundle/anywhere_app.js', location.href).href)
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
       ).modules['ui/legacy/legacy.js']();
       InspectorView.InspectorView.instance().closeDrawer();
     });
@@ -478,7 +486,9 @@ test(
       frontend.evaluate(async () => {
         // The built frontend has no type declarations; only this much of it is used.
         const { Widget }: { Widget: { Widget: { get(element: Element): { isShowing(): boolean } | undefined } } } =
-          await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+          await (
+            await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+          ).modules['ui/legacy/legacy.js']();
         const el = document.getElementById('anywhere-test-tab-b');
         return (
           el && {
@@ -499,7 +509,9 @@ test(
           widgetConfig(factory: (element: HTMLElement) => object): object;
           registerWidgetConfig(element: HTMLElement, config: object): void;
         };
-      } = await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+      } = await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['ui/legacy/legacy.js']();
       // As WebMCP's call details render it: <devtools-widget> tabs, the first one selected.
       const pane = document.createElement('devtools-tabbed-pane');
       pane.id = 'anywhere-test-tabs';
@@ -525,7 +537,7 @@ test(
         const {
           Widget,
         }: { Widget: { Widget: { get(element: Element): { selectTab(id: string): void } | undefined } } } = await (
-          await import(new URL('bundle/anywhere_app.js', location.href).href)
+          await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
         ).modules['ui/legacy/legacy.js']();
         const pane = document.getElementById('anywhere-test-tabs');
         if (!pane) throw new Error('no tabbed pane');
@@ -569,7 +581,9 @@ test('CDP messages go only to the embedder, and only its messages are taken', { 
         InspectorFrontendHost,
       }: {
         InspectorFrontendHost: { InspectorFrontendHostInstance: { sendMessageToBackend(message: string): void } };
-      } = await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['core/host/host.js']();
+      } = await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['core/host/host.js']();
       InspectorFrontendHost.InspectorFrontendHostInstance.sendMessageToBackend(MARKER);
     }, MARKER);
     assert.deepEqual(await page.evaluate(() => window.__targets), [origin]);
@@ -593,7 +607,9 @@ test('CDP messages go only to the embedder, and only its messages are taken', { 
         };
       };
       InspectorFrontendHostAPI: { Events: { DispatchMessage: string } };
-    } = await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['core/host/host.js']();
+    } = await (
+      await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+    ).modules['core/host/host.js']();
     const received: unknown[] = [];
     window.__received = received;
     InspectorFrontendHost.InspectorFrontendHostInstance.events.addEventListener(
@@ -624,7 +640,9 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
         DockController,
       }: {
         DockController: { DockController: { instance(): { canDock(): boolean; setDockSide(side: string): void } } };
-      } = await (await import(new URL('bundle/anywhere_app.js', location.href).href)).modules['ui/legacy/legacy.js']();
+      } = await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['ui/legacy/legacy.js']();
       const controller = DockController.DockController.instance();
       if (!controller.canDock()) throw new Error('docking is off');
       controller.setDockSide(side);
@@ -705,7 +723,7 @@ test("DevTools' own scripts are ignore-listed once, next to the user's rules", {
             Settings: { instance(): { moduleSetting(name: string): { getAsArray(): { pattern: string }[] } } };
           };
         } = await (
-          await import(new URL('bundle/anywhere_app.js', location.href).href)
+          await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
         ).modules['core/common/common.js']();
         return Settings.Settings.instance()
           .moduleSetting(KEY)

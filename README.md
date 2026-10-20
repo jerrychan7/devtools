@@ -117,7 +117,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 ## Usage (preview)
 
-The packages are not published yet; the paths below refer to the builds in this repository. `data-frontend` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build.
+The packages are not published yet; the paths below refer to the builds in this repository. `data-frontend` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build. Its `bundle/` files are named after their content and can be cached for good; serve `anywhere_app.html` itself with revalidation (`Cache-Control: no-cache`), so that an update reaches the browser.
 
 ### One script tag
 

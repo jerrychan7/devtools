@@ -6,7 +6,9 @@
 //     worth a request are the chunk DevTools loads when it opens;
 //   - each worker is a single file of its own;
 //   - the SVG icons are inlined into Images.js as data: URLs (each declared once, as the CSS
-//     variable every use reads).
+//     variable every use reads);
+//   - every bundled file is named after a hash of its content, so it can be cached for good:
+//     only anywhere_app.html, which names the entry, must be revalidated.
 // Rollup tree-shakes what nothing uses.
 //
 // Every bundled file lands in bundle/, one level below the root. A module's import.meta.url
@@ -24,8 +26,8 @@ const WORKERS = [
   'entrypoints/formatter_worker/formatter_worker-entrypoint.js',
   'entrypoints/wasmparser_worker/wasmparser_worker-entrypoint.js',
 ];
-/** Where each entry ends up, seen from bundle/. */
-const entryOutput = new Map([APP, ...WORKERS].map(file => [file, `./${path.posix.basename(file)}`]));
+/** Where each worker ends up, seen from bundle/: known once the worker is bundled. */
+const workerOutput = new Map<string, string>();
 /** A root whose own modules are smaller than this goes into the entry chunk. */
 const SMALL_ROOT = 20_000;
 /** Stands for the bundled file's own import.meta.url while the others are rewritten. */
@@ -62,9 +64,9 @@ export async function bundle(src: string, out: string): Promise<void> {
           JSON.stringify(svgDataUrl(path.join(src, 'Images', name)))
         );
       }
-      // Workers are entries of their own: they moved, so point at their new place.
+      // Workers are bundled on their own: point at their files.
       const entry = (spec: string) =>
-        entryOutput.get(path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)));
+        workerOutput.get(path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)));
       code = code
         .replace(
           /new URL\((["'`])(\.{1,2}\/[^"'`]+\.js)\1,\s*import\.meta\.url\)/g,
@@ -158,21 +160,30 @@ export async function bundle(src: string, out: string): Promise<void> {
   };
 
   fs.rmSync(out, { recursive: true, force: true });
+  /** Bundles `input`, and returns the name of its file in bundle/. */
   const write = async (input: string, split: boolean) => {
-    const build = await rollup({ input: path.join(src, input), plugins: [rewrite], onwarn: () => {} });
-    await build.write({
+    const build = await rollup({
+      input: path.join(src, input),
+      plugins: [rewrite],
+      onwarn: () => {},
+      // The entry chunk may export more than the entry: no facade file of its own (a request).
+      preserveEntrySignatures: 'allow-extension',
+    });
+    const { output } = await build.write({
       dir: path.join(out, OUT_DIR),
       format: 'es',
-      entryFileNames: '[name].js',
+      entryFileNames: '[name]-[hash].js',
       chunkFileNames: '[name]-[hash].js',
       inlineDynamicImports: !split,
       ...(split ? { manualChunks: chunkOf } : {}),
       plugins: [minify],
     });
     await build.close();
+    return output[0].fileName;
   };
-  await write(APP, true);
-  for (const worker of WORKERS) await write(worker, false);
+  // The workers first: the app names their files.
+  for (const worker of WORKERS) workerOutput.set(worker, `./${await write(worker, false)}`);
+  const app = await write(APP, true);
 
   // Everything but the JS modules, and the JS files loaded by URL rather than imported.
   for (const file of fs.readdirSync(src, { recursive: true, encoding: 'utf8' })) {
@@ -183,5 +194,5 @@ export async function bundle(src: string, out: string): Promise<void> {
     fs.copyFileSync(path.join(src, file), path.join(out, file));
   }
   const html = path.join(out, 'anywhere_app.html');
-  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(`./${APP}`, `./${OUT_DIR}/anywhere_app.js`));
+  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(`./${APP}`, `./${OUT_DIR}/${app}`));
 }

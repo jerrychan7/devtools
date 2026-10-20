@@ -117,7 +117,7 @@
 
 ## 用法（预览）
 
-各个包尚未发布，下面的路径指本仓库构建出的文件。`data-frontend` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。
+各个包尚未发布，下面的路径指本仓库构建出的文件。`data-frontend` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。产物里 `bundle/` 下的文件以内容命名，可以永久缓存；`anywhere_app.html` 本身要带重新验证提供（`Cache-Control: no-cache`），更新才能到达浏览器。
 
 ### 一行 script
 
