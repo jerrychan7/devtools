@@ -6,6 +6,7 @@ import { compareSpecificity, specificity, splitTopLevel } from '../core/selector
 import { CdpError } from '../core/server';
 import { resolveElement } from './dom';
 import { historyOf } from '../core/history';
+import { adoptedOf, quietly, watchAdopted } from '../core/adopted';
 import { ForcedPseudoClasses, type TreeScope } from './forced-pseudo';
 
 type CSSStyle = Protocol.CSS.CSSStyle;
@@ -74,6 +75,28 @@ function declarations(text: string): Declaration[] {
 }
 
 /**
+ * Like Chrome, after the declared properties come the longhands the style actually holds,
+ * without ranges: normal ones first, then !important ones, each in declaration order.
+ * Longhands a `border` resets but cannot set (`border-image-*`) are implicit.
+ */
+function appliedProperties(decl: CSSStyleDeclaration, list: Declaration[]): CSSProperty[] {
+  const names = list.filter(d => !d.disabled).map(d => d.raw.slice(0, d.raw.indexOf(':')).trim().toLowerCase());
+  const borderImage = names.some(n => n.startsWith('border-image'));
+  const normal: CSSProperty[] = [];
+  const important: CSSProperty[] = [];
+  for (const name of Array.from(decl)) {
+    const value = decl.getPropertyValue(name);
+    if (decl.getPropertyPriority(name) === 'important') {
+      important.push({ name, value: `${value} !important`, important: true });
+      continue;
+    }
+    const implicit = !borderImage && name.startsWith('border-image-') && names.includes('border');
+    normal.push({ name, value, ...(implicit && { implicit }) });
+  }
+  return [...normal, ...important];
+}
+
+/**
  * Serializes declarations as `name: value;` separated by spaces, the text the client edits;
  * disabled ones as `/* name: value; *\/`. Each declared property gets a range; longhands of
  * shorthands follow without one.
@@ -129,9 +152,9 @@ function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: numbe
     if (longhands.length > 1 || (longhands.length === 1 && longhands[0]?.name !== name)) {
       shorthandEntries.push({ name, value: shown, ...(important && { important }) });
       property.longhandProperties = longhands;
-      for (const longhand of longhands) cssProperties.push({ ...longhand });
     }
   }
+  cssProperties.push(...appliedProperties(decl, list));
   return {
     styleSheetId,
     cssProperties,
@@ -267,6 +290,8 @@ class SheetRegistry {
   inspectorSheet: CSSStyleSheet | null = null;
   /** Whether a sheet is ours rather than the page's (forced pseudo-class companions). */
   isOwnSheet: (sheet: CSSStyleSheet) => boolean = () => false;
+  /** Whether a <style> came from the HTML parser rather than from a script. */
+  fromParser: (style: HTMLStyleElement) => boolean = () => true;
 
   constructor(
     private fetch: typeof window.fetch,
@@ -315,7 +340,7 @@ class SheetRegistry {
         if (owner && isOwn(owner) && sheet !== this.inspectorSheet) continue;
         list.push(sheet);
       }
-      for (const sheet of tree.adoptedStyleSheets) if (!this.isOwnSheet(sheet)) list.push(sheet);
+      for (const sheet of adoptedOf(tree)) if (!this.isOwnSheet(sheet)) list.push(sheet);
       if (list.length) result.push({ tree, sheets: list });
     }
     if (this.memo) this.memo.trees = result;
@@ -496,8 +521,13 @@ class SheetRegistry {
     const lines = text.split('\n');
     const isInspector = sheet === this.inspectorSheet;
     const constructed = isConstructed(sheet);
-    // Like Chrome, sheets in shadow trees and constructed ones have no source URL and are not inline.
-    const local = constructed || sheet.ownerNode?.getRootNode() instanceof ShadowRoot;
+    // Like Chrome, sheets in shadow trees, constructed ones and those of a <style> a script
+    // inserted have no source URL and are not inline.
+    const owner = sheet.ownerNode;
+    const local =
+      constructed ||
+      owner?.getRootNode() instanceof ShadowRoot ||
+      (owner instanceof HTMLStyleElement && !this.fromParser(owner));
     return {
       styleSheetId: this.idOf(sheet),
       frameId: FRAME_ID,
@@ -533,23 +563,40 @@ function rgba(value: string): [number, number, number, number] | null {
 }
 
 type RGBA = [number, number, number, number];
+/** A color: its channels, or for one in another color space (`oklch()`, `color()`...) its text, which Chrome reports as is. */
+type Color = RGBA | string;
+
+/** Computed colors: rgb() and the notations Chrome keeps for other color spaces. */
+const COLOR = /\b(?:rgba?|color|lab|lch|oklab|oklch)\([^()]*\)/g;
+
+/** A computed color, or null for a translucent one outside sRGB, which we cannot blend. */
+function parseColor(value: string): Color | null {
+  const channels = rgba(value);
+  if (channels) return channels;
+  const alpha = /\/\s*([\d.]+)(%?)\s*\)$/.exec(value);
+  if (alpha && Number(alpha[1]) / (alpha[2] ? 100 : 1) < 1) return null;
+  return value;
+}
+
+const isOpaque = (c: Color) => typeof c === 'string' || c[3] >= 1;
 
 /**
  * The colors of one element's background, topmost last: its color, then the stops of its
- * gradients. null when an image makes the background unknown.
+ * topmost gradient (like Chrome, the layers below it are not looked at). null when an image
+ * makes the background unknown.
  */
-function backgroundLayers(style: CSSStyleDeclaration): RGBA[][] | null {
-  const layers: RGBA[][] = [];
-  const color = rgba(style.backgroundColor);
+function backgroundLayers(style: CSSStyleDeclaration): Color[][] | null {
+  const layers: Color[][] = [];
+  const color = parseColor(style.backgroundColor);
   if (!color) return null;
-  if (color[3] > 0) layers.push([color]);
+  if (typeof color === 'string' || color[3] > 0) layers.push([color]);
   const image = style.backgroundImage;
   if (image !== 'none') {
-    if (!/^(?:(?:repeating-)?(?:linear|radial|conic)-gradient\(.*\)(?:,\s*)?)+$/.test(image) || /url\(/.test(image))
-      return null;
-    const stops: RGBA[] = [];
-    for (const [stop] of image.matchAll(/rgba?\([^)]*\)/g)) {
-      const c = rgba(stop);
+    const top = splitTopLevel(image, ',')[0]?.trim() ?? '';
+    if (!/^(?:repeating-)?(?:linear|radial|conic)-gradient\(.*\)$/.test(top)) return null;
+    const stops: Color[] = [];
+    for (const [stop] of top.matchAll(COLOR)) {
+      const c = parseColor(stop);
       if (!c) return null;
       stops.push(c);
     }
@@ -565,30 +612,42 @@ function backgroundLayers(style: CSSStyleDeclaration): RGBA[][] | null {
  * own; null when an image makes them unknown.
  */
 function backgroundsBehind(el: Element, style: CSSStyleDeclaration): string[] | null {
-  const layers: RGBA[][] = [];
+  const layers: Color[][] = [];
   for (let node: Element | null = el, s = style; node;) {
     const own = backgroundLayers(s);
     if (!own) return null;
     layers.unshift(...own);
     // The topmost opaque layer hides what is below it.
-    if (own.some(layer => layer.every(c => c[3] >= 1))) break;
+    if (own.some(layer => layer.every(isOpaque))) break;
     node = parentOf(node);
     if (node) s = getComputedStyle(node);
   }
   let opaque = 0;
   layers.forEach((layer, i) => {
-    if (layer.every(c => c[3] >= 1)) opaque = i;
+    if (layer.every(isOpaque)) opaque = i;
   });
-  let colors: [number, number, number][] = [[255, 255, 255]];
+  let colors: ([number, number, number] | string)[] = [[255, 255, 255]];
   for (const layer of layers.slice(opaque)) {
-    const next: [number, number, number][] = [];
-    for (const [r, g, b] of colors)
-      for (const [lr, lg, lb, la] of layer)
+    const next: ([number, number, number] | string)[] = [];
+    for (const below of colors)
+      for (const c of layer) {
+        if (typeof c === 'string' || c[3] >= 1) {
+          next.push(typeof c === 'string' ? c : [c[0], c[1], c[2]]);
+          continue;
+        }
+        // A translucent stop over a color outside sRGB: not blended, like an opaque one would hide it.
+        if (typeof below === 'string') return null;
+        const [lr, lg, lb, la] = c;
+        const [r, g, b] = below;
         next.push([lr * la + r * (1 - la), lg * la + g * (1 - la), lb * la + b * (1 - la)]);
+      }
     colors = next;
   }
-  // Chrome truncates the blended channels.
-  const result = colors.map(([r, g, b]) => `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`);
+  // Chrome truncates the blended channels. (It rounds them for a stop written in the modern
+  // `rgb(0 0 0 / 0.5)` syntax, which the computed style does not tell from `rgba(0, 0, 0, 0.5)`.)
+  const result = colors.map(c =>
+    typeof c === 'string' ? c : `rgb(${Math.floor(c[0])}, ${Math.floor(c[1])}, ${Math.floor(c[2])})`
+  );
   return Array.from(new Set(result));
 }
 
@@ -613,13 +672,148 @@ function mediaList(text: string): Protocol.CSS.MediaQuery[] {
   });
 }
 
-/** Rules of a shadow tree for its host: the selector is `:host` or `:host(<arg>)` and pseudo-classes. */
-function hostSelector(selector: string): string | null {
-  const m = /^:host(?:\((.*)\))?(.*)$/.exec(selector);
+/**
+ * The source of a <style>, in two versions of the same length (indices are shared): `text`
+ * without comments, to match selectors in (they may quote attribute values), and `braces`
+ * also without strings and url(), where braces delimit blocks. Located rules are cached.
+ */
+interface Source {
+  text: string;
+  braces: string;
+  located: WeakMap<CSSStyleRule, Located | null>;
+}
+
+interface Located {
+  selectors: string[];
+  open: number;
+  close: number;
+}
+
+/** The source last read, kept while the <style> text does not change. */
+let lastSource: { raw: string; source: Source } | null = null;
+
+const blank = (m: string) => ' '.repeat(m.length);
+
+function sourceOf(sheet: CSSStyleSheet): Source | null {
+  const owner = sheet.ownerNode;
+  if (!(owner instanceof HTMLStyleElement) || owner.sheet !== sheet) return null;
+  const raw = owner.textContent;
+  if (lastSource?.raw !== raw) {
+    const text = raw.replace(/\/\*[\s\S]*?\*\//g, blank);
+    const braces = text.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|url\([^)]*\)/gi, blank);
+    lastSource = { raw, source: { text, braces, located: new WeakMap() } };
+  }
+  return lastSource.source;
+}
+
+/** A pattern for a selector, allowing any white space between its tokens. */
+function selectorPattern(selector: string): string {
+  return selector
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s*([>~]|\\\+)\s*/g, '\\s*$1\\s*')
+    .replace(/ +/g, '\\s+');
+}
+
+/** The index of the `}` closing the block whose `{` is at `open`. */
+function blockEnd(source: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}' && --depth === 0) return i;
+  }
+  return source.length;
+}
+
+/**
+ * Where a style rule is in the source, as written: its selectors and the range of its block
+ * (from its `{` to its `}`). Nested rules are looked for in the block of their parent only.
+ */
+function locate(source: Source, rule: CSSStyleRule): Located | null {
+  const cached = source.located.get(rule);
+  if (cached !== undefined) return cached;
+  const result = find(source, rule);
+  source.located.set(rule, result);
+  return result;
+}
+
+function find(source: Source, rule: CSSStyleRule): Located | null {
+  const parts = splitTopLevel(rule.selectorText, ',').map(p => p.trim());
+  const parent = nestingParent(rule);
+  let from = 0;
+  let to = source.text.length;
+  if (parent) {
+    if (!(parent instanceof CSSStyleRule)) return null;
+    const outer = locate(source, parent);
+    if (!outer) return null;
+    from = outer.open;
+    to = outer.close;
+  }
+  // The CSSOM adds the `&` an author may leave out: `.x` becomes `& .x`.
+  const pattern = parts
+    .map(p => (parent && p.startsWith('& ') ? `(&\\s+)?${selectorPattern(p.slice(2))}` : `()${selectorPattern(p)}`))
+    .join('\\s*,\\s*');
+  const m = new RegExp(`(?:^|[{;}])\\s*${pattern}\\s*\\{`, 'y');
+  for (let i = from; i < to; i++) {
+    // Rules start after a delimiter outside strings.
+    if (i > from && !/[{;}]/.test(source.braces[i] ?? '')) continue;
+    m.lastIndex = i;
+    const match = m.exec(source.text);
+    if (!match) continue;
+    const open = i + match[0].length - 1;
+    return {
+      selectors: parts.map((p, k) => (parent && p.startsWith('& ') && !match[k + 1] ? p.slice(2) : p)),
+      open,
+      close: blockEnd(source.braces, open),
+    };
+  }
+  return null;
+}
+
+/**
+ * Nested selectors as written in the source, where Chrome shows them so. null when the source
+ * is unknown (a <link>, a constructed sheet) or the rule is not found in it.
+ */
+function sourceSelectors(sheet: CSSStyleSheet, rule: CSSStyleRule, parts: string[]): string[] | null {
+  if (!(nestingParent(rule) instanceof CSSStyleRule)) return null;
+  if (!parts.some(p => p.startsWith('& '))) return null;
+  const source = sourceOf(sheet);
+  return source === null ? null : (locate(source, rule)?.selectors ?? null);
+}
+
+/**
+ * Rules of a shadow tree for its host: the selector is `:host`, `:host(<arg>)` or
+ * `:host-context(<arg>)` and pseudo-classes. Returns whether a host matches, or null.
+ */
+function hostMatcher(selector: string): ((host: Element) => boolean) | null {
+  let matcher = hostMatchers.get(selector);
+  if (matcher === undefined) hostMatchers.set(selector, (matcher = parseHost(selector)));
+  return matcher;
+}
+
+/** Host matchers by selector. */
+const hostMatchers = new Map<string, ((host: Element) => boolean) | null>();
+
+function parseHost(selector: string): ((host: Element) => boolean) | null {
+  const m = /^:host(-context)?(?:\((.*)\))?(.*)$/.exec(selector);
   if (!m) return null;
-  const rest = m[2] ?? '';
+  const arg = m[2];
+  const rest = m[3] ?? '';
   if (/[\s>+~]/.test(rest.replace(/\([^)]*\)/g, ''))) return null;
-  return `${m[1] ? `:is(${m[1]})` : '*'}${rest}`;
+  if (!m[1]) {
+    const own = `${arg ? `:is(${arg})` : '*'}${rest}`;
+    return host => host.matches(own);
+  }
+  if (!arg) return null;
+  // The host or any of its ancestors, across shadow boundaries.
+  return host => {
+    if (!host.matches(`*${rest}`)) return false;
+    for (let node: Element | null = host; node;) {
+      if (node.matches(arg)) return true;
+      const parent: Node | null = node.parentNode;
+      node = parent instanceof ShadowRoot ? parent.host : parent instanceof Element ? parent : null;
+    }
+    return false;
+  };
 }
 
 export function registerCss(ctx: Context) {
@@ -666,14 +860,25 @@ export function registerCss(ctx: Context) {
   );
   sheets.isOwnSheet = sheet => forced.owns(sheet);
 
+  // The DOM does not tell which <style> the parser made: those in the document before the
+  // parser is done are taken as its own, those added later as a script's. A script that adds
+  // one while the page loads is taken for the parser.
+  const parsed = new WeakSet<HTMLStyleElement>();
+  const collectParsed = () => document.querySelectorAll('style').forEach(s => parsed.add(s));
+  collectParsed();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', collectParsed, { once: true });
+  sheets.fromParser = style => parsed.has(style);
+
   /** After the page's styles changed: keep forced states and pseudo-elements in sync. */
   function stylesChanged() {
-    if (forced.isActive) forced.rebuild();
+    // The companion sheets it adopts are ours, not a change of the page's.
+    if (forced.isActive) quietly(() => forced.rebuild());
     ctx.refreshPseudoElements?.();
   }
   let enabled = false;
   let known = new Set<CSSStyleSheet>();
   let observer: MutationObserver | null = null;
+  let stopAdopted: (() => void) | null = null;
 
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
@@ -686,6 +891,10 @@ export function registerCss(ctx: Context) {
 
   /** Reports added and removed sheets since the last call. */
   function syncSheets() {
+    return quietly(reportSheets);
+  }
+
+  function reportSheets() {
     const scoped = sheets.scoped();
     const current = new Set(scoped.map(s => s.sheet));
     for (const sheet of current) if (!known.has(sheet)) server.emit('CSS.styleSheetAdded', { header: header(sheet) });
@@ -736,12 +945,18 @@ export function registerCss(ctx: Context) {
     if (!(rule instanceof CSSStyleRule)) return { selectors: [], text: selectorLabel(rule) };
     const line = sheets.ruleId(sheet, rule);
     let column = 0;
-    const selectors = splitTopLevel(rule.selectorText, ',').map(raw => {
+    const parts = splitTopLevel(rule.selectorText, ',');
+    const written = sourceSelectors(
+      sheet,
+      rule,
+      parts.map(p => p.trim())
+    );
+    const selectors = parts.map((raw, i) => {
       const text = raw.trim();
       const start = column + raw.indexOf(text);
       column += raw.length + 1;
       return {
-        text,
+        text: written?.[i] ?? text,
         specificity: specificity(resolveSelector(text, rule, true)),
         range: { startLine: line, startColumn: start, endLine: line, endColumn: start + text.length },
       };
@@ -934,21 +1149,26 @@ export function registerCss(ctx: Context) {
       order: number;
       layer: number[];
       proximity: number;
+      rank: number;
     }[] = [];
     // A pseudo-element's own element can be its container.
     const containerStart = pseudo ? el : parentOf(el);
-    const slot = el.assignedSlot;
     const byTree = requestCandidates ?? candidates();
     // Rules of a shadow tree reach outside it only through `:host` and `::slotted()`.
     const ownShadow = nodes.shadowRootOf(el);
     const elRoot = el.getRootNode();
-    const slotTree = slot?.getRootNode();
-    const groups: [Candidate[] | undefined, 'own' | 'host' | 'slotted'][] = [
-      [byTree.get(elRoot instanceof ShadowRoot ? elRoot : document), 'own'],
-      [ownShadow ? byTree.get(ownShadow) : undefined, 'host'],
-      [slotTree instanceof ShadowRoot ? byTree.get(slotTree) : undefined, 'slotted'],
+    const groups: [Candidate[] | undefined, 'own' | 'host' | 'slotted', HTMLSlotElement | null, number][] = [
+      [byTree.get(elRoot instanceof ShadowRoot ? elRoot : document), 'own', null, 0],
+      [ownShadow ? byTree.get(ownShadow) : undefined, 'host', null, 0],
     ];
-    for (const [group, kind] of groups)
+    // A slot can itself be assigned to a slot further in: `::slotted()` of each of those trees
+    // matches, the trees further in losing to those closer to the element, like in Chrome.
+    let depth = 0;
+    for (let slot = el.assignedSlot; slot; slot = slot.assignedSlot) {
+      const slotTree = slot.getRootNode();
+      if (slotTree instanceof ShadowRoot) groups.push([byTree.get(slotTree), 'slotted', slot, -depth++]);
+    }
+    for (const [group, kind, slot, rank] of groups)
       for (const candidate of group ?? []) {
         const { sheet, tree, rule, order, layer, containers, scope, selectors } = candidate;
         let proximity = Infinity;
@@ -958,8 +1178,8 @@ export function registerCss(ctx: Context) {
               return !pseudo && s.slotted !== null && !!slot?.matches(s.host) && el.matches(s.slotted);
             if (s.pseudo !== pseudo) return false;
             if (kind === 'host') {
-              const host = hostSelector(s.host);
-              return host !== null && el.matches(host);
+              const host = hostMatcher(s.host);
+              return host !== null && host(el);
             }
             if (!scope) return el.matches(s.host);
             // `:scope` is the root: Element.matches for the root itself, querySelectorAll below it,
@@ -987,6 +1207,7 @@ export function registerCss(ctx: Context) {
           order,
           layer,
           proximity,
+          rank,
         });
       }
     // Layers, then specificity, then scope proximity (nearer roots win), then order of
@@ -994,6 +1215,7 @@ export function registerCss(ctx: Context) {
     return matches
       .sort(
         (x, y) =>
+          x.rank - y.rank ||
           compareLayers(x.layer, y.layer) ||
           compareSpecificity(x.spec, y.spec) ||
           (x.proximity === y.proximity ? 0 : x.proximity > y.proximity ? -1 : 1) ||
@@ -1125,7 +1347,7 @@ export function registerCss(ctx: Context) {
           )
         )
           shadowRootCache = null;
-        forced.removed(records.flatMap(r => Array.from(r.removedNodes)));
+        quietly(() => forced.removed(records.flatMap(r => Array.from(r.removedNodes))));
         if (touchesSheets) syncSheets();
       });
       observed = new WeakSet();
@@ -1135,17 +1357,24 @@ export function registerCss(ctx: Context) {
       syncSheets();
       // A <link> stylesheet (or a <style> with @import) becomes available once loaded.
       document.addEventListener('load', onLoad, true);
+      // Adopted style sheets change without a DOM mutation.
+      stopAdopted = watchAdopted(
+        () => void syncSheets(),
+        () => [document, ...shadowRoots()]
+      );
     },
 
     disable() {
       enabled = false;
-      forced.clear();
+      quietly(() => forced.clear());
       observer?.disconnect();
       observer = null;
       shadowRootCache = null;
       stopShadowRoots?.();
       stopShadowRoots = null;
       document.removeEventListener('load', onLoad, true);
+      stopAdopted?.();
+      stopAdopted = null;
     },
 
     async getMatchedStylesForNode(
@@ -1259,29 +1488,44 @@ export function registerCss(ctx: Context) {
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
-      // Before the rule at `location`, or after it when the location is inside it (rules are one per line).
+      // Before the rule at `location`, or after it when the location is inside it (rules are one
+      // per line). Like Chrome, a location in an @media (or another group rule) puts the rule in it.
       const { startLine, startColumn } = params.location;
-      const top = Array.from(sheet.cssRules);
-      const at = top.findIndex(r => {
-        if (!(r instanceof CSSStyleRule)) return false;
-        const line = sheets.ruleId(sheet, r);
-        return line > startLine || (line === startLine && startColumn === 0);
-      });
-      const index = sheet.insertRule(params.ruleText, at < 0 ? top.length : at);
-      const rule = sheet.cssRules[index];
+      const entries = sheets.entries(sheet).map(e => e.rule);
+      const onLine = entries.find(r => sheets.ruleId(sheet, r) === startLine);
+      let parent: CSSStyleSheet | CSSGroupingRule = sheet;
+      let at = -1;
+      if (onLine) {
+        // The group rule (not a style rule: addRule does not nest) the rule is in.
+        let child: CSSRule = onLine;
+        for (let p = child.parentRule; p; child = p, p = p.parentRule)
+          if (p instanceof CSSGroupingRule && !(p instanceof CSSStyleRule)) {
+            parent = p;
+            break;
+          }
+        at = Array.from(parent.cssRules).indexOf(child) + (startColumn === 0 ? 0 : 1);
+      } else {
+        // Before the top-level rule of the next style rule.
+        let next: CSSRule | null | undefined = entries.find(r => sheets.ruleId(sheet, r) > startLine);
+        while (next?.parentRule) next = next.parentRule;
+        at = next ? Array.from(sheet.cssRules).indexOf(next) : -1;
+      }
+      const target = parent;
+      const index = target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at);
+      const rule = target.cssRules[index];
       if (!(rule instanceof CSSStyleRule)) {
-        sheet.deleteRule(index);
+        target.deleteRule(index);
         throw new CdpError('Failed to parse rule text');
       }
       const text = rule.cssText;
       history.record({
         undo: () => {
-          const at = Array.from(sheet.cssRules).indexOf(rule);
-          if (at >= 0) sheet.deleteRule(at);
+          const at = Array.from(target.cssRules).indexOf(rule);
+          if (at >= 0) target.deleteRule(at);
           stylesChanged();
         },
         redo: () => {
-          sheet.insertRule(text, Math.min(index, sheet.cssRules.length));
+          target.insertRule(text, Math.min(index, target.cssRules.length));
           stylesChanged();
         },
       });
@@ -1301,7 +1545,7 @@ export function registerCss(ctx: Context) {
     getPlatformFontsForNode: (): Protocol.CSS.GetPlatformFontsForNodeResponse => ({ fonts: [] }),
     getMediaQueries: (): Protocol.CSS.GetMediaQueriesResponse => ({ medias: [] }),
     forcePseudoState(params: Protocol.CSS.ForcePseudoStateRequest) {
-      forced.set(element(params.nodeId), params.forcedPseudoClasses);
+      quietly(() => forced.set(element(params.nodeId), params.forcedPseudoClasses));
       ctx.refreshPseudoElements?.();
     },
     trackComputedStyleUpdates: () => {},

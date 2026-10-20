@@ -244,6 +244,176 @@ test('@layer order and !important match Chrome', async () => {
   assert.deepEqual(ours, ['rgb(0, 0, 70)', 'rgb(1, 1, 1)', 'rgb(0, 80, 0)', 'rgb(3, 3, 3)']);
 });
 
+test('an anonymous @layer keeps its place among the layers', async () => {
+  await t.page.evaluate(() => {
+    const s = document.createElement('style');
+    s.textContent = `
+      @layer early { #fy { color: rgb(1, 0, 0); outline-color: rgb(1, 0, 0); text-decoration-color: rgb(1, 0, 0) !important } }
+      @layer {
+        #fy:hover { color: rgb(2, 0, 0); background-color: rgb(2, 0, 0); outline-color: rgb(2, 0, 0) }
+        #fy:hover { border-left-color: rgb(2, 0, 0) !important; border-right-color: rgb(2, 0, 0) !important }
+        #fy:hover { border-bottom-color: rgb(2, 0, 0) !important; text-decoration-color: rgb(2, 0, 0) !important }
+        #fy:not(.z) { outline-color: rgb(3, 0, 0) }
+      }
+      @layer late { #fy { background-color: rgb(4, 0, 0) } #fy { border-right-color: rgb(4, 0, 0); border-bottom-color: rgb(4, 0, 0) !important } }
+      #fy { border-left-color: rgb(5, 0, 0); border-right-color: rgb(5, 0, 0) }
+      @layer { #fy { border-top-color: rgb(6, 0, 0) } }
+      @layer early { #fy:hover { border-top-color: rgb(7, 0, 0) } }
+    `;
+    document.head.appendChild(s);
+    document.body.insertAdjacentHTML('beforeend', '<div id="fy">fy</div>');
+  });
+  const read = () =>
+    t.page.evaluate(() => {
+      const el = document.getElementById('fy');
+      if (!el) throw new Error('#fy not found');
+      const s = getComputedStyle(el);
+      return [
+        s.color,
+        s.backgroundColor,
+        s.outlineColor,
+        s.borderLeftColor,
+        s.borderRightColor,
+        s.borderTopColor,
+        s.borderBottomColor,
+        s.textDecorationColor,
+      ];
+    });
+  const { ours, chrome } = await both('fy', ['hover'], read);
+  assert.deepEqual(ours, chrome);
+  assert.deepEqual(ours, [
+    'rgb(2, 0, 0)',
+    'rgb(4, 0, 0)',
+    'rgb(3, 0, 0)',
+    'rgb(2, 0, 0)',
+    'rgb(2, 0, 0)',
+    'rgb(6, 0, 0)',
+    'rgb(2, 0, 0)',
+    'rgb(1, 0, 0)',
+  ]);
+});
+
+/** Adds `css` and `<div id>`, then reads colors of #id with :hover forced, through both sides. */
+async function hoverColors(id: string, css: string) {
+  await t.page.evaluate(
+    (id, css) => {
+      const s = document.createElement('style');
+      s.textContent = css;
+      document.head.appendChild(s);
+      document.body.insertAdjacentHTML('beforeend', `<div id="${id}">${id}</div>`);
+    },
+    id,
+    css
+  );
+  const read = () =>
+    t.page.evaluate(id => {
+      const el = document.getElementById(id);
+      if (!el) throw new Error(`#${id} not found`);
+      const s = getComputedStyle(el);
+      return [s.color, s.backgroundColor, s.outlineColor, s.borderLeftColor, s.borderRightColor, s.borderTopColor];
+    }, id);
+  return both(id, ['hover'], read);
+}
+
+test('an anonymous @layer nested in a named one keeps its place, !important included', async () => {
+  const { ours, chrome } = await hoverColors(
+    'fn',
+    `
+      @layer pre { #fn { border-right-color: rgb(9, 0, 0) !important } }
+      @layer outer {
+        @layer first { #fn { color: rgb(1, 0, 0); outline-color: rgb(1, 0, 0) !important } }
+        @layer {
+          #fn:hover { color: rgb(2, 0, 0); background-color: rgb(2, 0, 0) }
+          #fn:hover { outline-color: rgb(2, 0, 0) !important; border-left-color: rgb(2, 0, 0) !important }
+        }
+        @layer second { #fn { background-color: rgb(3, 0, 0); border-left-color: rgb(3, 0, 0) !important } }
+      }
+      @layer outer2 {
+        @layer { #fn:hover { border-right-color: rgb(2, 0, 0) !important; border-top-color: rgb(2, 0, 0) !important } }
+        @layer z { #fn { border-top-color: rgb(3, 0, 0) !important } }
+      }
+    `
+  );
+  assert.deepEqual(ours, chrome);
+  assert.deepEqual(ours, [
+    'rgb(2, 0, 0)',
+    'rgb(3, 0, 0)',
+    'rgb(1, 0, 0)',
+    'rgb(2, 0, 0)',
+    'rgb(9, 0, 0)',
+    'rgb(2, 0, 0)',
+  ]);
+});
+
+test('layers first named in a false @media or @supports are not ordered there', async () => {
+  const { ours, chrome } = await hoverColors(
+    'fc',
+    `
+      @media (max-width: 1px) { @layer cl { } }
+      @supports (not (display: block)) { @layer cm { } }
+      @media (min-width: 1px) { @layer cn { } }
+      @layer { #fc:hover { color: rgb(2, 0, 0); background-color: rgb(2, 0, 0); outline-color: rgb(2, 0, 0) } }
+      @layer cl { #fc { color: rgb(4, 0, 0) } }
+      @layer cm { #fc { background-color: rgb(4, 0, 0) } }
+      @layer cn { #fc { outline-color: rgb(4, 0, 0) } }
+    `
+  );
+  assert.deepEqual(ours, chrome);
+  assert.deepEqual(ours.slice(0, 3), ['rgb(4, 0, 0)', 'rgb(4, 0, 0)', 'rgb(2, 0, 0)']);
+});
+
+test('layers first named in @container are ordered there, whatever the container', async () => {
+  const { ours, chrome } = await hoverColors(
+    'fq',
+    `
+      @container (max-width: 1px) { @layer cq { } }
+      @container (min-width: 1px) { @layer cr { } }
+      @layer { #fq:hover { color: rgb(2, 0, 0); background-color: rgb(2, 0, 0) } }
+      @layer cq { #fq { color: rgb(4, 0, 0) } }
+      @layer cr { #fq { background-color: rgb(4, 0, 0) } }
+    `
+  );
+  assert.deepEqual(ours, chrome);
+  assert.deepEqual(ours.slice(0, 2), ['rgb(2, 0, 0)', 'rgb(2, 0, 0)']);
+});
+
+test('the layer order follows a @media condition changing while forced', async () => {
+  await t.page.setViewport({ width: 800, height: 600 });
+  await t.page.evaluate(() => {
+    const s = document.createElement('style');
+    s.textContent = `
+      @media (max-width: 500px) { @layer vw { } }
+      @layer { #fw:hover { color: rgb(2, 0, 0) } }
+      @layer vw { #fw { color: rgb(4, 0, 0) } }
+    `;
+    document.head.appendChild(s);
+    document.body.insertAdjacentHTML('beforeend', '<div id="fw">fw</div>');
+  });
+  const color = () =>
+    t.page.evaluate(() => {
+      const el = document.getElementById('fw');
+      if (!el) throw new Error('#fw not found');
+      return getComputedStyle(el).color;
+    });
+  // Narrow, `vw` is named before the anonymous layer, which then wins; wide, after it.
+  const measure = async () => {
+    const wide = await color();
+    await t.page.setViewport({ width: 400, height: 600 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const narrow = await color();
+    await t.page.setViewport({ width: 800, height: 600 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return [wide, narrow, await color()];
+  };
+  try {
+    const { ours, chrome } = await both('fw', ['hover'], measure);
+    assert.deepEqual(ours, chrome);
+    assert.deepEqual(ours, ['rgb(4, 0, 0)', 'rgb(2, 0, 0)', 'rgb(4, 0, 0)']);
+  } finally {
+    await t.page.setViewport({ width: 800, height: 600 });
+  }
+});
+
 test("the page's adopted style sheets are kept, and reassigning them keeps the forced styles", async () => {
   const result = await withForced(t.ours, 'fo', ['hover'], async () => {
     await t.page.evaluate(() => {

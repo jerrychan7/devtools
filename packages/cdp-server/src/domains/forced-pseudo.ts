@@ -1,3 +1,4 @@
+import { quietly } from '../core/adopted';
 import { FORCE_ATTRIBUTE } from '../core/nodes';
 
 /** A document or shadow root: what style sheets apply to. */
@@ -31,6 +32,10 @@ export class ForcedPseudoClasses {
   /** The companion of each tree, with the hook keeping it among the tree's adopted sheets. */
   private companions = new Map<TreeScope, Companion>();
   private sheetsOfCompanions = new WeakSet<CSSStyleSheet>();
+  /** Media queries the companions depend on (for the layer order), and their change listeners. */
+  private queries = new Map<string, { list: MediaQueryList; listener: () => void }>();
+  private queried = new Set<string>();
+  private mediaLists = new Map<string, MediaQueryList>();
 
   /** `trees`: the document and shadow roots, each with its top-level sheets in cascade order. */
   constructor(
@@ -120,6 +125,7 @@ export class ForcedPseudoClasses {
   rebuild() {
     this.prune();
     const seen = new Set<TreeScope>();
+    this.queried.clear();
     if (this.forced.size) {
       for (const { tree, sheets } of this.trees()) {
         const text = this.companionText(sheets);
@@ -139,6 +145,33 @@ export class ForcedPseudoClasses {
       if (seen.has(tree)) continue;
       this.detach(companion);
       this.companions.delete(tree);
+    }
+    this.watch();
+  }
+
+  private mediaList(text: string): MediaQueryList {
+    let list = this.mediaLists.get(text);
+    if (!list) {
+      list = matchMedia(text);
+      this.mediaLists.set(text, list);
+    }
+    return list;
+  }
+
+  /** Rebuilds when a media query the layer order depended on changes; only while something is forced. */
+  private watch() {
+    for (const [text, { list, listener }] of this.queries) {
+      if (this.queried.has(text)) continue;
+      list.removeEventListener('change', listener);
+      this.queries.delete(text);
+      this.mediaLists.delete(text);
+    }
+    for (const text of this.queried) {
+      if (this.queries.has(text)) continue;
+      const list = this.mediaList(text);
+      const listener = () => this.rebuild();
+      list.addEventListener('change', listener);
+      this.queries.set(text, { list, listener });
     }
   }
 
@@ -166,8 +199,11 @@ export class ForcedPseudoClasses {
       const value: unknown = get.call(tree);
       return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => s instanceof CSSStyleSheet) : [];
     };
-    const adopted = native();
-    if (adopted[adopted.length - 1] !== sheet) set.call(tree, [...adopted.filter(s => s !== sheet), sheet]);
+    // Our own reads and writes are not changes of the page's adopted sheets.
+    quietly(() => {
+      const adopted = native();
+      if (adopted[adopted.length - 1] !== sheet) set.call(tree, [...adopted.filter(s => s !== sheet), sheet]);
+    });
     if (companion.restore) return;
     const own = Object.getOwnPropertyDescriptor(tree, 'adoptedStyleSheets');
     Object.defineProperty(tree, 'adoptedStyleSheets', {
@@ -183,12 +219,14 @@ export class ForcedPseudoClasses {
       Reflect.deleteProperty(tree, 'adoptedStyleSheets');
       if (own) Object.defineProperty(tree, 'adoptedStyleSheets', own);
       // The page's sheets without the companion.
-      const adopted = native();
-      if (adopted.includes(sheet))
-        set.call(
-          tree,
-          adopted.filter(s => s !== sheet)
-        );
+      quietly(() => {
+        const adopted = native();
+        if (adopted.includes(sheet))
+          set.call(
+            tree,
+            adopted.filter(s => s !== sheet)
+          );
+      });
     };
   }
 
@@ -203,52 +241,211 @@ export class ForcedPseudoClasses {
    * and <link> with their @import-ed sheets inlined, then adopted sheets), each rule using a forced
    * pseudo-class is copied with the rewritten selector, and after the first copy every
    * following style rule is replayed, so that rules later in the cascade still win.
+   *
+   * A copy of an anonymous `@layer { }` would be a new anonymous layer after all layers of its
+   * parent, so those copies are not made in place. Instead the parent (the page or a named layer)
+   * gets one more, last, sublayer holding, in the page's layer order, the first anonymous layer
+   * with copied rules and every layer after it, each with all its rules: the copies win over
+   * their layer, and the layers after it still win over them. For !important, where layer order
+   * is reversed, a last sublayer is added to the nearest named layer before the anonymous one (at
+   * its level or an ancestor's), holding that layer's own rules and every layer from there up to
+   * the anonymous one: that ranks between them, as the anonymous layer does. Limitation: with no
+   * named layer before it, at any level, the !important copies of an anonymous layer rank below
+   * the !important rules of the layers after it, which the page's own sheets keep.
+   *
+   * Layers first named in a false @media or @supports are not put into the layer order, as in
+   * Chrome; those in @container are, whatever the container (also as in Chrome).
    */
   private companionText(sheets: CSSStyleSheet[]): string {
+    /** A cascade layer of the page: its sublayers in layer order, all its rules, and its own ones. */
+    interface Layer {
+      name: string;
+      parent: Layer | null;
+      children: Layer[];
+      text: string;
+      own: string;
+    }
+    const root: Layer = { name: '', parent: null, children: [], text: '', own: '' };
+    /** The anonymous layer of each `@layer { }` and `@import … layer`. */
+    const anonymousOf = new Map<CSSRule, Layer>();
+    /** The `@layer { }` and `@import … layer` rules of anonymous layers holding a copied rule. */
+    const copiedRules = new Set<CSSRule>();
+    const copied = new Set<Layer>();
     let started = false;
+    let all = false;
     const prelude = (rule: CSSRule) => rule.cssText.slice(0, rule.cssText.indexOf('{')).trim();
     const wrap = (inner: string, preludes: string[]) => preludes.reduceRight((out, p) => `${p} {\n${out}}\n`, inner);
+    const media = (text: string) => !text || this.mediaList(text).matches;
+    /** The media queries around the rules being walked (with `all`): they decide on the layers named there. */
+    const open: string[] = [];
+    const under = <T>(text: string, fn: () => T): T => {
+      if (!all || !text) return fn();
+      open.push(text);
+      try {
+        return fn();
+      } finally {
+        open.pop();
+      }
+    };
+    const supports = (text: string) => !text || CSS.supports(`(${text})`);
+    /** The sublayer `name` of `parent`, put into the layer order when `live` (its conditions hold). */
+    const sublayer = (parent: Layer, name: string, live: boolean): Layer => {
+      let layer = name ? parent.children.find(c => c.name === name) : undefined;
+      if (!layer) {
+        layer = { name, parent, children: [], text: '', own: '' };
+        if (!live) return layer;
+        parent.children.push(layer);
+      }
+      return layer;
+    };
+    /**
+     * Enters the layer `name` (dotted, or '' for anonymous) of `parent`, recording `inner` (with
+     * `conditions`, the preludes since `parent`) into it and each layer on the way.
+     */
+    const enter = (rule: CSSRule, parent: Layer, name: string, conditions: string[], live: boolean) => {
+      for (const text of open) this.queried.add(text);
+      const names = name ? name.split('.') : [''];
+      const layers: Layer[] = [];
+      let at = parent;
+      for (const n of names) {
+        at = n ? sublayer(at, n, live) : (anonymousOf.get(rule) ?? sublayer(at, '', live));
+        if (!n) anonymousOf.set(rule, at);
+        layers.push(at);
+      }
+      return (inner: string, own: string) => {
+        layers.forEach((layer, i) => {
+          const rest = names.slice(i + 1).join('.');
+          layer.text += wrap(inner, [...conditions, ...(rest ? [`@layer ${rest}`] : [])]);
+        });
+        at.own += wrap(own, conditions);
+      };
+    };
     const walkSheet = (sheet: CSSStyleSheet): string => {
       if (sheet.disabled) return '';
-      const inner = walk(this.rulesOf(sheet));
-      return inner && sheet.media.length ? wrap(inner, [`@media ${sheet.media.mediaText}`]) : inner;
+      const conditions = sheet.media.length ? [`@media ${sheet.media.mediaText}`] : [];
+      const [inner] = under(sheet.media.mediaText, () =>
+        walk(this.rulesOf(sheet), root, conditions, media(sheet.media.mediaText))
+      );
+      return inner && conditions.length ? wrap(inner, conditions) : inner;
     };
-    const walk = (list: CSSRule[]): string => {
+    /**
+     * The copy of `list`, and of its rules outside sublayers. `layer`: the layer it is in;
+     * `conditions`: the preludes around it since that layer; `live`: whether they hold.
+     */
+    const walk = (list: CSSRule[], layer: Layer, conditions: string[], live: boolean): [string, string] => {
       let out = '';
+      let own = '';
       for (const rule of list) {
         if (rule instanceof CSSStyleRule) {
           // Nested rules (`&:hover`) resolve `&` against the copy of their parent, which only
           // carries its own declarations once copying started.
           const rewritten = this.rewrite(rule.selectorText);
           if (rewritten !== rule.selectorText) started = true;
-          const own = started ? rule.style.cssText : '';
-          const nested = walk(this.rulesOf(rule));
-          if (own || nested) out += `${rewritten} { ${own}${nested ? `\n${nested}` : ''} }\n`;
+          const declarations = started || all ? rule.style.cssText : '';
+          const [nested] = walk(this.rulesOf(rule), layer, conditions, live);
+          if (declarations || nested) {
+            const text = `${rewritten} { ${declarations}${nested ? `\n${nested}` : ''} }\n`;
+            out += text;
+            own += text;
+          }
         } else if (rule instanceof CSSNestedDeclarations) {
-          if (started && rule.style.cssText) out += `${rule.style.cssText}\n`;
+          if ((started || all) && rule.style.cssText) {
+            out += `${rule.style.cssText}\n`;
+            own += `${rule.style.cssText}\n`;
+          }
+        } else if (rule instanceof CSSLayerBlockRule) {
+          const record = all ? enter(rule, layer, rule.name, conditions, live) : null;
+          const sub = all ? (anonymousOf.get(rule) ?? layer) : layer;
+          const [inner, innerOwn] = walk(this.rulesOf(rule), sub, [], live);
+          record?.(inner, innerOwn);
+          if (!rule.name && !all) {
+            // Copied at the end instead, see above.
+            if (inner) copiedRules.add(rule);
+          } else if (inner) out += wrap(inner, [prelude(rule)]);
         } else if (rule instanceof CSSGroupingRule) {
-          const inner = walk(this.rulesOf(rule));
-          // Limitation: a copy of an anonymous `@layer { }` is a new anonymous layer, after all
-          // layers of the page, so it ranks above named layers the page put later. Named layers
-          // keep their place, as their order is fixed by the page's sheets, which come first.
-          if (inner) out += wrap(inner, [prelude(rule)]);
+          const p = prelude(rule);
+          let holds = live;
+          const query = rule instanceof CSSMediaRule ? rule.media.mediaText : '';
+          if (query) holds &&= media(query);
+          else if (rule instanceof CSSSupportsRule) holds &&= CSS.supports(rule.conditionText);
+          const [inner, innerOwn] = under(query, () => walk(this.rulesOf(rule), layer, [...conditions, p], holds));
+          if (inner) out += wrap(inner, [p]);
+          if (innerOwn) own += wrap(innerOwn, [p]);
         } else if (rule instanceof CSSLayerStatementRule) {
-          // Layer order is fixed by the page's sheets, which come first.
-          continue;
+          if (all && live) for (const name of rule.nameList) enter(rule, layer, name, conditions, true);
+          if (all) out += `${rule.cssText}\n`;
         } else if (rule instanceof CSSImportRule && rule.styleSheet) {
-          const inner = walk(this.rulesOf(rule.styleSheet));
-          if (!inner) continue;
-          const preludes: string[] = [];
-          if (rule.layerName !== null) preludes.push(`@layer ${rule.layerName}`.trim());
-          if (rule.supportsText) preludes.push(`@supports ${rule.supportsText}`);
-          if (rule.media.length) preludes.push(`@media ${rule.media.mediaText}`);
-          out += wrap(inner, preludes);
+          const wrappers: string[] = [];
+          if (rule.supportsText) wrappers.push(`@supports ${rule.supportsText}`);
+          if (rule.media.length) wrappers.push(`@media ${rule.media.mediaText}`);
+          const holds = live && supports(rule.supportsText ?? '') && media(rule.media.mediaText);
+          const layerName = rule.layerName;
+          if (layerName === null) {
+            const sheet = rule.styleSheet;
+            const [inner, innerOwn] = under(rule.media.mediaText, () =>
+              walk(this.rulesOf(sheet), layer, [...conditions, ...wrappers], holds)
+            );
+            if (inner) out += wrap(inner, wrappers);
+            if (innerOwn) own += wrap(innerOwn, wrappers);
+            continue;
+          }
+          const record = all
+            ? under(rule.media.mediaText, () => enter(rule, layer, layerName, [...conditions, ...wrappers], holds))
+            : null;
+          const sub = all ? (anonymousOf.get(rule) ?? layer) : layer;
+          const [inner, innerOwn] = walk(this.rulesOf(rule.styleSheet), sub, [], holds);
+          record?.(inner, innerOwn);
+          if (!layerName && !all) {
+            if (inner) copiedRules.add(rule);
+          } else if (inner) out += wrap(inner, [`@layer ${layerName}`.trim(), ...wrappers]);
         }
       }
-      return out;
+      return [out, own];
     };
     let out = '';
     for (const sheet of sheets) out += walkSheet(sheet);
+    if (!copiedRules.size) return out;
+    // The page's layers, with all their rules.
+    all = true;
+    for (const sheet of sheets) walkSheet(sheet);
+    for (const rule of copiedRules) {
+      const anonymous = anonymousOf.get(rule);
+      if (anonymous) copied.add(anonymous);
+    }
+    const path = (layer: Layer): string[] => (layer.parent ? [...path(layer.parent), layer.name] : []);
+    const full = (layers: Layer[]) => layers.map(l => wrap(l.text, ['@layer'])).join('');
+    const within = (layer: Layer, inner: string) =>
+      layer.parent ? wrap(inner, [`@layer ${path(layer).join('.')}`]) : inner;
+    const visit = (layer: Layer) => {
+      const indexes = layer.children.flatMap((c, i) => (copied.has(c) ? [i] : []));
+      const first = indexes[0];
+      const last = indexes[indexes.length - 1];
+      if (first !== undefined && last !== undefined) {
+        out += within(layer, wrap(full(layer.children.slice(first)), ['@layer']));
+        // !important: find a named layer before, at this level or an ancestor's.
+        let at = layer;
+        let index = first;
+        let tail = full(layer.children.slice(first, last + 1));
+        for (;;) {
+          const before = at.children.slice(0, index);
+          let named = before.length - 1;
+          while (named >= 0 && before[named]?.name === '') named--;
+          const host = before[named];
+          if (host) {
+            const inner = wrap(host.own, ['@layer']) + full(before.slice(named + 1)) + tail;
+            out += within(host, wrap(inner, ['@layer']));
+            break;
+          }
+          const parent = at.parent;
+          if (!parent) break;
+          tail = wrap(full(before) + tail, ['@layer']);
+          index = parent.children.indexOf(at);
+          at = parent;
+        }
+      }
+      for (const child of layer.children) if (child.name) visit(child);
+    };
+    visit(root);
     return out;
   }
 }
