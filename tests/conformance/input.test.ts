@@ -11,6 +11,9 @@ const RECORDED = [
   'pointerover',
   'pointerdown',
   'pointerup',
+  'pointercancel',
+  'pointerout',
+  'pointerleave',
   'mouseover',
   'mousedown',
   'mouseup',
@@ -259,4 +262,90 @@ test('a tap while touch is emulated (the screencast\'s "Use touch")', async () =
     }
   );
   assert.ok(result.events.includes('touchstart:btn'));
+});
+
+// Chrome sends a touch that starts off the page to the root element, and a touch dragged off
+// the page stays with the element it started on.
+test('a touch off the page goes to the root element', async () => {
+  const result = await same(
+    async chrome => {
+      await chrome.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 900, y: 700 }] });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await chrome.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    },
+    async ours => {
+      await ours.send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+      await click(ours, 900, 700);
+      await ours.send('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+    }
+  );
+  assert.deepEqual(
+    result.events.filter(e => e.startsWith('touch')),
+    ['touchstart:', 'touchend:']
+  );
+});
+
+test('a touch dragged off the page stays with its element', async () => {
+  const result = await same(
+    async chrome => {
+      await chrome.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 50, y: 30 }] });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 900, y: 700 }] });
+      await chrome.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await chrome.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    },
+    async ours => {
+      await ours.send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+      await ours.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: 50,
+        y: 30,
+        button: 'left',
+        clickCount: 1,
+      });
+      await ours.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 900, y: 700, button: 'left', buttons: 1 });
+      await ours.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: 900,
+        y: 700,
+        button: 'left',
+        clickCount: 1,
+      });
+      await ours.send('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+    }
+  );
+  assert.deepEqual(
+    result.events.filter(e => e.startsWith('touch')),
+    ['touchstart:btn', 'touchmove:btn', 'touchend:btn']
+  );
+});
+
+// With touch emulated for the mouse and no touch in progress, Chrome answers a release or a move with {} and sends nothing,
+// through either command.
+test('a release or a move without a touch sends nothing', async () => {
+  const responses: Record<string, unknown[]> = { chrome: [], ours: [] };
+  const steps = (name: string) => async (side: Side) => {
+    const send = (p: Promise<unknown>) =>
+      p
+        .then(
+          r => r,
+          (e: unknown) => String(e)
+        )
+        .then(r => responses[name]?.push(r));
+    await side.send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+    for (const type of ['mouseReleased', 'mouseMoved'] as const) {
+      const params = { type, x: 50, y: 30, button: 'left' as const, clickCount: 1 };
+      await send(side.send('Input.emulateTouchFromMouseEvent', params));
+      await send(side.send('Input.dispatchMouseEvent', params));
+    }
+    await side.send('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+  };
+  // Chrome's hover from earlier tests sometimes gets a pointerover and a mouseover through:
+  // only what a touch would send is compared.
+  const touchy = (events: string[]) => events.filter(e => !/^(pointer|mouse)over:/.test(e));
+  assert.deepEqual(touchy((await run(t.chrome, steps('chrome'))).events), []);
+  assert.deepEqual(touchy((await run(t.ours, steps('ours'))).events), []);
+  assert.deepEqual(responses['ours'], responses['chrome']);
+  assert.deepEqual(responses['chrome'], [{}, {}, {}, {}]);
 });

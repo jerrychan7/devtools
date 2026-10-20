@@ -59,7 +59,9 @@ export function registerInput({ server }: Context) {
   let hovered: Element | Document | null = null;
   let pressed: Element | Document | null = null;
   /** Where the current touch started, to tell a tap from a drag. */
-  let touchStart: { x: number; y: number; moved: boolean } | null = null;
+  let touchStart: { x: number; y: number; moved: boolean; cancelled: boolean } | null = null;
+  /** The current touch started off the page: Chrome then only sends its tap a mouseover. */
+  let touchOffPage = false;
 
   function mouseInit(p: MouseEventRequest, buttons: number): MouseEventInit {
     return {
@@ -146,16 +148,19 @@ export function registerInput({ server }: Context) {
   }
 
   function touch(p: MouseEventRequest) {
-    if (p.type === 'mouseMoved' && !touchStart) return; // hovering does not touch
+    // Hovering does not touch, and Chrome ignores a release without a touch to end.
+    if ((p.type === 'mouseMoved' || p.type === 'mouseReleased') && !touchStart) return;
     // Once touching, the touch stays with the touched element even off the page, so that
-    // the release still ends it.
+    // the release still ends it. Like Chrome, a touch starting off the page (or on nothing)
+    // goes to the root element.
     const held = pressed instanceof Element ? pressed : null;
-    const target = elementAt(p.x, p.y) ?? (p.type === 'mousePressed' ? null : held);
-    if (!target) return;
+    const found = elementAt(p.x, p.y);
+    const target = found ?? (p.type === 'mousePressed' ? null : held) ?? document.documentElement;
     if (p.type === 'mouseWheel') return wheel(target, p);
     const type = p.type === 'mousePressed' ? 'touchstart' : p.type === 'mouseReleased' ? 'touchend' : 'touchmove';
     if (type === 'touchstart') {
-      touchStart = { x: p.x, y: p.y, moved: false };
+      touchStart = { x: p.x, y: p.y, moved: false, cancelled: false };
+      touchOffPage = !found;
       pressed = target;
     } else if (touchStart && Math.hypot(p.x - touchStart.x, p.y - touchStart.y) > 10) {
       touchStart.moved = true;
@@ -171,14 +176,23 @@ export function registerInput({ server }: Context) {
     };
     if (type === 'touchstart') touched.dispatchEvent(new PointerEvent('pointerover', pointerInit));
     const pointerType = type === 'touchstart' ? 'pointerdown' : type === 'touchend' ? 'pointerup' : 'pointermove';
-    let proceed = touched.dispatchEvent(new PointerEvent(pointerType, pointerInit));
+    // Once scrolling has taken the touch over, the pointer is gone: only touch events follow.
+    const cancelled = touchStart?.cancelled ?? false;
+    let proceed = cancelled || touched.dispatchEvent(new PointerEvent(pointerType, pointerInit));
+    // Like Chrome, the lifted pointer leaves before the touchend.
+    if (type === 'touchend' && !cancelled) touched.dispatchEvent(new PointerEvent('pointerout', pointerInit));
     // Touch and TouchEvent cannot be constructed in every browser: missing in desktop Safari,
     // present but throwing "Illegal constructor" in iOS Safari and some WebViews. Only the
     // pointer events are sent there.
     const event = touchEvent(type, touched, p);
     if (event) proceed = touched.dispatchEvent(event) && proceed;
-    if (type === 'touchend') touched.dispatchEvent(new PointerEvent('pointerout', pointerInit));
     if (type === 'touchmove' && proceed && touchStart?.moved) {
+      // Like Chrome, the touchmove that starts the scroll is followed by the pointer's cancel.
+      if (!touchStart.cancelled) {
+        touchStart.cancelled = true;
+        touched.dispatchEvent(new PointerEvent('pointercancel', pointerInit));
+        touched.dispatchEvent(new PointerEvent('pointerout', pointerInit));
+      }
       // Dragging scrolls, unless the page cancelled the touch.
       scrollBy(target, touchStart.x - p.x, touchStart.y - p.y);
       touchStart.x = p.x;
@@ -195,6 +209,7 @@ export function registerInput({ server }: Context) {
           target.dispatchEvent(new MouseEvent('mouseover', { ...init, relatedTarget: hovered }));
           hovered = target;
         }
+        if (touchOffPage) return;
         if (target.dispatchEvent(new MouseEvent('mousedown', { ...init, buttons: BUTTONS.left }))) focus(target);
         target.dispatchEvent(new MouseEvent('mouseup', init));
         target.dispatchEvent(new MouseEvent('click', init));
