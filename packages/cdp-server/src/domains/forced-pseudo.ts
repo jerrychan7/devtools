@@ -1,4 +1,13 @@
-import { FORCE_ATTRIBUTE, OWN_ATTRIBUTE } from '../core/nodes';
+import { FORCE_ATTRIBUTE } from '../core/nodes';
+
+/** A document or shadow root: what style sheets apply to. */
+export type TreeScope = Document | ShadowRoot;
+
+interface Companion {
+  sheet: CSSStyleSheet;
+  /** Takes the companion and the hook off the tree. */
+  restore: (() => void) | null;
+}
 
 /** Pseudo-classes CSS.forcePseudoState can force (longer names first, for the alternation). */
 const FORCEABLE_CLASSES = ['hover', 'focus-within', 'focus-visible', 'focus', 'active', 'visited', 'target'];
@@ -9,19 +18,30 @@ const FORCEABLE = new RegExp(`:(${FORCEABLE_CLASSES.join('|')})(?![\\w-])`, 'g')
  * :focus, …), so forced elements get a marker attribute, and every rule using a forced
  * pseudo-class gets a copy whose selector uses the marker instead.
  *
- * The copies go into a "companion" style sheet inserted right after each original sheet,
- * and after the first copied rule the companion replays all following rules of the original
- * sheet: the cascade order, which decides between rules of equal specificity, stays exactly
- * as if the pseudo-class matched. The page's own style sheets are not modified.
+ * The copies go into a constructed "companion" style sheet appended to the adoptedStyleSheets
+ * of the document (and of each shadow root with style sheets, for the rules of that tree), so
+ * the page's DOM is untouched. Adopted sheets come after all
+ * document sheets in the cascade, so after the first copied rule the companion replays all
+ * following rules of every sheet (keeping their @media, @supports, @layer and @import
+ * conditions): the cascade order, which decides between rules of equal specificity, stays as
+ * if the pseudo-class matched. The page's own style sheets are not modified.
  */
 export class ForcedPseudoClasses {
   private forced = new Map<Element, Set<string>>();
-  private companions: HTMLStyleElement[] = [];
+  /** The companion of each tree, with the hook keeping it among the tree's adopted sheets. */
+  private companions = new Map<TreeScope, Companion>();
+  private sheetsOfCompanions = new WeakSet<CSSStyleSheet>();
 
+  /** `trees`: the document and shadow roots, each with its top-level sheets in cascade order. */
   constructor(
-    private sheets: () => CSSStyleSheet[],
+    private trees: () => { tree: TreeScope; sheets: CSSStyleSheet[] }[],
     private rulesOf: (sheet: CSSStyleSheet | CSSGroupingRule) => CSSRule[]
   ) {}
+
+  /** Whether `sheet` is one of our companions rather than a sheet of the page. */
+  owns(sheet: CSSStyleSheet): boolean {
+    return this.sheetsOfCompanions.has(sheet);
+  }
 
   /** Pseudo-classes forced on at least one element. */
   private active(): Set<string> {
@@ -98,43 +118,137 @@ export class ForcedPseudoClasses {
 
   /** Recreates the companion sheets, e.g. after the page's style sheets changed. */
   rebuild() {
-    this.companions.forEach(style => style.remove());
-    this.companions = [];
     this.prune();
-    if (!this.forced.size) return;
-    for (const sheet of this.sheets()) {
-      const owner = sheet.ownerNode;
-      if (!(owner instanceof Element) || !owner.isConnected) continue;
-      const text = this.companionText(this.rulesOf(sheet));
-      if (!text) continue;
-      const style = document.createElement('style');
-      style.setAttribute(OWN_ATTRIBUTE, 'forced-pseudo-classes');
-      style.textContent = text;
-      owner.after(style);
-      this.companions.push(style);
+    const seen = new Set<TreeScope>();
+    if (this.forced.size) {
+      for (const { tree, sheets } of this.trees()) {
+        const text = this.companionText(sheets);
+        if (!text) continue;
+        seen.add(tree);
+        let companion = this.companions.get(tree);
+        if (!companion) {
+          companion = { sheet: new CSSStyleSheet(), restore: null };
+          this.sheetsOfCompanions.add(companion.sheet);
+          this.companions.set(tree, companion);
+        }
+        companion.sheet.replaceSync(text);
+        this.attach(tree, companion);
+      }
+    }
+    for (const [tree, companion] of this.companions) {
+      if (seen.has(tree)) continue;
+      this.detach(companion);
+      this.companions.delete(tree);
     }
   }
 
-  private companionText(rules: CSSRule[]): string {
+  /** Puts each companion back at the end of its tree's adopted sheets, e.g. after the page pushed onto them in place. */
+  reattach() {
+    for (const [tree, companion] of this.companions) this.attach(tree, companion);
+  }
+
+  /**
+   * Appends the companion after the tree's adopted sheets, and keeps it there when the page
+   * assigns new ones. The page does not see it: reading adoptedStyleSheets gives a copy without
+   * it. The trade-off: pushing onto or splicing that copy in place has no effect, where the page
+   * would change its adopted sheets; a live view would show the companion. Changes made in place
+   * on the real array before the hook (or by code holding it) move the companion away from the
+   * end, which reattach() repairs.
+   */
+  private attach(tree: TreeScope, companion: Companion) {
+    const sheet = companion.sheet;
+    const proto = tree instanceof ShadowRoot ? ShadowRoot.prototype : Document.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
+    const get = descriptor?.get;
+    const set = descriptor?.set;
+    if (!get || !set) return;
+    const native = (): CSSStyleSheet[] => {
+      const value: unknown = get.call(tree);
+      return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => s instanceof CSSStyleSheet) : [];
+    };
+    const adopted = native();
+    if (adopted[adopted.length - 1] !== sheet) set.call(tree, [...adopted.filter(s => s !== sheet), sheet]);
+    if (companion.restore) return;
+    const own = Object.getOwnPropertyDescriptor(tree, 'adoptedStyleSheets');
+    Object.defineProperty(tree, 'adoptedStyleSheets', {
+      configurable: true,
+      enumerable: descriptor.enumerable ?? true,
+      get: (): CSSStyleSheet[] => native().filter(s => s !== sheet),
+      set(value: CSSStyleSheet[]) {
+        const sheets = Array.from(value).filter(s => s !== sheet);
+        set.call(tree, [...sheets, sheet]);
+      },
+    });
+    companion.restore = () => {
+      Reflect.deleteProperty(tree, 'adoptedStyleSheets');
+      if (own) Object.defineProperty(tree, 'adoptedStyleSheets', own);
+      // The page's sheets without the companion.
+      const adopted = native();
+      if (adopted.includes(sheet))
+        set.call(
+          tree,
+          adopted.filter(s => s !== sheet)
+        );
+    };
+  }
+
+  /** Removes the companion; the page's adopted sheets stay. */
+  private detach(companion: Companion) {
+    companion.restore?.();
+    companion.restore = null;
+  }
+
+  /**
+   * The companion's rules: walking the tree's style sheets in cascade order (sheets of <style>
+   * and <link> with their @import-ed sheets inlined, then adopted sheets), each rule using a forced
+   * pseudo-class is copied with the rewritten selector, and after the first copy every
+   * following style rule is replayed, so that rules later in the cascade still win.
+   */
+  private companionText(sheets: CSSStyleSheet[]): string {
     let started = false;
+    const prelude = (rule: CSSRule) => rule.cssText.slice(0, rule.cssText.indexOf('{')).trim();
+    const wrap = (inner: string, preludes: string[]) => preludes.reduceRight((out, p) => `${p} {\n${out}}\n`, inner);
+    const walkSheet = (sheet: CSSStyleSheet): string => {
+      if (sheet.disabled) return '';
+      const inner = walk(this.rulesOf(sheet));
+      return inner && sheet.media.length ? wrap(inner, [`@media ${sheet.media.mediaText}`]) : inner;
+    };
     const walk = (list: CSSRule[]): string => {
       let out = '';
       for (const rule of list) {
         if (rule instanceof CSSStyleRule) {
+          // Nested rules (`&:hover`) resolve `&` against the copy of their parent, which only
+          // carries its own declarations once copying started.
           const rewritten = this.rewrite(rule.selectorText);
-          if (rewritten !== rule.selectorText) {
-            out += `${rewritten} { ${rule.style.cssText} }\n`;
-            started = true;
-          } else if (started) {
-            out += rule.cssText + '\n';
-          }
+          if (rewritten !== rule.selectorText) started = true;
+          const own = started ? rule.style.cssText : '';
+          const nested = walk(this.rulesOf(rule));
+          if (own || nested) out += `${rewritten} { ${own}${nested ? `\n${nested}` : ''} }\n`;
+        } else if (rule instanceof CSSNestedDeclarations) {
+          if (started && rule.style.cssText) out += `${rule.style.cssText}\n`;
         } else if (rule instanceof CSSGroupingRule) {
           const inner = walk(this.rulesOf(rule));
-          if (inner) out += `${rule.cssText.slice(0, rule.cssText.indexOf('{')).trim()} {\n${inner}}\n`;
+          // Limitation: a copy of an anonymous `@layer { }` is a new anonymous layer, after all
+          // layers of the page, so it ranks above named layers the page put later. Named layers
+          // keep their place, as their order is fixed by the page's sheets, which come first.
+          if (inner) out += wrap(inner, [prelude(rule)]);
+        } else if (rule instanceof CSSLayerStatementRule) {
+          // Layer order is fixed by the page's sheets, which come first.
+          continue;
+        } else if (rule instanceof CSSImportRule && rule.styleSheet) {
+          const inner = walk(this.rulesOf(rule.styleSheet));
+          if (!inner) continue;
+          const preludes: string[] = [];
+          if (rule.layerName !== null) preludes.push(`@layer ${rule.layerName}`.trim());
+          if (rule.supportsText) preludes.push(`@supports ${rule.supportsText}`);
+          if (rule.media.length) preludes.push(`@media ${rule.media.mediaText}`);
+          out += wrap(inner, preludes);
         }
       }
       return out;
     };
-    return walk(rules);
+    let out = '';
+    for (const sheet of sheets) out += walkSheet(sheet);
+    return out;
   }
 }

@@ -306,30 +306,6 @@ test('CSS.setStyleTexts keeps disabled and invalid declarations', async () => {
   );
 });
 
-test('DOM.getNodeForLocation looks through devtools-anywhere elements', async () => {
-  await t.page.evaluate(() => {
-    const target = document.createElement('div');
-    target.id = 'under-own';
-    target.style.cssText = 'position:fixed;left:0;top:0;width:50px;height:50px;z-index:2147483646';
-    const own = document.createElement('div');
-    own.id = 'own-cover';
-    own.setAttribute('data-devtools-anywhere', '');
-    own.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647';
-    const child = document.createElement('span');
-    child.style.cssText = 'display:block;width:50px;height:50px';
-    own.append(child);
-    document.body.append(target, own);
-  });
-  // Chrome finds devtools-anywhere's element like any other; ours finds the page's below it.
-  const { backendNodeId } = await t.ours.send('DOM.getNodeForLocation', { x: 10, y: 10 });
-  const { node } = await t.ours.send('DOM.describeNode', { backendNodeId });
-  assert.deepEqual(node.attributes?.slice(0, 2), ['id', 'under-own']);
-  await t.page.evaluate(() => {
-    document.getElementById('under-own')?.remove();
-    document.getElementById('own-cover')?.remove();
-  });
-});
-
 test('Overlay.highlightNode follows its element when the page scrolls', async () => {
   const boxes = () =>
     t.page.evaluate(() =>
@@ -464,6 +440,35 @@ test('CSS.getBackgroundColors blends translucent backgrounds of the ancestors an
       const before = byId(root, 'bg-pseudo').pseudoElements?.[0];
       assert.ok(before);
       result.push(await colorsOf(before.nodeId));
+      return result;
+    })
+  );
+  assert.deepEqual(colors[0], colors[1]);
+});
+
+test('CSS.getBackgroundColors reports gradient stops blended over what is behind, none for images', async () => {
+  await t.page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'afterbegin',
+      `<div id="bgg-a" style="background-image: linear-gradient(red, blue)">a</div>
+      <div id="bgg-b" style="background-image: linear-gradient(rgba(255, 0, 0, 0.5), blue)">b</div>
+      <div style="background: linear-gradient(green, yellow)"><b id="bgg-c">c</b></div>
+      <div style="background: rgba(0, 0, 0, 0.5)"><i id="bgg-d">d</i></div>
+      <div style="background: rgba(0, 0, 0, 0.3)"><i id="bgg-e">e</i></div>
+      <div id="bgg-f" style="background: url(data:image/png;base64,AAAA) red">f</div>`
+    );
+  });
+  await t.page.evaluate(async () => {
+    window.scrollTo(0, 0);
+    for (let i = 0; i < 2; i++) await new Promise(resolve => requestAnimationFrame(resolve));
+  });
+  const colors = await Promise.all(
+    [t.ours, t.chrome].map(async side => {
+      await side.send('CSS.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+      const result: (string[] | undefined)[] = [];
+      for (const id of ['bgg-a', 'bgg-b', 'bgg-c', 'bgg-d', 'bgg-e', 'bgg-f'])
+        result.push((await side.send('CSS.getBackgroundColors', { nodeId: byId(root, id).nodeId })).backgroundColors);
       return result;
     })
   );

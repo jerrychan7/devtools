@@ -164,3 +164,96 @@ test('a forced element taken out of the document is no longer forced', async () 
   const leftovers = await t.page.evaluate(() => document.querySelectorAll('[data-devtools-anywhere]').length);
   assert.equal(leftovers, 0);
 });
+
+test('forcing does not change the DOM, even next to a <style> in the body', async () => {
+  await t.page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `<section id="fd"><style>#fd-a:hover { color: rgb(40, 0, 0) } #fd > :nth-child(2) { color: rgb(0, 40, 0) }</style>` +
+        `<div id="fd-a">a</div></section>` +
+        `<style>#fd-b:hover { color: rgb(50, 0, 0) }</style><style>#fd-b:not(.z) { color: rgb(60, 0, 0) }</style><div id="fd-b">b</div>`
+    );
+  });
+  const snapshot = () =>
+    t.page.evaluate(() => {
+      const section = document.getElementById('fd');
+      const a = document.getElementById('fd-a');
+      if (!section || !a) throw new Error('#fd not found');
+      return {
+        count: section.childElementCount,
+        nth: a.matches(':nth-child(2)'),
+        body: document.body.childElementCount,
+      };
+    });
+  const before = await snapshot();
+  await t.page.evaluate(() => {
+    const records: MutationRecord[] = [];
+    const w = window as Window & { fdRecords?: MutationRecord[]; fdObserver?: MutationObserver };
+    w.fdRecords = records;
+    w.fdObserver = new MutationObserver(r => records.push(...r));
+    w.fdObserver.observe(document, { childList: true, subtree: true });
+  });
+  const { ours, chrome } = await both('fd-a', ['hover'], async () => ({
+    ...(await snapshot()),
+    ...(await computed('fd-a')),
+  }));
+  assert.deepEqual(ours, chrome);
+  assert.equal(ours.color, 'rgb(0, 40, 0)');
+  assert.deepEqual({ count: ours.count, nth: ours.nth, body: ours.body }, before);
+  // A later sheet's rule of equal specificity still wins over the forced copy.
+  const b = await both('fd-b', ['hover'], () => computed('fd-b'));
+  assert.deepEqual(b.ours, b.chrome);
+  assert.equal(b.ours.color, 'rgb(60, 0, 0)');
+  const records = await t.page.evaluate(() => {
+    const w = window as Window & { fdRecords?: MutationRecord[]; fdObserver?: MutationObserver };
+    w.fdObserver?.disconnect();
+    return (w.fdRecords || []).filter(r => r.type === 'childList').length;
+  });
+  assert.equal(records, 0);
+});
+
+test('@layer order and !important match Chrome', async () => {
+  await t.page.evaluate(() => {
+    const s = document.createElement('style');
+    s.textContent = `
+      @layer base, top;
+      @layer top { #fl { color: rgb(0, 0, 70) } }
+      @layer base { #fl:hover { color: rgb(70, 0, 0); background-color: rgb(1, 1, 1) !important } }
+      #fl:hover { outline-color: rgb(0, 70, 0) }
+      @layer top { #fl { background-color: rgb(2, 2, 2) !important } }
+      #fl:not(.z) { outline-color: rgb(0, 80, 0) }
+    `;
+    document.head.appendChild(s);
+    const later = document.createElement('style');
+    later.textContent = `@layer base { #fl { border-left-color: rgb(9, 9, 9) } }`;
+    document.head.appendChild(later);
+    const s2 = new CSSStyleSheet();
+    s2.replaceSync('@layer base { #fl:hover { border-left-color: rgb(3, 3, 3) } }');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, s2];
+    document.body.insertAdjacentHTML('beforeend', '<div id="fl">fl</div>');
+  });
+  const read = () =>
+    t.page.evaluate(() => {
+      const el = document.getElementById('fl');
+      if (!el) throw new Error('#fl not found');
+      const s = getComputedStyle(el);
+      return [s.color, s.backgroundColor, s.outlineColor, s.borderLeftColor];
+    });
+  const { ours, chrome } = await both('fl', ['hover'], read);
+  assert.deepEqual(ours, chrome);
+  assert.deepEqual(ours, ['rgb(0, 0, 70)', 'rgb(1, 1, 1)', 'rgb(0, 80, 0)', 'rgb(3, 3, 3)']);
+});
+
+test("the page's adopted style sheets are kept, and reassigning them keeps the forced styles", async () => {
+  const result = await withForced(t.ours, 'fo', ['hover'], async () => {
+    await t.page.evaluate(() => {
+      const extra = new CSSStyleSheet();
+      extra.replaceSync('#fa-none { color: red }');
+      document.adoptedStyleSheets = [extra];
+    });
+    return computed('fo');
+  });
+  assert.equal(result.background, 'rgb(0, 0, 5)');
+  const count = await t.page.evaluate(() => document.adoptedStyleSheets.length);
+  assert.equal(count, 1);
+});
