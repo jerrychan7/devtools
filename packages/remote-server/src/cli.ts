@@ -1,7 +1,8 @@
 // devtools-anywhere-remote: starts a remote debugging server and prints how to use it.
 //
 //   devtools-anywhere-remote [--port 8080] [--host 0.0.0.0] [--base-path /] [--token <t> | --no-token]
-//                            [--cert cert.pem --key key.pem] [--frontend-dir <dir>]
+//                            [--cert cert.pem --key key.pem] [--public-url <url>]
+//                            [--frontend-dir <dir> | --frontend-url <url>]
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { startRemoteServer, type RemoteServerOptions } from './index';
@@ -15,7 +16,9 @@ const { values } = parseArgs({
     'no-token': { type: 'boolean' },
     cert: { type: 'string' },
     key: { type: 'string' },
+    'public-url': { type: 'string' },
     'frontend-dir': { type: 'string' },
+    'frontend-url': { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -30,7 +33,9 @@ if (values.help) {
       --no-token           Let anyone who can reach the server inspect its pages
       --cert <file>        TLS certificate: serve over HTTPS, for HTTPS pages
       --key <file>         TLS private key
-      --frontend-dir <dir> DevTools frontend build to serve`);
+      --public-url <url>   The server's URL as pages reach it (default: this machine's LAN address)
+      --frontend-dir <dir> DevTools frontend build to serve
+      --frontend-url <url> anywhere_app.html hosted elsewhere (a CDN), to open instead`);
   process.exit(0);
 }
 if (!!values.cert !== !!values.key) {
@@ -45,10 +50,12 @@ if (values['base-path'] !== undefined) options.basePath = values['base-path'];
 if (values['no-token']) options.token = false;
 else if (values.token !== undefined) options.token = values.token;
 if (values.cert && values.key) options.https = { cert: readFileSync(values.cert), key: readFileSync(values.key) };
+if (values['public-url'] !== undefined) options.publicUrl = values['public-url'];
 if (values['frontend-dir'] !== undefined) options.frontendDir = values['frontend-dir'];
+if (values['frontend-url'] !== undefined) options.frontendUrl = values['frontend-url'];
 
 const remote = await startRemoteServer(options);
 console.log(`Inspect pages at ${remote.url}`);
-console.log(`Connect a page with this as the first script in its <head> (use this machine's address):`);
+console.log(`Connect a page with this as the first script in its <head>:`);
 console.log(`  ${remote.scriptTag}`);
 if (remote.token === false) console.log('No token: anyone who can reach this server can inspect its pages.');

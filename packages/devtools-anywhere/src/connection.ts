@@ -13,7 +13,7 @@ const SHELL_ID_PREFIX = 'shell-';
 /** Chrome's error for commands that were pending when the inspected document went away. */
 const NAVIGATED_ERROR = { code: -32000, message: 'Inspected target navigated or closed' };
 /** Domains that keep state while enabled; a new frontend instance must start from disabled. */
-const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+export const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
 
 /** A CDP message as the shell sees it: only the fields it routes by are checked. */
 interface Envelope {

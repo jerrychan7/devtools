@@ -157,17 +157,17 @@ To inspect a page on a phone from Chrome on a computer, start the remote debuggi
 npx devtools-anywhere-remote --port 8080
 ```
 
-It prints the target list's URL, with a token, and the script tag for pages. Load the probe from the server, with `data-remote`, as the first script in the page's `<head>`, using the computer's address as the phone sees it:
+It prints the target list's URL, with a token, and the script tag for pages, naming the computer by its LAN address (`--public-url` names it otherwise, for example behind a proxy). Load the probe from the server, with `data-remote`, as the first script in the page's `<head>`:
 
 ```html
 <script src="http://192.168.1.2:8080/probe.iife.js" data-remote></script>
 ```
 
-The page connects after it loads (early output is captured as usual), and shows up in the target list; "inspect" opens DevTools on it in a tab of its own. DevTools stays connected when the page reloads or navigates within the tab, and the page reconnects by itself when the connection drops. A second DevTools window on the same page takes over from the first. `data-remote` can also name the server (`data-remote="http://host:8080/"`) when the probe comes from elsewhere.
+The page connects after it loads (early output is captured as usual), and shows up in the target list, which can be filtered and shows how many DevTools windows are attached; "inspect" opens DevTools on it in a tab of its own. DevTools stays connected when the page reloads or navigates within the tab, and the page reconnects by itself when the connection drops (it stays on the list meanwhile). Several DevTools windows can inspect one page at once, each in a session of its own, as in Chrome: the page runs a CDP server per session. `data-remote` can also name the server (`data-remote="http://host:8080/"`) when the probe comes from elsewhere.
 
 - The server serves the probe, its bundle and the DevTools frontend; the frontend runs on the computer, so the same-origin caveat does not apply.
 - Inspecting a page means running any script in it: the target list and DevTools connections need the token (`--token <value>`, by default a random one; `--no-token` turns it off). Pages connect without it.
-- An HTTPS page can only connect to an HTTPS server: `--cert` and `--key`. Other options: `--host`, `--base-path`, `--frontend-dir`. The same is available from Node.js as `startRemoteServer(options)`.
+- An HTTPS page can only connect to an HTTPS server: `--cert` and `--key`. Other options: `--host`, `--base-path`, `--frontend-dir`, and `--frontend-url` to open a frontend hosted elsewhere (a CDN; an HTTPS one needs the server over HTTPS too). The same is available from Node.js as `startRemoteServer(options)`, and `createRemoteHandler(options)` gives its request and upgrade handlers, to mount under a base path in a server of one's own (Express, Koa, …): each returns false for what is not its own.
 - `/json/list` (with the token) lists the targets in the shape of Chrome's.
 
 ## Development

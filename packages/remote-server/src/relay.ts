@@ -1,11 +1,16 @@
-// Relays CDP messages between one page (a target) and the DevTools frontend inspecting it, and
+// Relays CDP messages between one page (a target) and the DevTools frontends inspecting it, and
 // keeps DevTools working across page reloads, the way the shell does in the page's own tab
 // (relayShell in packages/devtools-anywhere/src/connection.ts): the two are built separately, so
 // keep them in step by hand.
 //
+// Each frontend is a session, as in Chrome: the page runs a CDP server of its own for it
+// (packages/devtools-anywhere/src/remote.ts), so that one frontend's domains, node ids and
+// remote objects are not another's. Between the relay and the page, a session's messages are
+// prefixed with its id and a colon; the relay's own messages (hello, pagehide, detach) are not.
+//
 // The page says hello when it connects, with its loader id: a new loader id is a new page
-// instance (a reload or a navigation), which the frontend is told about, and every `enable`
-// command it sent so far is re-sent to the new page, which then replays its own captured
+// instance (a reload or a navigation), which every frontend is told about, and every `enable`
+// command each one sent so far is re-sent to the new page, which then replays its own captured
 // output. The same loader id is the same instance back from a dropped connection: it sends
 // what it queued meanwhile, and nothing is replayed.
 
@@ -13,12 +18,12 @@
 export const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 /** Sent by the page on pagehide: the commands it did not answer never will be. */
 export const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
+/** Sent to the page when a session ends: its CDP server stops (its domains are disabled). */
+export const DETACH_METHOD = 'DevtoolsAnywhere.detach';
 /** Prefix of ids the relay uses for its own commands (no client waits for their responses). */
 const RELAY_ID_PREFIX = 'relay-';
 /** Chrome's error for commands that were pending when the inspected document went away. */
 const NAVIGATED_ERROR = { code: -32000, message: 'Inspected target navigated or closed' };
-/** Domains that keep state while enabled; a new frontend must start from disabled. */
-const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
 /** Messages kept for a page that is not connected; the oldest go first. */
 const MAX_QUEUED = 10_000;
 
@@ -57,25 +62,34 @@ const record = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null ? Object.fromEntries(Object.entries(value)) : {};
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
+/** One frontend's session with the page. */
+interface Session {
+  id: number;
+  client: Peer;
+  /** `enable` commands the client sent, with their params, to re-send to a new page instance. */
+  enabled: Map<string, unknown>;
+  /** Ids of its commands sent to the current page instance and not answered yet. */
+  pending: Map<string | number, string>;
+}
+
 /** A page as the relay knows it, from its first connection on. */
 export class Target {
   info: TargetInfo = { url: '', title: '', favicon: '', userAgent: '' };
-  /** When the page first connected. */
+  /** When the page first connected, and when it last connected or went away. */
   readonly since = Date.now();
+  changed = Date.now();
   private page: Peer | undefined;
-  private client: Peer | undefined;
+  private sessions = new Map<Peer, Session>();
+  private bySessionId = new Map<number, Session>();
+  private sessionSeq = 0;
   private loaderId = '';
   /** The current page instance said hello, and has not gone away since. */
   private pageReady = false;
   private secure = false;
   /** The page's main frame id, from its hello: the same for every instance. */
   private frameId = '';
-  /** Commands for the page while it is not connected (with the same instance, or the first). */
+  /** Messages for the page while it is not connected (with the same instance, or the first). */
   private toPage: string[] = [];
-  /** `enable` commands the client sent, with their params, to re-send to a new page instance. */
-  private enabled = new Map<string, unknown>();
-  /** Ids of client commands sent to the current page instance and not answered yet. */
-  private pending = new Map<string | number, string>();
   private seq = 0;
 
   constructor(readonly id: string) {}
@@ -84,62 +98,75 @@ export class Target {
     return this.page !== undefined;
   }
 
-  get attached(): boolean {
-    return this.client !== undefined;
+  /** How many frontends inspect the page. */
+  get clients(): number {
+    return this.sessions.size;
   }
 
   /** The page connected: a new connection replaces the old one. */
   attachPage(page: Peer) {
     this.page?.close(4001, 'Replaced by a new connection');
     this.page = page;
+    this.changed = Date.now();
   }
 
   detachPage(page: Peer) {
     if (this.page !== page) return;
     this.page = undefined;
+    this.changed = Date.now();
   }
 
-  /** A DevTools frontend connected: it takes over from the one before, if any. */
+  /** A DevTools frontend connected: a session of its own. */
   attachClient(client: Peer) {
-    const previous = this.client;
-    this.client = client;
-    if (previous) {
-      previous.close(4002, 'Another DevTools window is inspecting this page');
-      this.reset();
-    }
+    const session: Session = { id: ++this.sessionSeq, client, enabled: new Map(), pending: new Map() };
+    this.sessions.set(client, session);
+    this.bySessionId.set(session.id, session);
   }
 
   detachClient(client: Peer) {
-    if (this.client !== client) return;
-    this.client = undefined;
-    this.reset();
+    const session = this.sessions.get(client);
+    if (!session) return;
+    this.sessions.delete(client);
+    this.bySessionId.delete(session.id);
+    // Like a new Chrome session for whichever frontend gets the page's server next.
+    this.send(JSON.stringify({ method: DETACH_METHOD, params: { session: session.id } }));
   }
 
   fromPage(data: string) {
-    const message = parse(data);
-    if (message?.method === HELLO_METHOD) return this.onHello(record(message.params));
-    if (message?.method === PAGEHIDE_METHOD) return this.onPagehide();
-    if (message && 'id' in message) {
-      // Responses go to the client that is waiting for them: not to one that connected since.
-      if (!isId(message.id) || !this.pending.delete(message.id)) return;
+    const colon = data.indexOf(':');
+    if (data.startsWith('{')) {
+      const message = parse(data);
+      if (message?.method === HELLO_METHOD) this.onHello(record(message.params));
+      else if (message?.method === PAGEHIDE_METHOD) this.onPagehide();
+      return;
     }
-    this.client?.send(data);
+    const session = this.bySessionId.get(Number(data.slice(0, colon)));
+    if (!session) return;
+    const body = data.slice(colon + 1);
+    // Events start with "method"; responses go to the client only while it waits for them.
+    if (!body.startsWith('{"method"')) {
+      const id = parse(body)?.id;
+      if (!isId(id) || !session.pending.delete(id)) return;
+    }
+    session.client.send(body);
   }
 
-  fromClient(data: string) {
+  fromClient(client: Peer, data: string) {
+    const session = this.sessions.get(client);
+    if (!session) return;
     const { id, method, params } = parse(data) ?? {};
     // Anything else is the page's CDP server's to answer (or reject).
-    if (typeof method !== 'string') return this.toPageNow(data);
-    if (method.endsWith('.enable')) this.enabled.set(method, params ?? {});
-    else if (method.endsWith('.disable')) this.enabled.delete(method.replace(/disable$/, 'enable'));
-    if (!isId(id)) return this.toPageNow(data);
+    if (typeof method !== 'string') return this.send(`${session.id}:${data}`);
+    if (method.endsWith('.enable')) session.enabled.set(method, params ?? {});
+    else if (method.endsWith('.disable')) session.enabled.delete(method.replace(/disable$/, 'enable'));
+    if (!isId(id)) return this.send(`${session.id}:${data}`);
     // Between two page instances Chrome fails the command too, and the next may never come.
-    if (this.loaderId && !this.pageReady) return this.abandon(id, method);
-    this.pending.set(id, method);
-    this.toPageNow(data);
+    if (this.loaderId && !this.pageReady) return this.abandon(session, id, method);
+    session.pending.set(id, method);
+    this.send(`${session.id}:${data}`);
   }
 
-  private toPageNow(data: string) {
+  private send(data: string) {
     if (this.page && this.pageReady) return this.page.send(data);
     this.toPage.push(data);
     if (this.toPage.length > MAX_QUEUED) this.toPage.shift();
@@ -149,16 +176,23 @@ export class Target {
    * Answers a client command the page will never answer. `enable` commands succeed: they are
    * re-sent to the next page instance anyway.
    */
-  private abandon(id: string | number, method: string) {
-    if (method.endsWith('.enable')) this.client?.send(JSON.stringify({ id, result: {} }));
-    else this.client?.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+  private abandon(session: Session, id: string | number, method: string) {
+    if (method.endsWith('.enable')) session.client.send(JSON.stringify({ id, result: {} }));
+    else session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+  }
+
+  /** The page instance went away: commands it did not answer never will be. */
+  private abandonAll() {
+    for (const session of this.sessions.values()) {
+      for (const [id, method] of session.pending) this.abandon(session, id, method);
+      session.pending.clear();
+    }
+    this.toPage.length = 0;
   }
 
   private onPagehide() {
     this.pageReady = false;
-    for (const [id, method] of this.pending) this.abandon(id, method);
-    this.pending.clear();
-    this.toPage.length = 0;
+    this.abandonAll();
   }
 
   private onHello(params: Record<string, unknown>) {
@@ -183,11 +217,8 @@ export class Target {
     // The instance came back after pagehide (from the back/forward cache), or a new one.
     const navigated = loaderId !== this.loaderId;
     this.loaderId = loaderId;
-    for (const [id, method] of this.pending) this.abandon(id, method);
-    this.pending.clear();
-    this.toPage.length = 0;
-    if (!navigated) return;
-    this.navigated(loaderId);
+    this.abandonAll();
+    if (navigated) for (const session of this.sessions.values()) this.navigated(session, loaderId);
   }
 
   private flush() {
@@ -195,8 +226,8 @@ export class Target {
     for (const data of queued) this.page?.send(data);
   }
 
-  /** Tells the client a new page instance replaced the old one, and replays its `enable`s. */
-  private navigated(loaderId: string) {
+  /** Tells a client a new page instance replaced the old one, and replays its `enable`s. */
+  private navigated(session: Session, loaderId: string) {
     const url = this.info.url;
     let origin = '';
     try {
@@ -204,8 +235,8 @@ export class Target {
     } catch {
       // Not a URL: the frame then has no security origin.
     }
-    this.client?.send(JSON.stringify({ method: 'Runtime.executionContextsCleared', params: {} }));
-    this.client?.send(
+    session.client.send(JSON.stringify({ method: 'Runtime.executionContextsCleared', params: {} }));
+    session.client.send(
       JSON.stringify({
         method: 'Page.frameNavigated',
         params: {
@@ -224,24 +255,10 @@ export class Target {
         },
       })
     );
-    for (const [method, params] of this.enabled) {
-      this.page?.send(JSON.stringify({ id: RELAY_ID_PREFIX + ++this.seq, method, params }));
+    for (const [method, params] of session.enabled) {
+      this.send(`${session.id}:${JSON.stringify({ id: RELAY_ID_PREFIX + ++this.seq, method, params })}`);
     }
     // The Elements panel requests the new page's document.
-    this.client?.send(JSON.stringify({ method: 'DOM.documentUpdated', params: {} }));
-  }
-
-  /**
-   * Like a new Chrome session for the next client: e.g. Debugger.enable and CSS.enable only
-   * report scripts and style sheets again after a disable.
-   */
-  private reset() {
-    this.enabled.clear();
-    this.pending.clear();
-    this.toPage.length = 0;
-    if (!this.page || !this.pageReady) return;
-    for (const domain of STATEFUL_DOMAINS) {
-      this.page.send(JSON.stringify({ id: RELAY_ID_PREFIX + ++this.seq, method: `${domain}.disable`, params: {} }));
-    }
+    session.client.send(JSON.stringify({ method: 'DOM.documentUpdated', params: {} }));
   }
 }

@@ -31,7 +31,7 @@ if (!('DevtoolsAnywhere' in window)) {
     DevtoolsAnywhere: {
       DevtoolsAnywhereElement,
       connectFrontend,
-      connectRemote: (serverUrl: string) => connectRemote(createPageServer(), serverUrl),
+      connectRemote: (serverUrl: string) => connectRemote(createPageServer, serverUrl),
       createCdpServer,
       defineDevtoolsAnywhere,
     },

@@ -18,7 +18,8 @@ interface Listed {
   id: string;
   title: string;
   url: string;
-  attached: boolean;
+  connected: boolean;
+  clients: number;
   devtoolsFrontendUrl: string;
   webSocketDebuggerUrl: string;
 }
@@ -129,17 +130,83 @@ test('DevTools stays connected across a reload, and the new page replays its out
   client.socket.close();
 });
 
-test('a second client takes over from the first', async () => {
+test('two clients inspect the page at once, each in a session of its own', async () => {
   const listed = await target();
   const first = await Client.connect(listed.webSocketDebuggerUrl);
   await first.call('Runtime.enable');
   await waitFor(() => first.logged('remote early'));
   const second = await Client.connect(listed.webSocketDebuggerUrl);
-  await waitFor(() => first.closed === 4002);
-  // The page started a new session for it: Runtime.enable replays the output again.
+  // Runtime.enable replays the output for the second session too, and only to it.
+  const before = first.messages.length;
   await second.call('Runtime.enable');
   await waitFor(() => second.logged('remote early'));
+  await waitFor(async () => (await target()).clients === 2);
+  // Output from now on reaches both.
+  await page.evaluate(() => console.log('remote both'));
+  await waitFor(() => first.logged('remote both') && second.logged('remote both'));
+  assert.ok(!first.messages.slice(before).some(m => JSON.stringify(m).includes('remote early')));
+  // Remote objects are the session's own: ending one session leaves the other's working.
+  const { result } = await first.call('Runtime.evaluate', { expression: '({ a: 1 })' });
+  const objectId = JSON.stringify(result).match(/"objectId":"([^"]+)"/)?.[1];
+  assert.ok(objectId);
   second.socket.close();
+  await waitFor(async () => (await target()).clients === 1);
+  const props = await first.call('Runtime.getProperties', { objectId, ownProperties: true });
+  assert.ok(JSON.stringify(props.result).includes('"name":"a"'));
+  assert.equal(first.closed, undefined);
+  first.socket.close();
+});
+
+test('the handlers mount in a server of its own, under a base path, with a public URL', async () => {
+  const { createServer } = await import('node:http');
+  const { createRemoteHandler } = await import('@devtools-anywhere/remote-server');
+  const handler = createRemoteHandler({
+    basePath: '/devtools/',
+    token: false,
+    publicUrl: 'https://debug.example/devtools/',
+    frontendUrl: 'https://cdn.example/anywhere_app.html',
+  });
+  const server = createServer((req, res) => {
+    if (!handler.handleRequest(req, res)) res.end('app');
+  });
+  server.on('upgrade', (req, socket, head) => handler.handleUpgrade(req, socket, head) || socket.destroy());
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const host = `127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
+  try {
+    assert.equal(await (await fetch(`http://${host}/other`)).text(), 'app');
+    assert.ok((await (await fetch(`http://${host}/devtools/probe.iife.js`)).text()).length > 1000);
+    assert.ok((await (await fetch(`http://${host}/devtools/`)).text()).includes('https://debug.example/devtools/'));
+    // A page connects under the base path, and the list opens the frontend from the CDN.
+    const ws = new WebSocket(`ws://${host}/devtools/target/mounted`);
+    await new Promise(resolve => (ws.onopen = resolve));
+    ws.send(
+      JSON.stringify({
+        method: 'DevtoolsAnywhere.hello',
+        params: { loaderId: 'l', url: 'https://x/', title: 'mounted' },
+      })
+    );
+    const listed = await waitFor(async (): Promise<Listed | undefined> =>
+      ((await (await fetch(`http://${host}/devtools/json/list`)).json()) as Listed[]).find(t => t.title === 'mounted')
+    );
+    assert.equal(
+      listed.devtoolsFrontendUrl,
+      `https://cdn.example/anywhere_app.html?ws=${encodeURIComponent(`${host}/devtools/client/mounted`)}`
+    );
+    // A page that went away stays listed for a while, to come back.
+    ws.close();
+    await waitFor(async () => {
+      const all = (await (await fetch(`http://${host}/devtools/json/list`)).json()) as Listed[];
+      return all.find(t => t.id === 'mounted')?.connected === false;
+    });
+  } finally {
+    handler.close();
+    server.close();
+  }
+});
+
+test('the printed script tag names the public URL', () => {
+  assert.equal(remote.scriptTag, `<script src="${remote.publicUrl}probe.iife.js" data-remote></script>`);
 });
 
 test(

@@ -1,9 +1,9 @@
 /**
  * The target list: the pages connected to the server, each with a link that opens DevTools
- * on it. It polls `json/list` with the token it was opened with, and builds every row from
+ * on it, and the script tag for pages (naming the server at `publicUrl`). It polls `json/list` with the token it was opened with, and builds every row from
  * text (titles and URLs come from the pages).
  */
-export function listPage(base: string): string {
+export function listPage(base: string, publicUrl?: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -20,12 +20,15 @@ export function listPage(base: string): string {
   .info { flex: 1; min-width: 0; }
   .title { font-weight: 500; }
   .url, .ua { color: #5f6368; overflow-wrap: anywhere; }
-  .empty { color: #5f6368; }
+  .empty, .state { color: #5f6368; }
+  .gone { opacity: .55; }
+  input { font: inherit; padding: 4px 8px; width: min(100%, 360px); box-sizing: border-box; }
   @media (prefers-color-scheme: dark) {
     body { background: #202124; color: #e8eaed; }
     code { background: #303134; }
     li { border-color: #3c4043; }
-    .url, .ua, .empty { color: #9aa0a6; }
+    .url, .ua, .empty, .state { color: #9aa0a6; }
+    input { background: #303134; color: inherit; border: 1px solid #5f6368; }
     a { color: #8ab4f8; }
   }
 </style>
@@ -34,28 +37,35 @@ export function listPage(base: string): string {
 <h1>Remote targets</h1>
 <p>Add this as the first script in the page's <code>&lt;head&gt;</code>:</p>
 <p><code id="snippet"></code></p>
+<input id="filter" type="search" placeholder="Filter by title, URL or user agent">
 <ul id="targets"></ul>
 <script>
   const base = ${JSON.stringify(base)};
+  const server = ${JSON.stringify(publicUrl ?? '')} || location.origin + base;
   document.getElementById('snippet').textContent =
-    '<script src="' + location.origin + base + 'probe.iife.js" data-remote></' + 'script>';
+    '<script src="' + server + 'probe.iife.js" data-remote></' + 'script>';
   const query = location.search;
   const list = document.getElementById('targets');
+  const filter = document.getElementById('filter');
+  let targets = [];
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text) node.textContent = text;
     return node;
   };
-  async function refresh() {
-    let targets = [];
-    try {
-      targets = await (await fetch(base + 'json/list' + query)).json();
-    } catch {
-      return;
-    }
-    list.replaceChildren(...targets.map(target => {
-      const item = el('li');
+  const ago = since => {
+    const s = Math.round((Date.now() - since) / 1000);
+    return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.round(s / 3600) + 'h';
+  };
+  function render() {
+    const words = filter.value.toLowerCase().split(/\\s+/).filter(Boolean);
+    const shown = targets.filter(target => {
+      const haystack = (target.title + ' ' + target.url + ' ' + target.userAgent).toLowerCase();
+      return words.every(word => haystack.includes(word));
+    });
+    list.replaceChildren(...shown.map(target => {
+      const item = el('li', target.connected ? '' : 'gone');
       const icon = el('img');
       icon.alt = '';
       if (/^https?:/.test(target.faviconUrl)) icon.src = target.faviconUrl;
@@ -63,15 +73,29 @@ export function listPage(base: string): string {
       info.append(
         el('div', 'title', target.title || target.url),
         el('div', 'url', target.url),
-        el('div', 'ua', target.userAgent));
-      const link = el('a', '', target.attached ? 'inspect (taking over)' : 'inspect');
+        el('div', 'ua', target.userAgent),
+        el('div', 'state', [
+          target.connected ? 'connected' : 'disconnected, waiting for it to come back',
+          'first seen ' + ago(target.since) + ' ago',
+          target.clients ? target.clients + ' DevTools attached' : '',
+        ].filter(Boolean).join(' · ')));
+      const link = el('a', '', 'inspect');
       link.href = target.devtoolsFrontendUrl;
       link.target = '_blank';
       item.append(icon, info, link);
       return item;
     }));
-    if (!targets.length) list.append(el('li', 'empty', 'No page is connected.'));
+    if (!shown.length) list.append(el('li', 'empty', targets.length ? 'No page matches.' : 'No page is connected.'));
   }
+  async function refresh() {
+    try {
+      targets = await (await fetch(base + 'json/list' + query)).json();
+    } catch {
+      return;
+    }
+    render();
+  }
+  filter.addEventListener('input', render);
   refresh();
   setInterval(refresh, 2000);
 </script>

@@ -153,17 +153,17 @@ export default {
 npx devtools-anywhere-remote --port 8080
 ```
 
-它会打印目标列表的地址（带 token）和给页面用的 script 标签。从服务端加载探针，带上 `data-remote`，放在页面 `<head>` 的第一个脚本位置；地址用手机能访问到的电脑地址：
+它会打印目标列表的地址（带 token）和给页面用的 script 标签，标签里用的是电脑的局域网地址（`--public-url` 可以改成别的地址，例如经过代理时）。从服务端加载探针，带上 `data-remote`，放在页面 `<head>` 的第一个脚本位置：
 
 ```html
 <script src="http://192.168.1.2:8080/probe.iife.js" data-remote></script>
 ```
 
-页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连。同一个页面再打开第二个 DevTools 时，后打开的会接管。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。
+页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；列表可以筛选，也会显示连着几个 DevTools。点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连，期间它仍留在列表中。一个页面可以同时被多个 DevTools 调试，和 Chrome 一样各有独立的会话：页面为每个会话运行一个 CDP 服务端。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。
 
 - 服务端同时提供探针、bundle 和 DevTools 前端；前端运行在电脑上，不受“前端要和页面不同源”的限制。
 - 调试一个页面就意味着能在其中执行任意脚本：目标列表和 DevTools 连接都需要 token（`--token <值>`，默认随机生成；`--no-token` 关闭）。页面连接不需要 token。
-- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--frontend-dir`。在 Node.js 中也可以调用 `startRemoteServer(options)`。
+- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--frontend-dir`，以及 `--frontend-url`（打开托管在别处的前端，如 CDN；HTTPS 的前端要求服务端也用 HTTPS）。在 Node.js 中也可以调用 `startRemoteServer(options)`；`createRemoteHandler(options)` 提供请求和 upgrade 两个处理函数，可以挂在自己的服务（Express、Koa 等）的某个 base path 下，不属于它的请求返回 false。
 - `/json/list`（带 token）按 Chrome 的格式列出目标。
 
 ### 组件

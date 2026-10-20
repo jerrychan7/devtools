@@ -1,8 +1,10 @@
 import { FRAME_ID, LOADER_ID, installProbe, type CdpServer } from '@devtools-anywhere/cdp-server';
+import { STATEFUL_DOMAINS } from './connection';
 
 // Keep in step with packages/remote-server/src/relay.ts: the two are built separately.
 const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
+const DETACH_METHOD = 'DevtoolsAnywhere.detach';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -32,11 +34,14 @@ function favicon() {
 }
 
 /**
- * Connects a CDP server to a remote debugging server (@devtools-anywhere/remote-server) at
- * `serverUrl`, the URL it serves the probe under. The connection comes back when it drops,
- * and what the page sends meanwhile is queued. Returns a function that disconnects.
+ * Connects the page to a remote debugging server (@devtools-anywhere/remote-server) at
+ * `serverUrl`, the URL it serves the probe under. Each DevTools frontend inspecting the page is
+ * a session with a CDP server of its own, from `createServer`: one frontend's domains, node ids
+ * and remote objects are not another's. Servers of ended sessions are kept, their domains
+ * disabled, for the next ones. The connection comes back when it drops, and what the page
+ * sends meanwhile is queued. Returns a function that disconnects.
  */
-export function connectRemote(server: CdpServer, serverUrl: string): () => void {
+export function connectRemote(createServer: () => CdpServer, serverUrl: string): () => void {
   const url = new URL(`target/${targetId()}`, new URL(serverUrl, location.href));
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   // The page's own WebSocket: the connection is not one of the page's.
@@ -75,10 +80,7 @@ export function connectRemote(server: CdpServer, serverUrl: string): () => void 
       queue.splice(0).forEach(message => ws.send(message));
     };
     ws.onmessage = event => {
-      if (typeof event.data !== 'string') return;
-      server.dispatch(event.data).catch(() => {
-        // Malformed message: there is no id to answer to.
-      });
+      if (typeof event.data === 'string') receive(event.data);
     };
     ws.onclose = () => {
       if (closed || socket !== ws) return;
@@ -87,7 +89,50 @@ export function connectRemote(server: CdpServer, serverUrl: string): () => void 
     };
   }
 
-  const offServer = server.onMessage(send);
+  /** Each session's server, and how to stop sending what it says. */
+  const sessions = new Map<string, { server: CdpServer; off: () => void }>();
+  const idle: CdpServer[] = [];
+  function session(id: string) {
+    let found = sessions.get(id);
+    if (!found) {
+      const server = idle.pop() ?? createServer();
+      found = { server, off: server.onMessage(message => send(`${id}:${message}`)) };
+      sessions.set(id, found);
+    }
+    return found.server;
+  }
+  function detach(id: string) {
+    const found = sessions.get(id);
+    if (!found) return;
+    sessions.delete(id);
+    found.off();
+    // Like a new Chrome session for the next frontend: e.g. Debugger.enable and CSS.enable only
+    // report scripts and style sheets again after a disable.
+    const { server } = found;
+    const calls = [...STATEFUL_DOMAINS.map(domain => `${domain}.disable`), 'Page.stopScreencast'];
+    Promise.all(calls.map(method => server.call(method).catch(() => {}))).then(() => idle.push(server));
+  }
+  function receive(data: string) {
+    if (data.startsWith('{')) {
+      let message: unknown;
+      try {
+        message = JSON.parse(data);
+      } catch {
+        return;
+      }
+      if (typeof message !== 'object' || !message || !('method' in message) || message.method !== DETACH_METHOD) return;
+      const params = 'params' in message ? message.params : undefined;
+      if (typeof params === 'object' && params && 'session' in params) detach(String(params.session));
+      return;
+    }
+    const colon = data.indexOf(':');
+    session(data.slice(0, colon))
+      .dispatch(data.slice(colon + 1))
+      .catch(() => {
+        // Malformed message: there is no id to answer to.
+      });
+  }
+
   // The title is often set late: the list shows it once the page has loaded.
   const onLoad = () => send(hello());
   const onPagehide = () => send(JSON.stringify({ method: PAGEHIDE_METHOD, params: {} }));
@@ -100,7 +145,7 @@ export function connectRemote(server: CdpServer, serverUrl: string): () => void 
   return () => {
     closed = true;
     clearTimeout(timer);
-    offServer();
+    for (const id of sessions.keys()) detach(id);
     removeEventListener('load', onLoad);
     removeEventListener('pagehide', onPagehide);
     removeEventListener('pageshow', onPageshow);
