@@ -35,7 +35,7 @@
 
 ### 能力边界
 
-- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在 shell 模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器：后续计划加入类似 Chii 的远程调试模式，页面连接到服务端，DevTools 经由服务端接入。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
+- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在 shell 模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器（Android 用 `chrome://inspect`，iOS 用 Safari 的 Web Inspector）；[远程调试](#远程调试)改变不了这一点，因为页面里运行的仍是同一个页面内 CDP 服务端。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
 - 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
   - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
@@ -65,7 +65,7 @@
 
 #### 1. 探针
 
-压缩后约 5.7 KB（min+gzip，包含外壳模式和自动挂载）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
+压缩后约 5.8 KB（min+gzip，包含外壳模式、自动挂载和远程调试）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
 
 - 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch`、`XHR` 和 `WebSocket`，把事件连同时间戳写入缓冲。WebSocket 帧按原样保存，二进制负载到 CDP 服务端才转成 base64。CDP 服务端挂载之前，每类记录（控制台消息、请求、WebSocket、每个 WebSocket 的帧）各保留最近 1 万条，作为从不加载服务端的页面的兜底；服务端挂载后改由它设定上限，控制台消息与 V8 一样保留最近 1000 条。
 - 无法 hook 的请求（文档、样式表、脚本、图片、字体等）通过 Resource Timing 记录；带 `buffered` 的 `PerformanceObserver` 还能拿到探针运行之前的请求。这些记录有 URL、类型、时序、大小，以及浏览器公开时的状态码和 MIME 类型，但没有请求头和响应头；响应体在需要时从 HTTP 缓存重新读取。外壳模式下启用了 Service Worker 时，它会为同源请求补上请求头和响应头。之所以仍以 hook 为主：hook 从最开始就生效、带调用栈、无需部署；Service Worker 要安装后才能接管页面，会和网站自己的 Service Worker 冲突，而且要代理请求才能看到响应。
@@ -110,6 +110,7 @@
 | `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
 | `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
+| `@devtools-anywhere/remote-server` | 远程调试服务端（Node.js）及其命令行工具 `devtools-anywhere-remote` |
 
 - 探针不单独成包：Runtime 和 Network 域直接读取它的缓冲，两者必须严格匹配。放在 cdp-server 中可以共用类型，也不会出现版本不匹配。
 - 前端单独成包，因为它体积大（约 16 MB），更新节奏跟随 Chrome 版本。其他语言（约 42 MB）再拆成一个包，需要的人才装。
@@ -142,7 +143,28 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`open`、`serviceWorker`。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`open`、`serviceWorker`、`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
+
+### 远程调试
+
+要在电脑上的 Chrome 里调试手机上的页面，先在电脑上启动远程调试服务端：
+
+```bash
+npx devtools-anywhere-remote --port 8080
+```
+
+它会打印目标列表的地址（带 token）和给页面用的 script 标签。从服务端加载探针，带上 `data-remote`，放在页面 `<head>` 的第一个脚本位置；地址用手机能访问到的电脑地址：
+
+```html
+<script src="http://192.168.1.2:8080/probe.iife.js" data-remote></script>
+```
+
+页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连。同一个页面再打开第二个 DevTools 时，后打开的会接管。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。
+
+- 服务端同时提供探针、bundle 和 DevTools 前端；前端运行在电脑上，不受“前端要和页面不同源”的限制。
+- 调试一个页面就意味着能在其中执行任意脚本：目标列表和 DevTools 连接都需要 token（`--token <值>`，默认随机生成；`--no-token` 关闭）。页面连接不需要 token。
+- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--frontend-dir`。在 Node.js 中也可以调用 `startRemoteServer(options)`。
+- `/json/list`（带 token）按 Chrome 的格式列出目标。
 
 ### 组件
 
@@ -155,7 +177,7 @@ export default {
 ## 参考
 
 - [chobitsu](https://github.com/liriliri/chobitsu)：CDP 实现的参考
-- [Chii](https://github.com/liriliri/chii)：嵌入模式 `src/target/DevtoolsFrame.ts`
+- [Chii](https://github.com/liriliri/chii)：嵌入模式 `src/target/DevtoolsFrame.ts`，以及它的远程调试服务端
 - [ChromeDevTools/devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)
 - [ChromeDevTools/devtools-protocol](https://github.com/ChromeDevTools/devtools-protocol)
 - [Puppeteer](https://github.com/puppeteer/puppeteer)：一致性测试中作为标准答案

@@ -6,6 +6,7 @@ import {
   DevtoolsAnywhereElement,
   connectFrontend,
   connectToShell,
+  connectRemote,
   createPageServer,
   defineDevtoolsAnywhere,
   setBundleUrl,
@@ -27,6 +28,12 @@ if (!('DevtoolsAnywhere' in window)) {
   defineDevtoolsAnywhere();
   if (isShellPage()) connectToShell(createPageServer());
   Object.assign(window, {
-    DevtoolsAnywhere: { DevtoolsAnywhereElement, connectFrontend, createCdpServer, defineDevtoolsAnywhere },
+    DevtoolsAnywhere: {
+      DevtoolsAnywhereElement,
+      connectFrontend,
+      connectRemote: (serverUrl: string) => connectRemote(createPageServer(), serverUrl),
+      createCdpServer,
+      defineDevtoolsAnywhere,
+    },
   });
 }

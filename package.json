@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@devtools-anywhere/cdp-server": "workspace:*",
+    "@devtools-anywhere/remote-server": "workspace:*",
     "@devtools-anywhere/vite-plugin": "workspace:*",
     "@types/node": "^22.18.0",
     "acorn": "^8.19.0",

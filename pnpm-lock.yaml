@@ -169,6 +169,9 @@ importers:
       '@devtools-anywhere/cdp-server':
         specifier: workspace:*
         version: link:packages/cdp-server
+      '@devtools-anywhere/remote-server':
+        specifier: workspace:*
+        version: link:packages/remote-server
       '@devtools-anywhere/vite-plugin':
         specifier: workspace:*
         version: link:packages/vite-plugin
@@ -244,6 +247,34 @@ importers:
         version: 4.64.9
 
   packages/devtools-frontend-locales: {}
+
+  packages/remote-server:
+    dependencies:
+      '@devtools-anywhere/devtools-frontend':
+        specifier: workspace:*
+        version: link:../devtools-frontend
+      devtools-anywhere:
+        specifier: workspace:*
+        version: link:../devtools-anywhere
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.0
+    devDependencies:
+      '@devtools-anywhere/devtools-frontend-locales':
+        specifier: workspace:*
+        version: link:../devtools-frontend-locales
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
+      '@types/ws':
+        specifier: ^8.5.12
+        version: 8.18.2
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
 
   packages/vite-plugin:
     dependencies:
@@ -989,6 +1020,9 @@ packages:
 
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@types/yauzl@2.10.3':
     resolution: {integrity: sha512-oJoftv0LSuaDZE3Le4DbKX+KS9G36NzOeSap90UIK0yMA/NhKJhqlSGtNDORNRaIbQfzjXDrQa0ytJ6mNRGz/Q==}
@@ -1975,6 +2009,10 @@ snapshots:
     dependencies:
       undici-types: 8.9.0
     optional: true
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 22.20.5
 
   '@types/yauzl@2.10.3':
     dependencies:

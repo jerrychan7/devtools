@@ -17,6 +17,12 @@ export interface DevtoolsAnywhereOptions {
   open?: boolean;
   /** Use the Service Worker in shell mode to inject the probe into iframe pages. Default: false. */
   serviceWorker?: boolean;
+  /**
+   * URL of a remote debugging server (@devtools-anywhere/remote-server), such as
+   * `http://192.168.1.2:8080/`: pages connect to it, to be inspected from another machine,
+   * instead of mounting DevTools in the page.
+   */
+  remote?: string;
 }
 
 const BASE = '/@devtools-anywhere/';
@@ -112,7 +118,8 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
       order: 'pre',
       handler() {
         const attrs: Record<string, string | boolean> = { src: `${BASE}probe.iife.js` };
-        if (frontend) attrs['data-frontend'] = frontend;
+        if (options.remote) attrs['data-remote'] = options.remote;
+        else if (frontend) attrs['data-frontend'] = frontend;
         if (options.open) attrs['data-open'] = true;
         if (options.serviceWorker) attrs['data-sw'] = true;
         return [{ tag: 'script', attrs, injectTo: 'head-prepend' }];

@@ -29,6 +29,7 @@ declare global {
     DevtoolsAnywhere: {
       createCdpServer: typeof createCdpServer;
       connectFrontend(server: CdpServer, frame: HTMLIFrameElement, frontendOrigin: string): () => void;
+      connectRemote(serverUrl: string): () => void;
     };
     __devtoolsAnywhereProbe__?: Probe;
     /** The harness's CDP server in the page, and the events it emitted. */

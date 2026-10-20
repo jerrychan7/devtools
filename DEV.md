@@ -64,7 +64,7 @@ pnpm dev          # builds once, then rebuilds every package on change
 pnpm playground   # http://localhost:8788/playground/
 ```
 
-`pnpm dev` runs esbuild in watch mode for `cdp-server`, `devtools-anywhere` and `vite-plugin`. A change in `cdp-server` also rebuilds the `devtools-anywhere` bundles that include it. There is no hot reload: refresh the page to load the new build. Type declarations are only emitted by `pnpm build`.
+`pnpm dev` runs esbuild in watch mode for `cdp-server`, `devtools-anywhere`, `vite-plugin` and `remote-server`. A change in `cdp-server` also rebuilds the `devtools-anywhere` bundles that include it. There is no hot reload: refresh the page to load the new build. Type declarations are only emitted by `pnpm build`.
 
 The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON; `/ws/echo` is a WebSocket that sends every message back.
 
@@ -79,6 +79,7 @@ packages/
   devtools-frontend/  pinned devtools-frontend version, patches and build scripts
   devtools-anywhere/  umbrella package: <devtools-anywhere>, iframe, connection layer, shell mode
   vite-plugin/    zero-config injection
+  remote-server/  remote debugging: relay between a page and DevTools elsewhere, target list, CLI
 tests/
   conformance/    compare CDP output against real Chrome via Puppeteer
   e2e/            probe → CDP → frontend
@@ -94,6 +95,7 @@ experiments/      validation records
 | A CDP domain | `packages/cdp-server/src/domains/` | Playground, plus a conformance test |
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
 | Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |
+| Remote debugging | `packages/remote-server/src/` (relay, server), `packages/devtools-anywhere/src/remote.ts` (page side) | `tests/e2e/remote.test.ts`; `node packages/remote-server/dist/cli.js` |
 | DevTools frontend | `packages/devtools-frontend/` | See below |
 
 ### Constraints and caveats

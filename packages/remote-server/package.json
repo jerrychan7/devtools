@@ -1,0 +1,46 @@
+{
+  "name": "@devtools-anywhere/remote-server",
+  "version": "0.0.0",
+  "description": "Relay that lets Chrome DevTools on one machine inspect a page running on another device",
+  "license": "MIT",
+  "bin": {
+    "devtools-anywhere-remote": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node build.ts --watch"
+  },
+  "dependencies": {
+    "@devtools-anywhere/devtools-frontend": "workspace:*",
+    "devtools-anywhere": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@devtools-anywhere/devtools-frontend-locales": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.25.0",
+    "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "@devtools-anywhere/devtools-frontend-locales": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@devtools-anywhere/devtools-frontend-locales": {
+      "optional": true
+    }
+  }
+}

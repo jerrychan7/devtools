@@ -7,6 +7,10 @@
 // the page has loaded and mounts <devtools-anywhere>. `data-open` opens DevTools right away;
 // `data-sw` is passed on as the element's `sw` attribute (see shell mode).
 //
+// With `data-remote` instead, it connects the page to a remote debugging server
+// (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
+// where DevTools on another machine inspects it. No <devtools-anywhere> is mounted then.
+//
 // Outside shell mode it unregisters the shell's Service Worker if one is left over (shell mode
 // ended without exitShell): recognized by its script URL, which the shell gives `probe` (ending
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
@@ -57,8 +61,9 @@ if (!readShellConfig() && navigator.serviceWorker) {
 }
 
 const frontend = script?.dataset['frontend'];
+const remote = script?.dataset['remote'];
 // In the shell's top window the probe has replaced the document with the shell already.
-if (script && frontend && !(readShellConfig() && window === top)) {
+if (script && (frontend || remote !== undefined) && !(readShellConfig() && window === top)) {
   const bundle = new URL(script.dataset['bundle'] || 'devtools-anywhere.iife.js', script.src).href;
   const open = script.hasAttribute('data-open');
   probe.ownUrls.add(bundle);
@@ -67,7 +72,14 @@ if (script && frontend && !(readShellConfig() && window === top)) {
     const loader = document.createElement('script');
     loader.src = bundle;
     loader.onload = () => {
-      if (document.querySelector('devtools-anywhere')) return;
+      if (remote !== undefined) {
+        const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
+        if (typeof api === 'object' && api && 'connectRemote' in api && typeof api.connectRemote === 'function') {
+          api.connectRemote(new URL(remote || '.', script.src).href);
+        }
+        return;
+      }
+      if (!frontend || document.querySelector('devtools-anywhere')) return;
       const element = document.createElement('devtools-anywhere');
       element.setAttribute('frontend', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');

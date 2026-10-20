@@ -35,7 +35,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 ### Limitations
 
-- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. A `debugger;` statement in page scripts cannot pause either; in shell mode, each one hit in a same-origin script logs a warning with its stack in the Console instead. Real breakpoints need the browser's own debugger: a remote debugging mode in the style of Chii, where the page connects to a server and DevTools attaches through it, is planned. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
+- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. A `debugger;` statement in page scripts cannot pause either; in shell mode, each one hit in a same-origin script logs a warning with its stack in the Console instead. Real breakpoints need the browser's own debugger (`chrome://inspect` for Android, Safari's Web Inspector for iOS); [remote debugging](#remote-debugging) does not change this, since the page still runs the same in-page CDP server. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
 - Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
@@ -65,7 +65,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 #### 1. Probe
 
-A synchronous script of about 5.7 KB (min+gzip, including shell mode and auto-mounting) that must be the first script executed in `<head>`.
+A synchronous script of about 5.8 KB (min+gzip, including shell mode, auto-mounting and remote debugging) that must be the first script executed in `<head>`.
 
 - Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch`, `XHR` and `WebSocket`, and writes events with timestamps into a buffer. WebSocket frames are kept as given; binary payloads are only converted to base64 by the CDP server. Until a CDP server mounts, each list (console messages, requests, WebSockets, frames per WebSocket) keeps its last 10,000 entries, a bound for pages that never load one; the server then sets its own, and keeps the last 1000 console messages like V8.
 - Requests that cannot be hooked (the document, style sheets, scripts, images, fonts, …) are recorded from Resource Timing; a buffered `PerformanceObserver` also delivers those from before the probe ran. They have URL, type, timing, size and (where the browser exposes it) status and MIME type, but no headers; their bodies are loaded again from the HTTP cache on demand. In shell mode with the Service Worker, it adds the request and response headers of same-origin ones. Hooks stay first because they work from the very start, keep call stacks, and need no deployment; a Service Worker only controls pages after it is installed, conflicts with a site's own, and would have to proxy requests to see responses.
@@ -110,6 +110,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 | `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets with English and Chinese UI, self-hostable or served from a CDN |
 | `@devtools-anywhere/devtools-frontend-locales` | Optional: the other 80 UI languages, at the same paths as in the frontend package. Serve both from one directory (the Vite plugin does this when it is installed); a missing language falls back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
+| `@devtools-anywhere/remote-server` | Remote debugging server (Node.js) and its CLI, `devtools-anywhere-remote` |
 
 - The probe is not a separate package: the Runtime and Network domains read its buffer directly, so the two must always match. Keeping it in cdp-server lets them share types and rules out version mismatches.
 - The frontend is separate because it is large (about 16 MB) and follows Chrome's release cadence. Its other languages (about 42 MB) are another package, so that only those who need them install them.
@@ -142,11 +143,32 @@ export default {
 }
 ```
 
-Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `open`, `serviceWorker`.
+Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `open`, `serviceWorker`, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
 
 ### The element
 
 A floating F12 button opens the panel; drag its bar to resize. Left of DevTools' settings button, the lock button switches shell mode on and off (a dialog explains it first, and an info bar shows while it is on) and the refresh button reloads the page; the toolbar's × closes the panel. DevTools' main menu (⋮) has "Dock side": bottom (the default), right, left, or undocked, a window over the page moved by its bar and resized from its corner. In shell mode the page shrinks to make room, as in Chrome; otherwise the panel covers the page. The side and sizes are remembered in localStorage, sizes as percentages of the viewport (`dvh`/`dvw`), so they fit any screen and orientation. Attributes: `frontend`, `open`, `dock`, `height`, `width`, `no-launcher`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
+
+### Remote debugging
+
+To inspect a page on a phone from Chrome on a computer, start the remote debugging server on the computer:
+
+```bash
+npx devtools-anywhere-remote --port 8080
+```
+
+It prints the target list's URL, with a token, and the script tag for pages. Load the probe from the server, with `data-remote`, as the first script in the page's `<head>`, using the computer's address as the phone sees it:
+
+```html
+<script src="http://192.168.1.2:8080/probe.iife.js" data-remote></script>
+```
+
+The page connects after it loads (early output is captured as usual), and shows up in the target list; "inspect" opens DevTools on it in a tab of its own. DevTools stays connected when the page reloads or navigates within the tab, and the page reconnects by itself when the connection drops. A second DevTools window on the same page takes over from the first. `data-remote` can also name the server (`data-remote="http://host:8080/"`) when the probe comes from elsewhere.
+
+- The server serves the probe, its bundle and the DevTools frontend; the frontend runs on the computer, so the same-origin caveat does not apply.
+- Inspecting a page means running any script in it: the target list and DevTools connections need the token (`--token <value>`, by default a random one; `--no-token` turns it off). Pages connect without it.
+- An HTTPS page can only connect to an HTTPS server: `--cert` and `--key`. Other options: `--host`, `--base-path`, `--frontend-dir`. The same is available from Node.js as `startRemoteServer(options)`.
+- `/json/list` (with the token) lists the targets in the shape of Chrome's.
 
 ## Development
 
@@ -155,7 +177,7 @@ See the [development guide](DEV.md) for setting up the environment, the reposito
 ## References
 
 - [chobitsu](https://github.com/liriliri/chobitsu): reference for the CDP implementation
-- [Chii](https://github.com/liriliri/chii): embedded mode in `src/target/DevtoolsFrame.ts`
+- [Chii](https://github.com/liriliri/chii): embedded mode in `src/target/DevtoolsFrame.ts`, and its remote debugging server
 - [ChromeDevTools/devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)
 - [ChromeDevTools/devtools-protocol](https://github.com/ChromeDevTools/devtools-protocol)
 - [Puppeteer](https://github.com/puppeteer/puppeteer): used as the source of truth in conformance tests

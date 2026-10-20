@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- The remote server's port is only known at run time: `?remote=<its URL>`. -->
+    <script>
+      document.write(
+        '<script src="' + new URLSearchParams(location.search).get('remote') + 'probe.iife.js" data-remote><\/script>'
+      );
+    </script>
+    <title>remote page</title>
+    <script>
+      console.log('remote early', performance.timeOrigin);
+    </script>
+  </head>
+  <body>
+    <h1 id="remote-marker">hello</h1>
+  </body>
+</html>

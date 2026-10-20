@@ -64,7 +64,7 @@ pnpm dev          # 先完整构建一次，之后改动哪个包就重新构建
 pnpm playground   # http://localhost:8788/playground/
 ```
 
-`pnpm dev` 以 watch 模式运行 `cdp-server`、`devtools-anywhere` 和 `vite-plugin` 的 esbuild。改动 `cdp-server` 时，打包了它的 `devtools-anywhere` 产物也会跟着重新构建。没有热更新：刷新页面即可加载新的构建。类型声明只在 `pnpm build` 时生成。
+`pnpm dev` 以 watch 模式运行 `cdp-server`、`devtools-anywhere`、`vite-plugin` 和 `remote-server` 的 esbuild。改动 `cdp-server` 时，打包了它的 `devtools-anywhere` 产物也会跟着重新构建。没有热更新：刷新页面即可加载新的构建。类型声明只在 `pnpm build` 时生成。
 
 playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回，`/ws/echo` 是一个把每条消息原样发回的 WebSocket。
 
@@ -79,6 +79,7 @@ packages/
   devtools-frontend/  钉住的 devtools-frontend 版本、补丁和构建脚本
   devtools-anywhere/  总包：<devtools-anywhere>、iframe、连接层、外壳模式
   vite-plugin/    零配置注入
+  remote-server/  远程调试：页面与另一处 DevTools 之间的中继、目标列表、命令行工具
 tests/
   conformance/    用 Puppeteer 对比真实 Chrome 的 CDP 输出
   e2e/            探针 → CDP → 前端的完整流程
@@ -94,6 +95,7 @@ experiments/      验证记录
 | CDP 域 | `packages/cdp-server/src/domains/` | playground，并加一致性测试 |
 | 组件、连接、外壳模式、Service Worker | `packages/devtools-anywhere/src/` | playground、端到端测试 |
 | Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts`（示例应用在 `tests/e2e/vite-app/`） |
+| 远程调试 | `packages/remote-server/src/`（中继、服务端）、`packages/devtools-anywhere/src/remote.ts`（页面端） | `tests/e2e/remote.test.ts`；`node packages/remote-server/dist/cli.js` |
 | DevTools 前端 | `packages/devtools-frontend/` | 见下文 |
 
 ### 约束与注意事项
