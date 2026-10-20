@@ -186,10 +186,10 @@ test('a middle click fires auxclick', async () => {
   assert.ok(result.events.includes('auxclick:btn'));
 });
 
-// Chrome sends the off-page release to the document (and clicks it); ours only has elements to
-// dispatch to, so it is checked alone: the press ends on the pressed element, without a click.
-test('a release outside the page still ends the press', async () => {
-  const result = await run(t.ours, async side => {
+// Off the page, Chrome sends the events to the document, the release included, and clicks it
+// (the nearest common ancestor of the press and the release).
+test('a release outside the page goes to the document and still ends the press', async () => {
+  const result = await same(async side => {
     await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 50, y: 30 });
     await side.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 50, y: 30, button: 'left', clickCount: 1 });
     await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: -10, y: -10, button: 'left', buttons: 1 });
@@ -200,9 +200,31 @@ test('a release outside the page still ends the press', async () => {
       button: 'left',
       clickCount: 1,
     });
+    // The press has ended: a later click is an ordinary one.
+    await click(side, 50, 30);
   });
-  assert.ok(result.events.includes('pointerup:btn'));
-  assert.ok(!result.events.includes('click:btn'));
+  assert.ok(result.events.includes('pointerup:'));
+  assert.ok(result.events.includes('click:'));
+});
+
+test('a press and release outside the page go to the document', async () => {
+  await same(async side => {
+    await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: -10, y: -10 });
+    await side.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: -10,
+      y: -10,
+      button: 'left',
+      clickCount: 1,
+    });
+    await side.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: -10,
+      y: -10,
+      button: 'left',
+      clickCount: 1,
+    });
+  });
 });
 
 test('Enter submits the form', async () => {

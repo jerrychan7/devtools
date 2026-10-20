@@ -41,6 +41,7 @@ export function installProbe(): Probe {
   const sockets: SocketRecord[] = [];
   const socketListeners = new Set<(record: SocketRecord) => void>();
 
+  const shadowRootListeners = new Set<(root: ShadowRoot) => void>();
   const probe: Probe = {
     version: 1,
     logs,
@@ -62,6 +63,10 @@ export function installProbe(): Probe {
       logs.length = 0;
     },
     shadowRoots: new WeakMap(),
+    onShadowRoot(listener) {
+      shadowRootListeners.add(listener);
+      return () => void shadowRootListeners.delete(listener);
+    },
     listeners: new WeakMap(),
     ownUrls: new Set(),
     // Old WebViews without fetch: a rejection callers handle like any failed request.
@@ -88,7 +93,7 @@ export function installProbe(): Probe {
   });
   hookConsole(addLog, now);
   hookErrors(addLog, now);
-  hookShadowRoots(probe.shadowRoots);
+  hookShadowRoots(probe.shadowRoots, shadowRootListeners);
   // The XHR hook's own listeners are not the page's either.
   const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
@@ -398,12 +403,13 @@ function hookConsole(addLog: (entry: LogEntry) => void, now: () => number) {
 // ---- shadow roots ----
 
 /** Records shadow roots as they are attached: closed ones are not reachable otherwise. */
-function hookShadowRoots(roots: WeakMap<Element, ShadowRoot>) {
+function hookShadowRoots(roots: WeakMap<Element, ShadowRoot>, listeners: Set<(root: ShadowRoot) => void>) {
   const attachShadow = Element.prototype.attachShadow;
   if (!attachShadow) return;
   Element.prototype.attachShadow = function (this: Element, init: ShadowRootInit) {
     const root = attachShadow.call(this, init);
     roots.set(this, root);
+    for (const listener of listeners) listener(root);
     return root;
   };
 }

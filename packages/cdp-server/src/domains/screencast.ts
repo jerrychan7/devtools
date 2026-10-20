@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
-import { OWN_ATTRIBUTE } from '../core/nodes';
+import { isOwn } from '../core/nodes';
 import { CdpError } from '../core/server';
 
 /** The part of snapDOM (`@zumer/snapdom`) the screencast uses. */
@@ -8,7 +8,7 @@ export type Snapdom = (
   element: Element,
   options: {
     clip: 'viewport';
-    exclude: string[];
+    exclude: ((el: Element) => boolean)[];
     excludeMode: 'hide';
     backgroundColor: string;
   }
@@ -68,7 +68,7 @@ export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoad
     const scale = Math.min(1, (params?.maxWidth ?? width) / width, (params?.maxHeight ?? height) / height);
     const result = await capture(document.documentElement, {
       clip: 'viewport',
-      exclude: [`[${OWN_ATTRIBUTE}]`],
+      exclude: [isOwn],
       excludeMode: 'hide',
       backgroundColor: background(),
     });

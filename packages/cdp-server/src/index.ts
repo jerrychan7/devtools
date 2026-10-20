@@ -19,7 +19,16 @@ import { installProbe } from './probe';
 
 export { CdpError, CdpServer } from './core/server';
 export { installProbe } from './probe';
-export { SHELL_KEY, SHELL_PAGE_ID, isShellPage, readShellConfig, type ShellConfig } from './probe/shell';
+export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
+export {
+  SHELL_KEY,
+  SHELL_PAGE_ID,
+  isShellPage,
+  isTrustedShellConfig,
+  readShellConfig,
+  setShellScriptUrl,
+  type ShellConfig,
+} from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
 export type { Probe } from './probe/types';
 export type { Snapdom, SnapdomLoader } from './domains/screencast';

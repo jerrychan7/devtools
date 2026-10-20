@@ -1,7 +1,9 @@
 import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, type Context } from '../core/context';
-import { FORCE_ATTRIBUTE, OWN_ATTRIBUTE, PseudoElement, truncateNodeValue, visibleAttributes } from '../core/nodes';
+import { FORCE_ATTRIBUTE, PseudoElement, closestOwn, isOwn, truncateNodeValue, visibleAttributes } from '../core/nodes';
+import { editAttributes, editNodeValue, editPosition, editReplace, historyOf } from '../core/history';
 import { CdpError } from '../core/server';
+import { type Box, type Quad, hasTransformedAncestor, localToViewport, mapQuad } from '../core/geometry';
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string };
 
@@ -43,7 +45,33 @@ const quad = (r: { left: number; top: number; right: number; bottom: number }) =
   r.bottom,
 ];
 
-/** Content, padding, border and margin boxes of an element, in viewport coordinates. */
+/**
+ * Viewport mapping of an element's untransformed border box, when it or an ancestor is transformed;
+ * null for plain layouts, where the bounding rectangle is exact.
+ */
+function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: number; height: number } | null {
+  if (!(el instanceof HTMLElement) || !hasTransformedAncestor(el)) return null;
+  const m = localToViewport(el);
+  if (!m || (m.is2D && m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1)) return null;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  // Trust the mapping only if it lands where the browser put the element.
+  const xs: number[] = [];
+  const ys: number[] = [];
+  mapQuad(m, { left: 0, top: 0, right: width, bottom: height }).forEach((v, i) => (i % 2 ? ys : xs).push(v));
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+  const ok =
+    near(Math.min(...xs), rect.left) &&
+    near(Math.max(...xs), rect.right) &&
+    near(Math.min(...ys), rect.top) &&
+    near(Math.max(...ys), rect.bottom);
+  return ok ? { m, width, height } : null;
+}
+
+/**
+ * Content, padding, border and margin boxes of an element, in viewport coordinates: transformed
+ * quads like Chrome's, with the untransformed layout size as width and height.
+ */
 export function boxModel(el: Element): Protocol.DOM.BoxModel {
   const rect = el.getBoundingClientRect();
   const style = getComputedStyle(el);
@@ -57,7 +85,10 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
   const margin = side('margin');
   const border = side('border', '-width');
   const padding = side('padding');
-  const borderBox = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  const layout = transformedLayout(el, rect);
+  const borderBox = layout
+    ? { left: 0, top: 0, right: layout.width, bottom: layout.height }
+    : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
   const paddingBox = {
     left: borderBox.left + border.left,
     top: borderBox.top + border.top,
@@ -76,14 +107,25 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
     right: borderBox.right + margin.right,
     bottom: borderBox.bottom + margin.bottom,
   };
+  const toQuad = layout ? (b: Box) => mapQuad(layout.m, b) : quad;
   return {
-    content: quad(contentBox),
-    padding: quad(paddingBox),
-    border: quad(borderBox),
-    margin: quad(marginBox),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
+    content: toQuad(contentBox),
+    padding: toQuad(paddingBox),
+    border: toQuad(borderBox),
+    margin: toQuad(marginBox),
+    width: layout ? layout.width : Math.round(rect.width),
+    height: layout ? layout.height : Math.round(rect.height),
   };
+}
+
+/** Border quads of an element for DOM.getContentQuads: transformed when it is. */
+function elementQuads(el: Element): Quad[] {
+  const rects = Array.from(el.getClientRects());
+  if (rects.length === 1 && rects[0]) {
+    const layout = transformedLayout(el, rects[0]);
+    if (layout) return [mapQuad(layout.m, { left: 0, top: 0, right: layout.width, bottom: layout.height })];
+  }
+  return rects.map(quad);
 }
 
 /**
@@ -223,11 +265,10 @@ export function registerDom(ctx: Context) {
 
   /** Whether a record only concerns devtools-anywhere's own elements. */
   function isOwnChange(record: MutationRecord): boolean {
-    const own = (n: Node) => n instanceof Element && n.closest(`[${OWN_ATTRIBUTE}]`) !== null;
-    if (own(record.target)) return true;
+    if (closestOwn(record.target)) return true;
     if (record.type !== 'childList') return false;
     const changed = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
-    return changed.length > 0 && changed.every(n => n instanceof Element && n.hasAttribute(OWN_ATTRIBUTE));
+    return changed.length > 0 && changed.every(n => n instanceof Element && isOwn(n));
   }
 
   function reportMutations(records: MutationRecord[]) {
@@ -326,6 +367,7 @@ export function registerDom(ctx: Context) {
   }
 
   const element = (ref: NodeRef) => resolveElement(ctx, ref);
+  const history = historyOf(ctx);
 
   server.register('DOM', {
     enable: () => {},
@@ -334,6 +376,7 @@ export function registerDom(ctx: Context) {
       observer = null;
       unpatchAttachShadow();
       searches.clear();
+      history.reset();
     },
 
     getDocument(params: Protocol.DOM.GetDocumentRequest): Protocol.DOM.GetDocumentResponse {
@@ -378,7 +421,8 @@ export function registerDom(ctx: Context) {
     }),
 
     setAttributeValue(params: Protocol.DOM.SetAttributeValueRequest) {
-      element(params).setAttribute(params.name, params.value);
+      const el = element(params);
+      history.record(editAttributes(el, () => el.setAttribute(params.name, params.value)));
     },
 
     setAttributesAsText(params: Protocol.DOM.SetAttributesAsTextRequest) {
@@ -393,16 +437,26 @@ export function registerDom(ctx: Context) {
       const source = context ? outer?.firstElementChild : outer;
       const attrs = Array.from(source?.attributes ?? []);
       // Like Chrome, an attribute that is set again keeps its place and is only reported as modified.
-      if (params.name && !attrs.some(attr => attr.name === params.name)) el.removeAttribute(params.name);
-      for (const attr of attrs) el.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+      history.record(
+        editAttributes(el, () => {
+          if (params.name && !attrs.some(attr => attr.name === params.name)) el.removeAttribute(params.name);
+          for (const attr of attrs) el.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+        })
+      );
     },
 
     removeAttribute(params: Protocol.DOM.RemoveAttributeRequest) {
-      element(params).removeAttribute(params.name);
+      const el = element(params);
+      history.record(editAttributes(el, () => el.removeAttribute(params.name)));
     },
 
     setNodeValue(params: Protocol.DOM.SetNodeValueRequest) {
-      resolveNode(ctx, params).nodeValue = params.value;
+      const node = resolveNode(ctx, params);
+      history.record(
+        editNodeValue(node, () => {
+          node.nodeValue = params.value;
+        })
+      );
     },
 
     getOuterHTML(params: Protocol.DOM.GetOuterHTMLRequest): Protocol.DOM.GetOuterHTMLResponse {
@@ -410,7 +464,12 @@ export function registerDom(ctx: Context) {
     },
 
     setOuterHTML(params: Protocol.DOM.SetOuterHTMLRequest) {
-      element(params).outerHTML = params.outerHTML;
+      const el = element(params);
+      history.record(
+        editReplace(el, () => {
+          el.outerHTML = params.outerHTML;
+        })
+      );
     },
 
     setNodeName(params: Protocol.DOM.SetNodeNameRequest): Protocol.DOM.SetNodeNameResponse {
@@ -418,22 +477,30 @@ export function registerDom(ctx: Context) {
       const renamed = document.createElement(params.name);
       for (const attr of Array.from(el.attributes))
         if (attr.name !== FORCE_ATTRIBUTE) renamed.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
-      while (el.firstChild) renamed.appendChild(el.firstChild);
-      el.replaceWith(renamed);
+      history.record(
+        editReplace(
+          el,
+          () => {
+            while (el.firstChild) renamed.appendChild(el.firstChild);
+            el.replaceWith(renamed);
+          },
+          true
+        )
+      );
       flushMutations();
       return { nodeId: nodes.idOf(renamed) };
     },
 
     removeNode(params: Protocol.DOM.RemoveNodeRequest) {
       const node = resolveNode(ctx, params);
-      node.parentNode?.removeChild(node);
+      history.record(editPosition(node, () => node.parentNode?.removeChild(node)));
     },
 
     moveTo(params: Protocol.DOM.MoveToRequest): Protocol.DOM.MoveToResponse {
       const node = resolveNode(ctx, params);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
-      target.insertBefore(node, before);
+      history.record(editPosition(node, () => target.insertBefore(node, before)));
       flushMutations();
       return { nodeId: nodes.idOf(node) };
     },
@@ -446,7 +513,7 @@ export function registerDom(ctx: Context) {
           el.removeAttribute(FORCE_ATTRIBUTE);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
-      target.insertBefore(copy, before);
+      history.record(editPosition(copy, () => target.insertBefore(copy, before)));
       flushMutations();
       return { nodeId: nodes.idOf(copy) };
     },
@@ -500,12 +567,12 @@ export function registerDom(ctx: Context) {
         range.selectNodeContents(node);
         return { quads: Array.from(range.getClientRects()).map(quad) };
       }
-      return { quads: Array.from(element(params).getClientRects()).map(quad) };
+      return { quads: elementQuads(element(params)) };
     },
 
     getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
       // The page's element under devtools-anywhere's own UI, which the page tree does not have.
-      const el = document.elementsFromPoint(params.x, params.y).find(e => !e.closest(`[${OWN_ATTRIBUTE}]`));
+      const el = document.elementsFromPoint(params.x, params.y).find(e => !closestOwn(e));
       if (!el) throw new CdpError('No node found at given location');
       const nodeId = nodes.knownId(el);
       return { backendNodeId: nodes.backendIdOf(el), frameId: FRAME_ID, ...(nodeId !== undefined && { nodeId }) };
@@ -538,7 +605,7 @@ export function registerDom(ctx: Context) {
       const found: Element[] = [];
       const visit = (root: ParentNode) => {
         for (const el of root.querySelectorAll('*')) {
-          if (!nodes.isVisible(el) || el.closest(`[${OWN_ATTRIBUTE}]`)) continue;
+          if (!nodes.isVisible(el) || closestOwn(el)) continue;
           const style = getComputedStyle(el);
           if (params.computedStyles.some(({ name, value }) => style.getPropertyValue(name) === value)) found.push(el);
           const shadowRoot = params.pierce && nodes.shadowRootOf(el);
@@ -573,9 +640,9 @@ export function registerDom(ctx: Context) {
     },
 
     getTopLayerElements: () => ({ nodeIds: [] }),
-    markUndoableState: () => {},
-    undo: () => {},
-    redo: () => {},
+    markUndoableState: () => history.markUndoableState(),
+    undo: () => history.undo(),
+    redo: () => history.redo(),
     hideHighlight: () => server.call('Overlay.hideHighlight'),
     highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => server.call('Overlay.highlightNode', params),
   });

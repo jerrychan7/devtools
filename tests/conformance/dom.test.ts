@@ -298,9 +298,9 @@ describe('long text and own elements', () => {
       const node = (root: DomNode) => find(root, n => attr(n, 'id') === id);
       assert.deepEqual(diffSubset(node(o), node(c)), [], id);
     }
-    // Chrome shows devtools-anywhere's element like any other; ours must leave it out.
-    assert.ok(find(o, n => attr(n, 'id') === 'own') === null);
-    assert.equal(body(o)?.childNodeCount, (body(c)?.childNodeCount ?? 0) - 1);
+    // The page can set devtools-anywhere's attribute itself: that does not hide an element.
+    assert.ok(find(o, n => attr(n, 'id') === 'own') !== null);
+    assert.equal(body(o)?.childNodeCount, body(c)?.childNodeCount);
   });
 
   test('long node values are cut', async () => {

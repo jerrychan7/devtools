@@ -365,7 +365,11 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
     releaseObject: (params: Protocol.Runtime.ReleaseObjectRequest) => objects.release(params.objectId),
     releaseObjectGroup: (params: Protocol.Runtime.ReleaseObjectGroupRequest) =>
       objects.releaseGroup(params.objectGroup),
-    discardConsoleEntries: () => probe.clearLogs(),
+    discardConsoleEntries: () => {
+      probe.clearLogs();
+      // Like V8, clearing the messages releases their 'console' handles.
+      objects.releaseGroup('console');
+    },
     globalLexicalScopeNames: () => ({ names: [] }),
     getIsolateId: () => ({ id: 'devtools-anywhere' }),
     getHeapUsage: () => {

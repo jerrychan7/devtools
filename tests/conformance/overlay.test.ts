@@ -123,3 +123,24 @@ test('inspect mode requests the hovered node and swallows touches', async () => 
   await t.ours.send('Overlay.setInspectMode', { mode: 'none' });
   assert.deepEqual(await touch(), [false, false, false]);
 });
+
+test('highlightNode follows a rotated element and labels its layout size', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="ov-rot" style="position:absolute;left:200px;top:200px;width:60px;height:30px;transform:rotate(45deg)"></div>'
+    )
+  );
+  const { root } = await t.ours.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await t.ours.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#ov-rot' });
+  await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: { showInfo: true } });
+  const drawn = await t.page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-devtools-anywhere="overlay"] > div'), d => ({
+      clip: d.style.clipPath,
+      text: d.textContent,
+    }))
+  );
+  assert.match(drawn[1]?.clip ?? '', /^polygon\(/);
+  assert.match(drawn[4]?.text ?? '', /60 × 30$/);
+  await t.ours.send('Overlay.hideHighlight');
+});

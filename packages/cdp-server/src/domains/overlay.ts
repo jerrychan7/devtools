@@ -1,12 +1,19 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
-import { OWN_ATTRIBUTE } from '../core/nodes';
+import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../core/nodes';
 import { boxModel, resolveNode } from './dom';
 
-/** Bounds of a CDP quad (x1 y1 … x4 y4, clockwise from the top left). */
+/** Axis-aligned bounds of a CDP quad (x1 y1 … x4 y4, clockwise from the top left). */
 function bounds(quad: number[]) {
-  const [left = 0, top = 0, , , right = 0, bottom = 0] = quad;
-  return { left, top, right, bottom };
+  const xs = quad.filter((_, i) => i % 2 === 0);
+  const ys = quad.filter((_, i) => i % 2 === 1);
+  return { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) };
+}
+
+/** Whether a quad is an axis-aligned rectangle. */
+function isRect(quad: number[]) {
+  const [x1, y1, x2, y2, x3, y3, x4, y4] = quad;
+  return x1 === x4 && x2 === x3 && y1 === y2 && y3 === y4;
 }
 
 type RGBA = Protocol.DOM.RGBA;
@@ -25,6 +32,7 @@ class Highlighter {
     if (this.layer?.isConnected) return this.layer;
     const layer = document.createElement('div');
     layer.setAttribute(OWN_ATTRIBUTE, 'overlay');
+    markOwn(layer);
     layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647';
     document.documentElement.appendChild(layer);
     return (this.layer = layer);
@@ -86,10 +94,7 @@ class Highlighter {
       [model.padding, color(config.paddingColor, 'rgba(147,196,125,.55)')],
       [model.content, color(config.contentColor, 'rgba(111,168,220,.66)')],
     ];
-    for (const [q, fill] of boxes) {
-      const { left, top, right, bottom } = bounds(q);
-      layer.appendChild(this.rect(left, top, right - left, bottom - top, fill));
-    }
+    for (const [q, fill] of boxes) layer.appendChild(this.quad(q, fill));
 
     if (config.showInfo === true) {
       const label = document.createElement('div');
@@ -112,10 +117,28 @@ class Highlighter {
     return div;
   }
 
+  /** Fills any quad: its bounding rectangle, clipped to the quad when transformed. */
+  quad(q: number[], fill: string, outline?: string) {
+    const { left, top, right, bottom } = bounds(q);
+    const div = this.rect(left, top, right - left, bottom - top, fill, isRect(q) ? outline : undefined);
+    if (!isRect(q)) {
+      const points: string[] = [];
+      for (let i = 0; i + 1 < q.length; i += 2) points.push(`${(q[i] ?? 0) - left}px ${(q[i + 1] ?? 0) - top}px`);
+      div.style.clipPath = `polygon(${points.join(',')})`;
+    }
+    return div;
+  }
+
   area(x: number, y: number, width: number, height: number, fill: string, outline?: string) {
     this.untrack();
     const layer = this.ensureLayer();
     layer.replaceChildren(this.rect(x, y, width, height, fill, outline));
+  }
+
+  areaQuad(q: number[], fill: string, outline?: string) {
+    this.untrack();
+    const layer = this.ensureLayer();
+    layer.replaceChildren(this.quad(q, fill, outline));
   }
 }
 
@@ -127,6 +150,7 @@ function viewportSizeOnResize() {
     if (!label) {
       label = document.createElement('div');
       label.setAttribute(OWN_ATTRIBUTE, 'viewport-size');
+      markOwn(label);
       label.style.cssText = `position:fixed;top:0;right:0;z-index:2147483647;pointer-events:none;padding:2px 6px;
         background:rgba(255,255,255,.85);color:#222;font:11px/16px system-ui,sans-serif;border-radius:0 0 0 2px`;
     }
@@ -154,7 +178,7 @@ export function registerOverlay(ctx: Context) {
   /** Element under a pointer event, ignoring devtools-anywhere's own UI. */
   function targetOf(event: Event): Element | null {
     const el = event.target instanceof Element ? event.target : null;
-    return el && !el.closest(`[${OWN_ATTRIBUTE}]`) ? el : null;
+    return el && !closestOwn(el) ? el : null;
   }
 
   function startInspect(config: Protocol.Overlay.HighlightConfig) {
@@ -244,15 +268,7 @@ export function registerOverlay(ctx: Context) {
     },
 
     highlightQuad(params: Protocol.Overlay.HighlightQuadRequest) {
-      const { left, top, right, bottom } = bounds(params.quad);
-      highlighter.area(
-        left,
-        top,
-        right - left,
-        bottom - top,
-        color(params.color, 'transparent'),
-        color(params.outlineColor, '')
-      );
+      highlighter.areaQuad(params.quad, color(params.color, 'transparent'), color(params.outlineColor, ''));
     },
 
     hideHighlight: () => highlighter.hide(),

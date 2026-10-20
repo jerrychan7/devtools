@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
-import { OWN_ATTRIBUTE } from '../core/nodes';
+import { closestOwn } from '../core/nodes';
 
 type MouseEventRequest = Protocol.Input.DispatchMouseEventRequest | Protocol.Input.EmulateTouchFromMouseEventRequest;
 
@@ -17,14 +17,17 @@ const modifierKeys = (modifiers = 0) => ({
 });
 
 /** The page's element at a viewport point, under DevTools' own elements. */
-function hit(x: number, y: number): Element | null {
-  for (const el of document.elementsFromPoint(x, y)) if (!el.closest(`[${OWN_ATTRIBUTE}]`)) return el;
+function elementAt(x: number, y: number): Element | null {
+  for (const el of document.elementsFromPoint(x, y)) if (!closestOwn(el)) return el;
   return null;
 }
 
+/** The mouse event target at a viewport point: like Chrome, the document where no page element is hit (outside the viewport). */
+const hit = (x: number, y: number): Element | Document => elementAt(x, y) ?? document;
+
 /** Scrolls the nearest scrollable ancestor that can still move in the direction of the delta. */
-function scrollBy(target: Element, dx: number, dy: number) {
-  for (let el: Element | null = target; el; el = el.parentElement) {
+function scrollBy(target: Element | Document, dx: number, dy: number) {
+  for (let el: Element | null = target instanceof Element ? target : null; el; el = el.parentElement) {
     if (el === document.documentElement || el === document.body) break;
     const style = getComputedStyle(el);
     const canX = /auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth;
@@ -53,8 +56,8 @@ const isEditable = (el: Element | null) =>
  */
 export function registerInput({ server }: Context) {
   let emitTouch = false;
-  let hovered: Element | null = null;
-  let pressed: Element | null = null;
+  let hovered: Element | Document | null = null;
+  let pressed: Element | Document | null = null;
   /** Where the current touch started, to tell a tap from a drag. */
   let touchStart: { x: number; y: number; moved: boolean } | null = null;
 
@@ -76,7 +79,7 @@ export function registerInput({ server }: Context) {
   }
 
   /** Fires the pointer event and its compatibility mouse event; false if either was cancelled. */
-  function fire(target: Element, type: 'down' | 'up' | 'move' | 'over' | 'out', init: MouseEventInit) {
+  function fire(target: Element | Document, type: 'down' | 'up' | 'move' | 'over' | 'out', init: MouseEventInit) {
     const pointer = new PointerEvent(`pointer${type}`, {
       ...init,
       pointerId: 1,
@@ -87,7 +90,7 @@ export function registerInput({ server }: Context) {
     return target.dispatchEvent(pointer) && target.dispatchEvent(mouse);
   }
 
-  function wheel(target: Element, p: MouseEventRequest) {
+  function wheel(target: Element | Document, p: MouseEventRequest) {
     const dx = p.deltaX ?? 0;
     const dy = p.deltaY ?? 0;
     const event = new WheelEvent('wheel', { ...mouseInit(p, 0), deltaX: dx, deltaY: dy, deltaMode: 0 });
@@ -100,13 +103,6 @@ export function registerInput({ server }: Context) {
   function mouse(p: MouseEventRequest) {
     const target = hit(p.x, p.y);
     const button = p.button ?? 'none';
-    if (!target) {
-      // Released off the page (outside the viewport, over DevTools' own elements): the
-      // pressed element still gets the release, so the button is not left held down.
-      if (p.type === 'mouseReleased' && pressed) fire(pressed, 'up', mouseInit(p, buttonsOf(p) ?? 0));
-      if (p.type === 'mouseReleased') pressed = null;
-      return;
-    }
     switch (p.type) {
       case 'mouseMoved': {
         const init = mouseInit(p, buttonsOf(p) ?? (pressed ? BUTTONS.left : 0));
@@ -132,8 +128,8 @@ export function registerInput({ server }: Context) {
         if (button === 'none' || !down) break;
         // The click goes to the nearest element that contains both the press and the release;
         // other buttons than the left one get an auxclick instead.
-        let clicked: Element | null = target;
-        while (clicked && !clicked.contains(down)) clicked = clicked.parentElement;
+        let clicked: Node | null = target;
+        while (clicked && !clicked.contains(down)) clicked = clicked.parentNode;
         if (!clicked) break;
         if (button !== 'left') {
           clicked.dispatchEvent(new MouseEvent('auxclick', init));
@@ -153,7 +149,8 @@ export function registerInput({ server }: Context) {
     if (p.type === 'mouseMoved' && !touchStart) return; // hovering does not touch
     // Once touching, the touch stays with the touched element even off the page, so that
     // the release still ends it.
-    const target = hit(p.x, p.y) ?? (p.type === 'mousePressed' ? null : pressed);
+    const held = pressed instanceof Element ? pressed : null;
+    const target = elementAt(p.x, p.y) ?? (p.type === 'mousePressed' ? null : held);
     if (!target) return;
     if (p.type === 'mouseWheel') return wheel(target, p);
     const type = p.type === 'mousePressed' ? 'touchstart' : p.type === 'mouseReleased' ? 'touchend' : 'touchmove';
@@ -164,7 +161,7 @@ export function registerInput({ server }: Context) {
       touchStart.moved = true;
     }
     const tapped = type === 'touchend' && touchStart && !touchStart.moved;
-    const touched = pressed ?? target;
+    const touched = (pressed instanceof Element ? pressed : null) ?? target;
     // Like a real touch: the pointer event first, then the touch event.
     const pointerInit: PointerEventInit = {
       ...mouseInit(p, type === 'touchend' ? 0 : BUTTONS.left),
@@ -234,10 +231,12 @@ export function registerInput({ server }: Context) {
     }
   }
 
-  function focus(target: Element) {
-    const focusable = target.closest<HTMLElement>(
-      'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable=""], [contenteditable="true"]'
-    );
+  function focus(target: Element | Document) {
+    const focusable =
+      target instanceof Element &&
+      target.closest<HTMLElement>(
+        'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable=""], [contenteditable="true"]'
+      );
     if (focusable) focusable.focus();
     else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }

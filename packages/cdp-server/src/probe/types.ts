@@ -148,6 +148,8 @@ export interface Probe {
   clearLogs(): void;
   /** Every shadow root attached since the probe ran, including closed ones. */
   shadowRoots: WeakMap<Element, ShadowRoot>;
+  /** Subscribes to shadow roots being attached. */
+  onShadowRoot(listener: (root: ShadowRoot) => void): () => void;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;
   /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */

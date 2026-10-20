@@ -2,8 +2,29 @@ import type { Protocol } from 'devtools-protocol';
 
 type DomNode = Protocol.DOM.Node;
 
-/** Elements of devtools-anywhere itself (the element, overlays) are hidden from the page's DOM. */
+/**
+ * Marks devtools-anywhere's own elements for CSS isolation only. Which nodes are ours is
+ * decided by {@link markOwn}, since the page can set this attribute on its own elements.
+ */
 export const OWN_ATTRIBUTE = 'data-devtools-anywhere';
+
+/** Nodes devtools-anywhere created itself (the element, overlays, …); the page cannot add to it. */
+const ownNodes = new WeakSet<Node>();
+
+/** Registers a node as devtools-anywhere's own, hiding it and its subtree from the client. */
+export function markOwn(node: Node): void {
+  ownNodes.add(node);
+}
+
+/** Whether `node` itself was registered with {@link markOwn}. */
+export const isOwn = (node: Node) => ownNodes.has(node);
+
+/** Whether `node` is one of ours or inside one, through shadow roots too. */
+export function closestOwn(node: Node): boolean {
+  for (let n: Node | null = node; n; n = n instanceof ShadowRoot ? n.host : n.parentNode)
+    if (ownNodes.has(n)) return true;
+  return false;
+}
 /** Pseudo-classes forced on an element (CSS.forcePseudoState); hidden from the client. */
 export const FORCE_ATTRIBUTE = 'data-devtools-anywhere-force';
 
@@ -186,7 +207,7 @@ export class NodeRegistry {
   /** Whether a node is shown to the client at all. */
   isVisible(node: Node): boolean {
     if (node.nodeType === Node.TEXT_NODE) return !!node.nodeValue?.trim();
-    if (node instanceof Element) return !node.hasAttribute(OWN_ATTRIBUTE);
+    if (node instanceof Element) return !isOwn(node);
     return true;
   }
 
