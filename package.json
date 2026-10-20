@@ -6,7 +6,7 @@
     "build": "pnpm -r run build",
     "dev": "pnpm run build && pnpm -r --parallel run dev",
     "typecheck": "pnpm run build && pnpm -r run typecheck && tsc -p tsconfig.scripts.json && tsc -p tsconfig.tests.json",
-    "test": "pnpm run build && node --test \"tests/**/*.test.ts\"",
+    "test": "pnpm run build && node --test --test-concurrency=4 \"tests/**/*.test.ts\"",
     "playground": "node playground/server.ts",
     "lint": "oxlint",
     "fmt": "oxfmt",

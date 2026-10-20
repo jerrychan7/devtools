@@ -56,7 +56,8 @@ export async function launch(args: string[] = []): Promise<Env> {
   const server = await startServer(0);
   let browser: Browser;
   try {
-    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args });
+    // A call that hangs fails after 30s rather than Puppeteer's default 180s.
+    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args, protocolTimeout: 30_000 });
   } catch (e) {
     // Otherwise the listening server keeps the worker alive and hides the launch error.
     server.close();
@@ -104,10 +105,21 @@ export async function openPage(env: Env, events: EventName[]): Promise<TestPage>
     },
   };
   const ours: Side = {
-    send: async (method, ...params) =>
-      (await page.evaluate((m, p) => window.__server.call(m, p), method, params[0] ?? {})) as Awaited<
-        ReturnType<Side['send']>
-      >,
+    send: async (method, ...params) => {
+      const start = Date.now();
+      try {
+        return (await page.evaluate((m, p) => window.__server.call(m, p), method, params[0] ?? {})) as Awaited<
+          ReturnType<Side['send']>
+        >;
+      } catch (e) {
+        // Names the command, so a timeout says which call hung; other errors are compared
+        // with Chrome's, so they stay as they are.
+        if (e instanceof Error && /timed out/.test(e.message)) {
+          e.message = `${method} (after ${Date.now() - start}ms): ${e.message}`;
+        }
+        throw e;
+      }
+    },
     events: async method =>
       (await page.evaluate(m => window.__ours.filter(e => e.method === m).map(e => e.params), method)) as EventParams<
         typeof method
