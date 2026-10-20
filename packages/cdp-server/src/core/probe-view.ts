@@ -103,8 +103,14 @@ export function viewProbe(probe: Probe): ProbeView {
     }
     return entry;
   };
-  // Records change in place: each read copies the probe's record again, deriving what it leaves out.
+  // Records change in place, and the probe reports every change: only a changed record is
+  // copied again, so reading all of them stays cheap.
+  const changed = new WeakSet<ProbeRequest>();
+  probe.onRequest(raw => changed.add(raw));
   const request = (raw: ProbeRequest): RequestRecord => {
+    const cached = requests.get(raw);
+    if (cached && !changed.has(raw)) return cached;
+    changed.delete(raw);
     const { headers, requestHeaders, ...rest } = raw;
     const fields: RequestRecord = { ...rest, requestHeaders: headersToObject(requestHeaders) };
     if (headers !== undefined) {
@@ -115,8 +121,7 @@ export function viewProbe(probe: Probe): ProbeView {
       if (raw.encodedDataLength !== undefined)
         fields.encodedDataLength = Number(responseHeaders['content-length']) || raw.encodedDataLength;
     }
-    const rec = requests.get(raw);
-    if (rec) return Object.assign(rec, fields);
+    if (cached) return Object.assign(cached, fields);
     requests.set(raw, fields);
     return fields;
   };
