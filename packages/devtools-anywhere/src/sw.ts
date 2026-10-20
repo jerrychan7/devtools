@@ -163,9 +163,9 @@ async function inject(request: Request, probeUrl: string): Promise<Response> {
   };
   const injectAt = (at: number) => concat(pending.subarray(0, at), tag, pending.subarray(at));
 
-  // Streams the page through, deciding as soon as <head> arrives: the DevTools frontend (its
-  // marker already received) passes through untouched, other pages get the probe right after
-  // <head>. A page without <head> early (anywhere_app.html has none) is held back until its
+  // Streams the page through, deciding as soon as <head> and the tag after it arrive: the
+  // DevTools frontend (its marker already received) passes through untouched, other pages get
+  // the probe right after <head>. A page without <head> early (anywhere_app.html has none) is held back until its
   // marker, </head> or <body>, at most SNIFF_LIMIT bytes, then gets the probe at the start.
   // Only the new chunk (plus a little of the text before it, for a tag split across chunks)
   // is searched; the whole response is never buffered.
@@ -181,8 +181,11 @@ async function inject(request: Request, probeUrl: string): Promise<Response> {
       else {
         const match = head < 0 ? /<head\b[^>]*>/i.exec(recent) : null;
         if (match) head = from + match.index + match[0].length;
-        if (head >= 0) out = injectAt(head);
-        else if (/<\/head\b|<body\b/i.test(recent) || pending.length >= SNIFF_LIMIT) out = injectAt(0);
+        // The frontend's marker is the tag right after <head>: until that tag is complete
+        // (it may come in the next chunk), the page is held back.
+        if (head >= 0) {
+          if (/^\s*(?:[^\s<]|<[^>]*>)/.test(text.slice(head)) || pending.length >= SNIFF_LIMIT) out = injectAt(head);
+        } else if (/<\/head\b|<body\b/i.test(recent) || pending.length >= SNIFF_LIMIT) out = injectAt(0);
       }
       if (!out) return;
       controller.enqueue(out);
@@ -191,7 +194,7 @@ async function inject(request: Request, probeUrl: string): Promise<Response> {
       text = '';
     },
     flush(controller) {
-      if (!done) controller.enqueue(injectAt(0));
+      if (!done) controller.enqueue(injectAt(head >= 0 ? head : 0));
     },
   });
 

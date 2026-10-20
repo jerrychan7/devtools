@@ -165,7 +165,15 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
         // Style sheets are readable from other origins (the tests load them cross-origin).
         ...(target.endsWith('.css') ? { 'access-control-allow-origin': '*' } : {}),
       });
-      res.end(data);
+      // ?split=<text> sends the file in two chunks, cut right after the first <text>, to test
+      // readers of streamed responses.
+      const split = url.searchParams.get('split');
+      const at = split ? data.indexOf(split) : -1;
+      if (split && at >= 0) {
+        res.write(data.subarray(0, at + split.length));
+        await sleep(200);
+        res.end(data.subarray(at + split.length));
+      } else res.end(data);
     } catch {
       res.writeHead(404).end('not found');
     }

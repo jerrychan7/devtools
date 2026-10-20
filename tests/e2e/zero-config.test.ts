@@ -171,6 +171,19 @@ test('the Service Worker injects the probe exactly once into a short page withou
   );
 });
 
+test('the Service Worker injects after <head> when the page ends right after it', async () => {
+  await navigatePageFrame('/tests/e2e/head-only.html');
+  const { mode, inHead } = await page.evaluate(() => {
+    const pageDocument = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentDocument;
+    if (!pageDocument) throw new Error('no page frame');
+    const probe = [...pageDocument.scripts].find(s => s.src.endsWith('/probe.iife.js'));
+    return { mode: pageDocument.compatMode, inHead: probe?.parentElement === pageDocument.head };
+  });
+  // Before the doctype, the probe would put the page in quirks mode.
+  assert.equal(mode, 'CSS1Compat');
+  assert.ok(inHead);
+});
+
 test('the Service Worker passes non-HTML responses through unchanged', async () => {
   await navigatePageFrame('/tests/e2e/not-html.json');
   const { contentType, text } = await page.evaluate(() => {
@@ -211,7 +224,12 @@ test('the Service Worker leaves the same-origin DevTools frontend alone', async 
   assert.equal(scripts.filter(src => src.endsWith('/probe.iife.js')).length, 0, scripts.join(', '));
 });
 
-for (const path of ['/tests/e2e/frontend-dir/', '/tests/e2e/frontend-dir/index.html']) {
+// The last one arrives in two chunks, cut between <head> and the marker after it.
+for (const path of [
+  '/tests/e2e/frontend-dir/',
+  '/tests/e2e/frontend-dir/index.html',
+  '/tests/e2e/frontend-dir/index.html?split=%3Chead%3E',
+]) {
   test(`the Service Worker leaves the frontend alone at ${path}`, async () => {
     // Recognized by its content, whatever URL it is opened at (a directory or its index.html).
     await page.evaluate(href => {
