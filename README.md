@@ -35,7 +35,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 ### Limitations
 
-- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
+- An in-page CDP implementation can only use JS APIs, so the following are **not available**: breakpoint debugging, Profiler, Memory, and real network timing. These panels are not included in the frontend rather than shown and found broken. A `debugger;` statement in page scripts cannot pause either. Real breakpoints need the browser's own debugger: a remote debugging mode in the style of Chii, where the page connects to a server and DevTools attaches through it, is planned. The Sources panel's Page tab lists the page's documents, external scripts and style sheets, images and fonts (inline scripts are not listed, since their position in the document is not known); snippets work.
 - Where page scripts lack an API, the gap is filled exactly or not at all; approximations are not shown as facts:
   - User-agent styles are not shown: browsers do not expose their default style sheet, and a bundled copy could differ from the browser's.
   - Event listeners are recorded by the probe from the moment it runs (it must be the first script); their source locations are not available.
@@ -84,6 +84,8 @@ No standalone `devtools.html` is hosted, and there is no navigation to a blob UR
 3. Inside the iframe, the probe captures as usual and loads the bundle, which connects the page's CDP server to the shell. The shell relays messages between the page and the frontend.
 4. When the page reloads or navigates, the new page says hello; the shell tells the frontend the page navigated and re-sends every `enable` command the frontend has sent, so the new page replays its own earliest output. The address bar and title follow the page.
 5. The lock button again, or the toolbar's × (`element.exitShell()`), clears the config and reloads the page on its own.
+
+The stored URLs are only trusted when they have the same origin as the probe script; otherwise the config is cleared and the page loads normally. Shell mode therefore needs the probe, the bundle and the frontend served from the page's origin.
 
 Shell mode is **optional**: inside an iframe, `viewport`, `100vh`, `position: fixed`, `window.top`, `X-Frame-Options` and others may behave differently from a top-level page. The default mode embeds DevTools directly in the page.
 
