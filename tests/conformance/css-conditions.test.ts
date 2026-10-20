@@ -58,6 +58,38 @@ before(async () => {
 });
 after(() => env?.close());
 
+test('size queries of an unrendered container and containers up the flat tree match Chrome', async () => {
+  await t.page.evaluate(() => {
+    const s = document.createElement('style');
+    s.textContent = `
+      .c-hide { container-type: inline-size; width: 300px; }
+      @container (width > 100px) { #c-hidden, #c-hidden2, #c-slotted { margin: 3px; } }
+      @container (width < 100px) { #c-slotted { padding: 4px; } }
+    `;
+    document.head.appendChild(s);
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div class="c-hide" style="display: none"><i id="c-hidden"></i></div>' +
+        '<div style="display: none"><div class="c-hide"><i id="c-hidden2"></i></div></div>' +
+        '<div id="c-host" class="c-hide"><i id="c-slotted"></i></div>'
+    );
+    const host = document.getElementById('c-host');
+    const root = host?.attachShadow({ mode: 'open' });
+    if (root) root.innerHTML = '<div style="container-type: inline-size; width: 50px"><slot></slot></div>';
+  });
+  for (const selector of ['#c-hidden', '#c-hidden2', '#c-slotted']) {
+    const [mo, mc] = await Promise.all(
+      [t.ours, t.chrome].map(async side =>
+        summarize(
+          (await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, selector) })).matchedCSSRules ??
+            []
+        )
+      )
+    );
+    assert.deepEqual(mo, mc, selector);
+  }
+});
+
 async function nodeId(side: Side, selector: string) {
   const { root } = await side.send('DOM.getDocument', { depth: -1 });
   const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector });

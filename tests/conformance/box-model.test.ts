@@ -122,6 +122,7 @@ test('getBoxModel and getContentQuads match Chrome for SVG, sticky, calc() and 4
         <line id="sv-butt" x1="5" y1="95" x2="60" y2="95" stroke="blue" stroke-width="4"/>
         <text id="sv-text" x="5" y="20" font-size="10">Hello</text>
         <text id="sv-text2" x="70" y="20" font-size="20">Wy</text>
+        <g id="sv-g-degenerate"><rect x="5" y="60" width="10" height="10"/><g transform="scale(0)"><rect x="0" y="0" width="5" height="5"/></g></g>
         <svg id="sv-inner" x="100" y="0" width="40" height="40" viewBox="0 0 10 10"><rect id="sv-inner-rect" x="1" y="1" width="4" height="4"/></svg>
       </svg>
       <svg id="sv-root" width="100" height="60" style="margin:10px;border:1px solid;padding:4px;transform:rotate(20deg)" viewBox="0 0 50 30" preserveAspectRatio="xMinYMid meet"><rect id="sv-root-rect" x="5" y="5" width="10" height="10"/></svg>
@@ -129,6 +130,9 @@ test('getBoxModel and getContentQuads match Chrome for SVG, sticky, calc() and 4
       <div style="height:100px;overflow:auto" id="sticky-scroller"><div style="height:30px"></div><div id="sticky" style="position:sticky;top:0;transform:rotate(5deg)"><div id="sticky-in" style="width:30px;height:10px;transform:scale(1.5)"></div></div><div style="height:500px"></div></div>
       <div id="calc" style="width:40px;height:20px;translate:calc(50% + 10px) calc(10px - 25%);rotate:10deg"></div>
       <div style="width:120px;transform:rotate(45deg)"><span id="inline-45" style="padding:2px;border:1px solid">some words that wrap over lines here</span></div>
+      <div id="rotate-axis" style="width:40px;height:20px;rotate:x 45deg"></div>
+      <div id="rotate-vector" style="width:40px;height:20px;rotate:1 1 0 30deg"></div>
+      <div style="writing-mode:vertical-rl;height:120px"><span id="inline-vertical" style="padding:6px 2px 4px 8px;border:1px solid">some words that wrap over lines here</span></div>
       <div style="height:200px"><!-- keeps #inline-45 off the end of the scrolled page --></div>`
     );
     const scroller = document.getElementById('sticky-scroller');
@@ -137,6 +141,7 @@ test('getBoxModel and getContentQuads match Chrome for SVG, sticky, calc() and 4
   const failures: string[] = [];
   for (const id of [
     'sv-g',
+    'sv-g-degenerate',
     'sv-square',
     'sv-miter',
     'sv-round',
@@ -154,6 +159,9 @@ test('getBoxModel and getContentQuads match Chrome for SVG, sticky, calc() and 4
     'sticky-in',
     'calc',
     'inline-45',
+    'rotate-axis',
+    'rotate-vector',
+    'inline-vertical',
   ]) {
     try {
       const ours = await t.ours.send('DOM.getBoxModel', { nodeId: await nodeId(t.ours, `#${id}`) });

@@ -80,7 +80,14 @@ function ownTransform(el: Element, style = getComputedStyle(el)): DOMMatrix | nu
     m = m.translate(length(x, w), length(y, h), parseFloat(z) || 0);
   }
   const rotate = style.getPropertyValue('rotate');
-  if (rotate && rotate !== 'none') m = m.multiply(new DOMMatrix(`rotate(${rotate})`));
+  if (rotate && rotate !== 'none') {
+    // An angle, or an axis (x, y, z or three numbers) then an angle.
+    const r = parts(rotate);
+    const angle = parseFloat(r.pop() ?? '') || 0;
+    const [x = 'z', y = '0', z = '1'] = r;
+    const axis = x === 'x' ? [1, 0, 0] : x === 'y' ? [0, 1, 0] : x === 'z' ? [0, 0, 1] : [x, y, z].map(Number);
+    m = m.rotateAxisAngle(axis[0], axis[1], axis[2], angle);
+  }
   const scale = style.getPropertyValue('scale');
   if (scale && scale !== 'none') {
     const [x = '1', y = x, z = '1'] = scale.split(' ');
@@ -267,10 +274,13 @@ function strokeBox(el: SVGGraphicsElement, svg: DOMMatrix, ancestors = new Map<E
   if (isContainer(el)) {
     let union: Box | null = null;
     const inverse = svg.inverse();
-    for (const child of Array.from(el.children)) {
+    // A degenerate container (scale(0)) has no inverse: its children add nothing.
+    const children = Number.isFinite(inverse.m11) ? Array.from(el.children) : [];
+    for (const child of children) {
       if (!(child instanceof SVGGraphicsElement) || getComputedStyle(child).display === 'none') continue;
       const mapping = svgToViewport(child, ancestors);
-      if (!mapping) continue;
+      // Like Chrome, a child under a non-invertible transform (scale(0)) adds nothing.
+      if (!mapping || !Number.isFinite(mapping.svg.inverse().m11)) continue;
       const box = boundsOf(mapQuad(inverse.multiply(mapping.svg), strokeBox(child, mapping.svg, ancestors)));
       union = union
         ? {
@@ -466,28 +476,30 @@ export const isInlineBox = (el: Element) =>
   el instanceof HTMLElement && getComputedStyle(el).display === 'inline' && !replaced.some(type => el instanceof type);
 
 /**
- * Chrome's quads of an inline element's line boxes leave out its padding and border: above and
- * below on every line, at the start of the first line and the end of the last.
+ * Chrome's quads of an inline element's line boxes leave out its padding and border: on both block
+ * sides of every line, at the start of the first line and the end of the last.
  */
 export function lineContentBoxes(el: Element, boxes: Box[]): Box[] {
   const style = getComputedStyle(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const edge = (side: string) => px(`padding-${side}`) + px(`border-${side}-width`);
-  const top = edge('top');
-  const bottom = edge('bottom');
-  const rtl = style.direction === 'rtl';
-  const start = edge(rtl ? 'right' : 'left');
-  const end = edge(rtl ? 'left' : 'right');
+  const vertical = style.writingMode !== 'horizontal-tb';
+  // Lines run top to bottom in vertical modes, bottom to top in sideways-lr; rtl reverses that.
+  const reversed = (style.direction === 'rtl') !== (style.writingMode === 'sideways-lr');
+  const [before, after] = vertical ? ['left', 'right'] : ['top', 'bottom'];
+  const [low, high] = vertical ? ['top', 'bottom'] : ['left', 'right'];
+  const start = reversed ? high : low;
+  const end = reversed ? low : high;
   return boxes.map((box, i) => {
-    let { left, right } = box;
-    if (i === 0) {
-      if (rtl) right -= start;
-      else left += start;
-    }
-    if (i === boxes.length - 1) {
-      if (rtl) left += end;
-      else right -= end;
-    }
-    return { left, top: box.top + top, right, bottom: box.bottom - bottom };
+    const out = { ...box };
+    const inset = (side: string, by: number) => {
+      if (side === 'left' || side === 'top') out[side] += by;
+      else if (side === 'right' || side === 'bottom') out[side] -= by;
+    };
+    inset(before, edge(before));
+    inset(after, edge(after));
+    if (i === 0) inset(start, edge(start));
+    if (i === boxes.length - 1) inset(end, edge(end));
+    return out;
   });
 }

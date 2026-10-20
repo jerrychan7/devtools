@@ -1170,8 +1170,8 @@ export function registerCss(ctx: Context) {
       proximity: number;
       rank: number;
     }[] = [];
-    // A pseudo-element's own element can be its container.
-    const containerStart = pseudo ? el : parentOf(el);
+    // A pseudo-element's own element can be its container; a slotted element's is up its slot.
+    const containerStart = pseudo ? el : (el.assignedSlot ?? parentOf(el));
     const byTree = requestCandidates ?? candidates();
     // Rules of a shadow tree reach outside it only through `:host` and `::slotted()`.
     const ownShadow = nodes.shadowRootOf(el);

@@ -342,3 +342,14 @@ test('setOuterHTML on the document element patches the document like Chrome', as
   }
   assert.deepEqual(result['ours'], result['chrome']);
 });
+
+test('DOM.getDocument discards the undo history like Chrome', async () => {
+  const { ours, chrome } = await both(async (side, id, snap) => {
+    await side.send('DOM.setAttributeValue', { nodeId: await id('#a'), name: 'title', value: 'changed' });
+    await side.send('DOM.markUndoableState');
+    await side.send('DOM.getDocument', { depth: -1 });
+    await side.send('DOM.undo');
+    await snap();
+  });
+  assert.deepEqual(ours, chrome);
+});

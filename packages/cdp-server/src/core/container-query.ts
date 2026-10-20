@@ -92,11 +92,14 @@ export const parentOf = (el: Element): Element | null => {
   return el.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
 };
 
-/** The nearest container from `start` up named `name` (if any) that can answer `features`. */
+/**
+ * The nearest container from `start` up the flat tree (a slotted element through its slot)
+ * named `name` (if any) that can answer `features`.
+ */
 function findContainer(start: Element | null, name: string, features: Set<string>): Element | null {
   const size = features.size > 0;
   const block = [...features].some(f => BLOCK_FEATURES.has(f));
-  for (let el = start; el; el = parentOf(el)) {
+  for (let el = start; el; el = el.assignedSlot ?? parentOf(el)) {
     const style = getComputedStyle(el);
     if (name && !style.containerName.split(/\s+/).includes(name)) continue;
     if (size) {
@@ -117,6 +120,8 @@ interface Box {
 
 /** The content box of a container, or null when it is not rendered. */
 function contentBox(el: Element): Box | null {
+  // No box (display: none on it or an ancestor, display: contents): its size is unknown.
+  if (!el.getClientRects().length) return null;
   const style = getComputedStyle(el);
   let width = parseFloat(style.width);
   let height = parseFloat(style.height);

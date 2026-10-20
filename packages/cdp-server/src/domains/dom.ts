@@ -441,6 +441,8 @@ export function registerDom(ctx: Context) {
     getDocument(params: Protocol.DOM.GetDocumentRequest): Protocol.DOM.GetDocumentResponse {
       nodes.reset();
       searches.clear();
+      // Chrome's DiscardFrontendBindings: edits on the old node ids can no longer be undone.
+      history.reset();
       observe();
       patchAttachShadow();
       return { root: nodes.serialize(document, params.depth ?? 2, params.pierce) };
