@@ -355,16 +355,18 @@ export function svgRootLayout(el: Element): { m: DOMMatrix; width: number; heigh
  * An inline element's line boxes relative to its border box (the union of them), measured with
  * the transforms of it and its ancestors switched off for the moment (2D transforms that do not
  * move anything, so that containing blocks stay), by animations that are gone before anything is
- * drawn and change no attribute. Scroll positions that the smaller overflow clamped are put back.
- * Null when the page's own !important transform wins over the animation.
+ * drawn and change no attribute. Null when the page's own !important transform wins over the
+ * animation, and when a scrolled ancestor (or the document) may owe its scroll position to the
+ * transformed boxes, as the smaller overflow could clamp it and fire a scroll event.
  */
 export function untransformedBoxes(el: Element): Box[] | null {
   const off = { transform: 'translate(0px)', translate: 'none', rotate: 'none', scale: 'none' };
   const animated: Element[] = [];
-  const scrolled: [Element, number, number][] = [];
   for (let a: Element | null = el; a; a = a.parentElement) {
+    // Switching the transforms off can shrink a scroller's scrollable overflow and clamp its
+    // position, which queues a scroll event the page would see even if the position is put back.
+    if ((a.scrollLeft || a.scrollTop) && !fillsScrollEnd(a, [el, ...animated])) return null;
     if (isTransformed(getComputedStyle(a))) animated.push(a);
-    if (a.scrollLeft || a.scrollTop) scrolled.push([a, a.scrollLeft, a.scrollTop]);
   }
   const animations = animated.map(a => {
     const animation = a.animate([off, off], { duration: 1, fill: 'both' });
@@ -382,9 +384,47 @@ export function untransformedBoxes(el: Element): Box[] | null {
     }));
   } finally {
     for (const animation of animations) animation.cancel();
-    for (const [a, left, top] of scrolled)
-      if (a.scrollLeft !== left || a.scrollTop !== top) a.scrollTo({ left, top, behavior: 'instant' });
   }
+}
+
+function union(a: DOMRect, b: DOMRect): DOMRect {
+  const left = Math.min(a.left, b.left);
+  const top = Math.min(a.top, b.top);
+  return new DOMRect(left, top, Math.max(a.right, b.right) - left, Math.max(a.bottom, b.bottom) - top);
+}
+
+/**
+ * Whether switching the transforms of the descendants `moved` of the scroller `a` (and with
+ * them the measured element) off cannot clamp its scroll position: in each direction it is
+ * scrolled to (negative positions scroll to the left or top), every one of them ends short of the end
+ * of its visible area or of the end of its scrollable overflow, which other content then holds.
+ * Their contents count with them (overflow that is not part of a box, such as shadows, does not).
+ */
+function fillsScrollEnd(a: Element, moved: Element[]): boolean {
+  const viewport = a === a.ownerDocument.scrollingElement;
+  const box = viewport ? new DOMRect(0, 0, 0, 0) : a.getBoundingClientRect();
+  const left = box.left + (viewport ? 0 : a.clientLeft);
+  const top = box.top + (viewport ? 0 : a.clientTop);
+  const right = left + a.clientWidth;
+  const bottom = top + a.clientHeight;
+  // Chrome rounds the overflow of transformed boxes outwards, by up to 2px here and there.
+  const slack = 3;
+  return moved.every(t => {
+    const own = t.getBoundingClientRect();
+    const range = t.ownerDocument.createRange();
+    range.selectNodeContents(t);
+    const inner = range.getBoundingClientRect();
+    const r = inner.width || inner.height ? union(own, inner) : own;
+    const x =
+      a.scrollLeft > 0
+        ? r.right < right - slack || r.right - left + a.scrollLeft < a.scrollWidth - slack
+        : a.scrollLeft >= 0 || r.left > left + slack;
+    const y =
+      a.scrollTop > 0
+        ? r.bottom < bottom - slack || r.bottom - top + a.scrollTop < a.scrollHeight - slack
+        : a.scrollTop >= 0 || r.top > top + slack;
+    return x && y;
+  });
 }
 
 /**

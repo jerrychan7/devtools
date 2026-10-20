@@ -128,7 +128,8 @@ test('getBoxModel and getContentQuads match Chrome for SVG, sticky, calc() and 4
       <div style="perspective:300px;margin:20px;width:300px"><div style="transform:rotateY(30deg)"><svg id="sv-3d" width="100" height="60" style="display:block"><rect id="sv-3d-rect" x="5" y="5" width="20" height="10"/></svg></div></div>
       <div style="height:100px;overflow:auto" id="sticky-scroller"><div style="height:30px"></div><div id="sticky" style="position:sticky;top:0;transform:rotate(5deg)"><div id="sticky-in" style="width:30px;height:10px;transform:scale(1.5)"></div></div><div style="height:500px"></div></div>
       <div id="calc" style="width:40px;height:20px;translate:calc(50% + 10px) calc(10px - 25%);rotate:10deg"></div>
-      <div style="width:120px;transform:rotate(45deg)"><span id="inline-45" style="padding:2px;border:1px solid">some words that wrap over lines here</span></div>`
+      <div style="width:120px;transform:rotate(45deg)"><span id="inline-45" style="padding:2px;border:1px solid">some words that wrap over lines here</span></div>
+      <div style="height:200px"><!-- keeps #inline-45 off the end of the scrolled page --></div>`
     );
     const scroller = document.getElementById('sticky-scroller');
     if (scroller) scroller.scrollTop = 80;
@@ -171,7 +172,7 @@ test('getBoxModel and getContentQuads match Chrome for SVG, sticky, calc() and 4
   assert.deepEqual(failures, []);
 });
 
-test('measuring a 45° inline element keeps scroll positions and yields to !important transforms', async () => {
+test('a 45° inline element in a scrolled scroller is estimated without scrolling anything', async () => {
   await t.page.evaluate(() => {
     document.body.insertAdjacentHTML(
       'beforeend',
@@ -187,7 +188,9 @@ test('measuring a 45° inline element keeps scroll positions and yields to !impo
       scroller.scrollLeft = scroller.scrollWidth;
     }
   });
-  const before = await t.page.evaluate(() => {
+  const before = await t.page.evaluate(async () => {
+    // Let the scroll events of the scrolling above go out first.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     const s = document.getElementById('m45-scroller');
     let events = 0;
     s?.addEventListener('scroll', () => events++);
@@ -197,11 +200,9 @@ test('measuring a 45° inline element keeps scroll positions and yields to !impo
   assert.ok((before[1] ?? 0) > 0);
   for (const id of ['m45', 'm45-in']) {
     const oq = await t.ours.send('DOM.getContentQuads', { nodeId: await nodeId(t.ours, `#${id}`) });
-    const cq = await t.chrome.send('DOM.getContentQuads', { nodeId: await nodeId(t.chrome, `#${id}`) });
-    if (id === 'm45') {
-      assert.equal(oq.quads.length, cq.quads.length);
-      oq.quads.forEach((q, i) => close(q, cq.quads[i] ?? [], 'quad'));
-    } else assert.ok(oq.quads.length > 0);
+    // #m45 sticks out at the end its scroller is scrolled to, so its quads are estimated from the
+    // client rectangles rather than measured, and not compared with Chrome's.
+    assert.ok(oq.quads.length > 0, id);
   }
   await new Promise(r => setTimeout(r, 100));
   const after = await t.page.evaluate(() => {
@@ -210,4 +211,27 @@ test('measuring a 45° inline element keeps scroll positions and yields to !impo
     return [s?.scrollLeft, s?.scrollTop, typeof events === 'function' ? events() : -1];
   });
   assert.deepEqual(after, [...before, 0]);
+});
+
+test('a 45° inline element on an unscrolled page is measured like Chrome', async () => {
+  const scroll = await t.page.evaluate(() => {
+    const y = scrollY;
+    scrollTo(0, 0);
+    document.body.insertAdjacentHTML(
+      'afterbegin',
+      `<div style="width:120px;transform:rotate(45deg)"><span id="m45-top" style="padding:2px;border:1px solid">some words that wrap over lines here</span></div>`
+    );
+    return y;
+  });
+  try {
+    const oq = await t.ours.send('DOM.getContentQuads', { nodeId: await nodeId(t.ours, '#m45-top') });
+    const cq = await t.chrome.send('DOM.getContentQuads', { nodeId: await nodeId(t.chrome, '#m45-top') });
+    assert.equal(oq.quads.length, cq.quads.length);
+    oq.quads.forEach((q, i) => close(q, cq.quads[i] ?? [], 'quad'));
+  } finally {
+    await t.page.evaluate(y => {
+      document.getElementById('m45-top')?.parentElement?.remove();
+      scrollTo(0, y);
+    }, scroll);
+  }
 });

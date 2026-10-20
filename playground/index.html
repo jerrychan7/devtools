@@ -26,6 +26,29 @@
       <button>Search</button>
     </form>
     <script src="/playground/webmcp.js"></script>
+    <!-- Transformed boxes: inspect them to see the highlight follow the rotation. -->
+    <div style="display: flex; gap: 48px; margin: 48px 24px">
+      <div id="rotated-block" style="width: 120px; height: 60px; background: #fdd; transform: rotate(30deg)">
+        block 30°
+      </div>
+      <div style="width: 160px; transform: rotate(30deg)">
+        <span id="inline-30" style="background: #dfd; padding: 4px; border: 2px solid green"
+          >a multi-line inline element rotated 30 degrees</span
+        >
+      </div>
+      <div style="width: 160px; transform: rotate(45deg)">
+        <span id="inline-45" style="background: #ddf; padding: 4px; border: 2px solid blue"
+          >a multi-line inline element rotated 45 degrees</span
+        >
+      </div>
+      <div id="scroller" style="width: 150px; height: 80px; overflow: auto; border: 1px solid #999">
+        <div style="width: 120px; transform: rotate(45deg); margin: 40px 10px">
+          <span id="inline-45-scrolled" style="background: #ffd; padding: 4px"
+            >inline at 45 degrees in a scroll box</span
+          >
+        </div>
+      </div>
+    </div>
     <script>
       window.addEventListener('load', function () {
         console.log('[body] load');
