@@ -133,15 +133,31 @@ test('highlightNode follows a rotated element and labels its layout size', async
   );
   const { root } = await t.ours.send('DOM.getDocument', { depth: 0 });
   const { nodeId } = await t.ours.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#ov-rot' });
+  const { model } = await t.ours.send('DOM.getBoxModel', { nodeId });
   await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: { showInfo: true } });
+  // Polygon points are relative to their box; shifted back they are viewport points.
   const drawn = await t.page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-devtools-anywhere="overlay"] > div'), d => ({
-      points: d.querySelector('polygon')?.getAttribute('points') ?? null,
-      text: d.textContent,
-    }))
+    Array.from(document.querySelectorAll<HTMLElement>('[data-devtools-anywhere="overlay"] > div'), d => {
+      const r = d.getBoundingClientRect();
+      const points = d.querySelector('polygon')?.getAttribute('points');
+      return {
+        quad: points ? points.split(/[ ,]/).map((n, i) => Number(n) + (i % 2 ? r.top : r.left)) : null,
+        text: d.textContent,
+      };
+    })
   );
-  assert.ok(drawn[1]?.points);
-  assert.match(drawn[4]?.text ?? '', /60 × 30$/);
+  const quads = drawn.flatMap(d => (d.quad ? [d.quad] : []));
+  const expected = [model.margin, model.border, model.padding, model.content];
+  assert.equal(quads.length, expected.length);
+  // A rotated quad is not axis-aligned, so these points differ from any rectangle's.
+  quads.forEach((quad, i) => {
+    const want = expected[i] ?? [];
+    assert.equal(quad.length, want.length);
+    quad.forEach((n, j) => assert.ok(Math.abs(n - (want[j] ?? NaN)) < 0.5, `quad ${i} point ${j}: ${n} vs ${want[j]}`));
+  });
+  assert.notEqual(model.border[1], model.border[3]);
+  const info = drawn.find(d => !d.quad);
+  assert.match(info?.text ?? '', /60 × 30$/);
   await t.ours.send('Overlay.hideHighlight');
 });
 
