@@ -44,6 +44,10 @@ const svgDataUrl = (file: string) =>
 /** Bundles the release files in `src` into `out` (replaced). */
 export async function bundle(src: string, out: string): Promise<void> {
   const rel = (file: string) => path.relative(src, file).split(path.sep).join('/');
+  /** The SVGs inlined into Images.js: not copied unless something still names them. */
+  const inlined = new Set<string>();
+  /** Whether Root.Runtime#loadLegacyModule was rewritten: an upstream change must fail the build. */
+  let legacyImport = false;
 
   const rewrite: Plugin = {
     name: 'rewrite-urls',
@@ -60,9 +64,10 @@ export async function bundle(src: string, out: string): Promise<void> {
     transform(code, id) {
       const file = rel(id);
       if (file === 'Images/Images.js') {
-        code = code.replace(/new URL\('\.\/([^']+\.svg)', import\.meta\.url\)\.toString\(\)/g, (_, name: string) =>
-          JSON.stringify(svgDataUrl(path.join(src, 'Images', name)))
-        );
+        code = code.replace(/new URL\('\.\/([^']+\.svg)', import\.meta\.url\)\.toString\(\)/g, (_, name: string) => {
+          inlined.add(`Images/${name}`);
+          return JSON.stringify(svgDataUrl(path.join(src, 'Images', name)));
+        });
       }
       // Workers are bundled on their own: point at their files.
       const entry = (spec: string) =>
@@ -85,7 +90,11 @@ export async function bundle(src: string, out: string): Promise<void> {
       code = code.replace(/import\.meta\.url/g, base).replaceAll(OWN_URL, 'import.meta.url');
       // Root.Runtime#loadLegacyModule imports any file by path: left to run time (rollup would
       // otherwise try to resolve the template).
-      code = code.replace('import(`../../${e}`)', 'import(e.replace(/^/, "../"))');
+      const legacy = 'import(`../../${e}`)';
+      if (code.includes(legacy)) {
+        legacyImport = true;
+        code = code.replace(legacy, 'import(e.replace(/^/, "../"))');
+      }
       return { code, map: null };
     },
   };
@@ -165,7 +174,12 @@ export async function bundle(src: string, out: string): Promise<void> {
     const build = await rollup({
       input: path.join(src, input),
       plugins: [rewrite],
-      onwarn: () => {},
+      // A bare specifier left unresolved would 404 at run time: fail the build. Circular
+      // dependencies are the upstream's own and harmless; the other warnings are shown.
+      onwarn: warning => {
+        if (warning.code === 'UNRESOLVED_IMPORT') throw new Error(`bundle: ${warning.message}`);
+        if (warning.code !== 'CIRCULAR_DEPENDENCY') console.warn(`bundle: ${warning.message}`);
+      },
       // The entry chunk may export more than the entry: no facade file of its own (a request).
       preserveEntrySignatures: 'allow-extension',
     });
@@ -184,15 +198,32 @@ export async function bundle(src: string, out: string): Promise<void> {
   // The workers first: the app names their files.
   for (const worker of WORKERS) workerOutput.set(worker, `./${await write(worker, false)}`);
   const app = await write(APP, true);
+  if (!legacyImport) throw new Error('bundle: Root.Runtime#loadLegacyModule not found (upstream changed?)');
 
+  // The text of the bundle and of the other text files, to tell whether an SVG is still named.
+  let corpus: string | undefined;
+  const named = (base: string) => {
+    corpus ??= fs
+      .readdirSync(src, { recursive: true, encoding: 'utf8' })
+      .filter(file => /\.(css|html|json|js)$/.test(file) && !(file.endsWith('.js') && !file.includes('.generated.')))
+      .map(file => path.join(src, file))
+      .concat(fs.readdirSync(path.join(out, OUT_DIR)).map(file => path.join(out, OUT_DIR, file)))
+      .map(file => fs.readFileSync(file, 'utf8'))
+      .join('\n');
+    return corpus.includes(base);
+  };
   // Everything but the JS modules, and the JS files loaded by URL rather than imported.
   for (const file of fs.readdirSync(src, { recursive: true, encoding: 'utf8' })) {
     const name = file.split(path.sep).join('/');
     if (fs.statSync(path.join(src, file)).isDirectory()) continue;
     if (name.endsWith('.js') && !name.includes('.generated.')) continue;
+    // An inlined SVG still named by a URL (the bundle, CSS, HTML) is copied all the same.
+    if (inlined.has(name) && !named(path.posix.basename(name))) continue;
     fs.mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
     fs.copyFileSync(path.join(src, file), path.join(out, file));
   }
   const html = path.join(out, 'anywhere_app.html');
-  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(`./${APP}`, `./${OUT_DIR}/${app}`));
+  const page = fs.readFileSync(html, 'utf8');
+  if (!page.includes(`./${APP}`)) throw new Error(`bundle: anywhere_app.html does not load ./${APP}`);
+  fs.writeFileSync(html, page.replace(`./${APP}`, `./${OUT_DIR}/${app}`));
 }
