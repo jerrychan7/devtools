@@ -1,7 +1,8 @@
 // Copyright 2026 jerrychan7. MIT license.
 //
 // DevTools for a page that inspects itself (devtools-anywhere): only the panels that work
-// against the in-page CDP server, connected to the embedding window through postMessage.
+// against the in-page CDP server, connected to the embedding window through postMessage, or
+// through a remote debugging server.
 
 import '../../Images/Images.js';
 import '../../ui/dom_extension/dom_extension.js';
@@ -121,8 +122,17 @@ host.sendMessageToBackend = (message: string) => window.parent.postMessage(messa
 // sides are built separately, so keep them in step by hand.
 type EmbedderRequest = {type: 'dock', side: UI.DockController.DockState}|{type: 'close'}|
     {type: 'keep-open', keep: boolean}|{type: 'theme', toolbar: string, divider: string, icon: string};
-const notifyEmbedder = (request: EmbedderRequest) => window.parent.postMessage({devtoolsAnywhere: request}, embedder);
-Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
+// Remote debugging (packages/remote-server): DevTools is a page of its own, connected to the
+// relay with upstream's `?ws=`/`?wss=` (its WebSocket transport), and there is no embedder.
+const remote = Boolean(Root.Runtime.Runtime.queryParam('ws') || Root.Runtime.Runtime.queryParam('wss'));
+const notifyEmbedder = (request: EmbedderRequest) => {
+  if (!remote) {
+    window.parent.postMessage({devtoolsAnywhere: request}, embedder);
+  }
+};
+if (!remote) {
+  Root.Runtime.Runtime.setQueryParamForTesting('can_dock', 'true');
+}
 // The page's debugger cannot pause (Debugger.setBreakpointByUrl only hands out ids): the Sources
 // panel leaves out the parts of its debugger sidebar that need a pause (pause and step buttons,
 // Breakpoints with "Pause on exceptions", Call Stack, Scope, Threads) and its breakpoint gutter;
@@ -266,7 +276,7 @@ UI.Toolbar.registerToolbarItem({
   location: UI.Toolbar.ToolbarItemLocation.MAIN_TOOLBAR_RIGHT,
 });
 window.addEventListener('message', event => {
-  if (event.source !== window.parent || typeof event.data !== 'string' ||
+  if (remote || event.source !== window.parent || typeof event.data !== 'string' ||
       (embedder !== '*' && event.origin !== embedder)) {
     return;
   }
