@@ -138,14 +138,17 @@ pnpm typecheck                                # 先构建，再检查所有包�
 ```bash
 cd packages/devtools-frontend
 node scripts/build.ts --no-sync     # 修改 src/ 后重新构建（增量，不动检出目录）
+node scripts/build.ts --no-sync --reset   # 同时丢弃检出目录里不属于任何补丁的修改
 node scripts/build.ts --no-sync --copy-only   # 只重新复制到 dist/（修改了复制逻辑时）
 ```
 
-要修改补丁，先在检出目录里改上游文件，再用该补丁所涉及文件的 diff 重新生成补丁：
+构建会让检出目录始终等于 `REVISION` 加上全部补丁：缺失、改动过或已删除的补丁，都会从干净的文件重新打一遍。如果某个文件既不同于 `REVISION`，也不同于打完补丁后的样子，说明里面有还没写进补丁的修改，构建会停下并列出它，而不是把修改丢掉；加 `--reset` 才会丢弃。
+
+要修改补丁，先在检出目录里改上游文件，再对 `HEAD` 求该补丁所涉及文件的 diff，重新生成补丁：
 
 ```bash
 cd devtools-frontend.ignore/devtools-frontend
-git diff -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
+git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
 升级到上游最新版：
@@ -154,7 +157,7 @@ git diff -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-f
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，`git apply --3way` 会在检出目录里留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync`。之后跑 `pnpm test`：新版前端可能会调用 CDP 服务端尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync`。之后跑 `pnpm test`：新版前端可能会调用 CDP 服务端尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
 
 ## 3. 开发完成
 

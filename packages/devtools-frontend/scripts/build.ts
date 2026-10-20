@@ -11,6 +11,8 @@
 // Flags:
 //   --latest     build the tip of origin/main instead of REVISION, and pin it on success
 //   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout)
+//   --reset      discard edits to upstream files in the checkout that the patches do not
+//                account for, instead of stopping (see "Patches" below)
 //   --copy-only  implies --no-sync and also skips the build: only copy the last build's
 //                output to dist/
 //
@@ -57,22 +59,72 @@ if (!noSync) {
   run('gclient', ['sync', '--force', '--delete_unversioned_trees'], { cwd: path.dirname(src) });
 }
 
-// Patches: small edits to upstream files, kept as reviewable diffs.
+// Patches: small edits to upstream files, kept as reviewable diffs. The checkout must end up
+// as exactly REVISION plus every patch, so that a build depends on nothing else: a patch that
+// was removed or changed must not linger. Edits made in the checkout to write a patch are not
+// thrown away silently, though: if the checkout holds changes the patches do not account for,
+// the build stops, unless --reset is given.
 const patches = fs
   .readdirSync(path.join(pkg, 'patches'))
   .filter(f => f.endsWith('.patch'))
-  .sort();
-for (const patch of patches) {
-  const file = path.join(pkg, 'patches', patch);
+  .sort()
+  .map(f => path.join(pkg, 'patches', f));
+/** Upstream files that differ from HEAD (staged or not; untracked files are ours, copied below). */
+const changed = () => read('git', ['diff', 'HEAD', '--name-only']).split('\n').filter(Boolean);
+/**
+ * Upstream files where the checkout differs from HEAD plus every patch (compared with a scratch
+ * index built that way), or null if the patches do not apply to HEAD.
+ */
+function unexpectedEdits(): string[] | null {
+  const index = path.join(src, '.git', 'anywhere-expected-index');
+  const scratch = { ...env, GIT_INDEX_FILE: index };
   try {
-    run('git', ['apply', '--check', '--reverse', file], { stdio: 'ignore' });
-    continue; // already applied (--no-sync)
-  } catch {}
-  console.log(`Applying ${patch}`);
-  run('git', ['apply', '--3way', file]);
+    execFileSync('git', ['read-tree', 'HEAD'], { cwd: src, env: scratch });
+    for (const patch of patches) execFileSync('git', ['apply', '--cached', patch], { cwd: src, env: scratch });
+    const patched = read('git', ['apply', '--numstat', ...patches])
+      .split('\n')
+      .map(line => line.split('\t')[2] ?? '')
+      .filter(Boolean);
+    const paths = [...new Set([...changed(), ...patched])];
+    if (paths.length === 0) return [];
+    const differ = execFileSync('git', ['diff', '--name-only', '--', ...paths], {
+      cwd: src,
+      env: scratch,
+      encoding: 'utf8',
+    });
+    return differ.split('\n').filter(Boolean);
+  } catch {
+    return null;
+  } finally {
+    fs.rmSync(index, { force: true });
+  }
+}
+const unexpected = unexpectedEdits();
+if (unexpected === null) throw new Error('The patches do not apply to REVISION: regenerate them (see DEV.md).');
+if (unexpected.length > 0) {
+  // A file still as in HEAD only lacks its patch. One that differs from both holds edits not in
+  // a patch yet, or an outdated or removed patch: they could be work in progress, so ask first.
+  const edited = unexpected.filter(file => changed().includes(file));
+  if (!args.has('--reset') && edited.length > 0) {
+    console.error(
+      `The checkout has edits the patches do not account for:\n  ${edited.join('\n  ')}\n` +
+        'Regenerate the patch from them (see DEV.md), or run with --reset to discard them.'
+    );
+    process.exit(1);
+  }
+  console.log('Reapplying the patches to REVISION');
+  run('git', ['reset', '--quiet']);
+  const dirty = changed();
+  if (dirty.length > 0) run('git', ['checkout', 'HEAD', '--', ...dirty]);
+  for (const patch of patches) {
+    console.log(`Applying ${path.basename(patch)}`);
+    run('git', ['apply', patch]);
+  }
 }
 
-// Our own sources are copied, not patched in.
+// Our own sources are copied, not patched in; the old copy goes first, so that a file removed
+// from src/ does not stay behind.
+fs.rmSync(path.join(src, 'front_end/entrypoints/anywhere_app'), { recursive: true, force: true });
 fs.cpSync(path.join(pkg, 'src'), path.join(src, 'front_end/entrypoints'), { recursive: true });
 
 if (!args.has('--copy-only')) {

@@ -138,14 +138,17 @@ pnpm typecheck                                # builds, then checks packages, bu
 ```bash
 cd packages/devtools-frontend
 node scripts/build.ts --no-sync     # rebuild after changing src/ (incremental, keeps the checkout as is)
+node scripts/build.ts --no-sync --reset   # also discard edits in the checkout that no patch holds
 node scripts/build.ts --no-sync --copy-only   # only redo the copy to dist/ (after changing the copy logic)
 ```
 
-To change a patch, edit the upstream files in the checkout, then regenerate the patch from the diff of the files it touches:
+The build keeps the checkout at exactly `REVISION` plus every patch: a patch that is missing, changed or removed is applied again from a clean file. A file that differs both from `REVISION` and from what the patches make of it holds edits no patch has yet, so the build stops and lists it rather than discard them; `--reset` discards them.
+
+To change a patch, edit the upstream files in the checkout, then regenerate the patch from the files it touches, compared with `HEAD`:
 
 ```bash
 cd devtools-frontend.ignore/devtools-frontend
-git diff -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
+git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
 To move to the latest upstream:
@@ -154,7 +157,7 @@ To move to the latest upstream:
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-It builds the tip of upstream `main` and pins it in `REVISION` on success. If a patch no longer applies, `git apply --3way` leaves conflict markers in the checkout: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync`. Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
+It builds the tip of upstream `main` and pins it in `REVISION` on success. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync`. Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
 
 ## 3. Finishing a change
 
