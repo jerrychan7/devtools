@@ -13,5 +13,11 @@
     "browser": true,
     "node": true
   },
-  "ignorePatterns": ["**/dist/**", "**/*.ignore/**", "packages/devtools-frontend/src/**", "experiments/**"]
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/*.ignore/**",
+    "packages/devtools-frontend/src/**",
+    "experiments/**",
+    "tests/**/assets/**"
+  ]
 }

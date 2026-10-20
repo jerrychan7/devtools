@@ -1,8 +1,16 @@
 import type { Protocol } from 'devtools-protocol';
 import { EXECUTION_CONTEXT_ID, FRAME_ID, type Context } from '../core/context';
+import {
+  lastExpressionStatement,
+  topLevelLexicalDeclarations,
+  topLevelLexicalNames,
+  returnOutsideFunction,
+  topLevelVarNames,
+} from '../core/lexer';
 import { CdpError } from '../core/server';
 import { parseStack } from '../core/stack';
 import type { LogEntry } from '../probe/types';
+import { refetch } from './network';
 
 // Indirect eval runs in the global scope, like code typed into the console.
 // oxlint-disable-next-line no-eval -- evaluating console input is the point.
@@ -16,7 +24,11 @@ const isThenable = (v: unknown): v is PromiseLike<unknown> =>
  * wraps object literals in parentheses itself). Falls back to an async wrapper for
  * top-level await. Returns the value and whether it came from the async wrapper.
  */
-function run(expression: string, allowAwait: boolean): { value: unknown; isAsync: boolean } {
+function run(
+  expression: string,
+  allowAwait: boolean,
+  asyncBody = returnLast(expression)
+): { value: unknown; isAsync: boolean } {
   try {
     return { value: globalEval(expression), isAsync: false };
   } catch (e) {
@@ -29,9 +41,38 @@ function run(expression: string, allowAwait: boolean): { value: unknown; isAsync
   } catch (e) {
     if (!(e instanceof SyntaxError)) throw e;
   }
-  // Several statements: their result and top-level declarations are not kept (that needs
-  // V8's REPL mode rewrite).
-  return { value: globalEval(`(async () => {${expression}\n})()`), isAsync: true };
+  // Several statements: the last one's value is returned when it is an expression.
+  return { value: globalEval(`(async () => {${asyncBody}\n})()`), isAsync: true };
+}
+
+/**
+ * Whether `script` compiles as a script, or else `asyncBody` as the body of the async wrapper.
+ * Nothing is run. Checked as a function body (`new Function`), plus what only a function body
+ * takes: a `return` or `new.target` outside any function. (Wrapping the script in
+ * `if (false) { … }` for eval is no pure check: its `var`s and, in sloppy code, its functions
+ * would be declared on window.)
+ */
+function compiles(script: string, asyncBody?: string): boolean {
+  const check = (code: string) => {
+    try {
+      new Function(code);
+      return true;
+    } catch (e) {
+      return !(e instanceof SyntaxError);
+    }
+  };
+  if (returnOutsideFunction(script)) return false;
+  // The async wrapper is only tried for input with `await` (see `run`).
+  return (
+    check(script) ||
+    (asyncBody !== undefined && /\bawait\b/.test(script) && check(`return async () => {${asyncBody}\n}`))
+  );
+}
+
+/** `code` with its last statement returned when it is an expression statement. */
+function returnLast(code: string): string {
+  const at = lastExpressionStatement(code);
+  return at === undefined ? code : `${code.slice(0, at)}return ${code.slice(at)}`;
 }
 
 /**
@@ -162,7 +203,327 @@ function fallbackCopy(text: string) {
   }
 }
 
+const IDENTIFIER = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*$/u;
+
+/** Global function the rewritten console input hands its declarations to. */
+const REPL_EXPORT = '__devtoolsAnywhereRepl__';
+
+/** A SyntaxError reported like V8's compile errors: no stack of its own. */
+function syntaxError(message: string) {
+  const error = new SyntaxError(message);
+  Object.defineProperty(error, 'stack', { value: `SyntaxError: ${message}`, configurable: true, writable: true });
+  return error;
+}
+
+type BindingState = 'tdz' | 'ready' | 'dead';
+
+interface ReplBinding {
+  kind: 'let' | 'const' | 'class';
+  value: unknown;
+  /** In its temporal dead zone (its command is running), initialized, or never initialized. */
+  state: BindingState;
+}
+
+/**
+ * Top-level `let`, `const` and `class` of console input in REPL mode, kept across commands like
+ * V8's REPL mode. Each is a global accessor property of window standing for the binding (so,
+ * unlike V8, `'a' in window` is true): later commands, closures and page scripts all read and
+ * write it, assigning a `const` throws, and a page script's `let` of the same name fails (the
+ * property is not configurable).
+ *
+ * The input is rewritten without moving any line or column: `let` / `const` become `var` padded
+ * to the same length, and a `var` of the global accessor assigns through it (and, being a
+ * declaration, leaves the completion value alone). In the async wrapper for top-level await,
+ * where a `var` would be the function's own, they become `0, ` padded instead: an assignment.
+ * A class stays a declaration of the input's own; its value is handed over at the end, on a line
+ * of its own. Like V8, the console may declare a name again, but not one a page script or `var`
+ * declared. Input with a 'use strict' directive is run as it is (strict eval keeps its `var`s).
+ */
+function replBindings() {
+  const bindings = new Map<string, ReplBinding>();
+  /** Every name a compiled command declared, initialized or not (V8 lists them all). */
+  const declared = new Set<string>();
+  /** Top-level `var`s of the console: eval makes them configurable, V8's REPL does not. */
+  const vars = new Set<string>();
+  let pending: string[] = [];
+  let pendingVars: string[] = [];
+  /** The bindings the running command declares, as they were before it. */
+  let saved = new Map<ReplBinding, { state: BindingState; value: unknown; kind: ReplBinding['kind'] }>();
+  let nextTemp = 0;
+
+  function referenceError(message: string, fn: () => unknown) {
+    const error = new ReferenceError(message);
+    // Thrown where the binding is used, not in the accessor.
+    const capture: unknown = Reflect.get(Error, 'captureStackTrace');
+    if (typeof capture === 'function') Reflect.apply(capture, Error, [error, fn]);
+    return error;
+  }
+
+  /** The binding for `name`, created in its dead zone; undefined when window has such a property. */
+  function bind(name: string, kind: ReplBinding['kind']): ReplBinding | undefined {
+    const known = bindings.get(name);
+    if (known) {
+      if (!saved.has(known)) saved.set(known, { state: known.state, value: known.value, kind: known.kind });
+      known.kind = kind;
+      return known;
+    }
+    // A property of the page's (a configurable one, like `name`) is left as it is.
+    if (Object.getOwnPropertyDescriptor(window, name)) return undefined;
+    const binding: ReplBinding = { kind, value: undefined, state: 'tdz' };
+    bindings.set(name, binding);
+    saved.set(binding, { state: 'dead', value: undefined, kind });
+    Object.defineProperty(window, name, {
+      configurable: false,
+      enumerable: false,
+      get: function get() {
+        // V8's REPL mode says so in the dead zone too.
+        if (binding.state !== 'ready') throw referenceError(`${name} is not defined`, get);
+        return binding.value;
+      },
+      set: function set(value: unknown) {
+        if (binding.state === 'ready' && binding.kind === 'const') {
+          const error = new TypeError('Assignment to constant variable.');
+          const capture: unknown = Reflect.get(Error, 'captureStackTrace');
+          if (typeof capture === 'function') Reflect.apply(capture, Error, [error, set]);
+          throw error;
+        }
+        // The declaration's initializer.
+        binding.value = value;
+        binding.state = 'ready';
+      },
+    });
+    return binding;
+  }
+
+  function hand(name: string, value: unknown) {
+    const binding = bindings.get(name);
+    if (!binding) return;
+    binding.value = value;
+    binding.state = 'ready';
+  }
+
+  /** Declared by a page script (a lexical binding, maybe in its dead zone) or `var`. */
+  function declaredByPage(name: string): boolean {
+    const own = Object.getOwnPropertyDescriptor(window, name);
+    if (own) return !own.configurable || vars.has(name);
+    if (name in window || !IDENTIFIER.test(name)) return false;
+    try {
+      globalEval(name);
+      return true;
+    } catch {
+      try {
+        globalEval(`typeof ${name}`);
+        return false;
+      } catch {
+        return true;
+      }
+    }
+  }
+
+  return {
+    names: () => [...declared],
+    /** The command ran (maybe throwing): its declarations count, the ones not reached are dead. */
+    compiled() {
+      for (const name of pending) {
+        declared.add(name);
+        const binding = bindings.get(name);
+        if (binding?.state === 'tdz') binding.state = 'dead';
+      }
+      for (const name of pendingVars) vars.add(name);
+      pending = [];
+      pendingVars = [];
+      saved = new Map();
+    },
+    /** The command did not compile: its bindings are as they were. */
+    failed() {
+      for (const [binding, before] of saved) Object.assign(binding, before);
+      pending = [];
+      pendingVars = [];
+      saved = new Map();
+    },
+    /**
+     * The input to evaluate as a script and as the body of the async wrapper; throws V8's
+     * SyntaxError for a name the page declared.
+     */
+    rewrite(expression: string): { script: string; body: string; commit: () => void } {
+      const declarations = topLevelLexicalDeclarations(expression);
+      pending = declarations.flatMap(declaration => declaration.names);
+      pendingVars = topLevelVarNames(expression);
+      const plain = { script: expression, body: returnLast(expression), commit: () => {} };
+      if (!declarations.length || /^\s*(['"])use strict\1/.test(expression)) return plain;
+      for (const name of pending)
+        if (!bindings.has(name) && declaredByPage(name)) {
+          pending = [];
+          pendingVars = [];
+          throw syntaxError(`Identifier '${name}' has already been declared`);
+        }
+      /** What declaring takes, done by `commit` once the input is known to compile. */
+      const plan: (() => void)[] = [];
+      const canBind = (name: string) => bindings.has(name) || !Object.getOwnPropertyDescriptor(window, name);
+      const declare = (name: string, kind: ReplBinding['kind'], initialized: boolean) =>
+        plan.push(() => {
+          const binding = bind(name, kind);
+          if (!binding) return;
+          binding.state = 'tdz';
+          if (initialized) hand(name, undefined);
+        });
+      let script = expression;
+      let body = expression;
+      const classes: string[] = [];
+      /** Insertions into the async body, made last to first so the offsets hold. */
+      const inserts: { at: number; text: string }[] = [];
+      const splice = (code: string, at: number, length: number, by: string) =>
+        code.slice(0, at) + by.padEnd(length) + code.slice(at + length);
+      const handOver = (names: string[]) =>
+        `let __devtoolsAnywhereRepl${++nextTemp} = [${names
+          .map(name => `${REPL_EXPORT}(${JSON.stringify(name)}, ${name})`)
+          .join(', ')}];`;
+      for (const { kind, names, bare, start, end } of declarations) {
+        if (kind === 'class') {
+          // Before running: a class used before its declaration is in its dead zone.
+          const name = names[0];
+          if (name === undefined || !canBind(name)) continue;
+          declare(name, kind, false);
+          classes.push(name);
+          // In the async body, right after the class (its line moves on, as the wrapper's first does).
+          inserts.push({ at: end, text: `;${handOver([name])}` });
+          continue;
+        }
+        // A name that cannot be bound (a page property): the declaration stays the input's own.
+        if (!names.every(canBind)) continue;
+        for (const name of names) declare(name, kind, bare.includes(name));
+        script = splice(script, start, kind.length, 'var');
+        body = splice(body, start, kind.length, '0,');
+      }
+      // The completion value is the original's last expression statement, not a rewritten declaration.
+      const last = lastExpressionStatement(expression);
+      if (last !== undefined) inserts.push({ at: last, text: 'return ' });
+      for (const { at, text } of inserts.sort((x, y) => y.at - x.at)) body = body.slice(0, at) + text + body.slice(at);
+      // On a line of its own after the input: no column moves.
+      if (classes.length) script += `\n;${handOver(classes)}`;
+      const commit = () => {
+        if (!Object.getOwnPropertyDescriptor(window, REPL_EXPORT))
+          Object.defineProperty(window, REPL_EXPORT, { value: hand, configurable: true });
+        for (const step of plan) step();
+      };
+      return { script, body, commit };
+    },
+  };
+}
+
+/**
+ * The names the page's classic scripts declared with top-level `let`, `const` and `class`
+ * (Runtime.globalLexicalScopeNames). Page scripts cannot list the global lexical scope, so the
+ * sources are lexed: inline `<script>`s and the external scripts the page loaded (fetched again,
+ * from the HTTP cache), each once. Module scripts are left out: their declarations are not global.
+ * Each name is then looked up, which drops the ones not declared (a script that did not compile, a
+ * module's name). The console's declarations (see `replBindings`) are added by the caller.
+ */
+function globalLexicalNames(probe: Context['probe']) {
+  /** Names per external script URL, and per inline script text. */
+  const external = new Map<string, Promise<string[]>>();
+  const inline = new Map<string, string[]>();
+
+  const lex = (source: string) => {
+    try {
+      return topLevelLexicalNames(source);
+    } catch {
+      return [];
+    }
+  };
+  const isModule = (script: HTMLScriptElement) => script.type.trim().toLowerCase() === 'module';
+  const isClassic = (script: HTMLScriptElement) =>
+    !script.type || /^(?:text|application)\/(?:x-)?(?:java|ecma)script$/i.test(script.type.trim());
+
+  function fromUrl(url: string): Promise<string[]> {
+    let names = external.get(url);
+    if (!names) {
+      names = refetch(probe, url)
+        .then(res => res.text())
+        .then(lex, () => []);
+      external.set(url, names);
+    }
+    return names;
+  }
+
+  function declared(name: string): boolean {
+    if (!IDENTIFIER.test(name)) return false;
+    try {
+      // A ReferenceError: not declared, or declared but in its temporal dead zone.
+      globalEval(name);
+      return true;
+    } catch {
+      try {
+        // Like V8, a name in its temporal dead zone is listed: only there does `typeof` throw.
+        globalEval(`typeof ${name}`);
+        return false;
+      } catch {
+        return true;
+      }
+    }
+  }
+
+  /** The last result, until a script is added, removed or loaded. */
+  let cached: Promise<string[]> | undefined;
+  let watching = false;
+  const invalidate = () => {
+    cached = undefined;
+  };
+  const hasScript = (node: Node) =>
+    node instanceof HTMLScriptElement || (node instanceof Element && !!node.querySelector('script'));
+  function watch() {
+    if (watching) return;
+    watching = true;
+    probe.onRequest(rec => {
+      if (rec.type === 'Script' && rec.state === 'done') invalidate();
+    });
+    new MutationObserver(records => {
+      const inScript = (node: Node) =>
+        node instanceof HTMLScriptElement || node.parentNode instanceof HTMLScriptElement;
+      if (records.some(r => inScript(r.target) || [...r.addedNodes, ...r.removedNodes].some(hasScript))) invalidate();
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  }
+
+  return {
+    /** Also the moment to look again: page code may have changed what is declared. */
+    invalidate,
+    list(): Promise<string[]> {
+      watch();
+      cached ??= compute();
+      return cached;
+    },
+  };
+
+  async function compute(): Promise<string[]> {
+    {
+      const lists: (string[] | Promise<string[]>)[] = [];
+      const modules = new Set<string>();
+      for (const script of document.querySelectorAll<HTMLScriptElement>('script')) {
+        if (script.src) {
+          if (isModule(script)) modules.add(script.src);
+          else if (isClassic(script) && /^https?:/.test(script.src) && !probe.ownUrls.has(script.src))
+            lists.push(fromUrl(script.src));
+        } else if (isClassic(script)) {
+          const text = script.text;
+          let names = inline.get(text);
+          if (!names) inline.set(text, (names = lex(text)));
+          lists.push(names);
+        }
+      }
+      // Scripts added and removed again, or loaded by other means.
+      for (const rec of probe.requests)
+        if (rec.type === 'Script' && rec.state === 'done' && !modules.has(rec.url) && !probe.ownUrls.has(rec.url))
+          lists.push(fromUrl(rec.url));
+      const names = new Set<string>();
+      for (const list of await Promise.all(lists)) for (const name of list) names.add(name);
+      return [...names].filter(declared);
+    }
+  }
+}
+
 export function registerRuntime({ server, objects, nodes, probe }: Context) {
+  const lexicalNames = globalLexicalNames(probe);
+  const repl = replBindings();
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
@@ -282,7 +643,24 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
       try {
         const allowAwait = !!(params.replMode || params.awaitPromise);
         const evaluate = async () => {
-          const { value, isAsync } = run(params.expression, allowAwait);
+          const rewritten = params.replMode ? repl.rewrite(params.expression) : undefined;
+          const script = rewritten?.script ?? params.expression;
+          const body = rewritten?.body ?? returnLast(params.expression);
+          // Like V8, input that does not compile declares nothing: the bindings (properties of
+          // window that cannot be removed) are only made for input that does.
+          if (rewritten && compiles(script, allowAwait ? body : undefined)) rewritten.commit();
+          let ran: ReturnType<typeof run>;
+          try {
+            ran = run(script, allowAwait, body);
+          } catch (e) {
+            if (params.replMode) {
+              if (e instanceof SyntaxError) repl.failed();
+              else repl.compiled();
+            }
+            throw e;
+          }
+          if (params.replMode) repl.compiled();
+          const { value, isAsync } = ran;
           if (!(isAsync || params.awaitPromise) || !isThenable(value)) return value;
           inPromise = !isAsync;
           return await value;
@@ -370,7 +748,9 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
       // Like V8, clearing the messages releases their 'console' handles.
       objects.releaseGroup('console');
     },
-    globalLexicalScopeNames: () => ({ names: [] }),
+    globalLexicalScopeNames: async (): Promise<Protocol.Runtime.GlobalLexicalScopeNamesResponse> => ({
+      names: [...new Set([...(await lexicalNames.list()), ...repl.names()])],
+    }),
     getIsolateId: () => ({ id: 'devtools-anywhere' }),
     getHeapUsage: () => {
       // Chrome-only, non-standard.
