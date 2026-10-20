@@ -126,6 +126,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 - **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用）和投屏，其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
 - **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
 - **小屏**：沿用上游自带的响应式布局（元素面板窄屏时上下分栏、标签页溢出折叠）。
+- **少请求**：上游每个模块各打成一个包，打开 DevTools 要发约 150 个请求，在 HTTP/1.1 或网络不稳时很慢。`scripts/bundle.ts` 用 rollup 把它们重新打包（含摇树）到 `dist/bundle/`：每个懒加载的模块（主要是面板）各成一个 chunk，用到时才加载；入口 chunk 包含入口引入的模块、多个面板共用的模块和体积很小的模块；每个 worker 打成单个文件，SVG 图标内联成 data: URL。打开 DevTools 约 10 个请求。由于模块不再是独立文件，端到端测试通过入口导出的 `modules` 访问它们。
 
 `packages/devtools-frontend/` 里有：
 
@@ -133,7 +134,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 - `src/anywhere_app/`：我们自己的入口，每次构建前复制到 `front_end/entrypoints/`。
 - `patches/*.patch`：对上游文件的修改，一个补丁对应一处改动。各补丁改的是不同的文件，打的先后顺序无关紧要。数量和改动都尽量少。
 - `locales/<语言>.json`：`anywhere_app` 自己的界面文字（其 `UIStrings` 的键）的翻译。上游的翻译里没有这些文字，构建时合并进对应语言的文件；其他语言显示英文。
-- `scripts/build.ts`：构建脚本。
+- `scripts/build.ts`：构建脚本；`scripts/bundle.ts`：构建最后一步的打包。
 
 ```bash
 cd packages/devtools-frontend

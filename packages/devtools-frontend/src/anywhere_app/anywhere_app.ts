@@ -323,3 +323,16 @@ UI.ContextMenu.ContextMenu.initialize = () => {
 // @ts-expect-error Exposed like in devtools_app, for parity.
 self.runtime = Root.Runtime.Runtime.instance({forceNew: true});
 new Main.MainImpl.MainImpl();
+
+/**
+ * The modules the end-to-end tests reach into, by their path in front_end: the built frontend is
+ * bundled, so they are not files of their own (each import resolves to the chunk that holds it).
+ */
+export const modules: Record<string, () => Promise<unknown>> = {
+  'core/common/common.js': () => import('../../core/common/common.js'),
+  'core/host/host.js': () => import('../../core/host/host.js'),
+  'models/breakpoints/breakpoints.js': () => import('../../models/breakpoints/breakpoints.js'),
+  'models/workspace/workspace.js': () => import('../../models/workspace/workspace.js'),
+  'panels/console/console.js': () => import('../../panels/console/console.js'),
+  'ui/legacy/legacy.js': () => import('../../ui/legacy/legacy.js'),
+};

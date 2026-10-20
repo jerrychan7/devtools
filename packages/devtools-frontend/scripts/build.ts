@@ -1,7 +1,7 @@
 // Builds the DevTools frontend from the official devtools-frontend sources:
 //   checks out the pinned revision, applies the patches, adds the anywhere_app entrypoint,
-//   builds with gn + autoninja and copies the release files to dist/ (and the locales
-//   beyond en-US and zh to ../devtools-frontend-locales/dist/).
+//   builds with gn + autoninja, and bundles the release files into dist/ (scripts/bundle.ts; the
+//   locales beyond en-US and zh go to ../devtools-frontend-locales/dist/).
 //
 // Environment:
 //   DEVTOOLS_FRONTEND_SRC  checkout of devtools-frontend (`fetch devtools-frontend`)
@@ -13,8 +13,8 @@
 //   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout)
 //   --reset      discard edits to upstream files in the checkout that the patches do not
 //                account for, instead of stopping (see "Patches" below)
-//   --copy-only  implies --no-sync and also skips the build: only copy the last build's
-//                output to dist/
+//   --copy-only  implies --no-sync and also skips the build: only bundle the last build's
+//                output into dist/
 //
 // locales/<locale>.json translates anywhere_app's own UI strings (keys of its UIStrings),
 // which upstream's translations do not have; other locales show them in English.
@@ -23,6 +23,7 @@ import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bundle } from './bundle.ts';
 
 const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(pkg, '../..');
@@ -32,6 +33,8 @@ const src = path.resolve(
 const depotTools = path.resolve(process.env['DEPOT_TOOLS'] ?? path.join(repo, 'depot_tools.ignore'));
 const out = path.join(src, 'out/Anywhere');
 const dist = path.join(pkg, 'dist');
+/** The release files anywhere_app can load, one bundle per module, before bundle.ts. */
+const release = path.join(out, 'release');
 /** The locales Chrome bundles stay in this package; the others go to the locales package. */
 const localesDist = path.join(pkg, '../devtools-frontend-locales/dist');
 const BUNDLED_LOCALES = ['en-US', 'zh'];
@@ -182,11 +185,10 @@ const keep = (file: string) => {
   return !file.includes('/') || file.startsWith('Images/') || inModule(file);
 };
 
-fs.rmSync(dist, { recursive: true, force: true });
-const copy = (file: string, content?: string) => {
-  fs.mkdirSync(path.dirname(path.join(dist, file)), { recursive: true });
-  if (content === undefined) fs.copyFileSync(path.join(gen, file), path.join(dist, file));
-  else fs.writeFileSync(path.join(dist, file), content);
+fs.rmSync(release, { recursive: true, force: true });
+const copy = (file: string) => {
+  fs.mkdirSync(path.dirname(path.join(release, file)), { recursive: true });
+  fs.copyFileSync(path.join(gen, file), path.join(release, file));
 };
 const kept = files.filter(keep);
 kept.forEach(file => copy(file));
@@ -211,14 +213,16 @@ for (const name of fs.readdirSync(path.join(gen, LOCALES)).filter(f => f.endsWit
       used[`${OWN_STRINGS} | ${key}`] = { message };
     }
   }
-  const target = BUNDLED_LOCALES.includes(name.slice(0, -'.json'.length)) ? dist : localesDist;
+  const target = BUNDLED_LOCALES.includes(name.slice(0, -'.json'.length)) ? release : localesDist;
   fs.mkdirSync(path.join(target, LOCALES), { recursive: true });
   fs.writeFileSync(path.join(target, LOCALES, name), JSON.stringify(used));
 }
 fs.writeFileSync(path.join(localesDist, 'REVISION'), revision + '\n');
 
-fs.writeFileSync(path.join(dist, 'REVISION'), revision + '\n');
+fs.writeFileSync(path.join(release, 'REVISION'), revision + '\n');
+await bundle(release, dist);
 if (args.has('--latest')) fs.writeFileSync(revisionFile, revision + '\n');
 console.log(
-  `Built devtools-frontend ${revision} → ${path.relative(repo, dist)} (${kept.length} of ${files.length} files)`
+  `Built devtools-frontend ${revision} → ${path.relative(repo, dist)} (${kept.length} of ${files.length} files, ` +
+    `bundled into ${fs.readdirSync(path.join(dist, 'bundle')).length})`
 );

@@ -17,6 +17,8 @@
     "update": "node scripts/build.ts --latest"
   },
   "devDependencies": {
-    "@types/node": "^22.18.0"
+    "@types/node": "^22.18.0",
+    "esbuild": "^0.25.12",
+    "rollup": "^4.64.9"
   }
 }

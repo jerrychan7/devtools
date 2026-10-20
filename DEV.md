@@ -126,6 +126,7 @@ pnpm typecheck                                # builds, then checks packages, bu
 - **Own entrypoint** `anywhere_app` instead of `devtools_app`: it imports only the panels that work against the in-page CDP server (Elements, Console, Sources, Network, Application) and the screencast, so the others are neither shown nor loaded. The only patch registers this entrypoint in the build (7 lines in 4 `BUILD.gn`/`.gni` files).
 - **Embedder through the official host API**: Chrome talks to DevTools through native `InspectorFrontendHost` bindings. The entrypoint keeps the hosted-mode stub and only replaces `sendMessageToBackend`/`isHostedMode`, so CDP messages travel through `postMessage` to the embedding window, which passes its origin as `#?embedded=<origin>`. No connection code is patched.
 - **Small screens**: upstream's responsive layouts (vertical split in Elements, overflowing tabs) are kept as is.
+- **Few requests**: upstream ships one bundle per module, about 150 requests to open DevTools, which is slow over HTTP/1.1 or a flaky network. `scripts/bundle.ts` rebundles them with rollup (tree-shaken) into `dist/bundle/`: each lazily loaded module (a panel, mostly) is a chunk loaded when it is, and the entry chunk holds what the entry imports, what several panels share and the small ones; each worker is one file, and the SVG icons are inlined as data: URLs. Opening DevTools takes about 10 requests. Since modules are no files of their own any more, the end-to-end tests reach them through `modules` exported by the entrypoint.
 
 `packages/devtools-frontend/` contains:
 
@@ -133,7 +134,7 @@ pnpm typecheck                                # builds, then checks packages, bu
 - `src/anywhere_app/`: our entrypoint, copied into `front_end/entrypoints/` before each build.
 - `patches/*.patch`: changes to upstream files, one patch per change. Each touches its own files, so the order they are applied in does not matter. Keep them as few and as small as possible.
 - `locales/<locale>.json`: translations of anywhere_app's own UI strings (keys of its `UIStrings`), which upstream's translations do not have; merged into that locale's file by the build. Other locales show them in English.
-- `scripts/build.ts`: the build.
+- `scripts/build.ts`: the build; `scripts/bundle.ts`: the bundling it ends with.
 
 ```bash
 cd packages/devtools-frontend
