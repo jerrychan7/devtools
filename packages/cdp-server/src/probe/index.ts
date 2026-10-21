@@ -22,7 +22,6 @@ export * from './shell';
 
 /** The probe keeps everything up to a coarse bound, for pages that never load a server. */
 const LIMIT = 10_000;
-const MAX_BODY_LENGTH = 5 * 1024 * 1024;
 const MAX_TOOL_OUTCOMES = 50;
 
 /** Drops the oldest entries of `list` past `max`. */
@@ -74,7 +73,7 @@ export function installProbe(): Probe {
     fetch: w.fetch ? w.fetch.bind(w) : () => Promise.reject(new TypeError('fetch is not available')),
     WebSocket: w.WebSocket,
     tools: new Map(),
-    limits: { logs: LIMIT, requests: LIMIT, sockets: LIMIT, socketEvents: LIMIT },
+    limits: { logs: LIMIT, requests: LIMIT, sockets: LIMIT, socketEvents: LIMIT, body: 5 * 1024 * 1024 },
   };
   Object.defineProperty(w, PROBE_KEY, { value: probe });
 
@@ -116,8 +115,8 @@ export function installProbe(): Probe {
     Object.assign(rec, patch);
     requestListeners.forEach(fn => fn(rec));
   }
-  hookFetch(track, update);
-  hookXhr(track, update, listen);
+  hookFetch(track, update, probe);
+  hookXhr(track, update, listen, probe);
   const shell = readShellConfig();
   observeResources(add, update, requests, shell?.sw);
 
@@ -601,7 +600,7 @@ function bodyToString(body: unknown): string | undefined {
   return undefined;
 }
 
-function hookFetch(track: Track, update: Update) {
+function hookFetch(track: Track, update: Update, probe: Probe) {
   const origFetch = window.fetch;
   if (!origFetch) return;
   const failed = (rec: ProbeRequest, err: unknown) =>
@@ -650,7 +649,7 @@ function hookFetch(track: Track, update: Update) {
     });
     copy?.text().then(
       text => {
-        if (text.length <= MAX_BODY_LENGTH) update(rec, { postData: text });
+        if (text.length <= probe.limits.body) update(rec, { postData: text });
       },
       () => {}
     );
@@ -675,14 +674,14 @@ function hookFetch(track: Track, update: Update) {
         if (
           !res.body ||
           contentType?.split(';')[0]?.trim() === 'text/event-stream' ||
-          Number(res.headers.get('content-length')) > MAX_BODY_LENGTH
+          Number(res.headers.get('content-length')) > probe.limits.body
         ) {
           update(rec, { state: 'done', endTime: performance.now(), encodedDataLength: 0 });
           return;
         }
         const copy = res.clone().body;
         if (!copy) return;
-        readCapped(copy, contentType ?? '').then(
+        readCapped(copy, contentType ?? '', probe.limits.body).then(
           ({ blob, size }) =>
             update(rec, {
               state: 'done',
@@ -700,13 +699,14 @@ function hookFetch(track: Track, update: Update) {
 }
 
 /**
- * Reads a copy of a response body chunk by chunk, up to MAX_BODY_LENGTH: past it the copy is
+ * Reads a copy of a response body chunk by chunk, up to `max` bytes: past it the copy is
  * cancelled, so a body without content-length that turns out large, or a stream that does not
  * end, is never buffered whole (neither here nor in the tee feeding the page's copy).
  */
 async function readCapped(
   body: ReadableStream<Uint8Array<ArrayBuffer>>,
-  type: string
+  type: string,
+  max: number
 ): Promise<{ blob?: Blob; size: number }> {
   const reader = body.getReader();
   const chunks: Uint8Array<ArrayBuffer>[] = [];
@@ -715,7 +715,7 @@ async function readCapped(
     const { done, value } = await reader.read();
     if (done) return { blob: new Blob(chunks, { type }), size };
     size += value.byteLength;
-    if (size > MAX_BODY_LENGTH) {
+    if (size > max) {
       void reader.cancel().catch(() => {});
       return { size };
     }
@@ -729,7 +729,7 @@ interface XhrInfo {
   headers: Record<string, string>;
 }
 
-function hookXhr(track: Track, update: Update, listen: EventTarget['addEventListener']) {
+function hookXhr(track: Track, update: Update, listen: EventTarget['addEventListener'], probe: Probe) {
   const proto = XMLHttpRequest.prototype;
   const origOpen = proto.open;
   const origSend = proto.send;
@@ -778,7 +778,7 @@ function hookXhr(track: Track, update: Update, listen: EventTarget['addEventList
       });
       if (!watched.has(this)) {
         watched.add(this);
-        watchXhr(this, current, update, listen);
+        watchXhr(this, current, update, listen, probe);
       }
       current.set(this, rec);
       try {
@@ -804,7 +804,8 @@ function watchXhr(
   xhr: XMLHttpRequest,
   current: WeakMap<XMLHttpRequest, ProbeRequest>,
   update: Update,
-  listen: EventTarget['addEventListener']
+  listen: EventTarget['addEventListener'],
+  probe: Probe
 ) {
   const finish = (patch: Partial<ProbeRequest>) => {
     const rec = current.get(xhr);
@@ -831,13 +832,13 @@ function watchXhr(
       if (type === 'arraybuffer' && xhr.response instanceof ArrayBuffer) {
         // Copied only when kept: the page may still change its buffer.
         size = xhr.response.byteLength;
-        if (size <= MAX_BODY_LENGTH) body = new Blob([xhr.response]);
+        if (size <= probe.limits.body) body = new Blob([xhr.response]);
       }
       // Like fetch(), bodies too large to keep are left out; only their length is reported.
       finish({
         state: 'done',
         ...responseMeta(),
-        body: size > MAX_BODY_LENGTH ? undefined : body,
+        body: size > probe.limits.body ? undefined : body,
         encodedDataLength: size,
       });
     }

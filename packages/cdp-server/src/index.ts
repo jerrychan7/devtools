@@ -44,6 +44,8 @@ export interface CdpServerOptions {
 
 /** How many console messages V8 keeps (V8ConsoleMessageStorage's limit). */
 const MAX_CONSOLE_MESSAGES = 1000;
+/** The largest body Chrome keeps for one resource (Blink's kDefaultResourceBufferSize). */
+const MAX_RESOURCE_BODY = 20 * 1000 * 1000;
 
 /**
  * Creates an in-page CDP server. Reuses the probe if probe.iife.js already ran;
@@ -51,8 +53,16 @@ const MAX_CONSOLE_MESSAGES = 1000;
  */
 export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
   const probe = installProbe();
-  // The server sets how much the probe keeps: V8 keeps the last 1000 console messages.
-  probe.limits = { ...probe.limits, logs: MAX_CONSOLE_MESSAGES };
+  // The server sets how much the probe keeps: V8 keeps the last 1000 console messages; like
+  // Chrome, requests and WebSockets are not limited in number, only their bodies in bytes
+  // (one resource here, all of them in the probe view).
+  probe.limits = {
+    logs: MAX_CONSOLE_MESSAGES,
+    requests: Infinity,
+    sockets: Infinity,
+    socketEvents: Infinity,
+    body: MAX_RESOURCE_BODY,
+  };
   keep(probe.logs, MAX_CONSOLE_MESSAGES);
   const ctx: Context = {
     server: new CdpServer(),

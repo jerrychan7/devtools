@@ -129,6 +129,8 @@ export interface RequestRecord {
    * absent when it was not captured (streaming or too large).
    */
   body?: string | Blob | undefined;
+  /** The body was dropped to keep the total under the server's budget, like Chrome's eviction. */
+  bodyEvicted?: boolean;
   encodedDataLength?: number;
   /** `performance.now()` when the response finished or failed. */
   endTime?: number;
@@ -201,8 +203,8 @@ export interface Probe {
   /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
   tools: Map<string, ToolRecord>;
   /**
-   * How many entries each list keeps, the oldest dropped first: a coarse bound until a server
-   * mounts and sets its own.
+   * How many entries each list keeps, the oldest dropped first, and how large a body is kept:
+   * coarse bounds until a server mounts and sets its own.
    */
   limits: ProbeLimits;
 }
@@ -213,6 +215,8 @@ export interface ProbeLimits {
   sockets: number;
   /** Per WebSocket. */
   socketEvents: number;
+  /** Bytes of one response body (or request body read afterwards); larger ones are not kept. */
+  body: number;
 }
 
 export interface ToolRecord {

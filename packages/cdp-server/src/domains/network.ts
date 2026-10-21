@@ -59,6 +59,10 @@ export function deleteCookie(
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${p}${d ? `; domain=${d}` : ''}`;
 }
 
+/** Chrome's defaults for Network.enable's buffer sizes (desktop kDefaultTotalBufferSize, kDefaultResourceBufferSize). */
+const DEFAULT_TOTAL_BUFFER = 200 * 1000 * 1000;
+const DEFAULT_RESOURCE_BUFFER = 20 * 1000 * 1000;
+
 const withoutHash = (url: string) => url.split('#')[0];
 
 /** Whether the request is one of devtools-anywhere's own (its bundle, the frontend, …). */
@@ -119,6 +123,9 @@ export function registerNetwork({ server, probe }: Context) {
     for (const [id, done] of table) if (done.has(last) && !ids.has(id)) table.delete(id);
   }
 
+  /** Network.enable's maxPostDataSize; 0 sends every body in requestWillBeSent. */
+  let maxPostData = 0;
+
   function find(requestId: string) {
     return probe.requests.find(r => r.requestId === requestId);
   }
@@ -139,11 +146,15 @@ export function registerNetwork({ server, probe }: Context) {
         initialPriority: 'High',
         referrerPolicy: 'strict-origin-when-cross-origin',
       };
-      if (rec.postData !== undefined) {
+      // Like Chrome, a body over maxPostDataSize (0: no limit) is left out of the event: the
+      // frontend asks for it with getRequestPostData, as for a body read later.
+      if (
+        rec.postData !== undefined &&
+        (!maxPostData || new TextEncoder().encode(rec.postData).length <= maxPostData)
+      ) {
         request.postData = rec.postData;
         request.hasPostData = true;
-      } else if (rec.hasPostData) {
-        // Read later: the frontend asks for it with getRequestPostData.
+      } else if (rec.postData !== undefined || rec.hasPostData) {
         request.hasPostData = true;
       }
       const callFrames = parseStack(rec.stack, 1);
@@ -283,7 +294,12 @@ export function registerNetwork({ server, probe }: Context) {
   };
 
   server.register('Network', {
-    enable() {
+    enable(params: Protocol.Network.EnableRequest) {
+      maxPostData = params.maxPostDataSize ?? 0;
+      probe.bodyLimits(
+        params.maxTotalBufferSize ?? DEFAULT_TOTAL_BUFFER,
+        params.maxResourceBufferSize ?? DEFAULT_RESOURCE_BUFFER
+      );
       if (unsubscribe) return;
       // Report requests and sockets made before the client connected, including early ones.
       probe.requests.forEach(emit);
@@ -307,6 +323,7 @@ export function registerNetwork({ server, probe }: Context) {
       params: Protocol.Network.GetResponseBodyRequest
     ): Promise<Protocol.Network.GetResponseBodyResponse> {
       const rec = find(params.requestId);
+      if (rec?.bodyEvicted) throw new CdpError('Request content was evicted from inspector cache');
       if (typeof rec?.body === 'string') return { body: rec.body, base64Encoded: false };
       // Captured binary data: text for textual types, like Chrome, base64 otherwise.
       if (rec?.body)
@@ -328,7 +345,8 @@ export function registerNetwork({ server, probe }: Context) {
       params: Protocol.Network.GetRequestPostDataRequest
     ): Protocol.Network.GetRequestPostDataResponse {
       const rec = find(params.requestId);
-      if (rec?.postData === undefined) throw new CdpError('No post data available for the request');
+      // Chrome drops the request body along with the response body.
+      if (rec?.postData === undefined || rec.bodyEvicted) throw new CdpError('No post data available for the request');
       return { postData: rec.postData, base64Encoded: false };
     },
 

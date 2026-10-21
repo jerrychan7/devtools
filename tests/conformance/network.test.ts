@@ -1,5 +1,6 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Protocol } from 'devtools-protocol';
 import { launch, openPage } from './harness.ts';
 import type { Env, EventName, Side, TestPage } from './harness.ts';
 
@@ -52,6 +53,10 @@ async function request(expression: string, marker: string, finalEvent: EventName
     };
   };
   return { ours: await pick(t.ours), chrome: await pick(t.chrome) };
+}
+
+async function enableBoth(params: Protocol.Network.EnableRequest) {
+  await Promise.all([t.ours.send('Network.enable', params), t.chrome.send('Network.enable', params)]);
 }
 
 describe('Network', () => {
@@ -328,5 +333,68 @@ describe('Network', () => {
     const body = await t.chrome.send('Network.getResponseBody', { requestId: image.sent.requestId });
     const content = await t.ours.send('Page.getResourceContent', { frameId: 'any', url: image.sent.request.url });
     assert.deepEqual(content, { content: body.body, base64Encoded: true });
+  });
+
+  // Without maxPostDataSize every body is in requestWillBeSent; past it, only hasPostData is.
+  for (const maxPostDataSize of [undefined, 65536]) {
+    test(`fetch POST with a 70 KiB body, maxPostDataSize ${maxPostDataSize}`, async () => {
+      await enableBoth({ maxPostDataSize });
+      const marker = `n=post-large-${maxPostDataSize}`;
+      const { ours, chrome } = await request(
+        `void fetch('/api/echo?${marker}', { method: 'POST', body: 'x'.repeat(70 * 1024) })`,
+        marker
+      );
+      assert.equal(ours.sent.request.postData, chrome.sent.request.postData);
+      assert.equal(ours.sent.request.hasPostData, chrome.sent.request.hasPostData);
+      const [oursData, chromeData] = await Promise.all([
+        t.ours.send('Network.getRequestPostData', { requestId: ours.sent.requestId }),
+        t.chrome.send('Network.getRequestPostData', { requestId: chrome.sent.requestId }),
+      ]);
+      assert.equal(oursData.postData, chromeData.postData);
+      await enableBoth({});
+    });
+  }
+
+  /** getResponseBody's result, or its error message, on both sides. */
+  async function bodies(ours: string, chrome: string) {
+    const get = (side: Side, requestId: string) =>
+      side.send('Network.getResponseBody', { requestId }).then(
+        result => result.body.length,
+        (e: unknown) => String(e instanceof Error ? e.message : e).replace(/^Protocol error \([^)]*\): /, '')
+      );
+    return { ours: await get(t.ours, ours), chrome: await get(t.chrome, chrome) };
+  }
+
+  test('a body over maxResourceBufferSize is not kept', async () => {
+    await enableBoth({ maxResourceBufferSize: 1000 });
+    const { ours, chrome } = await request(
+      "void fetch('/api/echo?n=over-resource', { method: 'POST', body: 'x'.repeat(2000) }).then(r => r.text())",
+      'n=over-resource'
+    );
+    const got = await bodies(ours.sent.requestId, chrome.sent.requestId);
+    assert.equal(got.ours, got.chrome);
+    await enableBoth({});
+  });
+
+  // GET requests: in Chrome a request body counts toward the same buffers.
+  test('past maxTotalBufferSize the oldest bodies are evicted', async () => {
+    await enableBoth({ maxTotalBufferSize: 3000, maxResourceBufferSize: 2500 });
+    const first = await request(
+      "void fetch('/api/echo?n=evict-first&pad=' + 'x'.repeat(2000)).then(r => r.text())",
+      'n=evict-first'
+    );
+    const second = await request(
+      "void fetch('/api/echo?n=evict-second&pad=' + 'x'.repeat(2000)).then(r => r.text())",
+      'n=evict-second'
+    );
+    const old = await bodies(first.ours.sent.requestId, first.chrome.sent.requestId);
+    console.log(JSON.stringify(old));
+    assert.equal(old.ours, old.chrome);
+    assert.equal(old.ours, 'Request content was evicted from inspector cache');
+    const recent = await bodies(second.ours.sent.requestId, second.chrome.sent.requestId);
+    console.log(JSON.stringify(recent));
+    assert.equal(recent.ours, recent.chrome);
+    assert.equal(typeof recent.ours, 'number');
+    await enableBoth({});
   });
 });
