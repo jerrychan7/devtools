@@ -13,6 +13,8 @@ type Accessors = {
   descriptor: PropertyDescriptor;
   get: (this: Tree) => unknown;
   set: (this: Tree, v: unknown) => void;
+  /** Our getter, to tell whether the property is still ours when stopping. */
+  hook: (this: Tree) => unknown;
 };
 
 const listeners = new Set<Listener>();
@@ -61,15 +63,17 @@ function install() {
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
     const get = descriptor?.get;
     const set = descriptor?.set;
-    if (!descriptor || !get || !set) continue;
-    natives.set(proto, { descriptor, get, set });
+    // Still hooked from before (the page wrapped our hook since): reuse it.
+    if (!descriptor || !get || !set || natives.has(proto)) continue;
+    const hook = function (this: Tree): unknown {
+      notify(this);
+      return get.call(this);
+    };
+    natives.set(proto, { descriptor, get, set, hook });
     Object.defineProperty(proto, 'adoptedStyleSheets', {
       configurable: true,
       enumerable: descriptor.enumerable ?? true,
-      get(this: Tree): unknown {
-        notify(this);
-        return get.call(this);
-      },
+      get: hook,
       set(this: Tree, value: unknown) {
         set.call(this, value);
         notify(this);
@@ -79,8 +83,13 @@ function install() {
 }
 
 function uninstall() {
-  for (const [proto, { descriptor }] of natives) Object.defineProperty(proto, 'adoptedStyleSheets', descriptor);
-  natives.clear();
+  // A hook the page wrapped since is kept (it does nothing without listeners), or the page's
+  // wrapper would be lost.
+  for (const [proto, { descriptor, hook }] of natives) {
+    if (Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets')?.get !== hook) continue;
+    Object.defineProperty(proto, 'adoptedStyleSheets', descriptor);
+    natives.delete(proto);
+  }
   touched = new Set();
   seen = new WeakMap();
 }
