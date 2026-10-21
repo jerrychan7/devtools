@@ -101,6 +101,8 @@ const TYPES: Record<string, string> = {
 const TARGET_ID = /^[\w-]{1,64}$/;
 /** How long a page that went away stays on the list, for it to come back (a reload, a dropped connection). */
 const GONE_TTL = 60_000;
+/** Pages the server keeps at most: each one connected, or gone and not forgotten yet. */
+const MAX_TARGETS = 1000;
 
 /** Directory of an installed package's file, or undefined if the package is not installed. */
 function packageDir(require: NodeJS.Require, file: string): string | undefined {
@@ -177,6 +179,9 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     const hash = frontend.indexOf('#');
     const page = hash < 0 ? frontend : frontend.slice(0, hash);
     const fragment = hash < 0 ? '' : frontend.slice(hash);
+    // A frontend served from elsewhere (a CDN) gets the socket, with its token, in the fragment,
+    // which the browser does not send there.
+    const inFragment = options.frontendUrl !== undefined;
     return [...targets.values()].map(target => {
       const socket = `${req.headers.host ?? 'localhost'}${base}client/${target.id}${query}`;
       return {
@@ -189,7 +194,9 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
         since: target.since,
         connected: target.connected,
         clients: target.clients,
-        devtoolsFrontendUrl: `${page}${page.includes('?') ? '&' : '?'}${ws}=${encodeURIComponent(socket)}${fragment}`,
+        devtoolsFrontendUrl: inFragment
+          ? `${page}${fragment || '#?'}${fragment.length > 1 ? '&' : ''}${ws}=${encodeURIComponent(socket)}`
+          : `${page}${page.includes('?') ? '&' : '?'}${ws}=${encodeURIComponent(socket)}${fragment}`,
         webSocketDebuggerUrl: `${ws}://${socket}`,
       };
     });
@@ -251,7 +258,10 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (!url.pathname.startsWith(base)) return false;
     const [kind, id = ''] = url.pathname.slice(base.length).split('/');
-    const ok = TARGET_ID.test(id) && (kind === 'target' || (kind === 'client' && authorized(url) && targets.has(id)));
+    // Any page may connect, but only so many: a new one past the limit is turned away.
+    const room = targets.has(id) || targets.size < MAX_TARGETS;
+    const ok =
+      TARGET_ID.test(id) && ((kind === 'target' && room) || (kind === 'client' && authorized(url) && targets.has(id)));
     if (!ok) {
       socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
       return true;

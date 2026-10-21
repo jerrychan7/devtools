@@ -32,6 +32,11 @@ const MAX_QUEUED = 10_000;
 const MAX_QUEUED_SIZE = 64 * 1024 * 1024;
 /** The error a command gets when it is dropped from the queue, never to reach the page. */
 const DROPPED_ERROR = { code: -32000, message: 'Too many messages queued for the page' };
+/** The `enable` whose result only the page has (Chrome always returns a debuggerId): it waits for one. */
+const HELD_ENABLE = 'Debugger.enable';
+/** What a hello's title and url are cut to, in UTF-16 code units: a page cannot fill the server's memory. */
+const MAX_TITLE = 4096;
+const MAX_URL = 2 * 1024 * 1024;
 
 /** One end of the relay: a WebSocket, as far as the relay is concerned. */
 export interface Peer {
@@ -78,6 +83,8 @@ interface Session {
   pending: Map<string | number, string>;
   /** `enable` commands answered between pagehide and the next hello, not sent to the page. */
   deferred: Set<string>;
+  /** Ids of its Debugger.enable commands the page went away from: the next instance answers them. */
+  held: Set<string | number>;
 }
 
 /** A page as the relay knows it, from its first connection on. */
@@ -137,6 +144,7 @@ export class Target {
       enabled: new Map(),
       pending: new Map(),
       deferred: new Set(),
+      held: new Set(),
     };
     this.sessions.set(client, session);
     this.bySessionId.set(session.id, session);
@@ -216,10 +224,11 @@ export class Target {
 
   /**
    * Answers a client command the page will never answer. `enable` commands succeed: they are
-   * re-sent to the next page instance anyway.
+   * re-sent to the next page instance anyway. Debugger.enable waits for that instance's answer.
    */
   private abandon(session: Session, id: string | number, method: string) {
-    if (method.endsWith('.enable')) session.client.send(JSON.stringify({ id, result: {} }));
+    if (method === HELD_ENABLE) session.held.add(id);
+    else if (method.endsWith('.enable')) session.client.send(JSON.stringify({ id, result: {} }));
     else session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
   }
 
@@ -241,8 +250,8 @@ export class Target {
 
   private onHello(params: Record<string, unknown>) {
     this.info = {
-      url: text(params['url']),
-      title: text(params['title']),
+      url: text(params['url']).slice(0, MAX_URL),
+      title: text(params['title']).slice(0, MAX_TITLE),
       favicon: text(params['favicon']),
       userAgent: text(params['userAgent']),
     };
@@ -285,11 +294,24 @@ export class Target {
 
   /** Sends the instance back from the back/forward cache the `enable`s answered while it was away. */
   private resend(session: Session) {
+    const held = this.sendHeld(session);
     for (const method of session.deferred) {
-      if (!session.enabled.has(method)) continue;
+      if (!session.enabled.has(method) || (held && method === HELD_ENABLE)) continue;
       const params = session.enabled.get(method);
       this.send(`${session.id}:${JSON.stringify({ id: RELAY_ID_PREFIX + ++this.seq, method, params })}`);
     }
+  }
+
+  /** Sends the new page instance the client's held Debugger.enable commands, under their own ids. */
+  private sendHeld(session: Session): boolean {
+    if (session.held.size === 0) return false;
+    const params = session.enabled.get(HELD_ENABLE) ?? {};
+    for (const id of session.held) {
+      session.pending.set(id, HELD_ENABLE);
+      this.send(`${session.id}:${JSON.stringify({ id, method: HELD_ENABLE, params })}`);
+    }
+    session.held.clear();
+    return true;
   }
 
   /** Tells a client a new page instance replaced the old one, and replays its `enable`s. */
@@ -330,7 +352,9 @@ export class Target {
           },
         })
       );
+    const held = this.sendHeld(session);
     for (const [method, params] of session.enabled) {
+      if (held && method === HELD_ENABLE) continue;
       this.send(`${session.id}:${JSON.stringify({ id: RELAY_ID_PREFIX + ++this.seq, method, params })}`);
     }
     // The Elements panel requests the new page's document.

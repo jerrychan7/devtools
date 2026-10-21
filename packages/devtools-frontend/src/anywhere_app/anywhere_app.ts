@@ -124,6 +124,14 @@ type EmbedderRequest = {type: 'dock', side: UI.DockController.DockState}|{type: 
     {type: 'keep-open', keep: boolean}|{type: 'theme', toolbar: string, divider: string, icon: string};
 // Remote debugging (packages/remote-server): DevTools is a page of its own, connected to the
 // relay with upstream's `?ws=`/`?wss=` (its WebSocket transport), and there is no embedder.
+// A frontend hosted elsewhere (a CDN) is given them as `#?ws=`/`#?wss=`, so that the socket's token
+// is not sent there: upstream reads only the query, which they are copied to.
+for (const name of ['ws', 'wss']) {
+  const value = params.get(name);
+  if (value && !Root.Runtime.Runtime.queryParam(name)) {
+    Root.Runtime.Runtime.setQueryParamForTesting(name, value);
+  }
+}
 const remote = Boolean(Root.Runtime.Runtime.queryParam('ws') || Root.Runtime.Runtime.queryParam('wss'));
 const notifyEmbedder = (request: EmbedderRequest) => {
   if (!remote) {

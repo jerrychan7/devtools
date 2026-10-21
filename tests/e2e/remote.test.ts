@@ -18,6 +18,7 @@ interface Listed {
   id: string;
   title: string;
   url: string;
+  userAgent: string;
   connected: boolean;
   clients: number;
   devtoolsFrontendUrl: string;
@@ -226,7 +227,7 @@ test('the handlers mount in a server of its own, under a base path, with a publi
     );
     assert.equal(
       listed.devtoolsFrontendUrl,
-      `https://cdn.example/anywhere_app.html?v=1&ws=${encodeURIComponent(`${host}/devtools/client/mounted`)}#x`
+      `https://cdn.example/anywhere_app.html?v=1#x&ws=${encodeURIComponent(`${host}/devtools/client/mounted`)}`
     );
     // A page that went away stays listed for a while, to come back.
     ws.close();
@@ -268,6 +269,67 @@ test('a page back from the back/forward cache gets the enables and detaches of w
   await waitFor(() => fake.received.some(m => m.includes('"method":"Runtime.enable"')));
   first.socket.close();
   fake.socket.close();
+});
+
+test('a Debugger.enable sent between two page instances is answered by the new one', async () => {
+  const fake = await fakePage('held');
+  fake.hello('l1');
+  await waitFor(async () => (await targets()).find(t => t.id === 'held'));
+  const client = await Client.connect(clientUrl('held'));
+  fake.socket.send(JSON.stringify({ method: 'DevtoolsAnywhere.pagehide' }));
+  const enabled = client.call('Debugger.enable');
+  fake.hello('l2');
+  const sent = await waitFor(() => fake.received.find(m => m.includes('"method":"Debugger.enable"')));
+  // Sent once, under the client's own id, and its answer goes to the client.
+  assert.equal(fake.received.filter(m => m.includes('"method":"Debugger.enable"')).length, 1);
+  const colon = sent.indexOf(':');
+  const { id } = JSON.parse(sent.slice(colon + 1)) as { id: number };
+  fake.socket.send(`${sent.slice(0, colon)}:${JSON.stringify({ id, result: { debuggerId: 'd' } })}`);
+  assert.deepEqual((await enabled).result, { debuggerId: 'd' });
+  client.socket.close();
+  fake.socket.close();
+});
+
+test("a hello's title and url are cut short, and the server keeps at most 1000 pages", async () => {
+  const fake = await fakePage('long');
+  fake.socket.send(
+    JSON.stringify({
+      method: 'DevtoolsAnywhere.hello',
+      params: {
+        loaderId: 'l',
+        title: 't'.repeat(5000),
+        url: 'u'.repeat(2 * 1024 * 1024 + 10),
+        userAgent: 'a'.repeat(5000),
+      },
+    })
+  );
+  const listed = await waitFor(async () => (await targets()).find(t => t.id === 'long' && t.title));
+  assert.equal(listed.title.length, 4096);
+  assert.equal(listed.url.length, 2 * 1024 * 1024);
+  assert.equal(listed.userAgent.length, 5000);
+  fake.socket.close();
+  // A server of its own: the pages it keeps would otherwise stay on this one's list.
+  const crowded = await startRemoteServer({ port: 0, host: '127.0.0.1', token: false });
+  const sockets: WebSocket[] = [];
+  const open = (id: string) =>
+    new Promise<boolean>(resolve => {
+      const socket = new WebSocket(`${new URL(crowded.url).origin.replace('http', 'ws')}/target/${id}`);
+      sockets.push(socket);
+      socket.onopen = () => resolve(true);
+      socket.onerror = () => resolve(false);
+    });
+  try {
+    for (let i = 0; i < 1000; i += 50) {
+      const batch = Array.from({ length: 50 }, (_, j) => open(`many-${i + j}`));
+      assert.ok((await Promise.all(batch)).every(Boolean));
+    }
+    assert.equal(await open('one-too-many'), false);
+    // A page already known still connects.
+    assert.equal(await open('many-999'), true);
+  } finally {
+    for (const socket of sockets) socket.close();
+    await crowded.close();
+  }
 });
 
 test("a new page instance is told only to the domains each client enabled, with Chrome's frame", async () => {
