@@ -41,9 +41,17 @@ const svgDataUrl = (file: string) =>
     .replace(/\s+/g, ' ')
     .replace(/[%#"<>]/g, c => encodeURIComponent(c));
 
-/** Bundles the release files in `src` into `out` (replaced). */
-export async function bundle(src: string, out: string): Promise<void> {
+/** The directory of a release file under third_party/ (`third_party/<lib>`), if it is under it. */
+const thirdPartyDir = (file: string) => /^third_party\/[^/]+/.exec(file)?.[0];
+
+/**
+ * Bundles the release files in `src` into `out` (replaced). Returns the third_party/<lib>
+ * directories whose code ends up in `out` (bundled, or copied), for the license check.
+ */
+export async function bundle(src: string, out: string): Promise<string[]> {
   const rel = (file: string) => path.relative(src, file).split(path.sep).join('/');
+  /** The third_party/<lib> directories something in `out` comes from. */
+  const thirdParty = new Set<string>();
   /** The SVGs inlined into Images.js: not copied unless something still names them. */
   const inlined = new Set<string>();
   /** Whether Root.Runtime#loadLegacyModule was rewritten: an upstream change must fail the build. */
@@ -193,6 +201,13 @@ export async function bundle(src: string, out: string): Promise<void> {
       plugins: [minify],
     });
     await build.close();
+    for (const chunk of output) {
+      if (chunk.type !== 'chunk') continue;
+      for (const [id, { renderedLength }] of Object.entries(chunk.modules)) {
+        const dir = thirdPartyDir(rel(id));
+        if (dir && renderedLength > 0) thirdParty.add(dir);
+      }
+    }
     return output[0].fileName;
   };
   // The workers first: the app names their files.
@@ -221,9 +236,12 @@ export async function bundle(src: string, out: string): Promise<void> {
     if (inlined.has(name) && !named(path.posix.basename(name))) continue;
     fs.mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
     fs.copyFileSync(path.join(src, file), path.join(out, file));
+    const dir = thirdPartyDir(name);
+    if (dir) thirdParty.add(dir);
   }
   const html = path.join(out, 'anywhere_app.html');
   const page = fs.readFileSync(html, 'utf8');
   if (!page.includes(`./${APP}`)) throw new Error(`bundle: anywhere_app.html does not load ./${APP}`);
   fs.writeFileSync(html, page.replace(`./${APP}`, `./${OUT_DIR}/${app}`));
+  return [...thirdParty].sort();
 }

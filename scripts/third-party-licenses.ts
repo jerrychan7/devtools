@@ -7,7 +7,8 @@
 //   - @zumer/snapdom from node_modules
 //   - the devtools-frontend checkout at packages/devtools-frontend/REVISION, for the DevTools
 //     license and the README.chromium + LICENSE of every library under front_end/third_party
-//     that ends up in packages/devtools-frontend/dist (which must be built)
+//     that ends up in packages/devtools-frontend/dist (which must be built: the frontend build
+//     lists those libraries in packages/devtools-frontend/dist-third-party.ignore.json)
 //
 // Env: DEVTOOLS_FRONTEND_SRC  checkout of devtools-frontend
 //                             default: <repo>/devtools-frontend.ignore/devtools-frontend
@@ -22,6 +23,7 @@ const src = path.resolve(
 );
 const thirdParty = path.join(src, 'front_end/third_party');
 const frontendDist = path.join(repo, 'packages/devtools-frontend/dist');
+const frontendThirdParty = path.join(repo, 'packages/devtools-frontend/dist-third-party.ignore.json');
 
 const fail = (message: string): never => {
   console.error(message);
@@ -32,6 +34,12 @@ if (!fs.existsSync(frontendDist)) {
   fail(
     'packages/devtools-frontend/dist does not exist: build the frontend first ' +
       '(pnpm --filter @devtools-anywhere/devtools-frontend build:frontend).'
+  );
+}
+if (!fs.existsSync(frontendThirdParty)) {
+  fail(
+    'packages/devtools-frontend/dist-third-party.ignore.json does not exist: build the frontend again ' +
+      '(pnpm --filter @devtools-anywhere/devtools-frontend build:frontend --copy-only reuses the last build).'
   );
 }
 if (!fs.existsSync(thirdParty)) fail(`No devtools-frontend checkout at ${src} (set DEVTOOLS_FRONTEND_SRC).`);
@@ -95,7 +103,10 @@ const devtools: Component = {
   note: "dist/ is its build output (with this project's patches); the translations in devtools-frontend-locales come from it too.",
 };
 
-/** Libraries of front_end/third_party in the frontend's dist: directory, where in dist, copyright. */
+/**
+ * Libraries of front_end/third_party in the frontend's dist: directory, where it comes from in the
+ * release files (bundled into dist/bundle/, or a directory copied to dist), copyright.
+ */
 const frontendLibraries: [dir: string, distPath: string, copyright: string][] = [
   ['acorn', 'third_party/acorn', 'acorn contributors (see its AUTHORS)'],
   ['chromium', 'third_party/chromium', 'The Chromium Authors'],
@@ -115,10 +126,13 @@ const frontendLibraries: [dir: string, distPath: string, copyright: string][] = 
 ];
 
 // A library added to (or dropped from) the frontend's dist must be added to (or dropped from) the list.
+// What is under third_party/ is checked against the build's list, the rest against dist/.
 const listed = new Set(frontendLibraries.map(([, distPath]) => distPath));
-const inDist = fs.readdirSync(path.join(frontendDist, 'third_party')).map(dir => `third_party/${dir}`);
-const unlisted = inDist.filter(distPath => !listed.has(distPath));
-const missing = [...listed].filter(distPath => !fs.existsSync(path.join(frontendDist, distPath)));
+const inDist = new Set(JSON.parse(read(frontendThirdParty)) as string[]);
+const unlisted = [...inDist].filter(distPath => !listed.has(distPath));
+const missing = [...listed].filter(distPath =>
+  distPath.startsWith('third_party/') ? !inDist.has(distPath) : !fs.existsSync(path.join(frontendDist, distPath))
+);
 if (unlisted.length || missing.length) {
   fail(
     'The frontend dist does not match the list in scripts/third-party-licenses.ts.\n' +
@@ -143,7 +157,9 @@ const frontendComponents = frontendLibraries.map(([dir, distPath, copyright]): C
       : `https://chromium.googlesource.com/devtools/devtools-frontend/+/${devtools.version}/front_end/third_party/${dir}/`,
     text: read(path.join(thirdParty, dir, field('License File'))),
     packages: ['devtools-frontend'],
-    note: `In dist/${distPath}/.`,
+    note: distPath.startsWith('third_party/')
+      ? `Bundled into dist/bundle/ (from ${distPath}/).`
+      : `In dist/${distPath}/.`,
   };
 });
 

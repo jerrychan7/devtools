@@ -228,7 +228,10 @@ for (const name of fs.readdirSync(path.join(gen, LOCALES)).filter(f => f.endsWit
 fs.writeFileSync(path.join(localesDist, 'REVISION'), revision + '\n');
 
 fs.writeFileSync(path.join(release, 'REVISION'), revision + '\n');
-await bundle(release, dist);
+// Which third_party libraries end up in dist/, for scripts/third-party-licenses.ts. Next to
+// dist/ rather than in it: it is not part of the package.
+const thirdParty = await bundle(release, dist);
+fs.writeFileSync(path.join(pkg, 'dist-third-party.ignore.json'), JSON.stringify(thirdParty, null, 2) + '\n');
 if (args.has('--latest')) fs.writeFileSync(revisionFile, revision + '\n');
 console.log(
   `Built devtools-frontend ${revision} → ${path.relative(repo, dist)} (${kept.length} of ${files.length} files, ` +

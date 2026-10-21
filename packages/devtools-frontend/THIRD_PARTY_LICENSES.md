@@ -69,7 +69,7 @@ This package contains the third-party code below, with its copyright notices and
 - Copyright: acorn contributors (see its AUTHORS)
 - Source: https://github.com/acornjs/acorn
 - Included in: devtools-frontend
-- Notes: In dist/third_party/acorn/.
+- Notes: Bundled into dist/bundle/ (from third_party/acorn/).
 
 ```text
 MIT License
@@ -102,7 +102,7 @@ THE SOFTWARE.
 - Copyright: The Chromium Authors
 - Source: https://chromium.googlesource.com/devtools/devtools-frontend/+/dbaca449720468dd5323411246d159d5e38c3767/front_end/third_party/chromium/
 - Included in: devtools-frontend
-- Notes: In dist/third_party/chromium/.
+- Notes: Bundled into dist/bundle/ (from third_party/chromium/).
 
 ```text
 // Copyright 2014 The Chromium Authors
@@ -141,7 +141,7 @@ THE SOFTWARE.
 - Copyright: Marijn Haverbeke and others
 - Source: https://github.com/codemirror/CodeMirror.next/
 - Included in: devtools-frontend
-- Notes: In dist/third_party/codemirror.next/.
+- Notes: Bundled into dist/bundle/ (from third_party/codemirror.next/).
 
 ```text
 MIT License
@@ -174,7 +174,7 @@ THE SOFTWARE.
 - Copyright: not stated in the license text
 - Source: https://www.npmjs.com/package/csp_evaluator
 - Included in: devtools-frontend
-- Notes: In dist/third_party/csp_evaluator/.
+- Notes: Bundled into dist/bundle/ (from third_party/csp_evaluator/).
 
 ```text
 
@@ -388,7 +388,7 @@ THE SOFTWARE.
 - Copyright: Google Inc. (diff-match-patch)
 - Source: https://github.com/google/diff-match-patch/tree/master/javascript
 - Included in: devtools-frontend
-- Notes: In dist/third_party/diff/.
+- Notes: Bundled into dist/bundle/ (from third_party/diff/).
 
 ```text
 
@@ -602,7 +602,7 @@ THE SOFTWARE.
 - Copyright: Google LLC (Lighthouse)
 - Source: https://github.com/GoogleChrome/lighthouse
 - Included in: devtools-frontend
-- Notes: In dist/third_party/i18n/.
+- Notes: Bundled into dist/bundle/ (from third_party/i18n/).
 
 ```text
 
@@ -816,7 +816,7 @@ THE SOFTWARE.
 - Copyright: Oath Inc. (includes tslib, 0BSD, Microsoft Corporation)
 - Source: https://github.com/formatjs/formatjs
 - Included in: devtools-frontend
-- Notes: In dist/third_party/intl-messageformat/.
+- Notes: Bundled into dist/bundle/ (from third_party/intl-messageformat/).
 
 ```text
 Copyright (c) 2019, Oath Inc.
@@ -861,7 +861,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - Copyright: Aseem Kishore and others
 - Source: https://github.com/json5/json5
 - Included in: devtools-frontend
-- Notes: In dist/third_party/json5/.
+- Notes: Bundled into dist/bundle/ (from third_party/json5/).
 
 ```text
 MIT License
@@ -896,7 +896,7 @@ SOFTWARE.
 - Copyright: Google LLC (Lighthouse)
 - Source: https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript
 - Included in: devtools-frontend
-- Notes: In dist/third_party/legacy-javascript/.
+- Notes: Bundled into dist/bundle/ (from third_party/legacy-javascript/).
 
 ```text
 
@@ -1110,7 +1110,7 @@ SOFTWARE.
 - Copyright: Google LLC
 - Source: https://github.com/lit/lit
 - Included in: devtools-frontend
-- Notes: In dist/third_party/lit/.
+- Notes: Bundled into dist/bundle/ (from third_party/lit/).
 
 ```text
 BSD 3-Clause License
@@ -1150,7 +1150,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - Copyright: Christopher Jeffrey / MarkedJS
 - Source: https://github.com/markedjs/marked
 - Included in: devtools-frontend
-- Notes: In dist/third_party/marked/.
+- Notes: Bundled into dist/bundle/ (from third_party/marked/).
 
 ```text
 ## Marked
@@ -1201,7 +1201,7 @@ out of the use of this software, even if advised of the possibility of such dama
 - Copyright: The Chromium Authors
 - Source: https://github.com/ChromeDevTools/source-map-scopes-codec
 - Included in: devtools-frontend
-- Notes: In dist/third_party/source-map-scopes-codec/.
+- Notes: Bundled into dist/bundle/ (from third_party/source-map-scopes-codec/).
 
 ```text
 Copyright 2025 The Chromium Authors
@@ -1239,7 +1239,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - Copyright: Patrick Hulce
 - Source: https://github.com/patrickhulce/third-party-web
 - Included in: devtools-frontend
-- Notes: In dist/third_party/third-party-web/.
+- Notes: Bundled into dist/bundle/ (from third_party/third-party-web/).
 
 ```text
 The MIT License (MIT)
@@ -1271,7 +1271,7 @@ SOFTWARE.
 - Copyright: not stated in the license text
 - Source: https://github.com/wasdk/wasmparser
 - Included in: devtools-frontend
-- Notes: In dist/third_party/wasmparser/.
+- Notes: Bundled into dist/bundle/ (from third_party/wasmparser/).
 
 ```text
 
