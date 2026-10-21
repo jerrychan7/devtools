@@ -60,6 +60,11 @@ export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
     nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
     probe: viewProbe(probe),
   };
+  ctx.server.onReset(() => {
+    ctx.objects.reset();
+    ctx.nodes.reset();
+    ctx.nodes.inspected = [];
+  });
   registerStubs(ctx.server);
   registerRuntime(ctx);
   registerNetwork(ctx);

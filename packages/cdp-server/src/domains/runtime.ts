@@ -557,6 +557,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
+  server.onReset(() => (lastResult = undefined));
 
   /** Console utilities, available only while console input is evaluated. */
   function commandLineApi(): Record<string, unknown> {

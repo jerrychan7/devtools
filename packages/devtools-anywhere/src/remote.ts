@@ -118,7 +118,10 @@ export function connectRemote(createServer: () => CdpServer, serverUrl: string):
     // report scripts and style sheets again after a disable.
     const { server } = found;
     const calls = [...STATEFUL_DOMAINS.map(domain => `${domain}.disable`), 'Page.stopScreencast'];
-    Promise.all(calls.map(method => server.call(method).catch(() => {}))).then(() => idle.push(server));
+    Promise.all(calls.map(method => server.call(method).catch(() => {}))).then(() => {
+      server.reset();
+      idle.push(server);
+    });
   }
   function receive(data: string) {
     if (data.startsWith('{')) {

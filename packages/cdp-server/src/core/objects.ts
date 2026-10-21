@@ -243,6 +243,15 @@ export class ObjectRegistry {
     return this.groupById.get(objectId);
   }
 
+  /** Starts a new session: forgets every object, and ids of the old session never resolve again. */
+  reset() {
+    this.prefix = Math.floor(Math.random() * 1e9) + '.';
+    this.byId.clear();
+    this.ids.clear();
+    this.groupById.clear();
+    this.groups.clear();
+  }
+
   releaseGroup(group: string) {
     this.groups.get(group)?.forEach(id => this.release(id));
     this.groups.delete(group);

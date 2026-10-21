@@ -157,6 +157,41 @@ test('two clients inspect the page at once, each in a session of its own', async
   first.socket.close();
 });
 
+test('a session after one that ended gets none of its objects, node ids, $0 or $_', async () => {
+  const listed = await target();
+  const first = await Client.connect(listed.webSocketDebuggerUrl);
+  await first.call('Runtime.enable');
+  const { result } = await first.call('Runtime.evaluate', { expression: '({ a: 1 })' });
+  const objectId = JSON.stringify(result).match(/"objectId":"([^"]+)"/)?.[1];
+  assert.ok(objectId);
+  await first.call('Runtime.evaluate', {
+    expression: '"left over"',
+    objectGroup: 'console',
+    includeCommandLineAPI: true,
+  });
+  const { result: doc } = await first.call('DOM.getDocument');
+  const nodeId = JSON.stringify(doc).match(/"nodeId":(\d+)/)?.[1];
+  assert.ok(nodeId);
+  await first.call('DOM.setInspectedNode', { nodeId: Number(nodeId) });
+  first.socket.close();
+  await waitFor(async () => (await target()).clients === 0);
+  // The page's server is reused once the old one is reset; give it time to be.
+  await new Promise(r => setTimeout(r, 300));
+  const second = await Client.connect(listed.webSocketDebuggerUrl);
+  await second.call('Runtime.enable');
+  const props = await second.call('Runtime.getProperties', { objectId, ownProperties: true });
+  assert.ok(props.error);
+  const resolved = await second.call('DOM.resolveNode', { nodeId: Number(nodeId) });
+  assert.ok(resolved.error);
+  const { result: utils } = await second.call('Runtime.evaluate', {
+    expression: '[typeof $_, typeof $0]',
+    includeCommandLineAPI: true,
+    returnByValue: true,
+  });
+  assert.ok(JSON.stringify(utils).includes('"value":["undefined","undefined"]'), JSON.stringify(utils));
+  second.socket.close();
+});
+
 test('the handlers mount in a server of its own, under a base path, with a public URL', async () => {
   const { createServer } = await import('node:http');
   const { createRemoteHandler } = await import('@devtools-anywhere/remote-server');

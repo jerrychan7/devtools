@@ -24,6 +24,7 @@ export class CdpError extends Error {
 export class CdpServer {
   private domains = new Map<string, Record<string, Handler>>();
   private listeners = new Set<(message: string) => void>();
+  private resets = new Set<() => void>();
 
   register(domain: string, handlers: Record<string, Handler>) {
     this.domains.set(domain, { ...this.domains.get(domain), ...handlers });
@@ -32,6 +33,19 @@ export class CdpServer {
   onMessage(listener: (message: string) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Adds what `reset()` clears. */
+  onReset(fn: () => void) {
+    this.resets.add(fn);
+  }
+
+  /**
+   * Forgets the state of the session that ended (remote objects, node ids, `$0`, `$_`), so that
+   * the next client starts like a new Chrome session. Call after disabling the domains.
+   */
+  reset() {
+    this.resets.forEach(fn => fn());
   }
 
   emit(method: string, params: object) {
