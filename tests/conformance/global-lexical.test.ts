@@ -36,6 +36,9 @@ test('globalLexicalScopeNames lists the names Chrome lists', async () => {
 
 test('a script no longer in the document is not fetched again from the network', async () => {
   const url = `${env?.baseUrl}/tests/conformance/assets/lexical-classic.js?_=${Date.now()}`;
+  // Under load the first load's response event can arrive after the script has run: wait for it,
+  // so it is not taken for a fetch made by Runtime.globalLexicalScopeNames.
+  const firstLoad = t.page.waitForResponse(res => res.url() === url);
   await t.page.evaluate(
     src =>
       new Promise(resolve => {
@@ -49,6 +52,7 @@ test('a script no longer in the document is not fetched again from the network',
       }),
     url
   );
+  await firstLoad;
   const fetched: string[] = [];
   const onResponse = (res: { url(): string; fromCache(): boolean }) => {
     if (res.url() === url && !res.fromCache()) fetched.push(res.url());
