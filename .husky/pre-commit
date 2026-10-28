@@ -1,1 +1,7 @@
 pnpm exec lint-staged
+# The devtools-frontend checkout must hold no edit to upstream files outside the patches, or a
+# build from a fresh checkout would lack it. The check takes seconds: only for commits that
+# touch the frontend package.
+if git diff --cached --name-only | grep -q '^packages/devtools-frontend/'; then
+  node packages/devtools-frontend/scripts/check-checkout.ts
+fi

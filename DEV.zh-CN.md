@@ -147,7 +147,7 @@ node scripts/build.ts --no-sync --reset   # 同时丢弃检出目录里不属于
 node scripts/build.ts --no-sync --copy-only   # 只重新复制到 dist/（修改了复制逻辑时）
 ```
 
-构建会让检出目录始终等于 `REVISION` 加上全部补丁：缺失、改动过或已删除的补丁，都会从干净的文件重新打一遍。如果某个文件既不同于 `REVISION`，也不同于打完补丁后的样子，说明里面有还没写进补丁的修改，构建会停下并列出它，而不是把修改丢掉；加 `--reset` 才会丢弃。
+构建会让检出目录始终等于 `REVISION` 加上全部补丁：缺失、改动过或已删除的补丁，都会从干净的文件重新打一遍。如果某个文件既不同于 `REVISION`，也不同于打完补丁后的样子，说明里面有还没写进补丁的修改，构建会停下并列出它，而不是把修改丢掉；加 `--reset` 才会丢弃。改动了 `packages/devtools-frontend/` 的提交，pre-commit 钩子也会因同样的修改而拦下（`scripts/check-checkout.ts`），避免在检出目录里改了却漏写进补丁；入口的改动需要配套改上游文件时（比如在 `KnownContextValues.ts` 登记 `jslog` 上下文值），写成单独的补丁。
 
 要修改补丁，先在检出目录里改上游文件，再对 `HEAD` 求该补丁所涉及文件的 diff，重新生成补丁：
 

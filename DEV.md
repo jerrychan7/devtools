@@ -147,7 +147,7 @@ node scripts/build.ts --no-sync --reset   # also discard edits in the checkout t
 node scripts/build.ts --no-sync --copy-only   # only redo the copy to dist/ (after changing the copy logic)
 ```
 
-The build keeps the checkout at exactly `REVISION` plus every patch: a patch that is missing, changed or removed is applied again from a clean file. A file that differs both from `REVISION` and from what the patches make of it holds edits no patch has yet, so the build stops and lists it rather than discard them; `--reset` discards them.
+The build keeps the checkout at exactly `REVISION` plus every patch: a patch that is missing, changed or removed is applied again from a clean file. A file that differs both from `REVISION` and from what the patches make of it holds edits no patch has yet, so the build stops and lists it rather than discard them; `--reset` discards them. A commit that touches `packages/devtools-frontend/` is stopped on the same edits by the pre-commit hook (`scripts/check-checkout.ts`), so that an edit made in the checkout cannot be left out of the patches; a checkout edit an entrypoint change needs (a `jslog` context in `KnownContextValues.ts`, say) goes into a patch of its own.
 
 To change a patch, edit the upstream files in the checkout, then regenerate the patch from the files it touches, compared with `HEAD`:
 

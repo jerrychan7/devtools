@@ -3,10 +3,7 @@
 //   builds with gn + autoninja, and bundles the release files into dist/ (scripts/bundle.ts; the
 //   locales beyond en-US and zh go to ../devtools-frontend-locales/dist/).
 //
-// Environment:
-//   DEVTOOLS_FRONTEND_SRC  checkout of devtools-frontend (`fetch devtools-frontend`)
-//                          default: <repo>/devtools-frontend.ignore/devtools-frontend
-//   DEPOT_TOOLS            depot_tools directory, default: <repo>/depot_tools.ignore
+// Environment: see checkout.ts.
 //
 // Flags:
 //   --latest     build the tip of origin/main instead of REVISION, and pin it on success
@@ -24,15 +21,9 @@
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { bundle } from './bundle.ts';
+import { changed, env, hasCheckout, patches, pkg, read, repo, src, unexpectedEdits } from './checkout.ts';
 
-const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const repo = path.resolve(pkg, '../..');
-const src = path.resolve(
-  process.env['DEVTOOLS_FRONTEND_SRC'] ?? path.join(repo, 'devtools-frontend.ignore/devtools-frontend')
-);
-const depotTools = path.resolve(process.env['DEPOT_TOOLS'] ?? path.join(repo, 'depot_tools.ignore'));
 const out = path.join(src, 'out/Anywhere');
 const dist = path.join(pkg, 'dist');
 /** The release files anywhere_app can load, one bundle per module, before bundle.ts. */
@@ -45,12 +36,10 @@ const revisionFile = path.join(pkg, 'REVISION');
 const args = new Set(process.argv.slice(2));
 /** --copy-only reuses the last build, so syncing (or moving to --latest) would mislabel it. */
 const noSync = args.has('--no-sync') || args.has('--copy-only');
-const env = { ...process.env, PATH: `${depotTools}${path.delimiter}${process.env['PATH']}`, DEPOT_TOOLS_UPDATE: '0' };
 const run = (cmd: string, argv: string[], opts: ExecFileSyncOptions = {}) =>
   execFileSync(cmd, argv, { cwd: src, env, stdio: 'inherit', ...opts });
-const read = (cmd: string, argv: string[]) => execFileSync(cmd, argv, { cwd: src, env, encoding: 'utf8' }).trim();
 
-if (!fs.existsSync(path.join(src, '.git'))) {
+if (!hasCheckout()) {
   console.error(`No devtools-frontend checkout at ${src}. Run \`fetch devtools-frontend\` (depot_tools) first.`);
   process.exit(1);
 }
@@ -74,42 +63,7 @@ if (noSync) {
 // as exactly REVISION plus every patch, so that a build depends on nothing else: a patch that
 // was removed or changed must not linger. Edits made in the checkout to write a patch are not
 // thrown away silently, though: if the checkout holds changes the patches do not account for,
-// the build stops, unless --reset is given.
-const patches = fs
-  .readdirSync(path.join(pkg, 'patches'))
-  .filter(f => f.endsWith('.patch'))
-  .sort()
-  .map(f => path.join(pkg, 'patches', f));
-/** Upstream files that differ from HEAD (staged or not; untracked files are ours, copied below). */
-const changed = () => read('git', ['diff', 'HEAD', '--name-only']).split('\n').filter(Boolean);
-/**
- * Upstream files where the checkout differs from HEAD plus every patch (compared with a scratch
- * index built that way), or null if the patches do not apply to HEAD.
- */
-function unexpectedEdits(): string[] | null {
-  const index = path.join(src, '.git', 'anywhere-expected-index');
-  const scratch = { ...env, GIT_INDEX_FILE: index };
-  try {
-    execFileSync('git', ['read-tree', 'HEAD'], { cwd: src, env: scratch });
-    for (const patch of patches) execFileSync('git', ['apply', '--cached', patch], { cwd: src, env: scratch });
-    const patched = read('git', ['apply', '--numstat', ...patches])
-      .split('\n')
-      .map(line => line.split('\t')[2] ?? '')
-      .filter(Boolean);
-    const paths = [...new Set([...changed(), ...patched])];
-    if (paths.length === 0) return [];
-    const differ = execFileSync('git', ['diff', '--name-only', '--', ...paths], {
-      cwd: src,
-      env: scratch,
-      encoding: 'utf8',
-    });
-    return differ.split('\n').filter(Boolean);
-  } catch {
-    return null;
-  } finally {
-    fs.rmSync(index, { force: true });
-  }
-}
+// the build stops, unless --reset is given (check-checkout.ts stops a commit on the same edits).
 const unexpected = unexpectedEdits();
 if (unexpected === null) throw new Error('The patches do not apply to REVISION: regenerate them (see DEV.md).');
 if (unexpected.length > 0) {
