@@ -1,4 +1,4 @@
-import { FRAME_ID, LOADER_ID, installProbe, type CdpServer } from '@devtools-anywhere/cdp-server';
+import { FRAME_ID, LOADER_ID, installProbe, type CdpServer } from './cdp-agent';
 import type { RemoteOptions } from './api';
 import { STATEFUL_DOMAINS } from './connection';
 

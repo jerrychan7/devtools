@@ -154,7 +154,7 @@ const dock = params.get('dock');
 // user can still remove it.
 const IGNORE_LIST = 'skip-stack-frames-pattern';
 const IGNORE_LIST_SEEDED = 'devtools-anywhere-ignore-list-seeded';
-const OWN_SCRIPTS = '/(probe|devtools-anywhere|cdp-server)\\.iife\\.js$|/snapdom\\.js$';
+const OWN_SCRIPTS = '/(probe|devtools-anywhere)\\.iife\\.js$|/snapdom\\.js$';
 function withOwnScriptsIgnored(prefs: Record<string, string>): Record<string, string> {
   if (prefs[IGNORE_LIST_SEEDED]) {
     return prefs;

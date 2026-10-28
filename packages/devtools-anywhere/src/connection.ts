@@ -1,4 +1,4 @@
-import { FRAME_ID, LOADER_ID, type CdpServer } from '@devtools-anywhere/cdp-server';
+import { FRAME_ID, LOADER_ID, type CdpServer } from './cdp-agent';
 import { RelayCore, parse, type Frame, type Session } from '@devtools-anywhere/relay-core';
 
 const HELLO_METHOD = 'DevtoolsAnywhere.hello';

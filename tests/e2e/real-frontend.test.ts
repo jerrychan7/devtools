@@ -4,8 +4,8 @@ import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ElementHandle, Frame, JSHandle, Page } from 'puppeteer-core';
-import { launch } from '../conformance/harness.ts';
-import type { Env } from '../conformance/harness.ts';
+import { launch } from '../support/browser.ts';
+import type { Env } from '../support/browser.ts';
 
 const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
 const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first';
@@ -350,7 +350,7 @@ test(
     const origin = new URL(env?.baseUrl ?? '').origin;
     assert.deepEqual(
       await ignored([
-        `${origin}/vendor/cdp-server.iife.js`,
+        `${origin}/vendor/devtools-anywhere.iife.js`,
         `${origin}/assets/snapdom.js`,
         `${origin}/assets/my-probe.iife.js`,
         `${origin}/assets/snapdom.js.html`,
@@ -701,7 +701,7 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
 test("DevTools' own scripts are ignore-listed once, next to the user's rules", { skip }, async () => {
   const KEY = 'skip-stack-frames-pattern';
   const SEEDED = 'devtools-anywhere-ignore-list-seeded';
-  const OWN = '/(probe|devtools-anywhere|cdp-server)\\.iife\\.js$|/snapdom\\.js$';
+  const OWN = '/(probe|devtools-anywhere)\\.iife\\.js$|/snapdom\\.js$';
   /** Reloads the page with these preferences, and returns the rules the new frontend uses. */
   const reloadWith = async (prefs: Record<string, string | null>) => {
     // The frontend's preferences are the localStorage of its origin, the page's.

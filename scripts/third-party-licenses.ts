@@ -3,7 +3,7 @@
 // running it again without changes leaves the files untouched.
 //
 // Inputs:
-//   - the es-module-lexer license (embedded below: the port lives in packages/cdp-server)
+//   - the es-module-lexer license (embedded below: the port lives in packages/devtools-anywhere/src/cdp-agent)
 //   - @zumer/snapdom from node_modules
 //   - the devtools-frontend checkout at packages/devtools-frontend/REVISION, for the DevTools
 //     license and the README.chromium + LICENSE of every library under front_end/third_party
@@ -79,8 +79,8 @@ const lexer: Component = {
   copyright: 'Guy Bedford',
   url: 'https://github.com/guybedford/es-module-lexer',
   text: ES_MODULE_LEXER_LICENSE,
-  packages: ['cdp-server', 'devtools-anywhere'],
-  note: 'The lexer in packages/cdp-server/src/core/lexer.ts is ported from it.',
+  packages: ['devtools-anywhere'],
+  note: 'The lexer in packages/devtools-anywhere/src/cdp-agent/core/lexer.ts is ported from it.',
 };
 const snapdom: Component = {
   name: 'snapDOM (@zumer/snapdom)',
@@ -223,7 +223,7 @@ write(
     'checkout (not committed); that directory is not part of any published package.\n'
 );
 
-for (const pkg of ['cdp-server', 'devtools-anywhere', 'devtools-frontend', 'devtools-frontend-locales']) {
+for (const pkg of ['devtools-anywhere', 'devtools-frontend', 'devtools-frontend-locales']) {
   const components = all.filter(c => c.packages.includes(pkg));
   write(
     `packages/${pkg}/THIRD_PARTY_LICENSES.md`,

@@ -5,7 +5,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
 import { startRemoteServer, type RemoteServer } from '@devtools-anywhere/remote-server';
-import { launch, type Env } from '../conformance/harness.ts';
+import { launch, type Env } from '../support/browser.ts';
 
 const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
 

@@ -25,15 +25,15 @@
   },
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/api-extract.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sw.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sw.json && tsc -p tsconfig.cdp-agent.json",
     "dev": "node build.ts --watch"
   },
   "dependencies": {
-    "@devtools-anywhere/cdp-server": "workspace:*",
     "@zumer/snapdom": "^3.3.5"
   },
   "devDependencies": {
     "@devtools-anywhere/relay-core": "workspace:*",
+    "devtools-protocol": "^0.0.1721318",
     "esbuild": "^0.25.0",
     "typescript": "^7.0.2"
   }

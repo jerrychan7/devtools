@@ -64,7 +64,7 @@ pnpm dev          # builds once, then rebuilds every package on change
 pnpm playground   # http://localhost:8788/playground/
 ```
 
-`pnpm dev` runs esbuild in watch mode for `cdp-server`, `devtools-anywhere`, `vite-plugin` and `remote-server`. A change in `cdp-server` also rebuilds the `devtools-anywhere` bundles that include it. There is no hot reload: refresh the page to load the new build. Type declarations are only emitted by `pnpm build`.
+`pnpm dev` runs esbuild in watch mode for `devtools-anywhere`, `vite-plugin` and `remote-server`. There is no hot reload: refresh the page to load the new build. Type declarations are only emitted by `pnpm build`.
 
 The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON; `/ws/echo` is a WebSocket that sends every message back.
 
@@ -72,19 +72,21 @@ The playground server serves the repository root, so any page in it can be opene
 
 ```
 packages/
-  cdp-server/     in-page CDP server
-    src/probe/    early capture: zero dependencies, size budget, separate build entry
-    src/core/     state shared across domains: remote objects, node ids, DOM observer, stylesheets
-    src/domains/  one directory per domain: runtime, network, dom, css, overlay, storage, ...
   devtools-frontend/  pinned devtools-frontend version, patches and build scripts
   devtools-anywhere/  umbrella package: <devtools-anywhere>, iframe, connection layer, shell mode
+    src/cdp-agent/    in-page CDP agent; imports nothing outside this directory (tsconfig.cdp-agent.json),
+                      the rest of the package uses it through index.ts and probe/
+      probe/          early capture: zero dependencies, size budget, separate build entry
+      core/           state shared across domains: remote objects, node ids, DOM observer, stylesheets
+      domains/        one file per domain: runtime, network, dom, css, overlay, storage, ...
+    test-support/     conformance harness, fixture page and assets
   vite-plugin/    zero-config injection
   remote-server/  remote debugging: relay between a page and DevTools elsewhere, target list, CLI
   relay-core/     internal, never published: the relay logic shell mode and remote-server share (reloads,
                   `enable` replay, pending commands); bundled into both
-tests/
-  conformance/    compare CDP output against real Chrome via Puppeteer
+tests/            tests that span packages
   e2e/            probe → CDP → frontend
+  support/        launches Chrome with the static server
 playground/       pages and server for development
 experiments/      validation records
 ```
@@ -93,8 +95,8 @@ experiments/      validation records
 
 | Change | Where | How to see it |
 |---|---|---|
-| Early capture (console, errors, requests) | `packages/cdp-server/src/probe/` | Keep it small: it runs synchronously before the page's code. Check `probe.iife.js` size (min+gzip) |
-| A CDP domain | `packages/cdp-server/src/domains/` | Playground, plus a conformance test |
+| Early capture (console, errors, requests) | `packages/devtools-anywhere/src/cdp-agent/probe/` | Keep it small: it runs synchronously before the page's code. Check `probe.iife.js` size (min+gzip) |
+| A CDP domain | `packages/devtools-anywhere/src/cdp-agent/domains/` | Playground, plus a conformance test |
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
 | Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |
 | Remote debugging | `packages/remote-server/src/` (relay, server), `packages/devtools-anywhere/src/remote.ts` (page side) | `tests/e2e/remote.test.ts`; `node packages/remote-server/dist/cli.js` |
@@ -116,11 +118,13 @@ experiments/      validation records
 
 ```bash
 pnpm test                                     # build + all tests
-node --test tests/conformance/css.test.ts     # one file (after a build or with pnpm dev running)
+node --test packages/devtools-anywhere/src/cdp-agent/domains/css.conformance.test.ts
+                                              # one file (after a build or with pnpm dev running)
 pnpm typecheck                                # builds, then checks packages, build scripts, tests and playground
 ```
 
-- `tests/conformance/`: the same page is inspected through real Chrome's CDP and through ours, and the outputs are compared. When implementing or changing a CDP method, add a test here: real Chrome is the reference, not the protocol documentation.
+A test sits next to what it tests, as `<name>.test.ts`; only tests that span packages are under `tests/`.
+- `*.conformance.test.ts` (next to the CDP agent's domains): the same page is inspected through real Chrome's CDP and through ours, and the outputs are compared. When implementing or changing a CDP method, add a test here: real Chrome is the reference, not the protocol documentation. They load the built bundles, as pages do.
 - `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend.
 
 ### Working on the frontend
@@ -177,7 +181,7 @@ pnpm test        # with the frontend built, so the real-frontend tests run
 
 The pre-commit hook (husky + lint-staged) runs on the staged files only: it formats them with oxfmt and adds the result to the commit, then lints them with oxlint and stops the commit on any error. `git commit --no-verify` skips it once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
 
-The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`, plus `dist/probe.d.ts` for cdp-server) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`). Commit a changed report with the change that caused it: it is how a change to the public API shows in review. In CI (`CI=true`) a report that no longer matches fails the build. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
+The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`). Commit a changed report with the change that caused it: it is how a change to the public API shows in review. In CI (`CI=true`) a report that no longer matches fails the build. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
 
 Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change.
 
@@ -186,7 +190,7 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 ### Commits
 
 - One logical step per commit.
-- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `docs`, `test`, `build`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-server`, `network`, `devtools-frontend`, `sw`, `readme`.
+- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `docs`, `test`, `build`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `sw`, `readme`.
 
 ### Pull requests
 

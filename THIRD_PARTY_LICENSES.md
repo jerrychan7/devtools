@@ -8,7 +8,7 @@ devtools-anywhere itself is licensed under the MIT license (see [LICENSE](LICENS
 
 | Component | Version | License | Copyright | Included in |
 | --- | --- | --- | --- | --- |
-| [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | cdp-server, devtools-anywhere |
+| [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | devtools-anywhere |
 | [snapDOM (@zumer/snapdom)](https://github.com/zumerlab/snapdom) | 3.3.5 | MIT | ZumerLab | devtools-anywhere |
 | [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | dbaca449720468dd5323411246d159d5e38c3767 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
 | [acorn (DevTools front_end/third_party/acorn)](https://github.com/acornjs/acorn) | 8.10.0 | MIT | acorn contributors (see its AUTHORS) | devtools-frontend |
@@ -53,8 +53,8 @@ Licenses of all transitive development dependencies (`pnpm licenses list -r --de
 - License: MIT
 - Copyright: Guy Bedford
 - Source: https://github.com/guybedford/es-module-lexer
-- Included in: cdp-server, devtools-anywhere
-- Notes: The lexer in packages/cdp-server/src/core/lexer.ts is ported from it.
+- Included in: devtools-anywhere
+- Notes: The lexer in packages/devtools-anywhere/src/cdp-agent/core/lexer.ts is ported from it.
 
 ```text
 MIT License

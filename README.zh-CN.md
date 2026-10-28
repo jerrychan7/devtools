@@ -106,13 +106,12 @@
 | 包 | 内容 |
 |---|---|
 | `devtools-anywhere` | 总包：`<devtools-anywhere>` 组件、`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`、`devtools-anywhere-sw.js` 和 `snapdom.js`（投屏的绘制器，按需加载） |
-| `@devtools-anywhere/cdp-server` | 页面内的 CDP 服务端。探针通过子路径 `@devtools-anywhere/cdp-server/probe` 导出，单独构建成一个很小的文件，供 `<script>` 引入和插件注入使用 |
 | `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
 | `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
 | `@devtools-anywhere/remote-server` | 远程调试服务端（Node.js）及其命令行工具 `devtools-anywhere-remote` |
 
-- 探针不单独成包：Runtime 和 Network 域直接读取它的缓冲，两者必须严格匹配。放在 cdp-server 中可以共用类型，也不会出现版本不匹配。
+- 页面内的 CDP agent 和探针不单独成包：探针和各个域共用同一套 hook 和缓冲，而且只有 `devtools-anywhere` 使用它们。它们放在 `devtools-anywhere` 中（`src/cdp-agent/`），不会出现版本不匹配；探针仍单独构建成一个很小的文件 `probe.iife.js`。
 - 前端单独成包，因为它体积大（约 16 MB），更新节奏跟随 Chrome 版本。其他语言（约 42 MB）再拆成一个包，需要的人才装。
 - 所有包使用同一个版本号、一起发布，版本号相同的包一定能配合使用。
 
@@ -191,4 +190,4 @@ devtools-anywhere 以 [MIT](LICENSE) 许可发布。每个发布包都带有自�
 
 - `@devtools-anywhere/devtools-frontend` 与 `@devtools-anywhere/devtools-frontend-locales` 由 Chrome DevTools frontend 构建（BSD-3-Clause，The Chromium Authors），包含它打包的各个库。
 - `devtools-anywhere` 打包了 [snapDOM](https://github.com/zumerlab/snapdom)（MIT）。
-- `packages/cdp-server/src/core/lexer.ts` 中的模块词法分析器移植自 [es-module-lexer](https://github.com/guybedford/es-module-lexer)（MIT，Guy Bedford）。
+- `packages/devtools-anywhere/src/cdp-agent/core/lexer.ts` 中的模块词法分析器移植自 [es-module-lexer](https://github.com/guybedford/es-module-lexer)（MIT，Guy Bedford）。

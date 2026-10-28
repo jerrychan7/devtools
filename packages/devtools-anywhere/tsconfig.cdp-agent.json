@@ -1,0 +1,13 @@
+{
+  // Type-checks the CDP agent on its own: with rootDir at src/cdp-agent, an import of anything
+  // outside it (the element, shell mode, the remote connection) fails with TS6059. The agent
+  // knows nothing of how it is embedded; the rest of the package uses it through its entry
+  // points (cdp-agent/index.ts, cdp-agent/probe).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src/cdp-agent",
+    "noEmit": true
+  },
+  "include": ["src/cdp-agent"],
+  "exclude": ["src/cdp-agent/**/*.test.ts"]
+}

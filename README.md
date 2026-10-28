@@ -106,13 +106,12 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 | Package | Contents |
 |---|---|
 | `devtools-anywhere` | Umbrella package: the `<devtools-anywhere>` element, `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js`, `devtools-anywhere-sw.js` and `snapdom.js` (the screencast's renderer, loaded on demand) |
-| `@devtools-anywhere/cdp-server` | In-page CDP server. The probe ships as the `@devtools-anywhere/cdp-server/probe` subpath export, built as a separate tiny file for `<script>` tags and injection |
 | `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets with English and Chinese UI, self-hostable or served from a CDN |
 | `@devtools-anywhere/devtools-frontend-locales` | Optional: the other 80 UI languages, at the same paths as in the frontend package. Serve both from one directory (the Vite plugin does this when it is installed); a missing language falls back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
 | `@devtools-anywhere/remote-server` | Remote debugging server (Node.js) and its CLI, `devtools-anywhere-remote` |
 
-- The probe is not a separate package: the Runtime and Network domains read its buffer directly, so the two must always match. Keeping it in cdp-server lets them share types and rules out version mismatches.
+- The in-page CDP agent and its probe are not a separate package: the probe and the domains share the same hooks and buffers, and only `devtools-anywhere` uses them. They live in `devtools-anywhere` (`src/cdp-agent/`), which rules out version mismatches; the probe is still built as a separate tiny file, `probe.iife.js`.
 - The frontend is separate because it is large (about 16 MB) and follows Chrome's release cadence. Its other languages (about 42 MB) are another package, so that only those who need them install them.
 - All packages share one version number and are released together, so matching versions always work together.
 
@@ -191,4 +190,4 @@ Third-party code in the published packages, with copyright notices and full lice
 
 - `@devtools-anywhere/devtools-frontend` and `@devtools-anywhere/devtools-frontend-locales` are built from the Chrome DevTools frontend (BSD-3-Clause, The Chromium Authors), including the libraries it bundles.
 - `devtools-anywhere` bundles [snapDOM](https://github.com/zumerlab/snapdom) (MIT).
-- The module lexer in `packages/cdp-server/src/core/lexer.ts` is ported from [es-module-lexer](https://github.com/guybedford/es-module-lexer) (MIT, Guy Bedford).
+- The module lexer in `packages/devtools-anywhere/src/cdp-agent/core/lexer.ts` is ported from [es-module-lexer](https://github.com/guybedford/es-module-lexer) (MIT, Guy Bedford).

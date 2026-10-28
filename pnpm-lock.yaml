@@ -166,9 +166,6 @@ importers:
 
   .:
     devDependencies:
-      '@devtools-anywhere/cdp-server':
-        specifier: workspace:*
-        version: link:packages/cdp-server
       '@devtools-anywhere/remote-server':
         specifier: workspace:*
         version: link:packages/remote-server
@@ -209,23 +206,8 @@ importers:
         specifier: ^7.3.7
         version: 7.3.7(@types/node@22.20.5)(yaml@2.9.1)
 
-  packages/cdp-server:
-    devDependencies:
-      devtools-protocol:
-        specifier: ^0.0.1721318
-        version: 0.0.1721318
-      esbuild:
-        specifier: ^0.25.0
-        version: 0.25.12
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-
   packages/devtools-anywhere:
     dependencies:
-      '@devtools-anywhere/cdp-server':
-        specifier: workspace:*
-        version: link:../cdp-server
       '@zumer/snapdom':
         specifier: ^3.3.5
         version: 3.3.5
@@ -233,6 +215,9 @@ importers:
       '@devtools-anywhere/relay-core':
         specifier: workspace:*
         version: link:../relay-core
+      devtools-protocol:
+        specifier: ^0.0.1721318
+        version: 0.0.1721318
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12

@@ -18,6 +18,7 @@
     "**/*.ignore/**",
     "packages/devtools-frontend/src/**",
     "experiments/**",
-    "tests/**/assets/**"
+    "tests/**/assets/**",
+    "packages/*/test-support/assets/**"
   ]
 }

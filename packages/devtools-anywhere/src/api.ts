@@ -1,7 +1,7 @@
 // The API devtools-anywhere.iife.js exposes as `window.DevtoolsAnywhere`: the one definition the
 // bundle (which must satisfy it), the probe (probe.iife.js, built separately, which calls it) and
 // the tests share. Types only, and no source module imported, so that any of them can take it in.
-import type { CdpServer, createCdpServer } from '@devtools-anywhere/cdp-server';
+import type { CdpServer, createCdpServer } from './cdp-agent';
 
 /** How a page reaches a remote debugging server. */
 export interface RemoteOptions {

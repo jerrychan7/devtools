@@ -1,7 +1,7 @@
 // Entry of devtools-anywhere.iife.js: installs the probe (if probe.iife.js did not run
 // earlier), registers <devtools-anywhere>, and exposes the API as `window.DevtoolsAnywhere`.
 // Inside the page iframe of shell mode, it connects the page's CDP server to the shell.
-import { createCdpServer, installProbe, isShellPage, setShellScriptUrl } from '@devtools-anywhere/cdp-server';
+import { createCdpServer, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
 import { connectFrontend, connectToShell } from './connection';
 import { DevtoolsAnywhereElement, createPageServer, defineDevtoolsAnywhere, setBundleUrl } from './element';
 import type { DevtoolsAnywhereApi } from './api';

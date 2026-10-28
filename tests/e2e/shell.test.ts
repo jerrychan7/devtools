@@ -3,8 +3,8 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { launch } from '../conformance/harness.ts';
-import type { Env } from '../conformance/harness.ts';
+import { launch } from '../support/browser.ts';
+import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;

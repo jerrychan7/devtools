@@ -39,7 +39,7 @@
 
 // Type-checked with the WebWorker library (tsconfig.sw.json), separately from the DOM code.
 declare const self: ServiceWorkerGlobalScope;
-import { debuggerStatementSites } from '../../cdp-server/src/core/lexer';
+import { debuggerStatementSites } from './cdp-agent/core/lexer';
 
 const params = new URL(self.location.href).searchParams;
 const probe = params.get('probe');
@@ -49,7 +49,7 @@ const SNIFF_OVERLAP = 1024;
 /** Marks the DevTools frontend page, which must not get the probe. */
 const FRONTEND =
   /<meta\b[^>]*\bname\s*=\s*["']?devtools-anywhere-frontend\b|entrypoints\/anywhere_app\/anywhere_app\.js/i;
-/** Message type the probe listens for; keep in sync with cdp-server's probe. */
+/** Message type the probe listens for; keep in sync with cdp-agent's probe. */
 const DETAILS = 'devtools-anywhere:response';
 const DESTINATIONS = new Set(['style', 'script', 'image', 'font']);
 /** Handshake message the shell posts to this worker; keep in sync with element.ts. */

@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { launch } from '../conformance/harness.ts';
-import type { Env } from '../conformance/harness.ts';
+import { launch } from '../support/browser.ts';
+import type { Env } from '../support/browser.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BUNDLE = path.join(root, 'packages/devtools-anywhere/dist/devtools-anywhere.iife.js');
@@ -24,7 +24,7 @@ let page: Page;
 before(async () => {
   env = await launch();
   page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/conformance/fixture.html');
+  await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
   await page.addScriptTag({ path: BUNDLE });
   await page.evaluate(() => console.log('logged before connecting'));
   await page.evaluate(html => {

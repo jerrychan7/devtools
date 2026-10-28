@@ -6,7 +6,7 @@ This package contains the third-party code below, with its copyright notices and
 
 | Component | Version | License | Copyright | Included in |
 | --- | --- | --- | --- | --- |
-| [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | cdp-server, devtools-anywhere |
+| [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | devtools-anywhere |
 | [snapDOM (@zumer/snapdom)](https://github.com/zumerlab/snapdom) | 3.3.5 | MIT | ZumerLab | devtools-anywhere |
 
 ### es-module-lexer (ported code)
@@ -15,8 +15,8 @@ This package contains the third-party code below, with its copyright notices and
 - License: MIT
 - Copyright: Guy Bedford
 - Source: https://github.com/guybedford/es-module-lexer
-- Included in: cdp-server, devtools-anywhere
-- Notes: The lexer in packages/cdp-server/src/core/lexer.ts is ported from it.
+- Included in: devtools-anywhere
+- Notes: The lexer in packages/devtools-anywhere/src/cdp-agent/core/lexer.ts is ported from it.
 
 ```text
 MIT License

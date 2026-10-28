@@ -2,10 +2,10 @@
 // Types come from the built packages (`pnpm build`), like the code the pages load. Their entry
 // points export only what the other packages use, not what the tests would like: types they do
 // not export are derived from those they do.
-import type { CdpServer, createCdpServer, installProbe } from '@devtools-anywhere/cdp-server';
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
+import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
 
-type Probe = ReturnType<typeof installProbe>;
+type CdpServer = ReturnType<DevtoolsAnywhereApi['createCdpServer']>;
 
 declare global {
   /** A CDP message as the fake frontends receive it (parsed JSON). */
@@ -28,8 +28,6 @@ declare global {
   }
 
   interface Window {
-    /** cdp-server.iife.js */
-    DevtoolsAnywhereCdp: { createCdpServer: typeof createCdpServer };
     /** devtools-anywhere.iife.js */
     DevtoolsAnywhere: DevtoolsAnywhereApi;
     __devtoolsAnywhereProbe__?: Probe;

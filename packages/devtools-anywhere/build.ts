@@ -10,14 +10,8 @@ if (!watch) rmSync('dist', { recursive: true, force: true });
 const common: BuildOptions = { bundle: true, target: 'es2020', sourcemap: true, logLevel: 'info' };
 
 const builds: BuildOptions[] = [
-  // The ESM build leaves the CDP server to the consumer's bundler.
-  {
-    ...common,
-    entryPoints: { index: 'src/index.ts' },
-    format: 'esm',
-    outdir: 'dist',
-    external: ['@devtools-anywhere/cdp-server', '@zumer/snapdom'],
-  },
+  // The ESM build leaves snapDOM to the consumer's bundler.
+  { ...common, entryPoints: { index: 'src/index.ts' }, format: 'esm', outdir: 'dist', external: ['@zumer/snapdom'] },
   {
     ...common,
     entryPoints: {

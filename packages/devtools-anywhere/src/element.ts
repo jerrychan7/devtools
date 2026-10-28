@@ -11,7 +11,7 @@ import {
   type CdpServer,
   type ShellConfig,
   type SnapdomLoader,
-} from '@devtools-anywhere/cdp-server';
+} from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
 
 let bundleUrl = '';

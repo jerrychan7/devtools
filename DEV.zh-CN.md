@@ -64,7 +64,7 @@ pnpm dev          # 先完整构建一次，之后改动哪个包就重新构建
 pnpm playground   # http://localhost:8788/playground/
 ```
 
-`pnpm dev` 以 watch 模式运行 `cdp-server`、`devtools-anywhere`、`vite-plugin` 和 `remote-server` 的 esbuild。改动 `cdp-server` 时，打包了它的 `devtools-anywhere` 产物也会跟着重新构建。没有热更新：刷新页面即可加载新的构建。类型声明只在 `pnpm build` 时生成。
+`pnpm dev` 以 watch 模式运行 `devtools-anywhere`、`vite-plugin` 和 `remote-server` 的 esbuild。没有热更新：刷新页面即可加载新的构建。类型声明只在 `pnpm build` 时生成。
 
 playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回，`/ws/echo` 是一个把每条消息原样发回的 WebSocket。
 
@@ -72,19 +72,21 @@ playground 的服务器以仓库根目录为根，所以仓库里任何页面都
 
 ```
 packages/
-  cdp-server/     页面内的 CDP 服务端
-    src/probe/    早期捕获：零依赖，有体积上限，单独的构建入口
-    src/core/     跨域共享的状态：远程对象、节点 id、DOM 变化监听、样式表
-    src/domains/  每个域一个目录：runtime、network、dom、css、overlay、storage……
   devtools-frontend/  钉住的 devtools-frontend 版本、补丁和构建脚本
   devtools-anywhere/  总包：<devtools-anywhere>、iframe、连接层、外壳模式
+    src/cdp-agent/    页面内的 CDP agent；不引用本目录之外的任何东西（tsconfig.cdp-agent.json），
+                      包内其他代码只通过 index.ts 和 probe/ 使用它
+      probe/          早期捕获：零依赖，有体积上限，单独的构建入口
+      core/           跨域共享的状态：远程对象、节点 id、DOM 变化监听、样式表
+      domains/        每个域一个文件：runtime、network、dom、css、overlay、storage……
+    test-support/     一致性测试的 harness、夹具页面和资源
   vite-plugin/    零配置注入
   remote-server/  远程调试：页面与另一处 DevTools 之间的中继、目标列表、命令行工具
   relay-core/     内部包、不发布：外壳模式与 remote-server 共用的中继逻辑（刷新、`enable` 重放、未答命令），
                   打包进两者
-tests/
-  conformance/    用 Puppeteer 对比真实 Chrome 的 CDP 输出
+tests/            跨包的测试
   e2e/            探针 → CDP → 前端的完整流程
+  support/        启动 Chrome 和静态服务器
 playground/       开发调试用的页面和服务器
 experiments/      验证记录
 ```
@@ -93,8 +95,8 @@ experiments/      验证记录
 
 | 改动 | 位置 | 怎么验证 |
 |---|---|---|
-| 早期捕获（console、异常、请求） | `packages/cdp-server/src/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积（min+gzip） |
-| CDP 域 | `packages/cdp-server/src/domains/` | playground，并加一致性测试 |
+| 早期捕获（console、异常、请求） | `packages/devtools-anywhere/src/cdp-agent/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积（min+gzip） |
+| CDP 域 | `packages/devtools-anywhere/src/cdp-agent/domains/` | playground，并加一致性测试 |
 | 组件、连接、外壳模式、Service Worker | `packages/devtools-anywhere/src/` | playground、端到端测试 |
 | Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts`（示例应用在 `tests/e2e/vite-app/`） |
 | 远程调试 | `packages/remote-server/src/`（中继、服务端）、`packages/devtools-anywhere/src/remote.ts`（页面端） | `tests/e2e/remote.test.ts`；`node packages/remote-server/dist/cli.js` |
@@ -116,11 +118,13 @@ experiments/      验证记录
 
 ```bash
 pnpm test                                     # 构建并运行全部测试
-node --test tests/conformance/css.test.ts     # 只跑一个文件（需先构建，或 pnpm dev 正在运行）
+node --test packages/devtools-anywhere/src/cdp-agent/domains/css.conformance.test.ts
+                                              # 只跑一个文件（需先构建，或 pnpm dev 正在运行）
 pnpm typecheck                                # 先构建，再检查所有包、构建脚本、测试和 playground 的类型
 ```
 
-- `tests/conformance/`：同一个页面分别通过真实 Chrome 的 CDP 和我们的实现来检查，对比两边的输出。实现或修改 CDP 方法时请在这里加测试：以真实 Chrome 的行为为准，而不是协议文档。
+测试放在被测代码旁边，命名为 `<名称>.test.ts`；只有跨包的测试放在 `tests/` 下。
+- `*.conformance.test.ts`（在 CDP agent 各个域的旁边）：同一个页面分别通过真实 Chrome 的 CDP 和我们的实现来检查，对比两边的输出。实现或修改 CDP 方法时请在这里加测试：以真实 Chrome 的行为为准，而不是协议文档。它们和页面一样加载构建产物。
 - `tests/e2e/`：连接层、外壳模式、零配置接入、Vite 插件和真实前端。
 
 ### 修改前端
@@ -177,7 +181,7 @@ pnpm test        # 前端需已构建，真实前端测试才会运行
 
 pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfmt 格式化并把结果加入这次提交，再用 oxlint 检查，有错误就中止提交。`git commit --no-verify` 可以跳过一次。lint 规则：oxlint 的 correctness 规则，禁止 `any`，禁止非空断言（`!`）。代码风格：2 空格缩进、加分号、单引号、行宽 120。`packages/devtools-frontend/src` 沿用 Chromium 的风格，不做 lint 和格式化。
 
-构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`，cdp-server 另有 `dist/probe.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`）。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。CI 中（`CI=true`）报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
+构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`）。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。CI 中（`CI=true`）报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
 行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本）。
 
@@ -186,7 +190,7 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 ### 提交
 
 - 每个提交只做一步。
-- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-server`、`network`、`devtools-frontend`、`sw`、`readme`。
+- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`sw`、`readme`。
 
 ### 提 PR
 

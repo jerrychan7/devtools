@@ -4,8 +4,6 @@
 
 ```ts
 
-import { CdpServer } from '@devtools-anywhere/cdp-server';
-
 // @internal
 export function defineDevtoolsAnywhere(tag?: string): void;
 

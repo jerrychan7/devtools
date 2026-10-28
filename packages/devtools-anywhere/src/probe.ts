@@ -17,7 +17,7 @@
 // ended without exitShell): recognized by its script URL, which the shell gives `probe` (ending
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
 // another tab still uses it. The page's own workers are left alone.
-import { installProbe, readShellConfig, setShellScriptUrl } from '@devtools-anywhere/cdp-server/probe';
+import { installProbe, readShellConfig, setShellScriptUrl } from './cdp-agent/probe';
 import type { DevtoolsAnywhereApi } from './api';
 
 const script = document.currentScript as HTMLScriptElement | null;
