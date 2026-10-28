@@ -2,7 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, type Context } from '../core/context';
 import { FORCE_ATTRIBUTE, PseudoElement, closestOwn, isOwn, truncateNodeValue, visibleAttributes } from '../core/nodes';
 import { editAttributes, editNodeValue, editPosition, editReplace, historyOf, patchOuterHTML } from '../core/history';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import {
   type Box,
   type Quad,
@@ -241,7 +241,7 @@ function outerHTML(node: Node): string {
 }
 
 export function registerDom(ctx: Context) {
-  const { server, nodes, objects } = ctx;
+  const { session, nodes, objects } = ctx;
   let observer: MutationObserver | null = null;
   const searches = new Map<string, Node[]>();
   let searchSeq = 0;
@@ -249,7 +249,7 @@ export function registerDom(ctx: Context) {
   function emitChildren(parent: Node, depth = 1, pierce = false) {
     const children = nodes.children(parent).map(child => nodes.serialize(child, depth - 1, pierce));
     nodes.childrenSent.add(parent);
-    server.emit('DOM.setChildNodes', {
+    session.emit('DOM.setChildNodes', {
       parentId: nodes.idOf(parent),
       nodes: children,
     } satisfies Protocol.DOM.SetChildNodesEvent);
@@ -274,14 +274,14 @@ export function registerDom(ctx: Context) {
       const current = new Set(nodes.activePseudoTypes(host));
       for (const type of current) {
         if (sent.has(type)) continue;
-        server.emit('DOM.pseudoElementAdded', {
+        session.emit('DOM.pseudoElementAdded', {
           parentId: hostId,
           pseudoElement: nodes.serializePseudo(nodes.pseudoOf(host, type)),
         } satisfies Protocol.DOM.PseudoElementAddedEvent);
       }
       for (const type of sent) {
         if (current.has(type)) continue;
-        server.emit('DOM.pseudoElementRemoved', {
+        session.emit('DOM.pseudoElementRemoved', {
           parentId: hostId,
           pseudoElementId: nodes.idOf(nodes.pseudoOf(host, type)),
         } satisfies Protocol.DOM.PseudoElementRemovedEvent);
@@ -336,13 +336,16 @@ export function registerDom(ctx: Context) {
         }
         if (!nodes.childrenSent.has(target)) {
           record.addedNodes.forEach(node => pending.delete(node));
-          server.emit('DOM.childNodeCountUpdated', { nodeId: targetId, childNodeCount: nodes.children(target).length });
+          session.emit('DOM.childNodeCountUpdated', {
+            nodeId: targetId,
+            childNodeCount: nodes.children(target).length,
+          });
           continue;
         }
         record.removedNodes.forEach(node => {
           const nodeId = nodes.knownId(node);
           if (nodeId === undefined) return;
-          server.emit('DOM.childNodeRemoved', { parentNodeId: targetId, nodeId });
+          session.emit('DOM.childNodeRemoved', { parentNodeId: targetId, nodeId });
           nodes.forget(node);
         });
         record.addedNodes.forEach((node, k) => {
@@ -352,7 +355,7 @@ export function registerDom(ctx: Context) {
           let previous = k ? (record.addedNodes[k - 1] ?? null) : record.previousSibling;
           if (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
             previous = previousVisibleSibling(node, pending);
-          server.emit('DOM.childNodeInserted', {
+          session.emit('DOM.childNodeInserted', {
             parentNodeId: targetId,
             previousNodeId: previous ? nodes.idOf(previous) : 0,
             node: nodes.serialize(node, 0),
@@ -362,10 +365,10 @@ export function registerDom(ctx: Context) {
         const name = record.attributeName;
         if (name === null || name === FORCE_ATTRIBUTE) continue;
         const value = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
-        if (value === null) server.emit('DOM.attributeRemoved', { nodeId: targetId, name });
-        else server.emit('DOM.attributeModified', { nodeId: targetId, name, value });
+        if (value === null) session.emit('DOM.attributeRemoved', { nodeId: targetId, name });
+        else session.emit('DOM.attributeModified', { nodeId: targetId, name, value });
       } else if (record.type === 'characterData' && targetId !== undefined) {
-        server.emit('DOM.characterDataModified', {
+        session.emit('DOM.characterDataModified', {
           nodeId: targetId,
           characterData: truncateNodeValue(target.nodeValue ?? ''),
         });
@@ -405,7 +408,7 @@ export function registerDom(ctx: Context) {
       const serialized = nodes.serialize(root, 0);
       serialized.shadowRootType = root.mode === 'open' ? 'open' : 'closed';
       nodes.onShadowRoot?.(root);
-      server.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
+      session.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
     }
     return root;
   }
@@ -428,7 +431,7 @@ export function registerDom(ctx: Context) {
   const element = (ref: NodeRef) => resolveElement(ctx, ref);
   const history = historyOf(ctx);
 
-  server.register('DOM', {
+  session.register('DOM', {
     enable: () => {},
     disable() {
       observer?.disconnect();
@@ -700,7 +703,7 @@ export function registerDom(ctx: Context) {
     markUndoableState: () => history.markUndoableState(),
     undo: () => history.undo(),
     redo: () => history.redo(),
-    hideHighlight: () => server.call('Overlay.hideHighlight'),
-    highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => server.call('Overlay.highlightNode', params),
+    hideHighlight: () => session.call('Overlay.hideHighlight'),
+    highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => session.call('Overlay.highlightNode', params),
   });
 }

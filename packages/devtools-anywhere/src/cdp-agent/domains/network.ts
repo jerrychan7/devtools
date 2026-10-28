@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
 import { base64, readBody } from '../core/body';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import { parseStack } from '../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../probe/types';
 
@@ -102,7 +102,7 @@ async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.W
   return { opcode: 2, mask, payloadData };
 }
 
-export function registerNetwork({ server, probe }: Context) {
+export function registerNetwork({ session, probe }: Context) {
   let unsubscribe: (() => void) | null = null;
   let unsubscribeSockets: (() => void) | null = null;
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
@@ -158,7 +158,7 @@ export function registerNetwork({ server, probe }: Context) {
         request.hasPostData = true;
       }
       const callFrames = parseStack(rec.stack, 1);
-      server.emit('Network.requestWillBeSent', {
+      session.emit('Network.requestWillBeSent', {
         requestId: rec.requestId,
         loaderId: LOADER_ID,
         documentURL: location.href,
@@ -175,7 +175,7 @@ export function registerNetwork({ server, probe }: Context) {
 
     if ((rec.state === 'headers' || rec.state === 'done') && !done.has('response')) {
       done.add('response');
-      server.emit('Network.responseReceived', {
+      session.emit('Network.responseReceived', {
         requestId: rec.requestId,
         loaderId: LOADER_ID,
         timestamp: (rec.responseTime ?? performance.now()) / 1000,
@@ -199,14 +199,14 @@ export function registerNetwork({ server, probe }: Context) {
 
     if (rec.state === 'done' && !done.has('end')) {
       done.add('end');
-      server.emit('Network.loadingFinished', {
+      session.emit('Network.loadingFinished', {
         requestId: rec.requestId,
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         encodedDataLength: rec.encodedDataLength ?? 0,
       } satisfies Protocol.Network.LoadingFinishedEvent);
     } else if (rec.state === 'failed' && !done.has('end')) {
       done.add('end');
-      server.emit('Network.loadingFailed', {
+      session.emit('Network.loadingFailed', {
         requestId: rec.requestId,
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         type: rec.type,
@@ -227,12 +227,12 @@ export function registerNetwork({ server, probe }: Context) {
     if (!done.has('created')) {
       done.add('created');
       const callFrames = parseStack(rec.stack, 1);
-      server.emit('Network.webSocketCreated', {
+      session.emit('Network.webSocketCreated', {
         requestId,
         url: rec.url,
         initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
       } satisfies Protocol.Network.WebSocketCreatedEvent);
-      server.emit('Network.webSocketWillSendHandshakeRequest', {
+      session.emit('Network.webSocketWillSendHandshakeRequest', {
         requestId,
         timestamp: rec.startTime / 1000,
         wallTime: rec.wallTime / 1000,
@@ -243,7 +243,7 @@ export function registerNetwork({ server, probe }: Context) {
 
     if (rec.openTime !== undefined && !done.has('open')) {
       done.add('open');
-      server.emit('Network.webSocketHandshakeResponseReceived', {
+      session.emit('Network.webSocketHandshakeResponseReceived', {
         requestId,
         timestamp: rec.openTime / 1000,
         response: { status: 101, statusText: 'Switching Protocols', headers: {} },
@@ -255,7 +255,7 @@ export function registerNetwork({ server, probe }: Context) {
       sentFrames.add(event);
       const timestamp = event.time / 1000;
       if (event.type === 'error') {
-        server.emit('Network.webSocketFrameError', {
+        session.emit('Network.webSocketFrameError', {
           requestId,
           timestamp,
           errorMessage: 'WebSocket error',
@@ -263,7 +263,7 @@ export function registerNetwork({ server, probe }: Context) {
       } else if (event.type === 'sent') {
         const response = await frameOf(event.data, true);
         if (gen !== generation) return;
-        server.emit('Network.webSocketFrameSent', {
+        session.emit('Network.webSocketFrameSent', {
           requestId,
           timestamp,
           response,
@@ -271,7 +271,7 @@ export function registerNetwork({ server, probe }: Context) {
       } else {
         const response = await frameOf(event.data, false);
         if (gen !== generation) return;
-        server.emit('Network.webSocketFrameReceived', {
+        session.emit('Network.webSocketFrameReceived', {
           requestId,
           timestamp,
           response,
@@ -281,7 +281,7 @@ export function registerNetwork({ server, probe }: Context) {
 
     if (rec.closeTime !== undefined && !done.has('closed')) {
       done.add('closed');
-      server.emit('Network.webSocketClosed', {
+      session.emit('Network.webSocketClosed', {
         requestId,
         timestamp: rec.closeTime / 1000,
       } satisfies Protocol.Network.WebSocketClosedEvent);
@@ -293,7 +293,7 @@ export function registerNetwork({ server, probe }: Context) {
     queue = queue.then(() => emitSocket(rec, gen)).catch(() => {});
   };
 
-  server.register('Network', {
+  session.register('Network', {
     enable(params: Protocol.Network.EnableRequest) {
       maxPostData = params.maxPostDataSize ?? 0;
       probe.bodyLimits(

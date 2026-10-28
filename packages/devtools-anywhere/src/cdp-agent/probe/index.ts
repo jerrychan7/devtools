@@ -2,7 +2,7 @@
 //
 // Load it as the first synchronous script of a page (probe.iife.js). It hooks console,
 // uncaught errors, fetch/XHR and WebSocket once, keeps recent events in ring buffers, and the CDP
-// server reads those buffers later. The CDP server installs it itself when no earlier
+// agent reads those buffers later. The CDP agent installs it itself when no earlier
 // probe exists, so every API is hooked exactly once either way.
 import {
   PROBE_KEY,
@@ -20,7 +20,7 @@ import { isShellPage, readShellConfig, writeShellDocument } from './shell';
 export * from './types';
 export * from './shell';
 
-/** The probe keeps everything up to a coarse bound, for pages that never load a server. */
+/** The probe keeps everything up to a coarse bound, for pages that never load the CDP agent. */
 const LIMIT = 10_000;
 const MAX_TOOL_OUTCOMES = 50;
 
@@ -356,7 +356,7 @@ function hookDebugger(addLog: (entry: ProbeLog) => void) {
 // ---- console ----
 
 /**
- * Records console calls as they are made; the CDP server turns them into entries. Only what
+ * Records console calls as they are made; the CDP agent turns them into entries. Only what
  * cannot be known later is decided here: which calls log nothing (V8 drops calls without
  * arguments except group, groupCollapsed, groupEnd and trace, and passing asserts), labels
  * (their toString runs once, at the call), and counter and timer state.

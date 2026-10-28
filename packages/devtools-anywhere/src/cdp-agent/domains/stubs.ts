@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping';
-import { CdpError, type CdpServer } from '../core/server';
+import { CdpError, type CdpSession } from '../core/session';
 
 type Command = keyof ProtocolMapping.Commands;
 type DomainOf<C> = C extends `${infer D}.${string}` ? D : never;
@@ -65,11 +65,11 @@ const UNDECLARED_NOOPS: Record<string, string[]> = {
   Storage: ['setInterestGroupTracking', 'setSharedStorageTracking'],
 };
 
-export function registerStubs(server: CdpServer) {
+export function registerStubs(session: CdpSession) {
   for (const [domain, methods] of [...Object.entries(NOOPS), ...Object.entries(UNDECLARED_NOOPS)]) {
-    server.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])));
+    session.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])));
   }
-  server.register('Network', {
+  session.register('Network', {
     // Throttling cannot be emulated in the page: the rules are accepted but never applied.
     emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({
       ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`),
@@ -78,15 +78,15 @@ export function registerStubs(server: CdpServer) {
     getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
   });
   // Feature flags of the browser are not readable from the page: report them as off.
-  server.register('SystemInfo', {
+  session.register('SystemInfo', {
     getFeatureState: (): Protocol.SystemInfo.GetFeatureStateResponse => ({ featureEnabled: false }),
   });
   // The page cannot read its shared storage's metadata: an error rather than made-up numbers.
-  server.register('Storage', {
+  session.register('Storage', {
     getSharedStorageMetadata() {
       throw new CdpError('Shared storage metadata is not available to the page');
     },
   });
   // env() values are not readable from the page.
-  server.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
+  session.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
 }

@@ -23,7 +23,7 @@ export class CdpError extends Error {
  *
  * @internal
  */
-export class CdpServer {
+export class CdpSession {
   private domains = new Map<string, Record<string, Handler>>();
   private listeners = new Set<(message: string) => void>();
   private resets = new Set<() => void>();

@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
 import { isOwn } from '../core/nodes';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 
 /** The part of snapDOM (`@zumer/snapdom`) the screencast uses. */
 export type Snapdom = (
@@ -36,9 +36,9 @@ const MIN_INTERVAL = 500;
  * times when rendering is slower; nothing is rendered while the page is hidden.
  * DevTools' own elements are left out.
  */
-export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoader | undefined) {
+export function registerScreencast({ session: cdpSession }: Context, loadSnapdom: SnapdomLoader | undefined) {
   if (!loadSnapdom) {
-    server.register('Page', {
+    cdpSession.register('Page', {
       startScreencast() {
         throw new CdpError('Screencast is not available: snapDOM is not configured');
       },
@@ -47,7 +47,7 @@ export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoad
     return;
   }
   const load = loadSnapdom;
-  let session = 0;
+  let frameSession = 0;
   let params: Protocol.Page.StartScreencastRequest | null = null;
   let acked = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -75,9 +75,9 @@ export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoad
     const canvas = await result.toCanvas({ scale, dpr: 1 });
     const png = params?.format === 'png';
     const url = canvas.toDataURL(png ? 'image/png' : 'image/jpeg', (params?.quality ?? 80) / 100);
-    if (current !== session) return;
+    if (current !== frameSession) return;
     acked = false;
-    server.emit('Page.screencastFrame', {
+    cdpSession.emit('Page.screencastFrame', {
       data: url.slice(url.indexOf(',') + 1),
       sessionId: current,
       metadata: {
@@ -96,7 +96,7 @@ export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoad
   function schedule(current: number, delay: number) {
     clearTimeout(timer);
     timer = setTimeout(function tick() {
-      if (current !== session) return;
+      if (current !== frameSession) return;
       // Wait for the acknowledgement and for the page to be visible.
       if (!acked || document.hidden) {
         timer = setTimeout(tick, 100);
@@ -104,27 +104,27 @@ export function registerScreencast({ server }: Context, loadSnapdom: SnapdomLoad
       }
       // A failed frame is retried later. Not logged: the page's console is the one inspected.
       frame(current).catch(() => {
-        if (current === session) schedule(current, MIN_INTERVAL * 4);
+        if (current === frameSession) schedule(current, MIN_INTERVAL * 4);
       });
     }, delay);
   }
 
   function stop() {
-    session++;
+    frameSession++;
     params = null;
     clearTimeout(timer);
   }
 
-  server.register('Page', {
+  cdpSession.register('Page', {
     startScreencast(request: Protocol.Page.StartScreencastRequest) {
       stop();
       params = request;
       acked = true;
-      schedule(session, 0);
+      schedule(frameSession, 0);
     },
     stopScreencast: () => stop(),
     screencastFrameAck(request: Protocol.Page.ScreencastFrameAckRequest) {
-      if (request.sessionId === session) acked = true;
+      if (request.sessionId === frameSession) acked = true;
     },
   });
 }

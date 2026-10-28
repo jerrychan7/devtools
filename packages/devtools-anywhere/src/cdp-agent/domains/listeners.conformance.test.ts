@@ -9,7 +9,7 @@ let t: TestPage;
 before(async () => {
   env = await launch();
   t = await openPage(env, []);
-  // Registered after the CDP server (and so the probe) is installed.
+  // Registered after the CDP agent (and so the probe) is installed.
   await t.page.evaluate(() => {
     const el = document.getElementById('app');
     if (!el) throw new Error('#app not found');

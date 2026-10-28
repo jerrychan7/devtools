@@ -1,9 +1,9 @@
 // Entry of devtools-anywhere.iife.js: installs the probe (if probe.iife.js did not run
 // earlier), registers <devtools-anywhere>, and exposes the API as `window.DevtoolsAnywhere`.
-// Inside the page iframe of shell mode, it connects the page's CDP server to the shell.
-import { createCdpServer, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
+// Inside the page iframe of shell mode, it connects the page's CDP session to the shell.
+import { createCdpSession, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
 import { connectFrontend, connectToShell } from './connection';
-import { DevtoolsAnywhereElement, createPageServer, defineDevtoolsAnywhere, setBundleUrl } from './element';
+import { DevtoolsAnywhereElement, createPageSession, defineDevtoolsAnywhere, setBundleUrl } from './element';
 import type { DevtoolsAnywhereApi } from './api';
 import { connectRemote } from './remote';
 
@@ -21,12 +21,12 @@ if (!('DevtoolsAnywhere' in window)) {
     probe.ownUrls.add(new URL('snapdom.js', script.src).href);
   }
   defineDevtoolsAnywhere();
-  if (isShellPage()) connectToShell(createPageServer());
+  if (isShellPage()) connectToShell(createPageSession());
   const api: DevtoolsAnywhereApi = {
     DevtoolsAnywhereElement,
     connectFrontend,
-    connectRemote: (serverUrl, options) => connectRemote(createPageServer, serverUrl, options),
-    createCdpServer,
+    connectRemote: (serverUrl, options) => connectRemote(createPageSession, serverUrl, options),
+    createCdpSession,
     defineDevtoolsAnywhere,
   };
   Object.assign(window, { DevtoolsAnywhere: api });

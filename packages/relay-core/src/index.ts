@@ -1,4 +1,4 @@
-// The relay between a page's CDP server and the DevTools frontends inspecting it, shared by shell
+// The relay between a page's CDP session and the DevTools frontends inspecting it, shared by shell
 // mode (ShellRelay in packages/devtools-anywhere/src/connection.ts: one frontend, the page in an
 // iframe) and the remote server (Target in packages/remote-server/src/relay.ts: any number of
 // frontends, the page over a WebSocket). Internal: bundled into both, never published.
@@ -128,7 +128,7 @@ export abstract class RelayCore {
   /** A message from a frontend: CDP, as Chrome takes it. */
   protected clientMessage(session: Session, data: string) {
     const { id, method, params } = parse(data) ?? {};
-    // Anything else is the page's CDP server's to answer (or reject).
+    // Anything else is the page's CDP session's to answer (or reject).
     if (typeof method !== 'string') return this.send(session, data);
     if (method.endsWith('.enable')) session.enabled.set(method, params ?? {});
     else if (method.endsWith('.disable')) session.enabled.delete(method.replace(/disable$/, 'enable'));

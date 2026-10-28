@@ -3,7 +3,7 @@ import { FRAME_ID, type Context } from '../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../core/nodes';
 import { containerMatches, parentOf, queriedAxes } from '../core/container-query';
 import { compareSpecificity, specificity, splitTopLevel } from '../core/selectors';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import { resolveElement } from './dom';
 import { historyOf } from '../core/history';
 import { adoptedOf, quietly, watchAdopted } from '../core/adopted';
@@ -839,7 +839,7 @@ function parseHost(selector: string): ((host: Element) => boolean) | null {
 }
 
 export function registerCss(ctx: Context) {
-  const { server, nodes } = ctx;
+  const { session, nodes } = ctx;
   const history = historyOf(ctx);
 
   /**
@@ -919,9 +919,9 @@ export function registerCss(ctx: Context) {
   function reportSheets() {
     const scoped = sheets.scoped();
     const current = new Set(scoped.map(s => s.sheet));
-    for (const sheet of current) if (!known.has(sheet)) server.emit('CSS.styleSheetAdded', { header: header(sheet) });
+    for (const sheet of current) if (!known.has(sheet)) session.emit('CSS.styleSheetAdded', { header: header(sheet) });
     for (const sheet of known)
-      if (!current.has(sheet)) server.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) });
+      if (!current.has(sheet)) session.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) });
     known = current;
     if (forced.isActive) forced.rebuild();
     else forced.reattach();
@@ -935,7 +935,7 @@ export function registerCss(ctx: Context) {
 
   /** Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in. */
   const loadCopies = () =>
-    sheets.loadCopies(sheet => server.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) }));
+    sheets.loadCopies(sheet => session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) }));
 
   /** Runs `apply` and records it for DOM.undo, `revert` taking it back. */
   function perform(apply: () => void, revert: () => void) {
@@ -1345,7 +1345,7 @@ export function registerCss(ctx: Context) {
     }
   }
 
-  server.register('CSS', {
+  session.register('CSS', {
     enable() {
       if (enabled) return;
       enabled = true;
@@ -1504,7 +1504,7 @@ export function registerCss(ctx: Context) {
         if (!style.sheet) throw new CdpError('Could not create the inspector style sheet');
         sheets.inspectorSheet = style.sheet;
         known.add(style.sheet);
-        server.emit('CSS.styleSheetAdded', { header: header(style.sheet) });
+        session.emit('CSS.styleSheetAdded', { header: header(style.sheet) });
       }
       return { styleSheetId: sheets.idOf(sheets.inspectorSheet) };
     },

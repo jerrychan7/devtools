@@ -5,7 +5,7 @@
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
 import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
 
-type CdpServer = ReturnType<DevtoolsAnywhereApi['createCdpServer']>;
+type CdpSession = ReturnType<DevtoolsAnywhereApi['createCdpSession']>;
 
 declare global {
   /** A CDP message as the fake frontends receive it (parsed JSON). */
@@ -31,12 +31,12 @@ declare global {
     /** devtools-anywhere.iife.js */
     DevtoolsAnywhere: DevtoolsAnywhereApi;
     __devtoolsAnywhereProbe__?: Probe;
-    /** The harness's CDP server in the page, and the events it emitted. */
-    __server: CdpServer;
+    /** The harness's CDP session in the page, and the events it emitted. */
+    __session: CdpSession;
     __ours: { method: string; params: unknown }[];
-    /** A CDP server with a stand-in snapDOM, the frames it sent and the scales it rendered at. */
+    /** A CDP session with a stand-in snapDOM, the frames it sent and the scales it rendered at. */
     __screencast?: {
-      server: CdpServer;
+      session: CdpSession;
       frames: { sessionId: number; data: string; deviceWidth: number }[];
       scales: number[];
     };

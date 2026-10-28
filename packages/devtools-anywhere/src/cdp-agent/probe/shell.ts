@@ -4,7 +4,7 @@
 // Entering shell mode stores a ShellConfig in sessionStorage and reloads. The probe, being
 // the first script, then turns the top-level document into the shell in place (the URL in
 // the address bar stays the same), and inside the page iframe it loads the bundle that
-// connects the page's CDP server to the shell.
+// connects the page's CDP session to the shell.
 
 /** @internal */
 export const SHELL_KEY = 'devtools-anywhere:shell';

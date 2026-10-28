@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import { deleteCookie, parseCookies } from './network';
 
 const storageKey = () => location.origin + '/';
@@ -149,7 +149,7 @@ function toBase64(buffer: ArrayBuffer) {
 }
 
 export function registerStorage(ctx: Context) {
-  const { server, objects } = ctx;
+  const { session, objects } = ctx;
 
   // ---- DOMStorage ----
 
@@ -175,34 +175,35 @@ export function registerStorage(ctx: Context) {
       setItem.call(this, key, value);
       if (!domStorageEnabled) return;
       const storageId = storageIdOf(this);
-      if (oldValue === null) server.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue: String(value) });
-      else server.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue: String(value) });
+      if (oldValue === null)
+        session.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue: String(value) });
+      else session.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue: String(value) });
     };
     proto.removeItem = function (this: Storage, key: string) {
       const existed = this.getItem(key) !== null;
       removeItem.call(this, key);
       if (domStorageEnabled && existed)
-        server.emit('DOMStorage.domStorageItemRemoved', { storageId: storageIdOf(this), key });
+        session.emit('DOMStorage.domStorageItemRemoved', { storageId: storageIdOf(this), key });
     };
     proto.clear = function (this: Storage) {
       clear.call(this);
-      if (domStorageEnabled) server.emit('DOMStorage.domStorageItemsCleared', { storageId: storageIdOf(this) });
+      if (domStorageEnabled) session.emit('DOMStorage.domStorageItemsCleared', { storageId: storageIdOf(this) });
     };
     // Changes other tabs of the origin make to localStorage.
     window.addEventListener('storage', event => {
       const { storageArea, key, oldValue, newValue } = event;
       if (!domStorageEnabled || !storageArea) return;
       const storageId = storageIdOf(storageArea);
-      if (key === null) server.emit('DOMStorage.domStorageItemsCleared', { storageId });
-      else if (newValue === null) server.emit('DOMStorage.domStorageItemRemoved', { storageId, key });
-      else if (oldValue === null) server.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue });
-      else server.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue });
+      if (key === null) session.emit('DOMStorage.domStorageItemsCleared', { storageId });
+      else if (newValue === null) session.emit('DOMStorage.domStorageItemRemoved', { storageId, key });
+      else if (oldValue === null) session.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue });
+      else session.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue });
     });
   }
 
   const storageOf = (id: Protocol.DOMStorage.StorageId) => (id.isLocalStorage ? localStorage : sessionStorage);
 
-  server.register('DOMStorage', {
+  session.register('DOMStorage', {
     enable() {
       domStorageEnabled = true;
       hookStorage();
@@ -233,7 +234,7 @@ export function registerStorage(ctx: Context) {
 
   // ---- IndexedDB ----
 
-  server.register('IndexedDB', {
+  session.register('IndexedDB', {
     enable: () => {},
     disable: () => {},
 
@@ -328,7 +329,7 @@ export function registerStorage(ctx: Context) {
 
   // ---- CacheStorage ----
 
-  server.register('CacheStorage', {
+  session.register('CacheStorage', {
     async requestCacheNames(): Promise<Protocol.CacheStorage.RequestCacheNamesResponse> {
       const names = await cacheStorage().keys();
       return {
@@ -407,7 +408,7 @@ export function registerStorage(ctx: Context) {
     }
   }
 
-  server.register('Storage', {
+  session.register('Storage', {
     getStorageKeyForFrame: (): Protocol.Storage.GetStorageKeyForFrameResponse => ({ storageKey: storageKey() }),
     getStorageKey: (): Protocol.Storage.GetStorageKeyResponse => ({ storageKey: storageKey() }),
 
@@ -427,7 +428,7 @@ export function registerStorage(ctx: Context) {
     getTrustTokens: () => ({ tokens: [] }),
   });
 
-  server.register('Network', {
+  session.register('Network', {
     getAllCookies: (): Protocol.Network.GetAllCookiesResponse => ({ cookies: parseCookies() }),
     setCookie: (params: Protocol.Network.SetCookieRequest): Protocol.Network.SetCookieResponse => ({
       success: setCookie(params),

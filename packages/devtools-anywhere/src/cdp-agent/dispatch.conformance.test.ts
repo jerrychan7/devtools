@@ -20,7 +20,7 @@ test('methods inherited from Object.prototype are not found', async () => {
     );
     const ours = await t.page.evaluate(
       m =>
-        window.__server.call(m).then(
+        window.__session.call(m).then(
           () => 'resolved',
           (e: Error) => e.message
         ),
@@ -34,8 +34,8 @@ test('methods inherited from Object.prototype are not found', async () => {
 test('an unparsable message is answered with a parse error', async () => {
   const replies = await t.page.evaluate(async () => {
     const out: string[] = [];
-    const off = window.__server.onMessage(m => out.push(m));
-    await window.__server.dispatch('{not json');
+    const off = window.__session.onMessage(m => out.push(m));
+    await window.__session.dispatch('{not json');
     off();
     return out.map(m => JSON.parse(m) as { id?: unknown; error?: { code: number } });
   });

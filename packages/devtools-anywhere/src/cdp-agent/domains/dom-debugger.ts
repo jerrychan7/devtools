@@ -1,11 +1,11 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../core/context';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 
 type EventListener = Protocol.DOMDebugger.EventListener;
 
 export function registerDomDebugger(ctx: Context) {
-  const { server, objects, nodes, probe } = ctx;
+  const { session, objects, nodes, probe } = ctx;
 
   /** The on* handler property names of each prototype, enumerated once rather than per node. */
   const handlerKeys = new WeakMap<object, string[]>();
@@ -64,7 +64,7 @@ export function registerDomDebugger(ctx: Context) {
     return result;
   }
 
-  server.register('DOMDebugger', {
+  session.register('DOMDebugger', {
     getEventListeners(
       params: Protocol.DOMDebugger.GetEventListenersRequest
     ): Protocol.DOMDebugger.GetEventListenersResponse {

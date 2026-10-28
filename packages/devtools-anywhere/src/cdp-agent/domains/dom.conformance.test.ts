@@ -220,7 +220,7 @@ describe('shadow DOM', () => {
   before(async () => {
     await t.chrome.clear();
     await t.ours.clear();
-    // Created after the CDP server is installed, so the probe records the closed root too.
+    // Created after the CDP agent is installed, so the probe records the closed root too.
     await t.page.evaluate(() => {
       const open = document.createElement('div');
       open.id = 'open-host';

@@ -1,9 +1,9 @@
-import { FRAME_ID, LOADER_ID, type CdpServer } from './cdp-agent';
+import { FRAME_ID, LOADER_ID, type CdpSession } from './cdp-agent';
 import { RelayCore, parse, type Frame, type Session } from '@devtools-anywhere/relay-core';
 
 const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 /**
- * Sent by a page in shell mode when its CDP server starts listening, or when pinged. Carries
+ * Sent by a page in shell mode when its CDP session starts listening, or when pinged. Carries
  * the page's loader id, which the shell needs for the `Page.frameNavigated` it reports.
  */
 const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } });
@@ -19,18 +19,18 @@ interface Link {
 }
 
 /**
- * Connects a CDP server to a peer window over postMessage.
+ * Connects a CDP session to a peer window over postMessage.
  *
  * Only messages whose source is the peer window and whose origin is `origin` are accepted,
  * and outgoing messages are addressed to that origin only. Outgoing messages are queued
  * until the peer sends its first message: before that, its window may still be loading.
  */
-function link(server: CdpServer, peer: () => Window | null | undefined, origin: string): Link {
+function link(session: CdpSession, peer: () => Window | null | undefined, origin: string): Link {
   let ready = false;
   const queue: string[] = [];
   const post = (message: string) => peer()?.postMessage(message, origin);
 
-  const offServer = server.onMessage(message => {
+  const offServer = session.onMessage(message => {
     if (ready) post(message);
     else queue.push(message);
   });
@@ -41,7 +41,7 @@ function link(server: CdpServer, peer: () => Window | null | undefined, origin: 
       ready = true;
       queue.splice(0).forEach(post);
     }
-    server.dispatch(event.data).catch(() => {
+    session.dispatch(event.data).catch(() => {
       // Malformed message: there is no id to answer to.
     });
   };
@@ -59,19 +59,19 @@ function link(server: CdpServer, peer: () => Window | null | undefined, origin: 
 }
 
 /**
- * Connects a CDP server to a DevTools frontend running in `frame`. When the frame reloads
+ * Connects a CDP session to a DevTools frontend running in `frame`. When the frame reloads
  * (a new frontend instance), the domains are disabled so that the new instance's `enable`
  * calls replay everything captured so far. Returns a function that disconnects.
  */
-export function connectFrontend(server: CdpServer, frame: HTMLIFrameElement, frontendOrigin: string): () => void {
-  const connection = link(server, () => frame.contentWindow, frontendOrigin);
+export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, frontendOrigin: string): () => void {
+  const connection = link(session, () => frame.contentWindow, frontendOrigin);
   let loads = 0;
   const onLoad = () => {
     if (loads++ === 0) return;
     connection.reset();
     // Like a new Chrome session: e.g. Debugger.enable and CSS.enable only report scripts and
     // style sheets again after a disable.
-    for (const domain of STATEFUL_DOMAINS) server.call(`${domain}.disable`).catch(() => {});
+    for (const domain of STATEFUL_DOMAINS) session.call(`${domain}.disable`).catch(() => {});
   };
   frame.addEventListener('load', onLoad);
   return () => {
@@ -80,9 +80,9 @@ export function connectFrontend(server: CdpServer, frame: HTMLIFrameElement, fro
   };
 }
 
-/** Connects the CDP server of a page in shell mode to the shell (its parent window). */
-export function connectToShell(server: CdpServer): () => void {
-  const connection = link(server, () => window.parent, location.origin);
+/** Connects the CDP session of a page in shell mode to the shell (its parent window). */
+export function connectToShell(session: CdpSession): () => void {
+  const connection = link(session, () => window.parent, location.origin);
   window.parent.postMessage(HELLO, location.origin);
   return () => connection.disconnect();
 }
@@ -171,7 +171,7 @@ class ShellRelay extends RelayCore {
 
 /**
  * Runs in the shell document: relays CDP messages between the DevTools frontend in
- * `devtools` and the page's CDP server in `page`, and keeps DevTools working across page
+ * `devtools` and the page's CDP session in `page`, and keeps DevTools working across page
  * reloads (the relay core's work, shared with the remote server). Returns a function that
  * disconnects.
  */

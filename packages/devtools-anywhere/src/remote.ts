@@ -1,4 +1,4 @@
-import { FRAME_ID, LOADER_ID, installProbe, type CdpServer } from './cdp-agent';
+import { FRAME_ID, LOADER_ID, installProbe, type CdpSession } from './cdp-agent';
 import type { RemoteOptions } from './api';
 import { STATEFUL_DOMAINS } from './connection';
 
@@ -37,15 +37,15 @@ function favicon() {
 /**
  * Connects the page to a remote debugging server (`@devtools-anywhere/remote-server`) at
  * `serverUrl`, the URL it serves the probe under. Each DevTools frontend inspecting the page is
- * a session with a CDP server of its own, from `createServer`: one frontend's domains, node ids
- * and remote objects are not another's. Servers of ended sessions are kept, their domains
+ * a session with a CDP session of its own, from `createSession`: one frontend's domains, node ids
+ * and remote objects are not another's. CDP sessions of ended sessions are kept, their domains
  * disabled, for the next ones. The connection comes back when it drops, and what the page
  * sends meanwhile is queued. With `singlePath`, the page connects to `serverUrl` itself, the
  * target in the query (for a server mounted where upgrades are routed by exact path), instead of
  * to `target/<id>` under it. Returns a function that disconnects.
  */
 export function connectRemote(
-  createServer: () => CdpServer,
+  createSession: () => CdpSession,
   serverUrl: string,
   { singlePath = false }: RemoteOptions = {}
 ): () => void {
@@ -105,17 +105,17 @@ export function connectRemote(
     };
   }
 
-  /** Each session's server, and how to stop sending what it says. */
-  const sessions = new Map<string, { server: CdpServer; off: () => void }>();
-  const idle: CdpServer[] = [];
-  function session(id: string) {
+  /** Each session's CDP session, and how to stop sending what it says. */
+  const sessions = new Map<string, { cdp: CdpSession; off: () => void }>();
+  const idle: CdpSession[] = [];
+  function cdpOf(id: string) {
     let found = sessions.get(id);
     if (!found) {
-      const server = idle.pop() ?? createServer();
-      found = { server, off: server.onMessage(message => send(`${id}:${message}`)) };
+      const cdp = idle.pop() ?? createSession();
+      found = { cdp, off: cdp.onMessage(message => send(`${id}:${message}`)) };
       sessions.set(id, found);
     }
-    return found.server;
+    return found.cdp;
   }
   function detach(id: string) {
     const found = sessions.get(id);
@@ -124,11 +124,11 @@ export function connectRemote(
     found.off();
     // Like a new Chrome session for the next frontend: e.g. Debugger.enable and CSS.enable only
     // report scripts and style sheets again after a disable.
-    const { server } = found;
+    const { cdp } = found;
     const calls = [...STATEFUL_DOMAINS.map(domain => `${domain}.disable`), 'Page.stopScreencast'];
-    Promise.all(calls.map(method => server.call(method).catch(() => {}))).then(() => {
-      server.reset();
-      idle.push(server);
+    Promise.all(calls.map(method => cdp.call(method).catch(() => {}))).then(() => {
+      cdp.reset();
+      idle.push(cdp);
     });
   }
   function receive(data: string) {
@@ -145,7 +145,7 @@ export function connectRemote(
       return;
     }
     const colon = data.indexOf(':');
-    session(data.slice(0, colon))
+    cdpOf(data.slice(0, colon))
       .dispatch(data.slice(colon + 1))
       .catch(() => {
         // Malformed message: there is no id to answer to.

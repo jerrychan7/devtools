@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import { EXECUTION_CONTEXT_ID, type Context } from '../core/context';
 import type { RequestRecord } from '../probe/types';
 import { refetch } from './network';
@@ -13,7 +13,7 @@ import { refetch } from './network';
  * page uses and show in stack traces. The frontend ignore-lists them.
  * There are no breakpoints: the breakpoint commands are accepted and resolve to nothing.
  */
-export function registerDebugger({ server, probe }: Context) {
+export function registerDebugger({ session, probe }: Context) {
   /** Script id per URL, stable for the page's lifetime. */
   const ids = new Map<string, string>();
   const sources = new Map<string, Promise<string>>();
@@ -28,7 +28,7 @@ export function registerDebugger({ server, probe }: Context) {
     if (!/^https?:/.test(url) || ids.has(url)) return;
     const scriptId = String(ids.size + 1);
     ids.set(url, scriptId);
-    server.emit('Debugger.scriptParsed', {
+    session.emit('Debugger.scriptParsed', {
       scriptId,
       url,
       startLine: 0,
@@ -49,7 +49,7 @@ export function registerDebugger({ server, probe }: Context) {
     throw new CdpError(`No script for id: ${scriptId}`);
   }
 
-  server.register('Debugger', {
+  session.register('Debugger', {
     enable(): Protocol.Debugger.EnableResponse {
       if (!enabled) {
         enabled = true;

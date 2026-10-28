@@ -1,4 +1,4 @@
-/** Global key the probe is installed under, so the CDP server can find an earlier probe. */
+/** Global key the probe is installed under, so the CDP agent can find an earlier probe. */
 export const PROBE_KEY = '__devtoolsAnywhereProbe__';
 
 /** Values of `Runtime.consoleAPICalled` `type`. */
@@ -44,7 +44,7 @@ export interface ExceptionEntry {
 export type LogEntry = ConsoleEntry | ExceptionEntry;
 
 /**
- * A console call as the probe records it; the CDP server turns it into a ConsoleEntry. Calls
+ * A console call as the probe records it; the CDP agent turns it into a ConsoleEntry. Calls
  * that log nothing (no arguments, a passing assert, …) are not recorded.
  */
 export interface ConsoleCall {
@@ -78,7 +78,7 @@ export type RequestType =
   | 'Other';
 
 /**
- * A request as the probe records it; the CDP server turns it into a RequestRecord. Headers
+ * A request as the probe records it; the CDP agent turns it into a RequestRecord. Headers
  * are kept as the page gives them, and the response's MIME type and size come from them.
  */
 export interface ProbeRequest extends Omit<
@@ -129,7 +129,7 @@ export interface RequestRecord {
    * absent when it was not captured (streaming or too large).
    */
   body?: string | Blob | undefined;
-  /** The body was dropped to keep the total under the server's budget, like Chrome's eviction. */
+  /** The body was dropped to keep the total under the session's budget, like Chrome's eviction. */
   bodyEvicted?: boolean;
   encodedDataLength?: number;
   /** `performance.now()` when the response finished or failed. */
@@ -205,7 +205,7 @@ export interface Probe {
   tools: Map<string, ToolRecord>;
   /**
    * How many entries each list keeps, the oldest dropped first, and how large a body is kept:
-   * coarse bounds until a server mounts and sets its own.
+   * coarse bounds until a CDP session mounts and sets its own.
    */
   limits: ProbeLimits;
 }

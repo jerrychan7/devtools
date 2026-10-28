@@ -1,5 +1,5 @@
 // The DevTools frontend built from the official sources (packages/devtools-frontend),
-// against the in-page CDP server. Skipped when the frontend has not been built.
+// against the in-page CDP agent. Skipped when the frontend has not been built.
 import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -560,7 +560,7 @@ test('CDP messages go only to the embedder, and only its messages are taken', { 
   assert.equal(embedded, origin, 'the embedder passes its origin');
 
   // What the frontend sends: the target origin it gives postMessage (the test message is not
-  // passed on to the page's CDP server).
+  // passed on to the page's CDP session).
   const MARKER = 'devtools-anywhere-test-marker';
   // The frontend calls the page's postMessage (window.parent.postMessage), which is replaced here.
   await page.evaluate(MARKER => {

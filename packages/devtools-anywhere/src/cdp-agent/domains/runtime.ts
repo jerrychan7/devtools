@@ -9,7 +9,7 @@ import {
   tokenize,
   type LexOptions,
 } from '../core/lexer';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import { parseStack } from '../core/stack';
 import type { LogEntry } from '../probe/types';
 import { refetch } from './network';
@@ -78,7 +78,7 @@ function returnLast(code: string, options?: LexOptions): string {
 }
 
 /**
- * Removes this server's own frames from errors thrown by evaluated code, so the console
+ * Removes the CDP agent's own frames from errors thrown by evaluated code, so the console
  * shows `at <anonymous>:1:7` like Chrome instead of the eval machinery underneath.
  */
 function hideEvalFrames(error: unknown) {
@@ -551,13 +551,13 @@ function globalLexicalNames(probe: Context['probe']) {
   }
 }
 
-export function registerRuntime({ server, objects, nodes, probe }: Context) {
+export function registerRuntime({ session, objects, nodes, probe }: Context) {
   const lexicalNames = globalLexicalNames(probe);
   const repl = replBindings();
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
-  server.onReset(() => (lastResult = undefined));
+  session.onReset(() => (lastResult = undefined));
 
   /** Console utilities, available only while console input is evaluated. */
   function commandLineApi(): Record<string, unknown> {
@@ -613,7 +613,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
 
   function emitLog(entry: LogEntry) {
     if (entry.kind === 'console') {
-      server.emit('Runtime.consoleAPICalled', {
+      session.emit('Runtime.consoleAPICalled', {
         type: entry.type,
         args: entry.args.map(arg => objects.wrap(arg, { generatePreview: true, group: 'console' })),
         executionContextId: EXECUTION_CONTEXT_ID,
@@ -626,7 +626,7 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
     const frames = parseStack(entry.stack);
     const top = frames[0];
     const url = entry.url || top?.url;
-    server.emit('Runtime.exceptionThrown', {
+    session.emit('Runtime.exceptionThrown', {
       timestamp: entry.time,
       exceptionDetails: {
         exceptionId: ++exceptionId,
@@ -642,10 +642,10 @@ export function registerRuntime({ server, objects, nodes, probe }: Context) {
     } satisfies Protocol.Runtime.ExceptionThrownEvent);
   }
 
-  server.register('Runtime', {
+  session.register('Runtime', {
     enable() {
       if (unsubscribe) return;
-      server.emit('Runtime.executionContextCreated', {
+      session.emit('Runtime.executionContextCreated', {
         context: {
           id: EXECUTION_CONTEXT_ID,
           origin: location.origin,

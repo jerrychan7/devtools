@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { CdpError } from '../core/server';
+import { CdpError } from '../core/session';
 import { FRAME_ID, type Context } from '../core/context';
 import { parseStack } from '../core/stack';
 import type { ToolOutcome, ToolRecord } from '../probe/types';
@@ -124,7 +124,7 @@ const newInvocationId = () =>
  * derives their input schema like Chrome does, fills them in and submits them.
  */
 export function registerWebMcp(ctx: Context) {
-  const { server, nodes, objects, probe } = ctx;
+  const { session, nodes, objects, probe } = ctx;
   const tools = new Map<string, Tool>();
   const invocations = new Map<string, AbortController>();
   let stop: (() => void) | null = null;
@@ -144,11 +144,11 @@ export function registerWebMcp(ctx: Context) {
     for (const name of removed) tools.delete(name);
     for (const tool of added) tools.set(tool.info.name, tool);
     if (removed.length)
-      server.emit('WebMCP.toolsRemoved', {
+      session.emit('WebMCP.toolsRemoved', {
         tools: removed.map(name => ({ name, frameId: FRAME_ID })),
       } satisfies Protocol.WebMCP.ToolsRemovedEvent);
     if (added.length)
-      server.emit('WebMCP.toolsAdded', {
+      session.emit('WebMCP.toolsAdded', {
         tools: added.map(tool => tool.info),
       } satisfies Protocol.WebMCP.ToolsAddedEvent);
   }
@@ -274,7 +274,7 @@ export function registerWebMcp(ctx: Context) {
 
   // ---- commands ----
 
-  server.register('WebMCP', {
+  session.register('WebMCP', {
     enable() {
       if (stop) return;
       const context: unknown = Reflect.get(document, 'modelContext');
@@ -300,7 +300,7 @@ export function registerWebMcp(ctx: Context) {
       const input: Record<string, unknown> = { ...params.input };
       // The response goes out before the events, as in Chrome.
       queueMicrotask(async () => {
-        server.emit('WebMCP.toolInvoked', {
+        session.emit('WebMCP.toolInvoked', {
           toolName: params.toolName,
           frameId: FRAME_ID,
           invocationId,
@@ -311,7 +311,7 @@ export function registerWebMcp(ctx: Context) {
           .catch((error: unknown): Outcome => ({ status: 'Error', errorText: '', exception: error }));
         // Gone when the domain was disabled meanwhile.
         if (!invocations.delete(invocationId)) return;
-        server.emit('WebMCP.toolResponded', respondedEvent(invocationId, outcome));
+        session.emit('WebMCP.toolResponded', respondedEvent(invocationId, outcome));
       });
       return { invocationId };
     },

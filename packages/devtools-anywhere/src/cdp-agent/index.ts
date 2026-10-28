@@ -2,7 +2,7 @@ import type { Context } from './core/context';
 import { NodeRegistry } from './core/nodes';
 import { ObjectRegistry } from './core/objects';
 import { viewProbe } from './core/probe-view';
-import { CdpServer } from './core/server';
+import { CdpSession } from './core/session';
 import { registerCss } from './domains/css';
 import { registerDebugger } from './domains/debugger';
 import { registerDom } from './domains/dom';
@@ -18,7 +18,7 @@ import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp';
 import { installProbe, keep } from './probe';
 
-export { CdpServer } from './core/server';
+export { CdpSession } from './core/session';
 export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {
@@ -34,7 +34,7 @@ export { FRAME_ID, LOADER_ID } from './core/context';
 export type { SnapdomLoader } from './domains/screencast';
 
 /** @internal */
-export interface CdpServerOptions {
+export interface CdpSessionOptions {
   /**
    * Loads snapDOM (`() => import('@zumer/snapdom')`), which renders the frames of
    * Page.startScreencast. Without it, screencasting is not available.
@@ -48,14 +48,14 @@ const MAX_CONSOLE_MESSAGES = 1000;
 const MAX_RESOURCE_BODY = 20 * 1000 * 1000;
 
 /**
- * Creates an in-page CDP server. Reuses the probe if probe.iife.js already ran;
+ * Creates an in-page CDP agent. Reuses the probe if probe.iife.js already ran;
  * otherwise installs it now, so output from this point on is captured.
  *
  * @internal
  */
-export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
+export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   const probe = installProbe();
-  // The server sets how much the probe keeps: V8 keeps the last 1000 console messages; like
+  // The session sets how much the probe keeps: V8 keeps the last 1000 console messages; like
   // Chrome, requests and WebSockets are not limited in number, only their bodies in bytes
   // (one resource here, all of them in the probe view).
   probe.limits = {
@@ -67,17 +67,17 @@ export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
   };
   keep(probe.logs, MAX_CONSOLE_MESSAGES);
   const ctx: Context = {
-    server: new CdpServer(),
+    session: new CdpSession(),
     objects: new ObjectRegistry(),
     nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
     probe: viewProbe(probe),
   };
-  ctx.server.onReset(() => {
+  ctx.session.onReset(() => {
     ctx.objects.reset();
     ctx.nodes.reset();
     ctx.nodes.inspected = [];
   });
-  registerStubs(ctx.server);
+  registerStubs(ctx.session);
   registerRuntime(ctx);
   registerNetwork(ctx);
   registerPage(ctx);
@@ -90,5 +90,5 @@ export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
   registerScreencast(ctx, options.loadSnapdom);
   registerInput(ctx);
   registerWebMcp(ctx);
-  return ctx.server;
+  return ctx.session;
 }

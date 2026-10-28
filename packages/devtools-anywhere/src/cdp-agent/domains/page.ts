@@ -3,8 +3,8 @@ import { readBody } from '../core/body';
 import { FRAME_ID, LOADER_ID, type Context } from '../core/context';
 import { isOwnRequest, refetch } from './network';
 
-export function registerPage({ server, probe }: Context) {
-  server.register('Page', {
+export function registerPage({ session, probe }: Context) {
+  session.register('Page', {
     enable: () => {},
 
     getResourceTree: (): Protocol.Page.GetResourceTreeResponse => ({

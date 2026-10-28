@@ -54,7 +54,7 @@ const isEditable = (el: Element | null) =>
  * (through `execCommand`, so it is undoable and fires `input`). Mouse events become touch
  * events while touch emulation is on (the screencast's "Use touch" toggle).
  */
-export function registerInput({ server }: Context) {
+export function registerInput({ session }: Context) {
   let emitTouch = false;
   let hovered: Element | Document | null = null;
   let pressed: Element | Document | null = null;
@@ -275,7 +275,7 @@ export function registerInput({ server }: Context) {
     document.execCommand('insertText', false, text);
   }
 
-  server.register('Input', {
+  session.register('Input', {
     dispatchMouseEvent(p: Protocol.Input.DispatchMouseEventRequest) {
       if (emitTouch) touch(p);
       else mouse(p);
@@ -322,7 +322,7 @@ export function registerInput({ server }: Context) {
     setIgnoreInputEvents: () => {},
   });
 
-  server.register('Emulation', {
+  session.register('Emulation', {
     setEmitTouchEventsForMouse(p: Protocol.Emulation.SetEmitTouchEventsForMouseRequest) {
       emitTouch = p.enabled;
     },

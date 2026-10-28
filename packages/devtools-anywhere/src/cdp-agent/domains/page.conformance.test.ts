@@ -41,12 +41,12 @@ test('startScreencast without snapDOM reports that it is not available', async (
   await assert.rejects(t.ours.send('Page.startScreencast', {}), /snapDOM is not configured/);
 });
 
-/** A CDP server whose snapDOM is a stand-in recording the scales it renders at. */
+/** A CDP session whose snapDOM is a stand-in recording the scales it renders at. */
 async function screencastServer() {
   await t.page.evaluate(() => {
     const frames: { sessionId: number; data: string; deviceWidth: number }[] = [];
     const scales: number[] = [];
-    const server = window.DevtoolsAnywhere.createCdpServer({
+    const session = window.DevtoolsAnywhere.createCdpSession({
       loadSnapdom: async () => ({
         snapdom: async () => ({
           async toCanvas({ scale }) {
@@ -59,7 +59,7 @@ async function screencastServer() {
         }),
       }),
     });
-    server.onMessage(m => {
+    session.onMessage(m => {
       const msg: {
         method?: string;
         params: { sessionId: number; data: string; metadata: { deviceWidth: number } };
@@ -71,10 +71,10 @@ async function screencastServer() {
           deviceWidth: msg.params.metadata.deviceWidth,
         });
     });
-    window.__screencast = { server, frames, scales };
+    window.__screencast = { session, frames, scales };
   });
   const call = (method: string, params: object = {}) =>
-    t.page.evaluate((m, p) => window.__screencast?.server.call(m, p), method, params);
+    t.page.evaluate((m, p) => window.__screencast?.session.call(m, p), method, params);
   const frames = () => t.page.evaluate(() => window.__screencast?.frames.slice() ?? []);
   /** Waits until `count` frames were sent. */
   const waitForFrames = async (count: number) => {

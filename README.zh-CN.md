@@ -35,7 +35,7 @@
 
 ### 能力边界
 
-- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在 shell 模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器（Android 用 `chrome://inspect`，iOS 用 Safari 的 Web Inspector）；[远程调试](#远程调试)改变不了这一点，因为页面里运行的仍是同一个页面内 CDP 服务端。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
+- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在 shell 模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器（Android 用 `chrome://inspect`，iOS 用 Safari 的 Web Inspector）；[远程调试](#远程调试)改变不了这一点，因为页面里运行的仍是同一个页面内 CDP agent。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
 - 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
   - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
@@ -67,7 +67,7 @@
 
 压缩后约 5.8 KB（min+gzip，包含外壳模式、自动挂载和远程调试）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
 
-- 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch`、`XHR` 和 `WebSocket`，把事件连同时间戳写入缓冲。WebSocket 帧按原样保存，二进制负载到 CDP 服务端才转成 base64。CDP 服务端挂载之前，每类记录（控制台消息、请求、WebSocket、每个 WebSocket 的帧）各保留最近 1 万条，作为从不加载服务端的页面的兜底；服务端挂载后改由它设定上限，控制台消息与 V8 一样保留最近 1000 条。
+- 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch`、`XHR` 和 `WebSocket`，把事件连同时间戳写入缓冲。WebSocket 帧按原样保存，二进制负载到 CDP agent 才转成 base64。CDP 会话挂载之前，每类记录（控制台消息、请求、WebSocket、每个 WebSocket 的帧）各保留最近 1 万条，作为从不加载 CDP agent 的页面的兜底；CDP 会话挂载后改由它设定上限，控制台消息与 V8 一样保留最近 1000 条。
 - 无法 hook 的请求（文档、样式表、脚本、图片、字体等）通过 Resource Timing 记录；带 `buffered` 的 `PerformanceObserver` 还能拿到探针运行之前的请求。这些记录有 URL、类型、时序、大小，以及浏览器公开时的状态码和 MIME 类型，但没有请求头和响应头；响应体在需要时从 HTTP 缓存重新读取。外壳模式下启用了 Service Worker 时，它会为同源请求补上请求头和响应头。之所以仍以 hook 为主：hook 从最开始就生效、带调用栈、无需部署；Service Worker 要安装后才能接管页面，会和网站自己的 Service Worker 冲突，而且要代理请求才能看到响应。
 - CDP 运行时和前端延迟加载。运行时的 Runtime、Network 域直接读取探针的缓冲并订阅新事件，因此每个 API 只被 hook 一次。
 
@@ -81,7 +81,7 @@
 
 1. 点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”（`element.enterShell()`），把前端地址和 bundle 地址写入 `sessionStorage`，然后刷新页面。
 2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere shell>`。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
-3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 服务端连接到外壳。外壳在页面和前端之间转发消息。
+3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间转发消息。
 4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化。
 5. 再点一次锁形按钮，或点工具栏上的 ×（`element.exitShell()`），会清除配置，并在普通模式下重新加载页面。
 
@@ -158,7 +158,7 @@ npx devtools-anywhere-remote --port 8080
 <script src="http://192.168.1.2:8080/probe.iife.js" data-remote></script>
 ```
 
-页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；列表可以筛选，也会显示连着几个 DevTools。点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连，期间它仍留在列表中。一个页面可以同时被多个 DevTools 调试，和 Chrome 一样各有独立的会话：页面为每个会话运行一个 CDP 服务端。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。它像链接一样相对探针的地址解析，所以挂在路径下的服务端要带结尾斜杠：`/devtools/` 指 `/devtools/` 下的服务端，`/devtools` 指的却是 `/` 下的。
+页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；列表可以筛选，也会显示连着几个 DevTools。点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连，期间它仍留在列表中。一个页面可以同时被多个 DevTools 调试，和 Chrome 一样各有独立的会话：页面为每个会话运行一个 CDP 会话。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。它像链接一样相对探针的地址解析，所以挂在路径下的服务端要带结尾斜杠：`/devtools/` 指 `/devtools/` 下的服务端，`/devtools` 指的却是 `/` 下的。
 
 - 服务端同时提供探针、bundle 和 DevTools 前端；前端运行在电脑上，不受“前端要和页面不同源”的限制。
 - 调试一个页面就意味着能在其中执行任意脚本：目标列表和 DevTools 连接都需要 token（`--token <值>`，默认随机生成；`--no-token` 关闭）。页面连接不需要 token。

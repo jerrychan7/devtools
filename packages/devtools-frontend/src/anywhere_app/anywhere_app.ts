@@ -1,7 +1,7 @@
 // Copyright 2026 jerrychan7. MIT license.
 //
 // DevTools for a page that inspects itself (devtools-anywhere): only the panels that work
-// against the in-page CDP server, connected to the embedding window through postMessage, or
+// against the in-page CDP agent, connected to the embedding window through postMessage, or
 // through a remote debugging server.
 
 import '../../Images/Images.js';

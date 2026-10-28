@@ -131,7 +131,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 
 `packages/devtools-frontend` 按钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)，只保留入口能加载到的文件。为了尽量少改上游：
 
-- **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP 服务端的面板（元素、控制台、源代码、网络、应用）和投屏，其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
+- **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP agent的面板（元素、控制台、源代码、网络、应用）和投屏，其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
 - **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
 - **小屏**：沿用上游自带的响应式布局（元素面板窄屏时上下分栏、标签页溢出折叠）。
 - **少请求**：上游每个模块各打成一个包，打开 DevTools 要发约 150 个请求，在 HTTP/1.1 或网络不稳时很慢。`scripts/bundle.ts` 用 rollup 把它们重新打包（含摇树）到 `dist/bundle/`：每个懒加载的模块（主要是面板）各成一个 chunk，用到时才加载；入口 chunk 包含入口引入的模块、多个面板共用的模块和体积很小的模块；每个 worker 打成单个文件，SVG 图标内联成 data: URL。打开 DevTools 约 10 个请求。打包出的文件都以内容 hash 命名，可以永久缓存；只有指明入口的 `anywhere_app.html` 需要每次重新验证。由于模块不再是独立文件，端到端测试通过入口导出的 `modules` 访问它们。
@@ -166,7 +166,7 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`）。之后跑 `pnpm test`：新版前端可能会调用 CDP 服务端尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
 
 ## 3. 开发完成
 

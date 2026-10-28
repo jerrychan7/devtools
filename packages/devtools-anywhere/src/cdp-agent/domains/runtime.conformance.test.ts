@@ -461,7 +461,7 @@ describe('probe buffers', () => {
       await page.evaluate(`for (let i = 0; i < 10100; i++) console.debug('flood', i)`);
       assert.deepEqual(await page.evaluate(logs), { length: 10000, first: 100 });
       await page.addScriptTag({ path: CDP_BUNDLE });
-      await page.evaluate(() => void window.DevtoolsAnywhere.createCdpServer());
+      await page.evaluate(() => void window.DevtoolsAnywhere.createCdpSession());
       assert.deepEqual(await page.evaluate(logs), { length: 1000, first: 9100 });
     } finally {
       await page.close();

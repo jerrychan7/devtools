@@ -2,13 +2,13 @@ import {
   installProbe,
   SHELL_KEY,
   SHELL_PAGE_ID,
-  createCdpServer,
+  createCdpSession,
   isShellPage,
   isTrustedShellConfig,
   markOwn,
   OWN_ATTRIBUTE,
   readShellConfig,
-  type CdpServer,
+  type CdpSession,
   type ShellConfig,
   type SnapdomLoader,
 } from './cdp-agent';
@@ -32,8 +32,8 @@ export function setBundleUrl(url: string) {
  */
 let loadSnapdom: SnapdomLoader = () => import('@zumer/snapdom');
 
-/** The CDP server of a page, with the screencast's renderer. */
-export const createPageServer = () => createCdpServer({ loadSnapdom: () => loadSnapdom() });
+/** The CDP session of a page, with the screencast's renderer. */
+export const createPageSession = () => createCdpSession({ loadSnapdom: () => loadSnapdom() });
 
 // Sizes are remembered as percentages of the viewport, so they fit any screen and orientation.
 const HEIGHT_KEY = 'devtools-anywhere:height%';
@@ -190,8 +190,8 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 export class DevtoolsAnywhereElement extends HTMLElement {
   static observedAttributes = ['open', 'frontend', 'height', 'width', 'dock'];
 
-  /** The CDP server for this page. Created when the element is first connected. */
-  server: CdpServer | null = null;
+  /** The CDP session for this page. Created when the element is first connected. */
+  session: CdpSession | null = null;
 
   private panel: HTMLDivElement;
   private frame: HTMLIFrameElement;
@@ -375,7 +375,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (this.hasAttribute('shell')) {
       this.registerShellWorker();
     } else {
-      this.server ??= createPageServer();
+      this.session ??= createPageSession();
     }
     this.update();
   }
@@ -459,7 +459,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const frontend = this.getAttribute('frontend');
     const pageElement = document.getElementById(SHELL_PAGE_ID);
     const page = pageElement instanceof HTMLIFrameElement ? pageElement : null;
-    if (!frontend || (!this.server && !(this.hasAttribute('shell') && page))) return;
+    if (!frontend || (!this.session && !(this.hasAttribute('shell') && page))) return;
     const url = new URL(frontend, location.href);
     if (url.href === this.loadedUrl) return;
     this.loadedUrl = url.href;
@@ -467,7 +467,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     installProbe().ownUrls.add(url.href);
     this.disconnect?.();
     this.frontendOrigin = url.origin;
-    if (this.server) this.disconnect = connectFrontend(this.server, this.frame, url.origin);
+    if (this.session) this.disconnect = connectFrontend(this.session, this.frame, url.origin);
     else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
     // Whether shell mode is available (it needs the bundle URL) and whether it is on.
     const shell = this.hasAttribute('shell');

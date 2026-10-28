@@ -181,7 +181,7 @@ function viewportSizeOnResize() {
 }
 
 export function registerOverlay(ctx: Context) {
-  const { server, nodes } = ctx;
+  const { session, nodes } = ctx;
   const highlighter = new Highlighter();
   let stopInspect: (() => void) | null = null;
   const showViewportSize = viewportSizeOnResize();
@@ -207,7 +207,7 @@ export function registerOverlay(ctx: Context) {
       hovered = el;
       // Like Chrome, so that the Elements panel reveals the hovered node.
       const nodeId = nodes.pushToClient?.(el);
-      if (nodeId !== undefined) server.emit('Overlay.nodeHighlightRequested', { nodeId });
+      if (nodeId !== undefined) session.emit('Overlay.nodeHighlightRequested', { nodeId });
     };
     const onMove = (event: Event) => {
       const el = targetOf(event);
@@ -227,7 +227,7 @@ export function registerOverlay(ctx: Context) {
       cancelAnimationFrame(frame);
       frame = 0;
       highlighter.hide();
-      server.emit('Overlay.inspectNodeRequested', { backendNodeId: nodes.backendIdOf(el) });
+      session.emit('Overlay.inspectNodeRequested', { backendNodeId: nodes.backendIdOf(el) });
     };
     const listening = new AbortController();
     const options = { capture: true, signal: listening.signal };
@@ -250,7 +250,7 @@ export function registerOverlay(ctx: Context) {
     };
   }
 
-  server.register('Overlay', {
+  session.register('Overlay', {
     enable: () => {},
     disable() {
       stopInspect?.();

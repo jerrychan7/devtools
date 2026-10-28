@@ -27,7 +27,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // (undocumented)
     get open(): boolean;
     set open(value: boolean);
-    server: CdpServer | null;
+    session: CdpSession | null;
     // (undocumented)
     show(): void;
     // (undocumented)

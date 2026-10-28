@@ -1,4 +1,4 @@
-// Runs real Chrome's CDP and our in-page CDP server side by side on the same page, so a
+// Runs real Chrome's CDP and our in-page CDP agent side by side on the same page, so a
 // single action in the page produces events from both that can be compared.
 import type { Page } from 'puppeteer-core';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
@@ -56,13 +56,13 @@ export async function openPage(env: Env, events: EventName[]): Promise<TestPage>
 
   await page.addScriptTag({ path: CDP_BUNDLE });
   await page.evaluate(() => {
-    const server = window.DevtoolsAnywhere.createCdpServer();
+    const session = window.DevtoolsAnywhere.createCdpSession();
     window.__ours = [];
-    server.onMessage(m => {
+    session.onMessage(m => {
       const msg: { method?: string; params: unknown } = JSON.parse(m);
       if (msg.method) window.__ours.push({ method: msg.method, params: msg.params });
     });
-    window.__server = server;
+    window.__session = session;
   });
 
   // Both sides return what the protocol says; the casts state that our server does too,
@@ -82,7 +82,7 @@ export async function openPage(env: Env, events: EventName[]): Promise<TestPage>
     send: async (method, ...params) => {
       const start = Date.now();
       try {
-        return (await page.evaluate((m, p) => window.__server.call(m, p), method, params[0] ?? {})) as Awaited<
+        return (await page.evaluate((m, p) => window.__session.call(m, p), method, params[0] ?? {})) as Awaited<
           ReturnType<Side['send']>
         >;
       } catch (e) {

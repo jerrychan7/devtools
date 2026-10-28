@@ -1,11 +1,11 @@
 import type { NodeRegistry } from './nodes';
 import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
-import type { CdpServer } from './server';
+import type { CdpSession } from './session';
 
 /** State shared by all domains. */
 export interface Context {
-  server: CdpServer;
+  session: CdpSession;
   objects: ObjectRegistry;
   nodes: NodeRegistry;
   probe: ProbeView;

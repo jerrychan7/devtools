@@ -28,12 +28,12 @@ before(async () => {
   await page.addScriptTag({ path: BUNDLE });
   await page.evaluate(() => console.log('logged before connecting'));
   await page.evaluate(html => {
-    window.__server = window.DevtoolsAnywhere.createCdpServer();
+    window.__session = window.DevtoolsAnywhere.createCdpSession();
     const frame = document.createElement('iframe');
     frame.srcdoc = html;
     document.body.appendChild(frame);
     window.__frame = frame;
-    window.DevtoolsAnywhere.connectFrontend(window.__server, frame, location.origin);
+    window.DevtoolsAnywhere.connectFrontend(window.__session, frame, location.origin);
   }, FRONTEND);
 });
 after(() => env?.close());
@@ -111,7 +111,7 @@ test('ignores messages from a frontend window of another origin', async () => {
         frame.srcdoc = `<script>parent.postMessage(JSON.stringify({ id: 98, method: 'Runtime.evaluate', params: { expression: 'window.__hacked = 1' } }), '*')</script>`;
         frame.addEventListener('load', () => resolve(), { once: true });
         document.body.appendChild(frame);
-        const disconnect = window.DevtoolsAnywhere.connectFrontend(window.__server, frame, 'https://other.example');
+        const disconnect = window.DevtoolsAnywhere.connectFrontend(window.__session, frame, 'https://other.example');
         frame.id = 'other-frontend';
         frame.addEventListener('cleanup', () => (disconnect(), frame.remove()), { once: true });
       })

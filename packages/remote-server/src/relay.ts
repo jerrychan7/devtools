@@ -2,7 +2,7 @@
 // keeps DevTools working across page reloads. What happens across reloads is the relay core's
 // (packages/relay-core), shared with shell mode; this is the remote server's side of it.
 //
-// Each frontend is a session, as in Chrome: the page runs a CDP server of its own for it
+// Each frontend is a session, as in Chrome: the page runs a CDP session of its own for it
 // (packages/devtools-anywhere/src/remote.ts), so that one frontend's domains, node ids and
 // remote objects are not another's. Between the relay and the page, a session's messages are
 // prefixed with its id and a colon; the relay's own messages (hello, pagehide, detach) are not.
@@ -21,7 +21,7 @@ import { RelayCore, parse, type Frame, type Session } from '@devtools-anywhere/r
 export const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 /** Sent by the page on pagehide: the commands it did not answer never will be. */
 export const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
-/** Sent to the page when a session ends: its CDP server stops (its domains are disabled). */
+/** Sent to the page when a session ends: its CDP session stops (its domains are disabled). */
 export const DETACH_METHOD = 'DevtoolsAnywhere.detach';
 /** What a hello's title and url are cut to, in UTF-16 code units: a page cannot fill the server's memory. */
 const MAX_TITLE = 4096;

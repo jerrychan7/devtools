@@ -1,7 +1,7 @@
 // Remote debugging: a page on one device (a phone, mostly) connects here, and Chrome DevTools on
 // another machine inspects it through this server.
 //
-//   page ──ws──▶ <base>target/<id>          the page's CDP server (probe.iife.js data-remote)
+//   page ──ws──▶ <base>target/<id>          the page's CDP session (probe.iife.js data-remote)
 //   DevTools ──ws──▶ <base>client/<id>      the frontend, opened from the target list
 //
 // Both are also taken at <base> itself, the id in the query (<base>?target=<id>,

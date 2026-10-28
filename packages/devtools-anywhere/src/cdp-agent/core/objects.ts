@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { CdpError } from './server';
+import { CdpError } from './session';
 
 type RemoteObject = Protocol.Runtime.RemoteObject;
 type ObjectPreview = Protocol.Runtime.ObjectPreview;
