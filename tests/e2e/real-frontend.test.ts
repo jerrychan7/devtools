@@ -701,7 +701,8 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
 test("DevTools' own scripts are ignore-listed once, next to the user's rules", { skip }, async () => {
   const KEY = 'skip-stack-frames-pattern';
   const SEEDED = 'devtools-anywhere-ignore-list-seeded';
-  const OWN = '/(probe|devtools-anywhere)\\.iife\\.js$|/snapdom\\.js$';
+  // The stored rule, spelled out: users keep it in their settings, so a change to it is breaking.
+  const OWN = '/(probe\\.iife\\.js|devtools-anywhere\\.iife\\.js|snapdom\\.js)$';
   /** Reloads the page with these preferences, and returns the rules the new frontend uses. */
   const reloadWith = async (prefs: Record<string, string | null>) => {
     // The frontend's preferences are the localStorage of its origin, the page's.

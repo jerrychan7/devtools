@@ -19,6 +19,7 @@
 // another tab still uses it. The page's own workers are left alone.
 import { installProbe, readShellConfig, setShellScriptUrl } from './cdp-agent/probe';
 import type { DevtoolsAnywhereApi } from './api';
+import { BUNDLE_SCRIPT, PROBE_SCRIPT } from './embedder';
 import type { ProbeScriptAttributes } from './probe-script';
 import { SHELL_QUERY } from './shell-messages';
 
@@ -33,7 +34,7 @@ if (script?.src) probe.ownUrls.add(script.src);
 const isShellWorker = (scriptUrl: string | undefined) => {
   if (!scriptUrl) return false;
   const params = new URL(scriptUrl).searchParams;
-  return !!params.get('probe')?.endsWith('/probe.iife.js') && params.has('shell');
+  return !!params.get('probe')?.endsWith(`/${PROBE_SCRIPT}`) && params.has('shell');
 };
 /**
  * Asks the worker whether a shell (maybe in another tab) still uses it. No answer within a
@@ -75,7 +76,7 @@ const frontend = attribute('data-frontend');
 const remote = attribute('data-remote');
 // In the shell's top window the probe has replaced the document with the shell already.
 if (script && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
-  const bundle = new URL(attribute('data-bundle') || 'devtools-anywhere.iife.js', script.src).href;
+  const bundle = new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href;
   const open = attribute('data-open') !== null;
   probe.ownUrls.add(bundle);
 

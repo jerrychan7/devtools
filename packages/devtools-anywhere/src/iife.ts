@@ -5,6 +5,7 @@ import { createCdpSession, installProbe, isShellPage, setShellScriptUrl } from '
 import { connectFrontend, connectToShell } from './connection';
 import { DevtoolsAnywhereElement, createPageSession, defineDevtoolsAnywhere, setBundleUrl } from './element';
 import type { DevtoolsAnywhereApi } from './api';
+import { SNAPDOM_SCRIPT } from './embedder';
 import { connectRemote } from './remote';
 
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
@@ -18,7 +19,7 @@ if (!('DevtoolsAnywhere' in window)) {
     setBundleUrl(script.src);
     // DevTools' own code is not one of the page's requests.
     probe.ownUrls.add(script.src);
-    probe.ownUrls.add(new URL('snapdom.js', script.src).href);
+    probe.ownUrls.add(new URL(SNAPDOM_SCRIPT, script.src).href);
   }
   defineDevtoolsAnywhere();
   if (isShellPage()) connectToShell(createPageSession());

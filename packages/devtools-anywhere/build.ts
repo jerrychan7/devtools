@@ -2,10 +2,14 @@
 // `--watch` rebuilds on every change (`pnpm dev`).
 import { context, type BuildOptions } from 'esbuild';
 import { rmSync } from 'node:fs';
+import { BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
 
 const watch = process.argv.includes('--watch');
 // In watch mode the other packages' watchers read this dist/: keep it in place.
 if (!watch) rmSync('dist', { recursive: true, force: true });
+
+/** An entry point's name, for the file it is built to. */
+const entry = (file: string) => file.replace(/\.js$/, '');
 
 const common: BuildOptions = { bundle: true, target: 'es2020', sourcemap: true, logLevel: 'info' };
 
@@ -15,8 +19,8 @@ const builds: BuildOptions[] = [
   {
     ...common,
     entryPoints: {
-      'devtools-anywhere.iife': 'src/iife.ts',
-      'probe.iife': 'src/probe.ts',
+      [entry(BUNDLE_SCRIPT)]: 'src/iife.ts',
+      [entry(PROBE_SCRIPT)]: 'src/probe.ts',
       'devtools-anywhere-sw': 'src/sw.ts',
     },
     format: 'iife',
@@ -26,7 +30,13 @@ const builds: BuildOptions[] = [
     external: ['@zumer/snapdom'],
   },
   // The screencast's renderer, for the IIFE build to load on demand.
-  { ...common, entryPoints: { snapdom: '@zumer/snapdom' }, format: 'esm', minify: true, outdir: 'dist' },
+  {
+    ...common,
+    entryPoints: { [entry(SNAPDOM_SCRIPT)]: '@zumer/snapdom' },
+    format: 'esm',
+    minify: true,
+    outdir: 'dist',
+  },
 ];
 
 const contexts = await Promise.all(builds.map(options => context(options)));

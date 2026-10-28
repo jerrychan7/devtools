@@ -14,7 +14,15 @@ import {
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
 import { SHELL_HANDSHAKE } from './shell-messages';
-import { DOCK_SIDES, REQUEST_KEY, type DockSide, type EmbedderRequest, type FrontendHash } from './embedder';
+import {
+  DOCK_SIDES,
+  PROBE_SCRIPT,
+  SNAPDOM_SCRIPT,
+  REQUEST_KEY,
+  type DockSide,
+  type EmbedderRequest,
+  type FrontendHash,
+} from './embedder';
 
 let bundleUrl = '';
 
@@ -24,7 +32,7 @@ let bundleUrl = '';
  */
 export function setBundleUrl(url: string) {
   bundleUrl = url;
-  loadSnapdom = () => import(/* @vite-ignore */ new URL('snapdom.js', url).href);
+  loadSnapdom = () => import(/* @vite-ignore */ new URL(SNAPDOM_SCRIPT, url).href);
 }
 
 /**
@@ -354,7 +362,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // navigates, instead of after register() and ready.
     navigator.serviceWorker.controller?.postMessage({ type: SHELL_HANDSHAKE });
     const url = new URL(config.sw);
-    url.searchParams.set('probe', new URL('probe.iife.js', config.bundle).href);
+    url.searchParams.set('probe', new URL(PROBE_SCRIPT, config.bundle).href);
     // Marks the worker as the shell's (see probe.ts), which unregisters a leftover one.
     url.searchParams.set('shell', '');
     try {

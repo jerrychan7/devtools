@@ -31,7 +31,7 @@ import * as Root from '../../core/root/root.js';
 import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import {type DockSide, type EmbedderRequest, type FrontendHash, REQUEST_KEY} from './embedder.js';
+import {type DockSide, type EmbedderRequest, type FrontendHash, OWN_SCRIPTS, REQUEST_KEY} from './embedder.js';
 import * as Main from '../main/main.js';
 
 // The Sources panel's Page tab lists the page's resources. Upstream registers it in
@@ -161,7 +161,7 @@ const dock = param('dock');
 // user can still remove it.
 const IGNORE_LIST = 'skip-stack-frames-pattern';
 const IGNORE_LIST_SEEDED = 'devtools-anywhere-ignore-list-seeded';
-const OWN_SCRIPTS = '/(probe|devtools-anywhere)\\.iife\\.js$|/snapdom\\.js$';
+const OWN_SCRIPTS_PATTERN = `/(${OWN_SCRIPTS.map(file => file.replaceAll('.', '\\.')).join('|')})$`;
 function withOwnScriptsIgnored(prefs: Record<string, string>): Record<string, string> {
   if (prefs[IGNORE_LIST_SEEDED]) {
     return prefs;
@@ -174,7 +174,7 @@ function withOwnScriptsIgnored(prefs: Record<string, string>): Record<string, st
     // bundle is not visible to this entrypoint, so the default is spelled out here.
     rules = [{pattern: '/node_modules/|^node:'}];
   }
-  const value = JSON.stringify([...(Array.isArray(rules) ? rules : []), {pattern: OWN_SCRIPTS, disabled: false}]);
+  const value = JSON.stringify([...(Array.isArray(rules) ? rules : []), {pattern: OWN_SCRIPTS_PATTERN, disabled: false}]);
   host.setPreference(IGNORE_LIST, value);
   host.setPreference(IGNORE_LIST_SEEDED, 'true');
   return {...prefs, [IGNORE_LIST]: value, [IGNORE_LIST_SEEDED]: 'true'};

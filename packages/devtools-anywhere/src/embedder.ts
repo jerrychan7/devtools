@@ -26,6 +26,16 @@ export type EmbedderRequest =
  */
 export const REQUEST_KEY = 'devtoolsAnywhere';
 
+/**
+ * devtools-anywhere's own scripts, as built (build.ts) and loaded next to each other: the
+ * frontend ignore-lists them in Sources, like extension scripts in Chrome.
+ */
+export const PROBE_SCRIPT = 'probe.iife.js';
+export const BUNDLE_SCRIPT = 'devtools-anywhere.iife.js';
+/** snapDOM, the screencast's renderer, loaded on demand. */
+export const SNAPDOM_SCRIPT = 'snapdom.js';
+export const OWN_SCRIPTS: readonly string[] = [PROBE_SCRIPT, BUNDLE_SCRIPT, SNAPDOM_SCRIPT];
+
 /** What the embedder passes the frontend in its URL's hash (`#?embedded=…&dock=…`). */
 export interface FrontendHash {
   /** The embedder's origin: the only one the frontend posts to. */
