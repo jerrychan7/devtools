@@ -19,6 +19,7 @@
 // another tab still uses it. The page's own workers are left alone.
 import { installProbe, readShellConfig, setShellScriptUrl } from './cdp-agent/probe';
 import type { DevtoolsAnywhereApi } from './api';
+import { SHELL_QUERY } from './shell-messages';
 
 const script = document.currentScript as HTMLScriptElement | null;
 // Shell configs must come from this script's origin.
@@ -45,7 +46,7 @@ const shellOpen = (worker: ServiceWorker) =>
       clearTimeout(timer);
       resolve(event.data === true);
     };
-    worker.postMessage({ type: 'devtools-anywhere:shell-open' }, [channel.port2]);
+    worker.postMessage({ type: SHELL_QUERY }, [channel.port2]);
   });
 if (!readShellConfig() && navigator.serviceWorker) {
   navigator.serviceWorker

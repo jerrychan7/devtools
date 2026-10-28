@@ -4,6 +4,7 @@
 // uncaught errors, fetch/XHR and WebSocket once, keeps recent events in ring buffers, and the CDP
 // agent reads those buffers later. The CDP agent installs it itself when no earlier
 // probe exists, so every API is hooked exactly once either way.
+import { RESPONSE_DETAILS } from './messages';
 import {
   PROBE_KEY,
   type ListenerRecord,
@@ -206,7 +207,7 @@ function observeResources(
       const data: unknown = event.data;
       if (!data || typeof data !== 'object' || !isOurs(event.source)) return;
       const { type, url, requestHeaders, status, statusText, responseHeaders } = data as Record<string, unknown>;
-      if (type !== 'devtools-anywhere:response' || typeof url !== 'string') return;
+      if (type !== RESPONSE_DETAILS || typeof url !== 'string') return;
       const patch: Partial<ProbeRequest> = {};
       const req = headers(requestHeaders);
       if (req) patch.requestHeaders = req;

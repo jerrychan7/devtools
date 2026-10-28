@@ -40,6 +40,8 @@
 // Type-checked with the WebWorker library (tsconfig.sw.json), separately from the DOM code.
 declare const self: ServiceWorkerGlobalScope;
 import { debuggerStatementSites } from './cdp-agent/core/lexer';
+import { RESPONSE_DETAILS, type ResponseDetails } from './cdp-agent/probe/messages';
+import { SHELL_HANDSHAKE, SHELL_QUERY } from './shell-messages';
 
 const params = new URL(self.location.href).searchParams;
 const probe = params.get('probe');
@@ -49,13 +51,7 @@ const SNIFF_OVERLAP = 1024;
 /** Marks the DevTools frontend page, which must not get the probe. */
 const FRONTEND =
   /<meta\b[^>]*\bname\s*=\s*["']?devtools-anywhere-frontend\b|entrypoints\/anywhere_app\/anywhere_app\.js/i;
-/** Message type the probe listens for; keep in sync with cdp-agent's probe. */
-const DETAILS = 'devtools-anywhere:response';
 const DESTINATIONS = new Set(['style', 'script', 'image', 'font']);
-/** Handshake message the shell posts to this worker; keep in sync with element.ts. */
-const SHELL = 'devtools-anywhere:shell';
-/** Asks whether a shell is open (answered on the transferred port); keep in sync with probe.ts. */
-const SHELL_QUERY = 'devtools-anywhere:shell-open';
 const SHELL_CACHE = 'devtools-anywhere-sw-shells';
 /**
  * `debugger` (8 characters) becomes a call of the probe's hook (keep the name in sync with the
@@ -107,7 +103,7 @@ self.addEventListener('message', event => {
     event.waitUntil(shellOpen().then(open => port.postMessage(open)));
     return;
   }
-  if (!(source instanceof Client) || event.data?.type !== SHELL) return;
+  if (!(source instanceof Client) || event.data?.type !== SHELL_HANDSHAKE) return;
   event.waitUntil(
     loadShells().then(async ids => {
       ids.add(source.id);
@@ -165,13 +161,13 @@ async function report(event: FetchEvent, fromWindow: boolean): Promise<Response>
   event.waitUntil(
     self.clients.get(event.clientId).then(client =>
       client?.postMessage({
-        type: DETAILS,
+        type: RESPONSE_DETAILS,
         url: request.url,
         requestHeaders: headersToObject(request.headers),
         status: original.status,
         statusText: original.statusText,
         responseHeaders: headersToObject(original.headers),
-      })
+      } satisfies ResponseDetails)
     )
   );
   return response;

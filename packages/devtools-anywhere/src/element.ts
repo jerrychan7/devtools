@@ -13,6 +13,7 @@ import {
   type SnapdomLoader,
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
+import { SHELL_HANDSHAKE } from './shell-messages';
 import { DOCK_SIDES, REQUEST_KEY, type DockSide, type EmbedderRequest, type FrontendHash } from './embedder';
 
 let bundleUrl = '';
@@ -46,8 +47,6 @@ const VW = typeof CSS !== 'undefined' && CSS.supports('width', '1dvw') ? 'dvw' :
 /** `part` as a percentage of `whole`, to one decimal. */
 const percent = (part: number, whole: number) => Math.round((part / whole) * 1000) / 10;
 const DOCK_KEY = 'devtools-anywhere:dock';
-/** Handshake the shell posts to devtools-anywhere-sw.js; keep in sync with sw.ts. */
-const SHELL_HANDSHAKE = 'devtools-anywhere:shell';
 const MIN_SIZE = 80;
 
 /**
