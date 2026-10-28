@@ -1,4 +1,5 @@
 import { FRAME_ID, LOADER_ID, installProbe, type CdpServer } from '@devtools-anywhere/cdp-server';
+import type { RemoteOptions } from './api';
 import { STATEFUL_DOMAINS } from './connection';
 
 // Keep in step with packages/remote-server/src/relay.ts: the two are built separately.
@@ -31,11 +32,6 @@ function targetId(fresh = false) {
 function favicon() {
   const link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
   return link?.href ?? new URL('/favicon.ico', location.href).href;
-}
-
-/** How the page reaches the server. */
-export interface RemoteOptions {
-  singlePath?: boolean;
 }
 
 /**

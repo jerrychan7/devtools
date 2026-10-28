@@ -4,7 +4,8 @@
 import { createCdpServer, installProbe, isShellPage, setShellScriptUrl } from '@devtools-anywhere/cdp-server';
 import { connectFrontend, connectToShell } from './connection';
 import { DevtoolsAnywhereElement, createPageServer, defineDevtoolsAnywhere, setBundleUrl } from './element';
-import { connectRemote, type RemoteOptions } from './remote';
+import type { DevtoolsAnywhereApi } from './api';
+import { connectRemote } from './remote';
 
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
 // again itself: only the first copy runs.
@@ -21,14 +22,12 @@ if (!('DevtoolsAnywhere' in window)) {
   }
   defineDevtoolsAnywhere();
   if (isShellPage()) connectToShell(createPageServer());
-  Object.assign(window, {
-    DevtoolsAnywhere: {
-      DevtoolsAnywhereElement,
-      connectFrontend,
-      connectRemote: (serverUrl: string, options?: RemoteOptions) =>
-        connectRemote(createPageServer, serverUrl, options),
-      createCdpServer,
-      defineDevtoolsAnywhere,
-    },
-  });
+  const api: DevtoolsAnywhereApi = {
+    DevtoolsAnywhereElement,
+    connectFrontend,
+    connectRemote: (serverUrl, options) => connectRemote(createPageServer, serverUrl, options),
+    createCdpServer,
+    defineDevtoolsAnywhere,
+  };
+  Object.assign(window, { DevtoolsAnywhere: api });
 }

@@ -18,6 +18,7 @@
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
 // another tab still uses it. The page's own workers are left alone.
 import { installProbe, readShellConfig, setShellScriptUrl } from '@devtools-anywhere/cdp-server/probe';
+import type { DevtoolsAnywhereApi } from './api';
 
 const script = document.currentScript as HTMLScriptElement | null;
 // Shell configs must come from this script's origin.
@@ -62,6 +63,10 @@ if (!readShellConfig() && navigator.serviceWorker) {
     .catch(() => {});
 }
 
+/** The bundle's API (src/api.ts), once the bundle has run: checked, since it is built separately. */
+const isApi = (api: unknown): api is Pick<DevtoolsAnywhereApi, 'connectRemote'> =>
+  typeof api === 'object' && api !== null && 'connectRemote' in api && typeof api.connectRemote === 'function';
+
 const frontend = script?.dataset['frontend'];
 const remote = script?.dataset['remote'];
 // In the shell's top window the probe has replaced the document with the shell already.
@@ -76,9 +81,10 @@ if (script && (frontend || remote !== undefined) && !(readShellConfig() && windo
     loader.onload = () => {
       if (remote !== undefined) {
         const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
-        if (typeof api === 'object' && api && 'connectRemote' in api && typeof api.connectRemote === 'function') {
-          const singlePath = script.hasAttribute('data-single-path');
-          api.connectRemote(new URL(remote || '.', script.src).href, { singlePath });
+        if (isApi(api)) {
+          api.connectRemote(new URL(remote || '.', script.src).href, {
+            singlePath: script.hasAttribute('data-single-path'),
+          });
         }
         return;
       }

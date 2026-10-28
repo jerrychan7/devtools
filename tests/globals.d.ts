@@ -3,6 +3,7 @@
 // points export only what the other packages use, not what the tests would like: types they do
 // not export are derived from those they do.
 import type { CdpServer, createCdpServer, installProbe } from '@devtools-anywhere/cdp-server';
+import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
 
 type Probe = ReturnType<typeof installProbe>;
 
@@ -29,12 +30,8 @@ declare global {
   interface Window {
     /** cdp-server.iife.js */
     DevtoolsAnywhereCdp: { createCdpServer: typeof createCdpServer };
-    /** devtools-anywhere.iife.js (the parts the tests use) */
-    DevtoolsAnywhere: {
-      createCdpServer: typeof createCdpServer;
-      connectFrontend(server: CdpServer, frame: HTMLIFrameElement, frontendOrigin: string): () => void;
-      connectRemote(serverUrl: string, options?: { singlePath?: boolean }): () => void;
-    };
+    /** devtools-anywhere.iife.js */
+    DevtoolsAnywhere: DevtoolsAnywhereApi;
     __devtoolsAnywhereProbe__?: Probe;
     /** The harness's CDP server in the page, and the events it emitted. */
     __server: CdpServer;
