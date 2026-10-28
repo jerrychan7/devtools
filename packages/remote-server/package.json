@@ -11,15 +11,15 @@
   ],
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/types/index.d.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/types/index.d.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
   "scripts": {
-    "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/api-extract.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "node build.ts --watch"
   },

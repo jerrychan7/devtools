@@ -32,7 +32,7 @@ export interface RemoteHandlerOptions {
    * anyone who can reach the server inspect every page connected to it.
    */
   token?: string | false;
-  /** A DevTools frontend build to serve. Default: @devtools-anywhere/devtools-frontend. */
+  /** A DevTools frontend build to serve. Default: `@devtools-anywhere/devtools-frontend`. */
   frontendDir?: string;
   /**
    * URL of the frontend's `anywhere_app.html` hosted elsewhere (a CDN), opened from the target
@@ -50,9 +50,11 @@ export interface RemoteHandlerOptions {
 /**
  * Remote debugging as request and upgrade handlers, to mount in a server of one's own:
  *
- *   const remote = createRemoteHandler({ basePath: '/devtools/' });
- *   server.on('request', (req, res) => remote.handleRequest(req, res) || app(req, res));
- *   server.on('upgrade', (req, socket, head) => remote.handleUpgrade(req, socket, head) || socket.destroy());
+ * ```ts
+ * const remote = createRemoteHandler({ basePath: '/devtools/' });
+ * server.on('request', (req, res) => remote.handleRequest(req, res) || app(req, res));
+ * server.on('upgrade', (req, socket, head) => remote.handleUpgrade(req, socket, head) || socket.destroy());
+ * ```
  */
 export interface RemoteHandler {
   readonly basePath: string;

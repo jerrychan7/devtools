@@ -34,7 +34,7 @@ function favicon() {
 }
 
 /**
- * Connects the page to a remote debugging server (@devtools-anywhere/remote-server) at
+ * Connects the page to a remote debugging server (`@devtools-anywhere/remote-server`) at
  * `serverUrl`, the URL it serves the probe under. Each DevTools frontend inspecting the page is
  * a session with a CDP server of its own, from `createServer`: one frontend's domains, node ids
  * and remote objects are not another's. Servers of ended sessions are kept, their domains

@@ -1,0 +1,10 @@
+{
+  "extends": "../../api-extractor.base.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/types/probe/index.d.ts",
+  "apiReport": {
+    "reportFileName": "<unscopedPackageName>.probe"
+  },
+  "dtsRollup": {
+    "untrimmedFilePath": "<projectFolder>/dist/probe.d.ts"
+  }
+}

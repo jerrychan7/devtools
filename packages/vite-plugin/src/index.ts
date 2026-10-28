@@ -18,7 +18,7 @@ export interface DevtoolsAnywhereOptions {
   /** Use the Service Worker in shell mode to inject the probe into iframe pages. Default: false. */
   serviceWorker?: boolean;
   /**
-   * URL of a remote debugging server (@devtools-anywhere/remote-server), such as
+   * URL of a remote debugging server (`@devtools-anywhere/remote-server`), such as
    * `http://192.168.1.2:8080/`: pages connect to it, to be inspected from another machine,
    * instead of mounting DevTools in the page.
    */

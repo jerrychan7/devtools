@@ -12,21 +12,21 @@
     "./dist/*.iife.js"
   ],
   "main": "./dist/index.js",
-  "types": "./dist/types/index.d.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/types/index.d.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./probe": {
-      "types": "./dist/types/probe/index.d.ts",
+      "types": "./dist/probe.d.ts",
       "import": "./dist/probe.js"
     },
     "./probe.iife.js": "./dist/probe.iife.js",
     "./cdp-server.iife.js": "./dist/cdp-server.iife.js"
   },
   "scripts": {
-    "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/api-extract.ts api-extractor.json api-extractor.probe.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "node build.ts --watch"
   },
