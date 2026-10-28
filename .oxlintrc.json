@@ -20,5 +20,23 @@
     "experiments/**",
     "tests/**/assets/**",
     "packages/*/test-support/assets/**"
+  ],
+  "overrides": [
+    {
+      "files": ["packages/devtools-anywhere/src/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["./cdp-agent/core/*", "./cdp-agent/domains/*"],
+                "message": "Use the CDP agent through its entry points: ./cdp-agent (index.ts) and ./cdp-agent/probe."
+              }
+            ]
+          }
+        ]
+      }
+    }
   ]
 }

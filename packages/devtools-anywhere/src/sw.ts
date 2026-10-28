@@ -39,6 +39,8 @@
 
 // Type-checked with the WebWorker library (tsconfig.sw.json), separately from the DOM code.
 declare const self: ServiceWorkerGlobalScope;
+// The lexer alone: the agent's entry points would bring DOM code into the worker.
+// oxlint-disable-next-line no-restricted-imports
 import { debuggerStatementSites } from './cdp-agent/core/lexer';
 import { RESPONSE_DETAILS, type ResponseDetails } from './cdp-agent/probe/messages';
 import { SHELL_HANDSHAKE, SHELL_QUERY } from './shell-messages';

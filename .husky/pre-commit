@@ -1,4 +1,6 @@
 pnpm exec lint-staged
+# Each contract literal is written in one file only (scripts/check-contracts.ts); under a second.
+node scripts/check-contracts.ts
 # The devtools-frontend checkout must hold no edit to upstream files outside the patches, or a
 # build from a fresh checkout would lack it. The check takes seconds: only for commits that
 # touch the frontend package.

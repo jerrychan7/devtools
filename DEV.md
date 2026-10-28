@@ -114,6 +114,19 @@ experiments/      validation records
   - Insert the probe with a `TransformStream` so SSR streaming is not broken.
   - Mind the scope: the SW script must sit at the site root, or the server must send a `Service-Worker-Allowed` header.
 
+### Where contracts live
+
+What two pieces of code must agree on is written once, where it is owned, and imported by the others:
+
+| Contract | Defined in | Used by |
+|---|---|---|
+| Relay messages (hello, pagehide, detach, ping), hello's params, the replaced-page close code | `packages/relay-core/src/protocol.ts` | `remote.ts`, `connection.ts`, remote-server's `relay.ts` |
+| Frontend ↔ `<devtools-anywhere>`: requests, dock sides, hash parameters, our scripts' file names | `packages/devtools-anywhere/src/embedder.ts` | the element, the build; `anywhere_app` through a copy made by the frontend build |
+| Shell mode's messages between the page and its Service Worker | `packages/devtools-anywhere/src/shell-messages.ts`, and the agent's `probe/messages.ts` | `element.ts`, `probe.ts`, `sw.ts`, the probe |
+| The probe script's `data-*` attributes | `packages/devtools-anywhere/src/probe-script.ts` (`ProbeScriptAttributes`, exported as `@internal`) | `probe.ts`, the Vite plugin, remote-server |
+
+`pnpm lint` and the pre-commit hook check that each literal with a prefix of ours (`DevtoolsAnywhere.`, `devtools-anywhere:`, `devtools-anywhere-`, `__devtoolsAnywhere`) is written in one source file only (`scripts/check-contracts.ts`; comments and tests are not checked). Names checked by the type checker against a contract, such as `keyof ProbeScriptAttributes`, may be spelled out where they are used. oxlint also stops the rest of `devtools-anywhere/src` from importing the CDP agent's `core/` or `domains/`: it goes through `cdp-agent/index.ts` and `cdp-agent/probe/`.
+
 ### Tests
 
 ```bash
@@ -173,13 +186,13 @@ It builds the tip of upstream `main` and pins it in `REVISION` on success. If a 
 ### Before committing
 
 ```bash
-pnpm lint        # oxlint
+pnpm lint        # oxlint, then scripts/check-contracts.ts
 pnpm fmt         # oxfmt: formats in place (Markdown is not formatted)
 pnpm typecheck
 pnpm test        # with the frontend built, so the real-frontend tests run
 ```
 
-The pre-commit hook (husky + lint-staged) runs on the staged files only: it formats them with oxfmt and adds the result to the commit, then lints them with oxlint and stops the commit on any error. `git commit --no-verify` skips it once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
+The pre-commit hook (husky + lint-staged) runs on the staged files only: it formats them with oxfmt and adds the result to the commit, then lints them with oxlint and stops the commit on any error; it also runs `scripts/check-contracts.ts` (see "Where contracts live"). `git commit --no-verify` skips it once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
 
 The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`). Commit a changed report with the change that caused it: it is how a change to the public API shows in review. In CI (`CI=true`) a report that no longer matches fails the build. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
 

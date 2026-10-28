@@ -9,7 +9,7 @@
     "test": "pnpm run build && node --test --test-concurrency=4 \"tests/**/*.test.ts\" \"packages/*/src/**/*.test.ts\" \"playground/**/*.test.ts\"",
     "playground": "node playground/server.ts",
     "licenses:update": "node scripts/third-party-licenses.ts",
-    "lint": "oxlint",
+    "lint": "oxlint && node scripts/check-contracts.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "prepare": "husky"
