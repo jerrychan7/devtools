@@ -1,3 +1,12 @@
+import type { ProbeScriptAttributes } from 'devtools-anywhere';
+
+/** The probe script's attributes that connect a page to this server, as written in a tag. */
+export function probeAttributes(singlePath: boolean): string {
+  const attributes: ProbeScriptAttributes = { 'data-remote': true };
+  if (singlePath) attributes['data-single-path'] = true;
+  return Object.keys(attributes).join(' ');
+}
+
 /**
  * The target list: the pages connected to the server, each with a link that opens DevTools
  * on it, and the script tag for pages (naming the server at `publicUrl`). It polls `json/list` with the token it was opened with, and builds every row from
@@ -43,7 +52,7 @@ export function listPage(base: string, publicUrl?: string, singlePath = false): 
   const base = ${JSON.stringify(base)};
   const server = ${JSON.stringify(publicUrl ?? '')} || location.origin + base;
   document.getElementById('snippet').textContent =
-    '<script src="' + server + 'probe.iife.js" data-remote${singlePath ? ' data-single-path' : ''}></' + 'script>';
+    '<script src="' + server + 'probe.iife.js" ${probeAttributes(singlePath)}></' + 'script>';
   const query = location.search;
   const list = document.getElementById('targets');
   const filter = document.getElementById('filter');

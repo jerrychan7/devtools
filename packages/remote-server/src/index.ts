@@ -25,7 +25,7 @@ import type { Duplex } from 'node:stream';
 import { TLSSocket } from 'node:tls';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
-import { listPage } from './list-page';
+import { listPage, probeAttributes } from './list-page';
 import { Target, type Peer } from './relay';
 
 /** @public */
@@ -371,7 +371,7 @@ export async function startRemoteServer(options: RemoteServerOptions = {}): Prom
   return {
     url: `${local}${token === false ? '' : `?token=${token}`}`,
     publicUrl,
-    scriptTag: `<script src="${publicUrl}probe.iife.js" data-remote${options.singlePath ? ' data-single-path' : ''}></script>`,
+    scriptTag: `<script src="${publicUrl}probe.iife.js" ${probeAttributes(options.singlePath ?? false)}></script>`,
     token,
     server,
     close() {

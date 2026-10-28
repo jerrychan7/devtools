@@ -34,6 +34,16 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     toggle(): void;
 }
 
+// @internal
+export type ProbeScriptAttributes = {
+    'data-frontend'?: string;
+    'data-bundle'?: string;
+    'data-open'?: true;
+    'data-sw'?: string | true;
+    'data-remote'?: string | true;
+    'data-single-path'?: true;
+};
+
 // (No @packageDocumentation comment for this package)
 
 ```

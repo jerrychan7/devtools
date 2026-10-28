@@ -19,6 +19,7 @@
 // another tab still uses it. The page's own workers are left alone.
 import { installProbe, readShellConfig, setShellScriptUrl } from './cdp-agent/probe';
 import type { DevtoolsAnywhereApi } from './api';
+import type { ProbeScriptAttributes } from './probe-script';
 import { SHELL_QUERY } from './shell-messages';
 
 const script = document.currentScript as HTMLScriptElement | null;
@@ -68,23 +69,25 @@ if (!readShellConfig() && navigator.serviceWorker) {
 const isApi = (api: unknown): api is Pick<DevtoolsAnywhereApi, 'connectRemote'> =>
   typeof api === 'object' && api !== null && 'connectRemote' in api && typeof api.connectRemote === 'function';
 
-const frontend = script?.dataset['frontend'];
-const remote = script?.dataset['remote'];
+/** One of the script's attributes (probe-script.ts); `null` when it is absent. */
+const attribute = (name: keyof ProbeScriptAttributes) => script?.getAttribute(name) ?? null;
+const frontend = attribute('data-frontend');
+const remote = attribute('data-remote');
 // In the shell's top window the probe has replaced the document with the shell already.
-if (script && (frontend || remote !== undefined) && !(readShellConfig() && window === top)) {
-  const bundle = new URL(script.dataset['bundle'] || 'devtools-anywhere.iife.js', script.src).href;
-  const open = script.hasAttribute('data-open');
+if (script && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
+  const bundle = new URL(attribute('data-bundle') || 'devtools-anywhere.iife.js', script.src).href;
+  const open = attribute('data-open') !== null;
   probe.ownUrls.add(bundle);
 
   const mount = () => {
     const loader = document.createElement('script');
     loader.src = bundle;
     loader.onload = () => {
-      if (remote !== undefined) {
+      if (remote !== null) {
         const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
         if (isApi(api)) {
           api.connectRemote(new URL(remote || '.', script.src).href, {
-            singlePath: script.hasAttribute('data-single-path'),
+            singlePath: attribute('data-single-path') !== null,
           });
         }
         return;
@@ -93,7 +96,8 @@ if (script && (frontend || remote !== undefined) && !(readShellConfig() && windo
       const element = document.createElement('devtools-anywhere');
       element.setAttribute('frontend', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');
-      if (script.dataset['sw'] !== undefined) element.setAttribute('sw', script.dataset['sw']);
+      const sw = attribute('data-sw');
+      if (sw !== null) element.setAttribute('sw', sw);
       document.body.appendChild(element);
     };
     document.head.appendChild(loader);

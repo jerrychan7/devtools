@@ -2,6 +2,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Plugin } from 'vite';
+import type { ProbeScriptAttributes } from 'devtools-anywhere';
 
 /** @public */
 export interface DevtoolsAnywhereOptions {
@@ -120,7 +121,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
     transformIndexHtml: {
       order: 'pre',
       handler() {
-        const attrs: Record<string, string | boolean> = { src: `${BASE}probe.iife.js` };
+        const attrs: { src: string } & ProbeScriptAttributes = { src: `${BASE}probe.iife.js` };
         if (options.remote) attrs['data-remote'] = options.remote;
         else if (frontend) attrs['data-frontend'] = frontend;
         if (options.open) attrs['data-open'] = true;
