@@ -91,6 +91,11 @@ if (unexpected.length > 0) {
 // from src/ does not stay behind.
 fs.rmSync(path.join(src, 'front_end/entrypoints/anywhere_app'), { recursive: true, force: true });
 fs.cpSync(path.join(pkg, 'src'), path.join(src, 'front_end/entrypoints'), { recursive: true });
+// The contract between anywhere_app and its embedder is written once, in devtools-anywhere.
+fs.copyFileSync(
+  path.join(pkg, '../devtools-anywhere/src/embedder.ts'),
+  path.join(src, 'front_end/entrypoints/anywhere_app/embedder.ts')
+);
 
 if (!args.has('--copy-only')) {
   run('gn', ['gen', out, '--args=is_debug=false']);

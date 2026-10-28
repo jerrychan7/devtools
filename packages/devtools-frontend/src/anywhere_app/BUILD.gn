@@ -1,6 +1,12 @@
 # Copyright 2026 jerrychan7. MIT license.
 import("../../../scripts/build/ninja/devtools_entrypoint.gni")
+import("../../../scripts/build/ninja/devtools_module.gni")
 import("../visibility.gni")
+
+# embedder.ts is copied in from packages/devtools-anywhere at build time (scripts/build.ts).
+devtools_module("embedder") {
+  sources = [ "embedder.ts" ]
+}
 
 devtools_entrypoint("entrypoint") {
   entrypoint = "anywhere_app.ts"
@@ -8,6 +14,7 @@ devtools_entrypoint("entrypoint") {
   deps = [ "../../Images:optimize_images" ]
 
   ts_deps = [
+    ":embedder",
     "../../core/common:bundle",
     "../../core/host:bundle",
     "../../core/i18n:bundle",

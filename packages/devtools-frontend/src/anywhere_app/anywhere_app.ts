@@ -30,6 +30,8 @@ import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
 import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
+
+import {type DockSide, type EmbedderRequest, type FrontendHash, REQUEST_KEY} from './embedder.js';
 import * as Main from '../main/main.js';
 
 // The Sources panel's Page tab lists the page's resources. Upstream registers it in
@@ -110,18 +112,23 @@ Common.Settings.registerSettingExtension({
 // The embedder passes its origin as `#?embedded=<origin>`; messages go only there. Without it,
 // only an embedder of the frontend's own origin is trusted, never any page that frames it.
 const params = new URLSearchParams(location.hash.replace(/^#\??/, ''));
-const embedder = params.get('embedded') ?? location.origin;
+/** One of the embedder's hash parameters (embedder.ts). */
+const param = (name: keyof FrontendHash): string|null => params.get(name);
+const embedder = param('embedded') ?? location.origin;
 const host = Host.InspectorFrontendHost.InspectorFrontendHostInstance;
 host.isHostedMode = () => false;
 host.sendMessageToBackend = (message: string) => window.parent.postMessage(message, embedder);
 
 // Docking: the main menu's "Dock side" moves the panel in the embedding page, which owns the
-// side (`#?dock=`, the side it shows the panel on now). Requests to the embedder are objects,
-// so they never mix with CDP messages, which are strings.
-// The embedder (packages/devtools-anywhere/src/element.ts) checks each field of these: the two
-// sides are built separately, so keep them in step by hand.
-type EmbedderRequest = {type: 'dock', side: UI.DockController.DockState}|{type: 'close'}|
-    {type: 'keep-open', keep: boolean}|{type: 'theme', toolbar: string, divider: string, icon: string};
+// side (`#?dock=`, the side it shows the panel on now). The requests and the hash parameters are
+// embedder.ts, copied in from packages/devtools-anywhere.
+// Our dock sides are Chromium's dock states: this fails to compile when either changes.
+const DOCK_SIDE_OF: Record<UI.DockController.DockState, DockSide>&Record<DockSide, `${UI.DockController.DockState}`> = {
+  bottom: 'bottom',
+  right: 'right',
+  left: 'left',
+  undocked: 'undocked',
+};
 // Remote debugging (packages/remote-server): DevTools is a page of its own, connected to the
 // relay with upstream's `?ws=`/`?wss=` (its WebSocket transport), and there is no embedder.
 // A frontend hosted elsewhere (a CDN) is given them as `#?ws=`/`#?wss=`, so that the socket's token
@@ -135,7 +142,7 @@ for (const name of ['ws', 'wss']) {
 const remote = Boolean(Root.Runtime.Runtime.queryParam('ws') || Root.Runtime.Runtime.queryParam('wss'));
 const notifyEmbedder = (request: EmbedderRequest) => {
   if (!remote) {
-    window.parent.postMessage({devtoolsAnywhere: request}, embedder);
+    window.parent.postMessage({[REQUEST_KEY]: request}, embedder);
   }
 };
 if (!remote) {
@@ -146,7 +153,7 @@ if (!remote) {
 // Breakpoints with "Pause on exceptions", Call Stack, Scope, Threads) and its breakpoint gutter;
 // Watch stays, evaluating in the global scope (patches/sources-without-pausing.patch).
 Root.Runtime.Runtime.setQueryParamForTesting('can_pause', 'false');
-const dock = params.get('dock');
+const dock = param('dock');
 
 // devtools-anywhere's own scripts (the probe, the bundle, snapDOM) are listed in Sources, since
 // they hook globals the page uses, but ignore-listed like extension scripts in Chrome: their stack
@@ -181,7 +188,7 @@ host.getPreferences = callback => getPreferences(prefs => {
 host.setIsDocked = (_isDocked: boolean, callback: () => void) => {
   const side = UI.DockController.DockController.instance().dockSide();
   if (side) {
-    notifyEmbedder({type: 'dock', side});
+    notifyEmbedder({type: 'dock', side: DOCK_SIDE_OF[side]});
   }
   setTimeout(callback, 0);
 };
@@ -191,8 +198,8 @@ host.closeWindow = () => notifyEmbedder({type: 'close'});
 // embedder's shell mode, `#?keep=` says whether it is available and `#?shell=` whether it is
 // on), and upstream's reload action. A dialog explains the mode before the page reloads into
 // it (tooltips need a mouse), and an info bar says when it is on.
-const canKeepOpen = params.get('keep') === '1';
-const keptOpen = params.get('shell') === '1';
+const canKeepOpen = param('keep') === '1';
+const keptOpen = param('shell') === '1';
 
 async function confirmKeepOpen(): Promise<boolean> {
   const confirmed = Common.Settings.Settings.instance().createSetting('anywhere-keep-open-confirmed', false);
