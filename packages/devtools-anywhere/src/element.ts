@@ -184,6 +184,8 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * - `shell`: set by shell mode on the element inside the shell document.
  *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
+ *
+ * @internal
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
   static observedAttributes = ['open', 'frontend', 'height', 'width', 'dock'];
@@ -547,7 +549,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
-/** Registers the element under `tag` unless something is already registered there. */
+/** Registers the element under `tag` unless something is already registered there. @internal */
 export function defineDevtoolsAnywhere(tag = 'devtools-anywhere') {
   if (!customElements.get(tag)) customElements.define(tag, DevtoolsAnywhereElement);
 }

@@ -4,14 +4,7 @@
 
 ```ts
 
-// @public
-export class CdpError extends Error {
-    constructor(message: string, code?: number);
-    // (undocumented)
-    readonly code: number;
-}
-
-// @public
+// @internal
 export class CdpServer {
     call(method: string, params?: object): Promise<unknown>;
     dispatch(message: string | {
@@ -24,103 +17,82 @@ export class CdpServer {
     // (undocumented)
     onMessage(listener: (message: string) => void): () => void;
     onReset(fn: () => void): void;
-    // Warning: (ae-forgotten-export) The symbol "Handler" needs to be exported by the entry point index.d.ts
-    //
     // (undocumented)
     register(domain: string, handlers: Record<string, Handler>): void;
     reset(): void;
 }
 
-// @public (undocumented)
+// @internal (undocumented)
 export interface CdpServerOptions {
     loadSnapdom?: SnapdomLoader;
 }
 
-// @public
+// @internal
 export function createCdpServer(options?: CdpServerOptions): CdpServer;
 
-// @public
+// @internal
 export const FRAME_ID = "devtools-anywhere-frame";
 
-// @public (undocumented)
+// @internal (undocumented)
 export function installProbe(): Probe;
 
-// @public
+// @internal
 export function isShellPage(): boolean;
 
-// @public
+// @internal
 export function isTrustedShellConfig(config: ShellConfig): boolean;
 
-// @public
+// @internal
 export const LOADER_ID: string;
 
-// @public
+// @internal
 export function markOwn(node: Node): void;
 
-// @public
+// @internal
 export const OWN_ATTRIBUTE = "data-devtools-anywhere";
 
-// @public (undocumented)
+// @internal (undocumented)
 export interface Probe {
     // (undocumented)
     clearLogs(): void;
     fetch: typeof fetch;
-    // Warning: (ae-forgotten-export) The symbol "ProbeLimits" needs to be exported by the entry point index.d.ts
     limits: ProbeLimits;
-    // Warning: (ae-forgotten-export) The symbol "ListenerRecord" needs to be exported by the entry point index.d.ts
     listeners: WeakMap<EventTarget, ListenerRecord[]>;
-    // Warning: (ae-forgotten-export) The symbol "ProbeLog" needs to be exported by the entry point index.d.ts
     logs: ProbeLog[];
     onLog(listener: (entry: ProbeLog) => void): () => void;
     onRequest(listener: (record: ProbeRequest) => void): () => void;
     onShadowRoot(listener: (root: ShadowRoot) => void): () => void;
     onSocket(listener: (record: SocketRecord) => void): () => void;
     ownUrls: Set<string>;
-    // Warning: (ae-forgotten-export) The symbol "ProbeRequest" needs to be exported by the entry point index.d.ts
     requests: ProbeRequest[];
     shadowRoots: WeakMap<Element, ShadowRoot>;
-    // Warning: (ae-forgotten-export) The symbol "SocketRecord" needs to be exported by the entry point index.d.ts
     sockets: SocketRecord[];
-    // Warning: (ae-forgotten-export) The symbol "ToolRecord" needs to be exported by the entry point index.d.ts
     tools: Map<string, ToolRecord>;
     // (undocumented)
     version: 1;
     WebSocket: typeof WebSocket;
 }
 
-// @public
+// @internal
 export function readShellConfig(): ShellConfig | null;
 
-// @public
+// @internal
 export function setShellScriptUrl(url: string): void;
 
-// @public (undocumented)
+// @internal (undocumented)
 export const SHELL_KEY = "devtools-anywhere:shell";
 
-// @public
+// @internal
 export const SHELL_PAGE_ID = "devtools-anywhere-page";
 
-// @public (undocumented)
+// @internal (undocumented)
 export interface ShellConfig {
     bundle: string;
     frontend: string;
     sw?: string;
 }
 
-// @public
-export type Snapdom = (element: Element, options: {
-    clip: 'viewport';
-    exclude: ((el: Element) => boolean)[];
-    excludeMode: 'hide';
-    backgroundColor: string;
-}) => Promise<{
-    toCanvas(options: {
-        scale: number;
-        dpr: number;
-    }): Promise<HTMLCanvasElement>;
-}>;
-
-// @public
+// @internal
 export type SnapdomLoader = () => Promise<{
     snapdom: Snapdom;
 }>;

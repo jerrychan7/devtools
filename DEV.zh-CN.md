@@ -177,7 +177,7 @@ pnpm test        # 前端需已构建，真实前端测试才会运行
 
 pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfmt 格式化并把结果加入这次提交，再用 oxlint 检查，有错误就中止提交。`git commit --no-verify` 可以跳过一次。lint 规则：oxlint 的 correctness 规则，禁止 `any`，禁止非空断言（`!`）。代码风格：2 空格缩进、加分号、单引号、行宽 120。`packages/devtools-frontend/src` 沿用 Chromium 的风格，不做 lint 和格式化。
 
-构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`，cdp-server 另有 `dist/probe.d.ts`），并把包的公开 API 写进 `packages/<包>/etc/*.api.md`（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`）。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。CI 中（`CI=true`）报告与 API 不一致会让构建失败。公开 API 的文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
+构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`，cdp-server 另有 `dist/probe.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`）。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。CI 中（`CI=true`）报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
 行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本）。
 

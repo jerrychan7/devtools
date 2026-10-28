@@ -10,7 +10,7 @@ if (!watch) rmSync('dist', { recursive: true, force: true });
 const common: BuildOptions = { bundle: true, target: 'es2020', sourcemap: true, logLevel: 'info' };
 
 const builds: BuildOptions[] = [
-  { ...common, entryPoints: { index: 'src/index.ts', probe: 'src/probe/index.ts' }, format: 'esm', outdir: 'dist' },
+  { ...common, entryPoints: { index: 'src/index.ts', probe: 'src/probe/entry.ts' }, format: 'esm', outdir: 'dist' },
   { ...common, entryPoints: { 'probe.iife': 'src/probe/iife.ts' }, format: 'iife', minify: true, outdir: 'dist' },
   { ...common, entryPoints: { 'cdp-server.iife': 'src/iife.ts' }, format: 'iife', minify: true, outdir: 'dist' },
 ];

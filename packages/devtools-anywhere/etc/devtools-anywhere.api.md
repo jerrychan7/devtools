@@ -6,22 +6,10 @@
 
 import { CdpServer } from '@devtools-anywhere/cdp-server';
 
-// @public
-export function connectFrontend(server: CdpServer, frame: HTMLIFrameElement, frontendOrigin: string): () => void;
-
-// @public
-export function connectRemote(createServer: () => CdpServer, serverUrl: string): () => void;
-
-// @public
-export function connectToShell(server: CdpServer): () => void;
-
-// @public
-export const createPageServer: () => CdpServer;
-
-// @public
+// @internal
 export function defineDevtoolsAnywhere(tag?: string): void;
 
-// @public
+// @internal
 export class DevtoolsAnywhereElement extends HTMLElement {
     constructor();
     // (undocumented)
@@ -30,7 +18,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     connectedCallback(): void;
     // (undocumented)
     disconnectedCallback(): void;
-    // Warning: (ae-forgotten-export) The symbol "DockSide" needs to be exported by the entry point index.d.ts
     get dock(): DockSide;
     set dock(side: DockSide);
     enterShell(): void;
@@ -48,12 +35,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // (undocumented)
     toggle(): void;
 }
-
-// @public
-export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement, frontendOrigin: string): () => void;
-
-// @public
-export function setBundleUrl(url: string): void;
 
 // (No @packageDocumentation comment for this package)
 

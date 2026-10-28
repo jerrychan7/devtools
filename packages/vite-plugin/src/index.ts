@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 
+/** @public */
 export interface DevtoolsAnywhereOptions {
   /**
    * Directory of a built DevTools frontend to serve, under `/@devtools-anywhere/front_end/`.
@@ -52,6 +53,8 @@ function packageDir(require: NodeJS.Require, file: string): string | undefined {
  * Injects devtools-anywhere into every page during development (`vite serve` only):
  * the probe becomes the first script in <head>, and DevTools mounts after the page loads.
  * Production builds are left untouched.
+ *
+ * @public
  */
 export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}): Plugin {
   const require = createRequire(import.meta.url);

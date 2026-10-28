@@ -173,6 +173,7 @@ export interface ListenerRecord {
   once: boolean;
 }
 
+/** @internal */
 export interface Probe {
   version: 1;
   /** Console calls and uncaught exceptions. */

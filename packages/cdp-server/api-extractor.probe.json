@@ -1,6 +1,6 @@
 {
   "extends": "../../api-extractor.base.json",
-  "mainEntryPointFilePath": "<projectFolder>/dist/types/probe/index.d.ts",
+  "mainEntryPointFilePath": "<projectFolder>/dist/types/probe/entry.d.ts",
   "apiReport": {
     "reportFileName": "<unscopedPackageName>.probe"
   },

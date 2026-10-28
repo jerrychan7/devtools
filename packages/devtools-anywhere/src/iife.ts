@@ -2,15 +2,9 @@
 // earlier), registers <devtools-anywhere>, and exposes the API as `window.DevtoolsAnywhere`.
 // Inside the page iframe of shell mode, it connects the page's CDP server to the shell.
 import { createCdpServer, installProbe, isShellPage, setShellScriptUrl } from '@devtools-anywhere/cdp-server';
-import {
-  DevtoolsAnywhereElement,
-  connectFrontend,
-  connectToShell,
-  connectRemote,
-  createPageServer,
-  defineDevtoolsAnywhere,
-  setBundleUrl,
-} from './index';
+import { connectFrontend, connectToShell } from './connection';
+import { DevtoolsAnywhereElement, createPageServer, defineDevtoolsAnywhere, setBundleUrl } from './element';
+import { connectRemote } from './remote';
 
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
 // again itself: only the first copy runs.

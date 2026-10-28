@@ -5,13 +5,15 @@ type DomNode = Protocol.DOM.Node;
 /**
  * Marks devtools-anywhere's own elements for CSS isolation only. Which nodes are ours is
  * decided by {@link markOwn}, since the page can set this attribute on its own elements.
+ *
+ * @internal
  */
 export const OWN_ATTRIBUTE = 'data-devtools-anywhere';
 
 /** Nodes devtools-anywhere created itself (the element, overlays, …); the page cannot add to it. */
 const ownNodes = new WeakSet<Node>();
 
-/** Registers a node as devtools-anywhere's own, hiding it and its subtree from the client. */
+/** Registers a node as devtools-anywhere's own, hiding it and its subtree from the client. @internal */
 export function markOwn(node: Node): void {
   ownNodes.add(node);
 }

@@ -14,7 +14,7 @@ export type Snapdom = (
   }
 ) => Promise<{ toCanvas(options: { scale: number; dpr: number }): Promise<HTMLCanvasElement> }>;
 
-/** Loads snapDOM on demand: it is large, and only the screencast needs it. */
+/** Loads snapDOM on demand: it is large, and only the screencast needs it. @internal */
 export type SnapdomLoader = () => Promise<{ snapdom: Snapdom }>;
 
 /** The color the browser paints behind the page: the root's or body's background, or white. */

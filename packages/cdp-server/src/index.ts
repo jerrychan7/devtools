@@ -18,7 +18,7 @@ import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp';
 import { installProbe, keep } from './probe';
 
-export { CdpError, CdpServer } from './core/server';
+export { CdpServer } from './core/server';
 export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {
@@ -32,8 +32,9 @@ export {
 } from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
 export type { Probe } from './probe/types';
-export type { Snapdom, SnapdomLoader } from './domains/screencast';
+export type { SnapdomLoader } from './domains/screencast';
 
+/** @internal */
 export interface CdpServerOptions {
   /**
    * Loads snapDOM (`() => import('@zumer/snapdom')`), which renders the frames of
@@ -50,6 +51,8 @@ const MAX_RESOURCE_BODY = 20 * 1000 * 1000;
 /**
  * Creates an in-page CDP server. Reuses the probe if probe.iife.js already ran;
  * otherwise installs it now, so output from this point on is captured.
+ *
+ * @internal
  */
 export function createCdpServer(options: CdpServerOptions = {}): CdpServer {
   const probe = installProbe();

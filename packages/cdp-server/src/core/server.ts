@@ -20,6 +20,8 @@ export class CdpError extends Error {
 /**
  * Transport-agnostic CDP dispatcher. Feed client messages to `dispatch()`, and send every
  * string passed to `onMessage` listeners back to the client.
+ *
+ * @internal
  */
 export class CdpServer {
   private domains = new Map<string, Record<string, Handler>>();

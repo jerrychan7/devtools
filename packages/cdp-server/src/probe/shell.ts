@@ -6,10 +6,12 @@
 // the address bar stays the same), and inside the page iframe it loads the bundle that
 // connects the page's CDP server to the shell.
 
+/** @internal */
 export const SHELL_KEY = 'devtools-anywhere:shell';
-/** id of the page iframe in the shell document. */
+/** id of the page iframe in the shell document. @internal */
 export const SHELL_PAGE_ID = 'devtools-anywhere-page';
 
+/** @internal */
 export interface ShellConfig {
   /** Absolute URL of the DevTools frontend entry page. */
   frontend: string;
@@ -25,6 +27,8 @@ let trustedOrigin = '';
  * Sets the origin shell configs must come from: that of the script that read them (the probe,
  * or the bundle). Its URL is taken while the script runs synchronously. Unset, the page's own
  * origin is used.
+ *
+ * @internal
  */
 export function setShellScriptUrl(url: string) {
   try {
@@ -39,6 +43,8 @@ export function setShellScriptUrl(url: string) {
  * written by any script of the page, so a config pointing elsewhere is not trusted. Only the
  * origin is checked: the frontend, bundle and probe may sit in different directories (e.g. the
  * Vite plugin's base vs. a zero-config `data-frontend`).
+ *
+ * @internal
  */
 export function isTrustedShellConfig(config: ShellConfig): boolean {
   const origin = trustedOrigin || location.origin;
@@ -53,7 +59,7 @@ export function isTrustedShellConfig(config: ShellConfig): boolean {
   });
 }
 
-/** The stored shell config; an invalid or untrusted one is removed and ignored. */
+/** The stored shell config; an invalid or untrusted one is removed and ignored. @internal */
 export function readShellConfig(): ShellConfig | null {
   try {
     const raw = sessionStorage.getItem(SHELL_KEY);
@@ -73,7 +79,7 @@ function isShellConfig(value: unknown): value is ShellConfig {
   return typeof frontend === 'string' && typeof bundle === 'string' && (sw === undefined || typeof sw === 'string');
 }
 
-/** True when this window is the page iframe inside a shell. */
+/** True when this window is the page iframe inside a shell. @internal */
 export function isShellPage(): boolean {
   if (window === top || !readShellConfig()) return false;
   try {

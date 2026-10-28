@@ -29,6 +29,7 @@ export function keep(list: unknown[], max: number): void {
   if (list.length > max) list.splice(0, list.length - max);
 }
 
+/** @internal */
 export function installProbe(): Probe {
   const w = window;
   const existing: Probe | undefined = Reflect.get(w, PROBE_KEY);

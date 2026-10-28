@@ -24,6 +24,7 @@ import { WebSocketServer } from 'ws';
 import { listPage } from './list-page';
 import { Target, type Peer } from './relay';
 
+/** @public */
 export interface RemoteHandlerOptions {
   /** Path everything is served under, such as `/devtools/`. Default: `/`. */
   basePath?: string;
@@ -55,6 +56,8 @@ export interface RemoteHandlerOptions {
  * server.on('request', (req, res) => remote.handleRequest(req, res) || app(req, res));
  * server.on('upgrade', (req, socket, head) => remote.handleUpgrade(req, socket, head) || socket.destroy());
  * ```
+ *
+ * @public
  */
 export interface RemoteHandler {
   readonly basePath: string;
@@ -67,6 +70,7 @@ export interface RemoteHandler {
   close(): void;
 }
 
+/** @public */
 export interface RemoteServerOptions extends RemoteHandlerOptions {
   /** Default: 8080. 0 picks a free port. */
   port?: number;
@@ -76,6 +80,7 @@ export interface RemoteServerOptions extends RemoteHandlerOptions {
   https?: { cert: string | Buffer; key: string | Buffer };
 }
 
+/** @public */
 export interface RemoteServer {
   /** The target list, with the token: what to open on this machine. */
   readonly url: string;
@@ -143,7 +148,7 @@ function lanAddress(): string | undefined {
   return undefined;
 }
 
-/** Creates the request and upgrade handlers of a remote debugging server. */
+/** Creates the request and upgrade handlers of a remote debugging server. @public */
 export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteHandler {
   const require = createRequire(import.meta.url);
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'));
@@ -304,7 +309,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
   };
 }
 
-/** Starts a remote debugging server; resolves once it listens. */
+/** Starts a remote debugging server; resolves once it listens. @public */
 export async function startRemoteServer(options: RemoteServerOptions = {}): Promise<RemoteServer> {
   // Created once the server listens, when its port (and so its public URL) is known.
   let handler: RemoteHandler | undefined;
