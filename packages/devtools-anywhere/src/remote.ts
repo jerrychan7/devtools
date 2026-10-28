@@ -1,11 +1,14 @@
 import { FRAME_ID, LOADER_ID, installProbe, type CdpSession } from './cdp-agent';
+import {
+  DETACH_METHOD,
+  HELLO_METHOD,
+  PAGEHIDE_METHOD,
+  REPLACED_CLOSE_CODE,
+  type DetachParams,
+  type HelloParams,
+} from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
 import { STATEFUL_DOMAINS } from './connection';
-
-// Keep in step with packages/remote-server/src/relay.ts: the two are built separately.
-const HELLO_METHOD = 'DevtoolsAnywhere.hello';
-const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
-const DETACH_METHOD = 'DevtoolsAnywhere.detach';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -82,7 +85,7 @@ export function connectRemote(
         secure: isSecureContext,
         // For a new relay (the server restarted) to end the sessions it does not know.
         sessions: [...sessions.keys()],
-      },
+      } satisfies HelloParams,
     });
 
   function connect() {
@@ -99,7 +102,7 @@ export function connectRemote(
     ws.onclose = event => {
       if (closed || socket !== ws) return;
       // Another page took the id (a duplicated tab copies sessionStorage): this one gets a new one.
-      if (event.code === 4001) url = targetUrl(targetId(true));
+      if (event.code === REPLACED_CLOSE_CODE) url = targetUrl(targetId(true));
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, MAX_DELAY);
     };
@@ -141,7 +144,10 @@ export function connectRemote(
       }
       if (typeof message !== 'object' || !message || !('method' in message) || message.method !== DETACH_METHOD) return;
       const params = 'params' in message ? message.params : undefined;
-      if (typeof params === 'object' && params && 'session' in params) detach(String(params.session));
+      if (typeof params !== 'object' || !params) return;
+      const field = (name: keyof DetachParams): unknown => Reflect.get(params, name);
+      const session = field('session');
+      if (session !== undefined) detach(String(session));
       return;
     }
     const colon = data.indexOf(':');

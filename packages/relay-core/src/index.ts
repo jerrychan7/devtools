@@ -14,6 +14,8 @@
 // answered while it was away. The same loader id while the page is ready only flushes what was
 // queued (a dropped connection, a repeated hello).
 
+export * from './protocol';
+
 // The core runs in the shell (a browser) and in the remote server (Node): of their globals it
 // only uses URL, which both have. Declared for this module only, instead of taking in either's
 // lib, so that nothing else of theirs is used by mistake and no global clashes with theirs.

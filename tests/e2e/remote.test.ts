@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
 import { startRemoteServer, type RemoteServer } from '@devtools-anywhere/remote-server';
 import { launch, type Env } from '../support/browser.ts';
+import { DETACH_METHOD, HELLO_METHOD, PAGEHIDE_METHOD } from '../../packages/relay-core/src/protocol.ts';
 
 const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
 
@@ -218,7 +219,7 @@ test('the handlers mount in a server of its own, under a base path, with a publi
     await new Promise(resolve => (ws.onopen = resolve));
     ws.send(
       JSON.stringify({
-        method: 'DevtoolsAnywhere.hello',
+        method: HELLO_METHOD,
         params: { loaderId: 'l', url: 'https://x/', title: 'mounted' },
       })
     );
@@ -299,7 +300,7 @@ async function fakePage(id: string) {
   socket.onmessage = event => received.push(String(event.data));
   await new Promise(resolve => (socket.onopen = resolve));
   const hello = (loaderId: string) =>
-    socket.send(JSON.stringify({ method: 'DevtoolsAnywhere.hello', params: { loaderId, title: id } }));
+    socket.send(JSON.stringify({ method: HELLO_METHOD, params: { loaderId, title: id } }));
   return { socket, received, hello };
 }
 const clientUrl = (id: string) => `${origin().replace('http', 'ws')}/client/${id}?token=${TOKEN}`;
@@ -310,13 +311,13 @@ test('a page back from the back/forward cache gets the enables and detaches of w
   await waitFor(async () => (await targets()).find(t => t.id === 'bfcache'));
   const first = await Client.connect(clientUrl('bfcache'));
   const second = await Client.connect(clientUrl('bfcache'));
-  fake.socket.send(JSON.stringify({ method: 'DevtoolsAnywhere.pagehide' }));
+  fake.socket.send(JSON.stringify({ method: PAGEHIDE_METHOD }));
   // Answered while the page is away, and sent to it when it comes back.
   assert.deepEqual((await first.call('Runtime.enable')).result, {});
   second.socket.close();
   await waitFor(async () => (await targets()).find(t => t.id === 'bfcache')?.clients === 1);
   fake.hello('l1');
-  await waitFor(() => fake.received.some(m => m.includes('DevtoolsAnywhere.detach')));
+  await waitFor(() => fake.received.some(m => m.includes(DETACH_METHOD)));
   await waitFor(() => fake.received.some(m => m.includes('"method":"Runtime.enable"')));
   first.socket.close();
   fake.socket.close();
@@ -327,7 +328,7 @@ test('a Debugger.enable sent between two page instances is answered by the new o
   fake.hello('l1');
   await waitFor(async () => (await targets()).find(t => t.id === 'held'));
   const client = await Client.connect(clientUrl('held'));
-  fake.socket.send(JSON.stringify({ method: 'DevtoolsAnywhere.pagehide' }));
+  fake.socket.send(JSON.stringify({ method: PAGEHIDE_METHOD }));
   const enabled = client.call('Debugger.enable');
   fake.hello('l2');
   const sent = await waitFor(() => fake.received.find(m => m.includes('"method":"Debugger.enable"')));
@@ -345,7 +346,7 @@ test("a hello's title and url are cut short, and the server keeps at most 1000 p
   const fake = await fakePage('long');
   fake.socket.send(
     JSON.stringify({
-      method: 'DevtoolsAnywhere.hello',
+      method: HELLO_METHOD,
       params: {
         loaderId: 'l',
         title: 't'.repeat(5000),
@@ -397,7 +398,7 @@ test("a new page instance is told only to the domains each client enabled, with 
   await waitFor(() => fake.received.filter(m => m.includes('.enable')).length === 4);
   const navigate = (loaderId: string, url: string) =>
     fake.socket.send(
-      JSON.stringify({ method: 'DevtoolsAnywhere.hello', params: { loaderId, url, secure: true, title: 'navigated' } })
+      JSON.stringify({ method: HELLO_METHOD, params: { loaderId, url, secure: true, title: 'navigated' } })
     );
   const frames = () =>
     all.messages.flatMap(m => (m.method === 'Page.frameNavigated' ? [JSON.stringify(m.params)] : []));
@@ -441,11 +442,11 @@ test('a page back on a new relay has the sessions it does not know detached', as
   const fake = await fakePage('stale');
   fake.socket.send(
     JSON.stringify({
-      method: 'DevtoolsAnywhere.hello',
+      method: HELLO_METHOD,
       params: { loaderId: 'l', title: 'stale', sessions: ['1', '2'] },
     })
   );
-  await waitFor(() => fake.received.filter(m => m.includes('DevtoolsAnywhere.detach')).length === 2);
+  await waitFor(() => fake.received.filter(m => m.includes(DETACH_METHOD)).length === 2);
   assert.ok(fake.received.some(m => m.includes('"session":"1"')));
   fake.socket.close();
 });

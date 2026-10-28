@@ -15,14 +15,19 @@
 // still has servers for: those this relay does not know (it is a new one: the server restarted, or
 // the target was forgotten) are detached.
 
-import { RelayCore, parse, type Frame, type Session } from '@devtools-anywhere/relay-core';
-
-/** Sent by the page when it connects, and again when what the target list shows changes. */
-export const HELLO_METHOD = 'DevtoolsAnywhere.hello';
-/** Sent by the page on pagehide: the commands it did not answer never will be. */
-export const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
-/** Sent to the page when a session ends: its CDP session stops (its domains are disabled). */
-export const DETACH_METHOD = 'DevtoolsAnywhere.detach';
+import {
+  DETACH_METHOD,
+  HELLO_METHOD,
+  PAGEHIDE_METHOD,
+  REPLACED_CLOSE_CODE,
+  RelayCore,
+  isId,
+  parse,
+  type DetachParams,
+  type Frame,
+  type HelloParams,
+  type Session,
+} from '@devtools-anywhere/relay-core';
 /** What a hello's title and url are cut to, in UTF-16 code units: a page cannot fill the server's memory. */
 const MAX_TITLE = 4096;
 const MAX_URL = 2 * 1024 * 1024;
@@ -74,7 +79,7 @@ export class Target extends RelayCore {
 
   /** The page connected: a new connection replaces the old one. */
   attachPage(page: Peer) {
-    this.page?.close(4001, 'Replaced by a new connection');
+    this.page?.close(REPLACED_CLOSE_CODE, 'Replaced by a new connection');
     this.page = page;
     this.greeted = false;
     this.changed = Date.now();
@@ -97,7 +102,7 @@ export class Target extends RelayCore {
     this.byClient.delete(client);
     this.closeSession(session);
     // Like a new Chrome session for whichever frontend gets the page's server next.
-    this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session: session.id } }));
+    this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session: session.id } satisfies DetachParams }));
   }
 
   /** A message from the page: one from a connection already replaced is ignored. */
@@ -131,22 +136,24 @@ export class Target extends RelayCore {
     return { id: this.frameId, url: this.info.url, secure: this.secure };
   }
 
-  private onHello(params: Record<string, unknown>) {
+  private onHello(record: Record<string, unknown>) {
+    // Untrusted: each field is checked, by its name in HelloParams.
+    const params = (name: keyof HelloParams): unknown => record[name];
     this.info = {
-      url: text(params['url']).slice(0, MAX_URL),
-      title: text(params['title']).slice(0, MAX_TITLE),
-      favicon: text(params['favicon']),
-      userAgent: text(params['userAgent']),
+      url: text(params('url')).slice(0, MAX_URL),
+      title: text(params('title')).slice(0, MAX_TITLE),
+      favicon: text(params('favicon')),
+      userAgent: text(params('userAgent')),
     };
-    this.secure = params['secure'] === true;
-    this.frameId = text(params['frameId']);
+    this.secure = params('secure') === true;
+    this.frameId = text(params('frameId'));
     this.greeted = true;
     // Servers of sessions from before this relay: no frontend of its own will ever end them.
-    const stale = Array.isArray(params['sessions']) ? params['sessions'] : [];
-    for (const id of stale) {
-      if (!this.sessions.has(Number(id)))
-        this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session: id } }));
+    const stale: unknown = params('sessions');
+    for (const session of Array.isArray(stale) ? stale : []) {
+      if (isId(session) && !this.sessions.has(Number(session)))
+        this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session } satisfies DetachParams }));
     }
-    this.hello(text(params['loaderId']));
+    this.hello(text(params('loaderId')));
   }
 }

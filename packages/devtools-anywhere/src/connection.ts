@@ -1,14 +1,21 @@
 import { FRAME_ID, LOADER_ID, type CdpSession } from './cdp-agent';
-import { RelayCore, parse, type Frame, type Session } from '@devtools-anywhere/relay-core';
+import {
+  HELLO_METHOD,
+  PING_METHOD,
+  RelayCore,
+  parse,
+  type Frame,
+  type HelloParams,
+  type Session,
+} from '@devtools-anywhere/relay-core';
 
-const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 /**
  * Sent by a page in shell mode when its CDP session starts listening, or when pinged. Carries
  * the page's loader id, which the shell needs for the `Page.frameNavigated` it reports.
  */
-const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } });
+const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } satisfies Partial<HelloParams> });
 /** Sent by the shell on startup, in case the page started listening first. */
-const PING = JSON.stringify({ method: 'DevtoolsAnywhere.ping' });
+const PING = JSON.stringify({ method: PING_METHOD });
 /** Domains that keep state while enabled; a new frontend instance must start from disabled. */
 export const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
 
@@ -155,11 +162,11 @@ class ShellRelay extends RelayCore {
     } else if (event.source === this.page.contentWindow && event.origin === location.origin) {
       if (event.data.startsWith(`{"method":"${HELLO_METHOD}"`)) {
         const params = parse(event.data)?.params;
+        const field = (name: keyof HelloParams): unknown =>
+          typeof params === 'object' && params !== null ? Reflect.get(params, name) : undefined;
+        const sent = field('loaderId');
         // A page without one (an older probe) is a new instance every time, as it always was.
-        const loaderId =
-          typeof params === 'object' && params !== null && 'loaderId' in params && typeof params.loaderId === 'string'
-            ? params.loaderId
-            : `unknown-${++this.unknownLoaders}`;
+        const loaderId = typeof sent === 'string' ? sent : `unknown-${++this.unknownLoaders}`;
         this.syncLocation();
         this.page.contentWindow?.addEventListener('pagehide', this.onPagehide);
         return this.hello(loaderId);
