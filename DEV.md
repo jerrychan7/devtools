@@ -80,6 +80,8 @@ packages/
   devtools-anywhere/  umbrella package: <devtools-anywhere>, iframe, connection layer, shell mode
   vite-plugin/    zero-config injection
   remote-server/  remote debugging: relay between a page and DevTools elsewhere, target list, CLI
+  relay-core/     internal, never published: the relay logic shell mode and remote-server share (reloads,
+                  `enable` replay, pending commands); bundled into both
 tests/
   conformance/    compare CDP output against real Chrome via Puppeteer
   e2e/            probe → CDP → frontend

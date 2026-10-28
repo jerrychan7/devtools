@@ -33,6 +33,7 @@
     "@zumer/snapdom": "^3.3.5"
   },
   "devDependencies": {
+    "@devtools-anywhere/relay-core": "workspace:*",
     "esbuild": "^0.25.0",
     "typescript": "^7.0.2"
   }

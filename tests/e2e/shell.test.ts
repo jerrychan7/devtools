@@ -83,7 +83,7 @@ test('DevTools survives a page reload and gets the new page output', async () =>
   assert.ok(state.received.some(m => m.method === 'Page.frameNavigated'));
   assert.ok(state.received.some(m => m.method === 'DOM.documentUpdated'));
   // The shell re-sends the frontend's enables to the new page; their answers stay in the shell.
-  assert.ok(!state.received.some(m => JSON.stringify(m).includes('"id":"shell-')));
+  assert.ok(!state.received.some(m => JSON.stringify(m).includes('"id":"relay-')));
   assert.equal(state.received.filter(m => m.id === 1).length, 1, 'Runtime.enable is answered once');
 });
 

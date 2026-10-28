@@ -7,10 +7,13 @@
   </head>
   <body>
     <script>
-      // Stands in for the DevTools frontend: enables Runtime and records what it receives.
+      // Stands in for the DevTools frontend: enables Runtime, Page and DOM (which a reload is
+      // reported to) and records what it receives.
       window.received = [];
       addEventListener('message', e => received.push(JSON.parse(e.data)));
       parent.postMessage(JSON.stringify({ id: 1, method: 'Runtime.enable' }), '*');
+      parent.postMessage(JSON.stringify({ id: 2, method: 'Page.enable' }), '*');
+      parent.postMessage(JSON.stringify({ id: 3, method: 'DOM.enable' }), '*');
     </script>
   </body>
 </html>

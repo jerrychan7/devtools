@@ -80,6 +80,8 @@ packages/
   devtools-anywhere/  总包：<devtools-anywhere>、iframe、连接层、外壳模式
   vite-plugin/    零配置注入
   remote-server/  远程调试：页面与另一处 DevTools 之间的中继、目标列表、命令行工具
+  relay-core/     内部包、不发布：外壳模式与 remote-server 共用的中继逻辑（刷新、`enable` 重放、未答命令），
+                  打包进两者
 tests/
   conformance/    用 Puppeteer 对比真实 Chrome 的 CDP 输出
   e2e/            探针 → CDP → 前端的完整流程

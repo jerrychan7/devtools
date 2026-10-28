@@ -1,4 +1,5 @@
 import { FRAME_ID, LOADER_ID, type CdpServer } from '@devtools-anywhere/cdp-server';
+import { RelayCore, parse, type Frame, type Session } from '@devtools-anywhere/relay-core';
 
 const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 /**
@@ -8,28 +9,8 @@ const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } });
 /** Sent by the shell on startup, in case the page started listening first. */
 const PING = JSON.stringify({ method: 'DevtoolsAnywhere.ping' });
-/** Prefix of ids the shell uses when it re-sends `enable` commands; responses are dropped. */
-const SHELL_ID_PREFIX = 'shell-';
-/** Chrome's error for commands that were pending when the inspected document went away. */
-const NAVIGATED_ERROR = { code: -32000, message: 'Inspected target navigated or closed' };
 /** Domains that keep state while enabled; a new frontend instance must start from disabled. */
 export const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
-
-/** A CDP message as the shell sees it: only the fields it routes by are checked. */
-interface Envelope {
-  id?: unknown;
-  method?: unknown;
-  params?: unknown;
-}
-
-function parse(data: string): Envelope | undefined {
-  try {
-    const value: unknown = JSON.parse(data);
-    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 interface Link {
   /** Forgets that the peer has spoken; outgoing messages are queued again. */
@@ -106,72 +87,53 @@ export function connectToShell(server: CdpServer): () => void {
   return () => connection.disconnect();
 }
 
-/**
- * Runs in the shell document: relays CDP messages between the DevTools frontend in
- * `devtools` and the page's CDP server in `page`, and keeps DevTools working across page
- * reloads. When a new page instance says hello, the frontend is told the page navigated
- * and every `enable` command it sent so far is re-sent to the new page, which then
- * replays its own captured output. Returns a function that disconnects.
- */
-export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement, frontendOrigin: string): () => void {
-  const enabled = new Map<string, unknown>();
-  let frontendReady = false;
-  let pageReady = false;
-  let pageInstances = 0;
-  let seq = 0;
-  const toFrontend: string[] = [];
-  const toPage: string[] = [];
-  /** Ids of frontend commands sent to the current page instance and not answered yet. */
-  const pending = new Map<string | number, string>();
+/** The shell's side of the relay core: one frontend, in an iframe; the page in another. */
+class ShellRelay extends RelayCore {
+  private frontendReady = false;
+  /** Hellos without a loader id so far. */
+  private unknownLoaders = 0;
+  private readonly toFrontend: string[] = [];
+  private readonly session: Session;
 
-  const postFrontend = (message: string) => {
-    if (frontendReady) devtools.contentWindow?.postMessage(message, frontendOrigin);
-    else toFrontend.push(message);
-  };
-  const postPage = (message: string) => {
-    if (pageReady) page.contentWindow?.postMessage(message, location.origin);
-    else toPage.push(message);
-  };
-
-  /**
-   * Answers a frontend command the page will never answer. `enable` commands succeed: they
-   * are re-sent to the next page instance anyway.
-   */
-  function abandon(id: string | number, method: string) {
-    if (method.endsWith('.enable')) postFrontend(JSON.stringify({ id, result: {} }));
-    else postFrontend(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+  constructor(
+    private readonly page: HTMLIFrameElement,
+    private readonly devtools: HTMLIFrameElement,
+    private readonly frontendOrigin: string
+  ) {
+    super();
+    this.session = this.openSession({ send: message => this.postFrontend(message) });
   }
 
-  /** The page instance went away: commands it did not answer never will be. */
-  function onPagehide() {
-    pageReady = false;
-    for (const [id, method] of pending) abandon(id, method);
-    pending.clear();
+  private postFrontend(message: string) {
+    if (this.frontendReady) this.devtools.contentWindow?.postMessage(message, this.frontendOrigin);
+    else this.toFrontend.push(message);
   }
 
-  /** Sends a frontend command to the page, or answers it if no page instance can. */
-  function sendCommand(data: string, id: string | number | undefined, method: string) {
-    if (id === undefined) return postPage(data);
-    // Before the first hello the page is still loading and will answer; between two page
-    // instances, Chrome fails the command too, and the next page may never come (no probe).
-    if (!pageReady && pageInstances > 0) return abandon(id, method);
-    pending.set(id, method);
-    postPage(data);
+  protected override canDeliver() {
+    return true;
   }
 
-  function pageUrl() {
+  protected override deliver(_session: Session | undefined, data: string) {
+    this.page.contentWindow?.postMessage(data, location.origin);
+  }
+
+  protected override frame(): Frame {
+    let url = this.page.src;
+    let secure = isSecureContext;
     try {
-      return page.contentWindow?.location.href ?? page.src;
+      url = this.page.contentWindow?.location.href ?? url;
+      secure = this.page.contentWindow?.isSecureContext ?? secure;
     } catch {
-      return page.src;
+      // Cross-origin page: assume it is like the shell.
     }
+    return { id: FRAME_ID, url, secure };
   }
 
   /** Mirrors the page's URL and title in the address bar and tab. */
-  function syncLocation() {
+  private syncLocation() {
     try {
-      const win = page.contentWindow;
-      const doc = page.contentDocument;
+      const win = this.page.contentWindow;
+      const doc = this.page.contentDocument;
       if (!win || !doc) return;
       if (win.location.href !== location.href) history.replaceState(null, '', win.location.href);
       document.title = doc.title;
@@ -180,87 +142,42 @@ export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement,
     }
   }
 
-  function onHello(loaderId: string) {
-    pageReady = true;
-    syncLocation();
-    page.contentWindow?.addEventListener('pagehide', onPagehide);
-    if (pageInstances++ === 0) {
-      toPage.splice(0).forEach(postPage);
-      return;
-    }
-    // A new page instance: whatever was queued was meant for the old one.
-    toPage.length = 0;
-    const url = pageUrl();
-    let secure = isSecureContext;
-    try {
-      secure = page.contentWindow?.isSecureContext ?? secure;
-    } catch {
-      // Cross-origin page: assume it is like the shell.
-    }
-    const { protocol, hostname, origin } = new URL(url);
-    const localhost = /^(.+\.)?localhost$|^127(\.\d+){3}$|^\[::1\]$/.test(hostname);
-    postFrontend(JSON.stringify({ method: 'Runtime.executionContextsCleared', params: {} }));
-    postFrontend(
-      JSON.stringify({
-        method: 'Page.frameNavigated',
-        params: {
-          frame: {
-            id: FRAME_ID,
-            loaderId,
-            url,
-            domainAndRegistry: '',
-            // As Chrome serializes it (location.origin), where the URL standard says "null".
-            securityOrigin: protocol === 'file:' ? 'file://' : origin,
-            mimeType: 'text/html',
-            secureContextType: !secure ? 'InsecureScheme' : localhost ? 'SecureLocalhost' : 'Secure',
-            crossOriginIsolatedContextType: 'NotIsolated',
-            gatedAPIFeatures: [],
-          },
-          type: 'Navigation',
-        },
-      })
-    );
-    for (const [method, params] of enabled) {
-      postPage(JSON.stringify({ id: SHELL_ID_PREFIX + ++seq, method, params }));
-    }
-    // The Elements panel requests the new page's document.
-    postFrontend(JSON.stringify({ method: 'DOM.documentUpdated', params: {} }));
-  }
+  private onPagehide = () => this.pagehide();
 
-  const onMessage = (event: MessageEvent) => {
+  readonly onMessage = (event: MessageEvent) => {
     if (typeof event.data !== 'string') return;
-    if (event.source === devtools.contentWindow && event.origin === frontendOrigin) {
-      if (!frontendReady) {
-        frontendReady = true;
-        toFrontend.splice(0).forEach(postFrontend);
+    if (event.source === this.devtools.contentWindow && event.origin === this.frontendOrigin) {
+      if (!this.frontendReady) {
+        this.frontendReady = true;
+        this.toFrontend.splice(0).forEach(message => this.postFrontend(message));
       }
-      const message = parse(event.data);
-      const { id, method, params } = message ?? {};
-      // Anything else is the page's CDP server's to answer (or reject).
-      if (typeof method !== 'string') return postPage(event.data);
-      if (method.endsWith('.enable')) enabled.set(method, params ?? {});
-      else if (method.endsWith('.disable')) enabled.delete(method.replace(/disable$/, 'enable'));
-      sendCommand(event.data, typeof id === 'string' || typeof id === 'number' ? id : undefined, method);
-    } else if (event.source === page.contentWindow && event.origin === location.origin) {
+      this.clientMessage(this.session, event.data);
+    } else if (event.source === this.page.contentWindow && event.origin === location.origin) {
       if (event.data.startsWith(`{"method":"${HELLO_METHOD}"`)) {
         const params = parse(event.data)?.params;
+        // A page without one (an older probe) is a new instance every time, as it always was.
         const loaderId =
           typeof params === 'object' && params !== null && 'loaderId' in params && typeof params.loaderId === 'string'
             ? params.loaderId
-            : LOADER_ID;
-        return onHello(loaderId);
+            : `unknown-${++this.unknownLoaders}`;
+        this.syncLocation();
+        this.page.contentWindow?.addEventListener('pagehide', this.onPagehide);
+        return this.hello(loaderId);
       }
-      if (event.data.includes(`"id":"${SHELL_ID_PREFIX}`)) return;
-      // Responses (not events) settle a pending command.
-      if (!event.data.startsWith('{"method"')) {
-        const id = parse(event.data)?.id;
-        if (typeof id === 'string' || typeof id === 'number') pending.delete(id);
-      }
-      postFrontend(event.data);
+      this.pageMessage(this.session, event.data);
     }
   };
+}
 
-  window.addEventListener('message', onMessage);
+/**
+ * Runs in the shell document: relays CDP messages between the DevTools frontend in
+ * `devtools` and the page's CDP server in `page`, and keeps DevTools working across page
+ * reloads (the relay core's work, shared with the remote server). Returns a function that
+ * disconnects.
+ */
+export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement, frontendOrigin: string): () => void {
+  const relay = new ShellRelay(page, devtools, frontendOrigin);
+  window.addEventListener('message', relay.onMessage);
   page.contentWindow?.postMessage(PING, location.origin);
-  return () => window.removeEventListener('message', onMessage);
+  return () => window.removeEventListener('message', relay.onMessage);
 }

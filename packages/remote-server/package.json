@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@devtools-anywhere/devtools-frontend-locales": "workspace:*",
+    "@devtools-anywhere/relay-core": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.12",
     "esbuild": "^0.25.0",
