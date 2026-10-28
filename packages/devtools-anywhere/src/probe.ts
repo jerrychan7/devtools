@@ -10,6 +10,8 @@
 // With `data-remote` instead, it connects the page to a remote debugging server
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
 // where DevTools on another machine inspects it. No <devtools-anywhere> is mounted then.
+// `data-single-path` connects to that URL itself, the target in the query, for a server whose
+// host routes WebSocket upgrades by exact path (remote-server's `singlePath`).
 //
 // Outside shell mode it unregisters the shell's Service Worker if one is left over (shell mode
 // ended without exitShell): recognized by its script URL, which the shell gives `probe` (ending
@@ -75,7 +77,8 @@ if (script && (frontend || remote !== undefined) && !(readShellConfig() && windo
       if (remote !== undefined) {
         const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
         if (typeof api === 'object' && api && 'connectRemote' in api && typeof api.connectRemote === 'function') {
-          api.connectRemote(new URL(remote || '.', script.src).href);
+          const singlePath = script.hasAttribute('data-single-path');
+          api.connectRemote(new URL(remote || '.', script.src).href, { singlePath });
         }
         return;
       }

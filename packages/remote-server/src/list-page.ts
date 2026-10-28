@@ -3,7 +3,7 @@
  * on it, and the script tag for pages (naming the server at `publicUrl`). It polls `json/list` with the token it was opened with, and builds every row from
  * text (titles and URLs come from the pages).
  */
-export function listPage(base: string, publicUrl?: string): string {
+export function listPage(base: string, publicUrl?: string, singlePath = false): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -43,7 +43,7 @@ export function listPage(base: string, publicUrl?: string): string {
   const base = ${JSON.stringify(base)};
   const server = ${JSON.stringify(publicUrl ?? '')} || location.origin + base;
   document.getElementById('snippet').textContent =
-    '<script src="' + server + 'probe.iife.js" data-remote></' + 'script>';
+    '<script src="' + server + 'probe.iife.js" data-remote${singlePath ? ' data-single-path' : ''}></' + 'script>';
   const query = location.search;
   const list = document.getElementById('targets');
   const filter = document.getElementById('filter');

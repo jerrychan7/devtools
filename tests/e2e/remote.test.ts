@@ -241,6 +241,57 @@ test('the handlers mount in a server of its own, under a base path, with a publi
   }
 });
 
+test('with singlePath, pages and DevTools connect at the base path itself, for hosts that route by exact path', async () => {
+  const { createServer } = await import('node:http');
+  const { createRemoteHandler } = await import('@devtools-anywhere/remote-server');
+  const handler = createRemoteHandler({ basePath: '/bridge/', token: TOKEN, singlePath: true });
+  const server = createServer((req, res) => {
+    if (!handler.handleRequest(req, res)) res.end('app');
+  });
+  // Like such a host: an upgrade is handed over only for the exact path it was registered at.
+  const upgradedPaths: string[] = [];
+  server.on('upgrade', (req, socket, head) => {
+    const pathname = new URL(req.url ?? '/', 'http://x').pathname;
+    upgradedPaths.push(pathname);
+    if (pathname !== '/bridge/' || !handler.handleUpgrade(req, socket, head)) socket.destroy();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const host = `127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
+  const singlePage = await env.browser.newPage();
+  try {
+    assert.ok((await (await fetch(`http://${host}/bridge/?token=${TOKEN}`)).text()).includes('data-single-path'));
+    await singlePage.goto(
+      `${env.baseUrl}/tests/e2e/remote-page.html?single&remote=${encodeURIComponent(`http://${host}/bridge/`)}`
+    );
+    const listed = await waitFor(async (): Promise<Listed | undefined> =>
+      ((await (await fetch(`http://${host}/bridge/json/list?token=${TOKEN}`)).json()) as Listed[]).find(
+        t => t.title === 'remote page' && t.connected
+      )
+    );
+    assert.equal(listed.webSocketDebuggerUrl, `ws://${host}/bridge/?client=${listed.id}&token=${TOKEN}`);
+    const client = await Client.connect(listed.webSocketDebuggerUrl);
+    await client.call('Runtime.enable');
+    await waitFor(() => client.logged('remote early'));
+    client.socket.close();
+    assert.deepEqual([...new Set(upgradedPaths)], ['/bridge/']);
+    // A query naming both, or neither, is not one of ours.
+    for (const query of [`?target=a&client=a&token=${TOKEN}`, `?token=${TOKEN}`]) {
+      const other = new WebSocket(`ws://${host}/bridge/${query}`);
+      assert.equal(
+        await new Promise(
+          resolve => ((other.onopen = () => resolve('open')), (other.onerror = () => resolve('refused')))
+        ),
+        'refused'
+      );
+    }
+  } finally {
+    await singlePage.close();
+    handler.close();
+    server.close();
+  }
+});
+
 /** A stand-in page: keeps every message the relay sends it. */
 async function fakePage(id: string) {
   const socket = new WebSocket(`${origin().replace('http', 'ws')}/target/${id}`);

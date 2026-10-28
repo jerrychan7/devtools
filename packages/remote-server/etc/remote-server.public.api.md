@@ -27,6 +27,7 @@ export interface RemoteHandlerOptions {
     frontendDir?: string;
     frontendUrl?: string;
     publicUrl?: string;
+    singlePath?: boolean;
     token?: string | false;
 }
 

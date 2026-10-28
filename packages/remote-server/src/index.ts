@@ -4,6 +4,10 @@
 //   page ──ws──▶ <base>target/<id>          the page's CDP server (probe.iife.js data-remote)
 //   DevTools ──ws──▶ <base>client/<id>      the frontend, opened from the target list
 //
+// Both are also taken at <base> itself, the id in the query (<base>?target=<id>,
+// <base>?client=<id>), for hosts that route upgrades by exact path only; with `singlePath` the
+// target list and the script tag use that form.
+//
 // The server also serves what both sides load: the probe and its bundle for the page, the
 // DevTools frontend for the inspecting machine, and the target list at <base>.
 //
@@ -46,6 +50,12 @@ export interface RemoteHandlerOptions {
    * script tag names. Default: the URL the list is opened at.
    */
   publicUrl?: string;
+  /**
+   * Gives pages and frontends WebSocket URLs at `basePath` itself, the target in the query
+   * (`<basePath>?target=<id>`, `<basePath>?client=<id>`), instead of under it: for a host that
+   * routes WebSocket upgrades by exact path only. Both forms are always accepted. Default: false.
+   */
+  singlePath?: boolean;
 }
 
 /**
@@ -190,7 +200,10 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     // which the browser does not send there.
     const inFragment = options.frontendUrl !== undefined;
     return [...targets.values()].map(target => {
-      const socket = `${req.headers.host ?? 'localhost'}${base}client/${target.id}${query}`;
+      const host = req.headers.host ?? 'localhost';
+      const socket = options.singlePath
+        ? `${host}${base}?client=${target.id}${query.replace('?', '&')}`
+        : `${host}${base}client/${target.id}${query}`;
       return {
         id: target.id,
         type: 'page',
@@ -221,7 +234,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
       if (!authorized(url)) {
         send(401, 'text/plain; charset=utf-8', 'Open the URL the server printed: it has the token.');
       } else if (rel === '') {
-        send(200, 'text/html; charset=utf-8', listPage(base, options.publicUrl));
+        send(200, 'text/html; charset=utf-8', listPage(base, options.publicUrl, options.singlePath));
       } else {
         send(200, 'application/json; charset=utf-8', JSON.stringify(list(req)));
       }
@@ -263,8 +276,19 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
 
   function handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer) {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    if (!url.pathname.startsWith(base)) return false;
-    const [kind, id = ''] = url.pathname.slice(base.length).split('/');
+    let kind: string | undefined;
+    let id = '';
+    if (url.pathname === base || `${url.pathname}/` === base) {
+      // The single-path form: the target in the query, under one of the two names.
+      const target = url.searchParams.get('target');
+      const client = url.searchParams.get('client');
+      if (target !== null && client === null) [kind, id] = ['target', target];
+      else if (client !== null && target === null) [kind, id] = ['client', client];
+    } else if (url.pathname.startsWith(base)) {
+      [kind, id = ''] = url.pathname.slice(base.length).split('/');
+    } else {
+      return false;
+    }
     // Any page may connect, but only so many: a new one past the limit is turned away.
     const room = targets.has(id) || targets.size < MAX_TARGETS;
     const ok =
@@ -347,7 +371,7 @@ export async function startRemoteServer(options: RemoteServerOptions = {}): Prom
   return {
     url: `${local}${token === false ? '' : `?token=${token}`}`,
     publicUrl,
-    scriptTag: `<script src="${publicUrl}probe.iife.js" data-remote></script>`,
+    scriptTag: `<script src="${publicUrl}probe.iife.js" data-remote${options.singlePath ? ' data-single-path' : ''}></script>`,
     token,
     server,
     close() {

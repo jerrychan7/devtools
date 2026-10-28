@@ -33,17 +33,29 @@ function favicon() {
   return link?.href ?? new URL('/favicon.ico', location.href).href;
 }
 
+/** How the page reaches the server. */
+export interface RemoteOptions {
+  singlePath?: boolean;
+}
+
 /**
  * Connects the page to a remote debugging server (`@devtools-anywhere/remote-server`) at
  * `serverUrl`, the URL it serves the probe under. Each DevTools frontend inspecting the page is
  * a session with a CDP server of its own, from `createServer`: one frontend's domains, node ids
  * and remote objects are not another's. Servers of ended sessions are kept, their domains
  * disabled, for the next ones. The connection comes back when it drops, and what the page
- * sends meanwhile is queued. Returns a function that disconnects.
+ * sends meanwhile is queued. With `singlePath`, the page connects to `serverUrl` itself, the
+ * target in the query (for a server mounted where upgrades are routed by exact path), instead of
+ * to `target/<id>` under it. Returns a function that disconnects.
  */
-export function connectRemote(createServer: () => CdpServer, serverUrl: string): () => void {
+export function connectRemote(
+  createServer: () => CdpServer,
+  serverUrl: string,
+  { singlePath = false }: RemoteOptions = {}
+): () => void {
   const targetUrl = (id: string) => {
-    const url = new URL(`target/${id}`, new URL(serverUrl, location.href));
+    const base = new URL(serverUrl, location.href);
+    const url = singlePath ? new URL(`?target=${id}`, base) : new URL(`target/${id}`, base);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     return url;
   };

@@ -2,10 +2,16 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <!-- The remote server's port is only known at run time: `?remote=<its URL>`. -->
+    <!-- The remote server's port is only known at run time: `?remote=<its URL>`, and `&single` for
+         its single-path form. -->
     <script>
+      const query = new URLSearchParams(location.search);
       document.write(
-        '<script src="' + new URLSearchParams(location.search).get('remote') + 'probe.iife.js" data-remote><\/script>'
+        '<script src="' +
+          query.get('remote') +
+          'probe.iife.js" data-remote' +
+          (query.has('single') ? ' data-single-path' : '') +
+          '><\/script>'
       );
     </script>
     <title>remote page</title>
