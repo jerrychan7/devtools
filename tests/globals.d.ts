@@ -1,6 +1,10 @@
 // Globals the tests read and write inside test pages (through page.evaluate).
-// Types come from the built packages (`pnpm build`), like the code the pages load.
-import type { CdpServer, Probe, createCdpServer } from '@devtools-anywhere/cdp-server';
+// Types come from the built packages (`pnpm build`), like the code the pages load. Their entry
+// points export only what the other packages use, not what the tests would like: types they do
+// not export are derived from those they do.
+import type { CdpServer, createCdpServer, installProbe } from '@devtools-anywhere/cdp-server';
+
+type Probe = ReturnType<typeof installProbe>;
 
 declare global {
   /** A CDP message as the fake frontends receive it (parsed JSON). */

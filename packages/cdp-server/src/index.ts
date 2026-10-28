@@ -31,7 +31,6 @@ export {
   type ShellConfig,
 } from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
-export type { Probe } from './probe/types';
 export type { SnapdomLoader } from './domains/screencast';
 
 /** @internal */

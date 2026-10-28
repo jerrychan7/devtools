@@ -8,12 +8,7 @@
 //
 // dist/types/core/server.d.ts:23:5 - (ae-forgotten-export) The symbol "Handler" needs to be exported by the entry point index.d.ts
 // dist/types/domains/screencast.d.ts:16:5 - (ae-forgotten-export) The symbol "Snapdom" needs to be exported by the entry point index.d.ts
-// dist/types/probe/types.d.ts:138:5 - (ae-forgotten-export) The symbol "ProbeLog" needs to be exported by the entry point index.d.ts
-// dist/types/probe/types.d.ts:140:5 - (ae-forgotten-export) The symbol "ProbeRequest" needs to be exported by the entry point index.d.ts
-// dist/types/probe/types.d.ts:142:5 - (ae-forgotten-export) The symbol "SocketRecord" needs to be exported by the entry point index.d.ts
-// dist/types/probe/types.d.ts:155:5 - (ae-forgotten-export) The symbol "ListenerRecord" needs to be exported by the entry point index.d.ts
-// dist/types/probe/types.d.ts:163:5 - (ae-forgotten-export) The symbol "ToolRecord" needs to be exported by the entry point index.d.ts
-// dist/types/probe/types.d.ts:168:5 - (ae-forgotten-export) The symbol "ProbeLimits" needs to be exported by the entry point index.d.ts
+// dist/types/probe/index.d.ts:7:1 - (ae-forgotten-export) The symbol "Probe" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

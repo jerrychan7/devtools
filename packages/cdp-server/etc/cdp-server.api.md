@@ -51,28 +51,6 @@ export function markOwn(node: Node): void;
 // @internal
 export const OWN_ATTRIBUTE = "data-devtools-anywhere";
 
-// @internal (undocumented)
-export interface Probe {
-    // (undocumented)
-    clearLogs(): void;
-    fetch: typeof fetch;
-    limits: ProbeLimits;
-    listeners: WeakMap<EventTarget, ListenerRecord[]>;
-    logs: ProbeLog[];
-    onLog(listener: (entry: ProbeLog) => void): () => void;
-    onRequest(listener: (record: ProbeRequest) => void): () => void;
-    onShadowRoot(listener: (root: ShadowRoot) => void): () => void;
-    onSocket(listener: (record: SocketRecord) => void): () => void;
-    ownUrls: Set<string>;
-    requests: ProbeRequest[];
-    shadowRoots: WeakMap<Element, ShadowRoot>;
-    sockets: SocketRecord[];
-    tools: Map<string, ToolRecord>;
-    // (undocumented)
-    version: 1;
-    WebSocket: typeof WebSocket;
-}
-
 // @internal
 export function readShellConfig(): ShellConfig | null;
 
