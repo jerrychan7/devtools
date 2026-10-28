@@ -13,6 +13,7 @@ import {
   type SnapdomLoader,
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
+import { DOCK_SIDES, REQUEST_KEY, type DockSide, type EmbedderRequest, type FrontendHash } from './embedder';
 
 let bundleUrl = '';
 
@@ -68,10 +69,26 @@ function store(key: string, value: string) {
 /** A finite number from a stored value, else undefined. */
 const finite = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 
-/** Where the panel is: docked to a side of the viewport, or floating over the page. */
-export type DockSide = 'bottom' | 'right' | 'left' | 'undocked';
-const DOCK_SIDES: readonly string[] = ['bottom', 'right', 'left', 'undocked'];
-const isDockSide = (value: unknown): value is DockSide => typeof value === 'string' && DOCK_SIDES.includes(value);
+const isDockSide = (value: unknown): value is DockSide => DOCK_SIDES.some(side => side === value);
+
+/**
+ * Checks the fields of each type of request from the frontend, which is built separately: a type
+ * added to EmbedderRequest (embedder.ts) does not compile here until it is checked.
+ */
+const REQUEST_CHECKS: { [T in EmbedderRequest['type']]: (request: object) => boolean } = {
+  dock: request => 'side' in request && isDockSide(request.side),
+  close: () => true,
+  'keep-open': request => 'keep' in request && typeof request.keep === 'boolean',
+  theme: request => ['toolbar', 'divider', 'icon'].every(key => typeof Reflect.get(request, key) === 'string'),
+};
+const isRequestType = (type: unknown): type is EmbedderRequest['type'] =>
+  typeof type === 'string' && Object.hasOwn(REQUEST_CHECKS, type);
+const isEmbedderRequest = (value: unknown): value is EmbedderRequest =>
+  typeof value === 'object' &&
+  value !== null &&
+  'type' in value &&
+  isRequestType(value.type) &&
+  REQUEST_CHECKS[value.type](value);
 
 /** Position and size of the undocked panel, in percent of the viewport. */
 interface FloatRect {
@@ -243,30 +260,25 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.setAttribute('dock', side);
   }
 
-  /**
-   * Requests from the frontend (objects, unlike CDP messages): its dock side menu, its close button.
-   * Their shape is `EmbedderRequest` in packages/devtools-frontend/src/anywhere_app/anywhere_app.ts,
-   * built separately: every field is checked here.
-   */
+  /** Requests from the frontend (embedder.ts): its dock side menu, its close button, … */
   private onFrontendRequest = (event: MessageEvent) => {
     if (event.source !== this.frame.contentWindow || event.origin !== this.frontendOrigin) return;
-    const request: unknown = event.data?.devtoolsAnywhere;
-    if (typeof request !== 'object' || !request || !('type' in request)) return;
-    if (request.type === 'dock' && 'side' in request && isDockSide(request.side)) {
+    const request: unknown = event.data?.[REQUEST_KEY];
+    if (!isEmbedderRequest(request)) return;
+    if (request.type === 'dock') {
       store(DOCK_KEY, request.side);
       this.dock = request.side;
-    } else if (request.type === 'keep-open' && 'keep' in request) {
+    } else if (request.type === 'keep-open') {
       if (request.keep) this.enterShell();
       else void this.exitShell();
     } else if (request.type === 'theme') {
-      const colors: Record<string, string[]> = {
-        toolbar: ['--bar-background'],
-        divider: ['--bar-handle', '--bar-border'],
-        icon: ['--bar-icon'],
-      };
-      for (const [key, properties] of Object.entries(colors)) {
-        const value: unknown = Reflect.get(request, key);
-        if (typeof value !== 'string' || !CSS.supports('color', value)) continue;
+      const colors: [string, string[]][] = [
+        [request.toolbar, ['--bar-background']],
+        [request.divider, ['--bar-handle', '--bar-border']],
+        [request.icon, ['--bar-icon']],
+      ];
+      for (const [value, properties] of colors) {
+        if (!CSS.supports('color', value)) continue;
         for (const property of properties) this.panel.style.setProperty(property, value);
       }
     } else if (request.type === 'close') {
@@ -476,7 +488,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       dock: this.dock,
       keep: !shell && bundleUrl ? '1' : '0',
       shell: shell ? '1' : '0',
-    });
+    } satisfies FrontendHash);
     this.frame.src = `${url.href.split('#')[0]}#?${hash}`;
   }
 
