@@ -338,7 +338,7 @@ describe('Network', () => {
   // Without maxPostDataSize every body is in requestWillBeSent; past it, only hasPostData is.
   for (const maxPostDataSize of [undefined, 65536]) {
     test(`fetch POST with a 70 KiB body, maxPostDataSize ${maxPostDataSize}`, async () => {
-      await enableBoth({ maxPostDataSize });
+      await enableBoth(maxPostDataSize === undefined ? {} : { maxPostDataSize });
       const marker = `n=post-large-${maxPostDataSize}`;
       const { ours, chrome } = await request(
         `void fetch('/api/echo?${marker}', { method: 'POST', body: 'x'.repeat(70 * 1024) })`,
