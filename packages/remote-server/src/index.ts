@@ -309,6 +309,8 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
       const client = url.searchParams.get('client');
       if (target !== null && client === null) [kind, id] = ['target', target];
       else if (client !== null && target === null) [kind, id] = ['client', client];
+      // Without one, the path short of the slash is not ours: the host may have a socket there.
+      else if (url.pathname !== base) return false;
     } else if (url.pathname.startsWith(base)) {
       [kind, id = ''] = url.pathname.slice(base.length).split('/');
     } else {
