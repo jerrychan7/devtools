@@ -38,8 +38,8 @@ export interface DevtoolsAnywhereOptions {
    * switch (`data-shell-mode-locked`). Default: false.
    */
   shellModeLocked?: boolean;
-  /** False hides the element's toggler button (`data-no-toggler`). Default: true. */
-  toggler?: boolean;
+  /** Hides the element's toggler button (`data-no-toggler`). Default: false. */
+  noToggler?: boolean;
   /** Use the Service Worker in shell mode to inject the probe into iframe pages. Default: false. */
   serviceWorker?: boolean;
   /**
@@ -150,7 +150,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         if (options.openImmediately) attrs['data-open-immediately'] = true;
         if (options.defaultShellMode) attrs['data-default-shell-mode'] = options.defaultShellMode;
         if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;
-        if (options.toggler === false) attrs['data-no-toggler'] = true;
+        if (options.noToggler) attrs['data-no-toggler'] = true;
         if (options.serviceWorker) attrs['data-sw'] = true;
         return [{ tag: 'script', attrs, injectTo: 'head-prepend' }];
       },

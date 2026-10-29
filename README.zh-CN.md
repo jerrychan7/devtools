@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`toggler`（默认 `true`；`false` 隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
 
 ### 远程调试
 

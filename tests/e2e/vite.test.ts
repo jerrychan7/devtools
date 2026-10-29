@@ -35,7 +35,7 @@ before(async () => {
         openImmediately: true,
         defaultShellMode: 'off',
         shellModeLocked: true,
-        toggler: false,
+        noToggler: true,
       }),
     ],
   });

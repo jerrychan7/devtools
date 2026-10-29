@@ -16,11 +16,11 @@ export interface DevtoolsAnywhereOptions {
     frontendDir?: string;
     frontendEntry?: string;
     frontendUrl?: string;
+    noToggler?: boolean;
     openImmediately?: boolean;
     remote?: string;
     serviceWorker?: boolean;
     shellModeLocked?: boolean;
-    toggler?: boolean;
 }
 
 ```
