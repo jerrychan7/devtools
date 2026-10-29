@@ -205,7 +205,10 @@ host.closeWindow = () => notifyEmbedder({type: 'close'});
 // Main toolbar, left of the settings button: keeping DevTools open across reloads (the
 // embedder's shell mode, `#?keep=` says whether it is available and `#?shell=` whether it is
 // on), and upstream's reload action. A dialog explains the mode before the page reloads into
-// it (tooltips need a mouse), and an info bar says when it is on.
+// it (tooltips need a mouse), and an info bar says when it is on. A page that locks the mode
+// passes `?shellModeLocked` in the query, whatever its value: then neither the toggle nor the
+// info bar's action to stop it is offered.
+const shellModeLocked = Root.Runtime.Runtime.queryParam('shellModeLocked') !== null;
 const canKeepOpen = param('keep') === '1';
 const keptOpen = param('shell') === '1';
 
@@ -254,7 +257,7 @@ function showKeptOpenInfobar(): void {
     return;
   }
   const infobar = new UI.Infobar.Infobar(
-      UI.Infobar.Type.INFO, i18nString(UIStrings.keptOpen), [{
+      UI.Infobar.Type.INFO, i18nString(UIStrings.keptOpen), shellModeLocked ? [] : [{
         text: i18nString(UIStrings.stopKeeping),
         delegate: () => notifyEmbedder({type: 'keep-open', keep: false}),
         dismiss: true,
@@ -271,7 +274,11 @@ UI.Toolbar.registerToolbarItem({
   async loadItem() {
     return {
       item() {
-        if (!canKeepOpen && !keptOpen) {
+        if (keptOpen) {
+          // The toolbar is built with the inspector view, which the info bar goes into.
+          setTimeout(showKeptOpenInfobar, 0);
+        }
+        if (shellModeLocked || (!canKeepOpen && !keptOpen)) {
           return null;
         }
         const button = new UI.Toolbar.ToolbarToggle(
@@ -282,10 +289,6 @@ UI.Toolbar.registerToolbarItem({
             notifyEmbedder({type: 'keep-open', keep: !keptOpen});
           }
         });
-        if (keptOpen) {
-          // The toolbar is built with the inspector view, which the info bar goes into.
-          setTimeout(showKeptOpenInfobar, 0);
-        }
         return button;
       },
     };
