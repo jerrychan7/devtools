@@ -2,7 +2,7 @@ import { parentOf } from '../../core/container-query';
 import { splitTopLevel } from '../../core/selectors';
 
 /** Channels of a computed `rgb()` / `rgba()` color, or null for other notations. */
-export function rgba(value: string): [number, number, number, number] | null {
+function rgba(value: string): [number, number, number, number] | null {
   const match = /^rgba?\(([\d.]+), ([\d.]+), ([\d.]+)(?:, ([\d.]+))?\)$/.exec(value);
   if (!match) return null;
   return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];

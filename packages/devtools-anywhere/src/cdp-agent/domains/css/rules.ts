@@ -126,3 +126,24 @@ export function sheetApplies(sheet: CSSStyleSheet): boolean {
   }
   return true;
 }
+
+/** Expressions of a media query list, as Chrome reports them in `mediaList`. */
+export function mediaList(text: string): Protocol.CSS.MediaQuery[] {
+  return splitTopLevel(text, ',').map(query => {
+    const expressions: Protocol.CSS.MediaQueryExpression[] = [];
+    for (const m of query.matchAll(/\(\s*([\w-]+)\s*:\s*(-?[\d.]+)([a-z%]*)\s*\)/gi)) {
+      const value = Number(m[2]);
+      const unit = (m[3] ?? '').toLowerCase();
+      // In media queries em and rem are relative to the initial font size (medium, 16px by
+      // default), not to the font size of the root element.
+      const scale = unit === 'px' ? 1 : unit === 'em' || unit === 'rem' ? 16 : null;
+      expressions.push({
+        value,
+        unit,
+        feature: (m[1] ?? '').toLowerCase(),
+        ...(scale !== null && { computedLength: value * scale }),
+      });
+    }
+    return { expressions, active: matchMedia(query.trim()).matches };
+  });
+}

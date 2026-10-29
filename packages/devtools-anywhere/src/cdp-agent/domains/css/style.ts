@@ -11,14 +11,6 @@ export type ComputedStyleResponse = Protocol.CSS.GetComputedStyleForNodeResponse
 
 export const INLINE_PREFIX = 'inline:';
 
-/** What the CSS domain watches in the document and shadow roots for style sheet changes. */
-export const OBSERVED: MutationObserverInit = {
-  childList: true,
-  subtree: true,
-  characterData: true,
-  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type'],
-};
-
 /** A pseudo-element at the end of a selector: `a::before`, legacy `a:after`, `::marker`. */
 export const PSEUDO_SUFFIX =
   /(?:::(before|after|marker|first-line|first-letter|placeholder|selection|backdrop|file-selector-button|cue|(?:part|slotted|highlight|view-transition[\w-]*)\([^)]*\))|:(before|after|first-line|first-letter))$/i;
@@ -51,7 +43,7 @@ export interface Declaration {
 }
 
 /** Declarations of a style text in order, those in comments disabled. */
-export function declarations(text: string): Declaration[] {
+function declarations(text: string): Declaration[] {
   const result: Declaration[] = [];
   const comment = /\/\*([\s\S]*?)\*\//g;
   let last = 0;

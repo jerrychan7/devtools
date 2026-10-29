@@ -16,21 +16,29 @@ import {
   resolveSelector,
   ruleType,
   scopeText,
+  mediaList,
   selectorLabel,
   sheetApplies,
 } from './rules';
 import { SheetRegistry, isConstructed } from './sheet-registry';
-import { hostMatcher, mediaList, sourceSelectors } from './source';
+import { hostMatcher, sourceSelectors } from './source';
 import {
   type CSSStyle,
   type ComputedStyleResponse,
   INLINE_PREFIX,
-  OBSERVED,
   buildStyle,
   setStyleText,
   sources,
   splitPseudoElement,
 } from './style';
+
+/** What the CSS domain watches in the document and shadow roots for style sheet changes. */
+const OBSERVED: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type'],
+};
 
 export function registerCss(ctx: Context) {
   const { session, nodes } = ctx;
