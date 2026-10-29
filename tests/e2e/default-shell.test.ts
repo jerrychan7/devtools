@@ -12,7 +12,7 @@ let url = '';
 
 before(async () => {
   env = await launch();
-  url = env.baseUrl + '/tests/e2e/default-shell.html';
+  url = env.baseUrl + '/tests/e2e/pages/default-shell.html';
 });
 after(() => env?.close());
 beforeEach(async () => {
@@ -115,7 +115,7 @@ test('a page that navigates the shell away is shown on its own after a few tries
 });
 
 test("the user's choice wins over data-shell", async () => {
-  await page.goto(env?.baseUrl + '/tests/e2e/zero-config.html');
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
   // data-shell="off" there: the page on its own.
   await page.waitForFunction(() => document.querySelector('devtools-anywhere'));
   assert.equal((await shellState()).inShell, false);

@@ -40,7 +40,7 @@ const click = (selector: string, frame: Page | Frame = page) =>
 
 /** Loads the page on its own, out of the shell, with DevTools hidden. */
 async function load() {
-  await page.goto(env?.baseUrl + '/tests/e2e/toggle-page.html');
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/toggle-page.html');
   await page.evaluate(() => sessionStorage.clear());
   await page.reload();
   await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.isConnected);

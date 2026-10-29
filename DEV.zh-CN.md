@@ -66,7 +66,7 @@ pnpm playground   # http://localhost:8788/playground/
 
 `pnpm dev` 以 watch 模式运行 `devtools-anywhere`、`vite-plugin` 和 `remote-server` 的 esbuild。没有热更新：刷新页面即可加载新的构建。类型声明只在 `pnpm build` 时生成。
 
-playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回，`/ws/echo` 是一个把每条消息原样发回的 WebSocket。
+playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/pages/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回，`/ws/echo` 是一个把每条消息原样发回的 WebSocket。
 
 调试远程模式时，再运行 `pnpm remote`（在 http://localhost:8790/ 启动远程服务器，只监听本机、不要 token），然后打开 `/playground/remote.html`：它会出现在服务器的目标列表里，从那里打开 DevTools 调试它。
 
@@ -142,7 +142,7 @@ pnpm typecheck                                # 先构建，再检查所有包�
 
 测试放在被测代码旁边，命名为 `<名称>.test.ts`；只有跨包的测试放在 `tests/` 下。
 - `*.conformance.test.ts`（在 CDP agent 各个域的旁边）：同一个页面分别通过真实 Chrome 的 CDP 和我们的实现来检查，对比两边的输出。实现或修改 CDP 方法时请在这里加测试：以真实 Chrome 的行为为准，而不是协议文档。它们和页面一样加载构建产物。
-- `tests/e2e/`：连接层、外壳模式、零配置接入、Vite 插件和真实前端。
+- `tests/e2e/`：连接层、外壳模式、零配置接入、Vite 插件和真实前端。测试打开的页面在 `pages/`（脚本与样式在 `pages/assets/`），替身前端在 `frontends/`。
 
 ### 修改前端
 

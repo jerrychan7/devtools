@@ -30,7 +30,7 @@ before(async () => {
   env = await launch();
   remote = await startRemoteServer({ port: 0, host: '127.0.0.1', token: TOKEN });
   page = await env.browser.newPage();
-  await page.goto(`${env.baseUrl}/tests/e2e/remote-page.html?remote=${encodeURIComponent(origin() + '/')}`);
+  await page.goto(`${env.baseUrl}/tests/e2e/pages/remote-page.html?remote=${encodeURIComponent(origin() + '/')}`);
 });
 after(async () => {
   await env.close();
@@ -96,7 +96,7 @@ test('the target list and client connections need the token', async () => {
 
 test('the page is listed, and its own connection is not one of its requests', async () => {
   const listed = await target();
-  assert.ok(listed.url.includes('/tests/e2e/remote-page.html'));
+  assert.ok(listed.url.includes('/tests/e2e/pages/remote-page.html'));
   assert.ok(listed.devtoolsFrontendUrl.startsWith('/front_end/anywhere_app.html?ws='));
   const client = await Client.connect(listed.webSocketDebuggerUrl);
   await client.call('Network.enable');
@@ -264,7 +264,7 @@ test('with singlePath, pages and DevTools connect at the base path itself, for h
   try {
     assert.ok((await (await fetch(`http://${host}/bridge/?token=${TOKEN}`)).text()).includes('data-single-path'));
     await singlePage.goto(
-      `${env.baseUrl}/tests/e2e/remote-page.html?single&remote=${encodeURIComponent(`http://${host}/bridge/`)}`
+      `${env.baseUrl}/tests/e2e/pages/remote-page.html?single&remote=${encodeURIComponent(`http://${host}/bridge/`)}`
     );
     const listed = await waitFor(async (): Promise<Listed | undefined> =>
       ((await (await fetch(`http://${host}/bridge/json/list?token=${TOKEN}`)).json()) as Listed[]).find(

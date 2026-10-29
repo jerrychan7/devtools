@@ -66,7 +66,7 @@ pnpm playground   # http://localhost:8788/playground/
 
 `pnpm dev` runs esbuild in watch mode for `devtools-anywhere`, `vite-plugin` and `remote-server`. There is no hot reload: refresh the page to load the new build. Type declarations are only emitted by `pnpm build`.
 
-The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON; `/ws/echo` is a WebSocket that sends every message back.
+The playground server serves the repository root, so any page in it can be opened, for example `/tests/e2e/pages/real-frontend.html`. Every request accepts `?delay=<ms>`, and `/api/echo` returns the request as JSON; `/ws/echo` is a WebSocket that sends every message back.
 
 For remote debugging, also run `pnpm remote` (a remote server at http://localhost:8790/, local only and without a token) and open `/playground/remote.html`: it appears in the server's target list, from which DevTools inspects it.
 
@@ -142,7 +142,7 @@ pnpm typecheck                                # builds, then checks packages, bu
 
 A test sits next to what it tests, as `<name>.test.ts`; only tests that span packages are under `tests/`.
 - `*.conformance.test.ts` (next to the CDP agent's domains): the same page is inspected through real Chrome's CDP and through ours, and the outputs are compared. When implementing or changing a CDP method, add a test here: real Chrome is the reference, not the protocol documentation. They load the built bundles, as pages do.
-- `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend.
+- `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend. The pages they open are in `pages/` (their scripts and styles in `pages/assets/`), the stand-in frontends in `frontends/`.
 
 ### Working on the frontend
 

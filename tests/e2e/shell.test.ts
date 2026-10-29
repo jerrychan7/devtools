@@ -12,7 +12,7 @@ let page: Page;
 before(async () => {
   env = await launch();
   page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/e2e/shell-page.html?first');
+  await page.goto(env.baseUrl + '/tests/e2e/pages/shell-page.html?first');
 });
 after(() => env?.close());
 
@@ -91,7 +91,7 @@ test('navigation inside the page updates the address bar', async () => {
   await page.evaluate(() => {
     const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
     if (!pageWindow) throw new Error('no page frame');
-    pageWindow.location.href = '/tests/e2e/shell-page.html?second';
+    pageWindow.location.href = '/tests/e2e/pages/shell-page.html?second';
   });
   const state = await waitFor(s => s.url.endsWith('?second'));
   assert.ok(earlyLogs(state).length >= 3);

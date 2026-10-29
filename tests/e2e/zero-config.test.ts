@@ -12,7 +12,7 @@ let page: Page;
 before(async () => {
   env = await launch();
   page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/e2e/zero-config.html');
+  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
 });
 after(() => env?.close());
 
@@ -110,7 +110,7 @@ test('in shell mode the Service Worker injects the probe into pages without it',
   await page.evaluate(() => {
     const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
     if (!pageWindow) throw new Error('no page frame');
-    pageWindow.location.href = '/tests/e2e/no-probe.html';
+    pageWindow.location.href = '/tests/e2e/pages/no-probe.html';
   });
   await waitFor(async () => logged(await received(), 'no-probe early'));
 });
@@ -159,7 +159,7 @@ const pageScripts = () =>
   });
 
 test('the Service Worker injects the probe exactly once into a short page without <head>', async () => {
-  await navigatePageFrame('/tests/e2e/no-head.html');
+  await navigatePageFrame('/tests/e2e/pages/no-head.html');
   await waitFor(async () => logged(await received(), 'no-head early'));
   // The probe, inserted once when the response ended (it then loads devtools-anywhere.iife.js).
   const scripts = await pageScripts();
@@ -172,7 +172,7 @@ test('the Service Worker injects the probe exactly once into a short page withou
 });
 
 test('the Service Worker injects after <head> when the page ends right after it', async () => {
-  await navigatePageFrame('/tests/e2e/head-only.html');
+  await navigatePageFrame('/tests/e2e/pages/head-only.html');
   const { mode, inHead } = await page.evaluate(() => {
     const pageDocument = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentDocument;
     if (!pageDocument) throw new Error('no page frame');
@@ -185,7 +185,7 @@ test('the Service Worker injects after <head> when the page ends right after it'
 });
 
 test('the Service Worker passes non-HTML responses through unchanged', async () => {
-  await navigatePageFrame('/tests/e2e/not-html.json');
+  await navigatePageFrame('/tests/e2e/pages/not-html.json');
   const { contentType, text } = await page.evaluate(() => {
     const pageDocument = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentDocument;
     if (!pageDocument) throw new Error('no page frame');
@@ -198,7 +198,7 @@ test('the Service Worker passes non-HTML responses through unchanged', async () 
 });
 
 test('the Service Worker makes debugger statements log a warning', async () => {
-  await navigatePageFrame('/tests/e2e/debugger-page.html');
+  await navigatePageFrame('/tests/e2e/pages/debugger-page.html');
   const text = 'debugger statement hit (pausing is not supported)';
   const hits = async () =>
     (await received()).filter(
@@ -248,7 +248,7 @@ test('the Service Worker makes debugger statements log a warning', async () => {
   const source = await page.evaluate(() => {
     const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
     if (!pageWindow) throw new Error('no page frame');
-    return pageWindow.fetch('/tests/e2e/assets/debugger-classic.js').then(r => r.text());
+    return pageWindow.fetch('/tests/e2e/pages/assets/debugger-classic.js').then(r => r.text());
   });
   assert.match(source, /^ {2}const é = x; debugger$/m);
 });
@@ -282,9 +282,9 @@ test('the Service Worker leaves the same-origin DevTools frontend alone', async 
 
 // The last one arrives in two chunks, cut between <head> and the marker after it.
 for (const path of [
-  '/tests/e2e/frontend-dir/',
-  '/tests/e2e/frontend-dir/index.html',
-  '/tests/e2e/frontend-dir/index.html?split=%3Chead%3E',
+  '/tests/e2e/frontends/frontend-dir/',
+  '/tests/e2e/frontends/frontend-dir/index.html',
+  '/tests/e2e/frontends/frontend-dir/index.html?split=%3Chead%3E',
 ]) {
   test(`the Service Worker leaves the frontend alone at ${path}`, async () => {
     // Recognized by its content, whatever URL it is opened at (a directory or its index.html).
@@ -322,7 +322,7 @@ test('the Service Worker injects right after the shell reloads', async () => {
   // The worker is active already: the reloaded shell must be known to it before the page frame
   // navigates, even though it registers the worker again only after its bundle has loaded.
   // The address bar follows the page frame: reload a page with the probe, so the shell comes back.
-  await navigatePageFrame('/tests/e2e/zero-config.html');
+  await navigatePageFrame('/tests/e2e/pages/zero-config.html');
   await page.evaluate(() => {
     // Marks the old document, to wait for the new one.
     Reflect.set(window, 'stale', true);
@@ -334,7 +334,7 @@ test('the Service Worker injects right after the shell reloads', async () => {
         const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
         if (Reflect.get(window, 'stale') || !pageWindow || !document.querySelector('devtools-anywhere[shell]'))
           return false;
-        pageWindow.location.href = '/tests/e2e/no-probe.html';
+        pageWindow.location.href = '/tests/e2e/pages/no-probe.html';
         return true;
       }),
     8000
@@ -343,7 +343,8 @@ test('the Service Worker injects right after the shell reloads', async () => {
     page.evaluate(() => {
       const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
       return (
-        pageWindow?.location.pathname === '/tests/e2e/no-probe.html' && pageWindow.document.readyState === 'complete'
+        pageWindow?.location.pathname === '/tests/e2e/pages/no-probe.html' &&
+        pageWindow.document.readyState === 'complete'
       );
     })
   );
@@ -363,7 +364,7 @@ test('leaving shell mode unregisters the Service Worker', async () => {
 });
 
 test('the Service Worker passes requests through once the shell is gone without exitShell', async () => {
-  await page.goto(env?.baseUrl + '/tests/e2e/zero-config.html');
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
   await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere')?.isConnected));
   await page.evaluate(() => {
     const devtools = document.querySelector('devtools-anywhere');
@@ -374,7 +375,7 @@ test('the Service Worker passes requests through once the shell is gone without 
   await waitFor(() => page.evaluate(() => !!navigator.serviceWorker.controller));
   // Another tab outside shell mode keeps the worker while this shell uses it.
   const other = await page.browser().newPage();
-  await other.goto(env?.baseUrl + '/tests/e2e/zero-config.html');
+  await other.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
   await waitFor(() => other.evaluate(() => !!document.querySelector('devtools-anywhere')));
   // Longer than the probe's wait for the worker's answer.
   await new Promise(r => setTimeout(r, 1200));
@@ -382,11 +383,11 @@ test('the Service Worker passes requests through once the shell is gone without 
   await other.close();
   // Shell mode ends behind the shell's back: the worker stays registered.
   await page.evaluate(() => sessionStorage.clear());
-  await page.goto(env?.baseUrl + '/tests/e2e/sw-iframe.html');
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/sw-iframe.html');
   await waitFor(() =>
     page.evaluate(() => {
       const framed = document.querySelector<HTMLIFrameElement>('#framed')?.contentDocument;
-      return framed?.readyState === 'complete' && framed.location.pathname === '/tests/e2e/no-probe.html';
+      return framed?.readyState === 'complete' && framed.location.pathname === '/tests/e2e/pages/no-probe.html';
     })
   );
   const { scripts, controlled, registrations } = await page.evaluate(async () => {
@@ -405,7 +406,7 @@ test('the Service Worker passes requests through once the shell is gone without 
 
 // Relies on the worker the previous test left registered.
 test('a page outside shell mode unregisters the left-over Service Worker', async () => {
-  await page.goto(env?.baseUrl + '/tests/e2e/zero-config.html');
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
   await waitFor(
     async () => (await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length)) === 0
   );

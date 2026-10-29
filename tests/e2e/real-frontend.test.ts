@@ -23,7 +23,7 @@ before(async () => {
   page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
   // Tall enough for the Network panel to render its rows below the overview.
   await page.setViewport({ width: 1000, height: 1600 });
-  await page.goto(env.baseUrl + '/tests/e2e/real-frontend.html');
+  await page.goto(env.baseUrl + '/tests/e2e/pages/real-frontend.html');
   frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
 });
 after(() => env?.close());

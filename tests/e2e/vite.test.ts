@@ -28,7 +28,14 @@ before(async () => {
     root: path.join(here, 'vite-app'),
     logLevel: 'silent',
     server: { port: 0, strictPort: false },
-    plugins: [devtoolsAnywhere({ frontendDir: here, frontendEntry: 'fake-frontend.html', open: true, shell: false })],
+    plugins: [
+      devtoolsAnywhere({
+        frontendDir: path.join(here, 'frontends'),
+        frontendEntry: 'fake-frontend.html',
+        open: true,
+        shell: false,
+      }),
+    ],
   });
   await server.listen();
   browser = await puppeteer.launch({

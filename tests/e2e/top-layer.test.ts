@@ -13,7 +13,7 @@ before(async () => {
   env = await launch();
   page = await env.browser.newPage();
   await page.setViewport({ width: 1000, height: 800 });
-  await page.goto(env.baseUrl + '/tests/e2e/zero-config.html');
+  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
   await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.open === true);
   // A page element at the highest z-index, after the element: without the top layer it would win.
   await page.evaluate(() =>
