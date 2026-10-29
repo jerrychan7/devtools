@@ -17,8 +17,18 @@ export const src = path.resolve(
   process.env['DEVTOOLS_FRONTEND_SRC'] ?? path.join(repo, 'devtools-frontend.ignore/devtools-frontend')
 );
 const depotTools = path.resolve(process.env['DEPOT_TOOLS'] ?? path.join(repo, 'depot_tools.ignore'));
+// A git hook runs with variables that point git at this repository (a commit with paths passes
+// its own index in GIT_INDEX_FILE): left in, git in the checkout would read and write ours.
+const OUR_REPOSITORY = [
+  'GIT_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_WORK_TREE',
+  'GIT_PREFIX',
+  'GIT_COMMON_DIR',
+  'GIT_OBJECT_DIRECTORY',
+];
 export const env = {
-  ...process.env,
+  ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !OUR_REPOSITORY.includes(name))),
   PATH: `${depotTools}${path.delimiter}${process.env['PATH']}`,
   DEPOT_TOOLS_UPDATE: '0',
 };
