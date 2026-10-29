@@ -65,3 +65,40 @@ test("each session keeps bodies within its own buffer sizes, not the other's", a
   await call(0, 'Network.disable');
   await call(1, 'Network.disable');
 });
+
+const color = () =>
+  page.evaluate(() => {
+    const el = document.getElementById('forced');
+    return el ? getComputedStyle(el).color : '';
+  });
+
+test('a pseudo-class two sessions force stays forced until both take it back', async () => {
+  await page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<style>#forced:hover { color: rgb(255, 0, 0); } #forced:focus { color: rgb(0, 0, 255); }</style><a id="forced">x</a>'
+    );
+  });
+  const force = async (index: number, classes: string[]) => {
+    await call(index, 'DOM.enable');
+    await call(index, 'CSS.enable');
+    const doc = await call(index, 'DOM.getDocument');
+    const root = typeof doc === 'object' && doc && 'root' in doc ? doc.root : null;
+    const nodeId = typeof root === 'object' && root && 'nodeId' in root ? root.nodeId : 0;
+    const found = await call(index, 'DOM.querySelector', { nodeId, selector: '#forced' });
+    const id = typeof found === 'object' && found && 'nodeId' in found ? found.nodeId : 0;
+    await call(index, 'CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: classes });
+  };
+  await force(0, ['hover']);
+  await force(1, ['hover', 'focus']);
+  assert.equal(await color(), 'rgb(0, 0, 255)', 'both states');
+  await call(1, 'CSS.disable');
+  assert.equal(await color(), 'rgb(255, 0, 0)', "the first session's :hover stays");
+  await force(1, ['focus']);
+  await call(0, 'CSS.disable');
+  assert.equal(await color(), 'rgb(0, 0, 255)', "the second session's :focus stays");
+  await call(1, 'CSS.disable');
+  assert.equal(await color(), 'rgb(0, 0, 0)');
+  // The page sees its own adopted sheets only, whichever session went first.
+  assert.equal(await page.evaluate(() => Object.hasOwn(document, 'adoptedStyleSheets')), false);
+});

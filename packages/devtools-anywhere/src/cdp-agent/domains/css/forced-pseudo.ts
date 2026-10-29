@@ -4,6 +4,13 @@ import { FORCE_ATTRIBUTE } from '../../core/nodes';
 /** A document or shadow root: what style sheets apply to. */
 export type TreeScope = Document | ShadowRoot;
 
+/** How a session reads the page's style sheets. */
+interface SheetProvider {
+  /** The document and shadow roots, each with its top-level sheets in cascade order. */
+  trees: () => { tree: TreeScope; sheets: CSSStyleSheet[] }[];
+  rulesOf: (sheet: CSSStyleSheet | CSSGroupingRule) => CSSRule[];
+}
+
 interface Companion {
   sheet: CSSStyleSheet;
   /** Takes the companion and the hook off the tree. */
@@ -37,9 +44,15 @@ function containsAcrossShadow(node: Node, el: Element): boolean {
  * following rules of every sheet (keeping their @media, @supports, @layer and @import
  * conditions): the cascade order, which decides between rules of equal specificity, stays as
  * if the pseudo-class matched. The page's own style sheets are not modified.
+ *
+ * One for the page, shared by the sessions as Chrome's CSS agents share the page: each session
+ * forces its own states, and an element is in the union of them (see ForcedPseudoClasses).
  */
-export class ForcedPseudoClasses {
-  private forced = new Map<Element, Set<string>>();
+class SharedForcedPseudoClasses {
+  /** The elements each session forced, with their pseudo-classes. */
+  private owners = new Map<object, Map<Element, Set<string>>>();
+  /** How each session forcing something reads the page's style sheets. */
+  readonly providers = new Map<object, SheetProvider>();
   /** The companion of each tree, with the hook keeping it among the tree's adopted sheets. */
   private companions = new Map<TreeScope, Companion>();
   private sheetsOfCompanions = new WeakSet<CSSStyleSheet>();
@@ -50,16 +63,56 @@ export class ForcedPseudoClasses {
   /** Media queries the last rebuild looked at: the others are let go. */
   private usedMedia = new Set<string>();
 
-  /** The document and shadow roots, each with its top-level sheets in cascade order. */
-  private trees: () => { tree: TreeScope; sheets: CSSStyleSheet[] }[];
-  private rulesOf: (sheet: CSSStyleSheet | CSSGroupingRule) => CSSRule[];
+  /** The sheets as the last session forcing something reads them. */
+  private provider(): SheetProvider | undefined {
+    let last: SheetProvider | undefined;
+    for (const owner of this.owners.keys()) last = this.providers.get(owner) ?? last;
+    return last;
+  }
 
-  constructor(
-    trees: () => { tree: TreeScope; sheets: CSSStyleSheet[] }[],
-    rulesOf: (sheet: CSSStyleSheet | CSSGroupingRule) => CSSRule[]
-  ) {
-    this.trees = trees;
-    this.rulesOf = rulesOf;
+  /** The document and shadow roots, each with its top-level sheets in cascade order. */
+  private trees() {
+    return this.provider()?.trees() ?? [];
+  }
+
+  private rulesOf(sheet: CSSStyleSheet | CSSGroupingRule): CSSRule[] {
+    return this.provider()?.rulesOf(sheet) ?? [];
+  }
+
+  /** The forced elements: each with the pseudo-classes any session forced on it. */
+  private get forced(): Map<Element, Set<string>> {
+    const all = new Map<Element, Set<string>>();
+    for (const elements of this.owners.values()) {
+      for (const [el, classes] of elements) {
+        let union = all.get(el);
+        if (!union) all.set(el, (union = new Set()));
+        classes.forEach(c => union.add(c));
+      }
+    }
+    return all;
+  }
+
+  /** Puts the marker attribute in line with what is forced on `el`. */
+  private mark(el: Element) {
+    const classes = this.forced.get(el);
+    if (classes) el.setAttribute(FORCE_ATTRIBUTE, [...classes].join(' '));
+    else el.removeAttribute(FORCE_ATTRIBUTE);
+  }
+
+  /** Forgets `owner`'s elements of `elements` (all of them by default). */
+  private release(owner: object, elements?: Element[]) {
+    const own = this.owners.get(owner);
+    if (!own) return void this.providers.delete(owner);
+    for (const el of elements ?? [...own.keys()]) own.delete(el);
+    if (own.size) return;
+    this.owners.delete(owner);
+    this.providers.delete(owner);
+  }
+
+  /** Forgets `el` for every session. */
+  private forget(el: Element) {
+    for (const owner of this.owners.keys()) this.release(owner, [el]);
+    el.removeAttribute(FORCE_ATTRIBUTE);
   }
 
   /** Whether `sheet` is one of our companions rather than a sheet of the page. */
@@ -89,27 +142,28 @@ export class ForcedPseudoClasses {
     );
   }
 
-  set(el: Element, classes: string[]) {
+  set(owner: object, el: Element, classes: string[]) {
     const known = classes.filter(c => FORCEABLE_CLASSES.includes(c));
     if (known.length) {
-      this.forced.set(el, new Set(known));
-      el.setAttribute(FORCE_ATTRIBUTE, known.join(' '));
-    } else {
-      this.forced.delete(el);
-      el.removeAttribute(FORCE_ATTRIBUTE);
-    }
+      let own = this.owners.get(owner);
+      if (!own) this.owners.set(owner, (own = new Map()));
+      own.set(el, new Set(known));
+    } else this.release(owner, [el]);
+    this.mark(el);
     this.rebuild();
   }
 
-  clear() {
-    for (const el of this.forced.keys()) el.removeAttribute(FORCE_ATTRIBUTE);
-    this.forced.clear();
+  /** Takes back what `owner` forced; what the other sessions forced stays. */
+  clear(owner: object) {
+    const elements = [...(this.owners.get(owner)?.keys() ?? [])];
+    this.release(owner);
+    elements.forEach(el => this.mark(el));
     this.rebuild();
   }
 
   get isActive() {
-    if (this.prune() && !this.forced.size) this.rebuild();
-    return this.forced.size > 0;
+    if (this.prune() && !this.owners.size) this.rebuild();
+    return this.owners.size > 0;
   }
 
   /**
@@ -120,8 +174,7 @@ export class ForcedPseudoClasses {
     let pruned = false;
     for (const el of this.forced.keys()) {
       if (el.isConnected) continue;
-      this.forced.delete(el);
-      el.removeAttribute(FORCE_ATTRIBUTE);
+      this.forget(el);
       pruned = true;
     }
     return pruned;
@@ -129,12 +182,11 @@ export class ForcedPseudoClasses {
 
   /** After `removed` left the tree: un-forces the elements among them, like Chrome. */
   removed(removed: Node[]) {
-    if (!this.forced.size || !removed.length) return;
+    if (!this.owners.size || !removed.length) return;
     let changed = false;
     for (const el of this.forced.keys()) {
       if (!removed.some(node => containsAcrossShadow(node, el))) continue;
-      this.forced.delete(el);
-      el.removeAttribute(FORCE_ATTRIBUTE);
+      this.forget(el);
       changed = true;
     }
     if (changed) this.rebuild();
@@ -146,7 +198,7 @@ export class ForcedPseudoClasses {
     const seen = new Set<TreeScope>();
     this.queried.clear();
     this.usedMedia.clear();
-    if (this.forced.size) {
+    if (this.owners.size) {
       for (const { tree, sheets } of this.trees()) {
         const text = this.companionText(sheets);
         if (!text) continue;
@@ -484,5 +536,56 @@ export class ForcedPseudoClasses {
     };
     visit(root);
     return out;
+  }
+}
+
+let shared: SharedForcedPseudoClasses | undefined;
+/** The page's forced states, shared by the sessions. */
+const page = () => (shared ??= new SharedForcedPseudoClasses());
+
+/**
+ * One session's CSS.forcePseudoState, like one of Chrome's CSS agents: it takes back only what it
+ * forced (CSS.disable, a removed element), and an element is in every state a session forced.
+ */
+export class ForcedPseudoClasses {
+  private readonly provider: SheetProvider;
+
+  constructor(trees: SheetProvider['trees'], rulesOf: SheetProvider['rulesOf']) {
+    this.provider = { trees, rulesOf };
+  }
+
+  /** Whether `sheet` is a companion (of any session) rather than a sheet of the page. */
+  owns(sheet: CSSStyleSheet): boolean {
+    return page().owns(sheet);
+  }
+
+  /** `selector` with the pseudo-classes forced by any session extended by the marker attribute. */
+  rewrite(selector: string, skip?: string): string {
+    return page().rewrite(selector, skip);
+  }
+
+  set(el: Element, classes: string[]) {
+    page().providers.set(this, this.provider);
+    page().set(this, el, classes);
+  }
+
+  clear() {
+    page().clear(this);
+  }
+
+  get isActive() {
+    return page().isActive;
+  }
+
+  removed(removed: Node[]) {
+    page().removed(removed);
+  }
+
+  rebuild() {
+    page().rebuild();
+  }
+
+  reattach() {
+    page().reattach();
   }
 }
