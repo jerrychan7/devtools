@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>custom element</title>
+    <script
+      src="/packages/devtools-anywhere/dist/probe.iife.js"
+      data-devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"
+      data-default-shell-mode="off"
+    ></script>
+    <style>
+      #placed {
+        height: 300px;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="before">before</p>
+    <devtools-anywhere id="placed"></devtools-anywhere>
+    <p id="after">after</p>
+    <devtools-anywhere
+      id="own-url"
+      devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html?own"
+      hidden
+      open
+      no-toggler
+      shell-mode-locked
+      dock="right"
+    ></devtools-anywhere>
+    <button id="request" data-devtools-anywhere-toggle="placed">placed</button>
+    <button id="global" data-devtools-anywhere-toggle>global</button>
+    <script src="/packages/devtools-anywhere/dist/devtools-anywhere.iife.js"></script>
+  </body>
+</html>

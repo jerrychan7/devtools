@@ -73,7 +73,9 @@ async function openDevtools() {
 
 /** Posts a request to the element from its frontend, as DevTools' lock button does. */
 const keepOpen = async (keep: boolean) => {
-  const frontend = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));
+  // The global element's frontend, not that of the page's own element.
+  const iframe = await page.$('devtools-anywhere[shell], html > devtools-anywhere');
+  const frontend = await (await iframe?.$('pierce/iframe'))?.contentFrame();
   assert.ok(frontend, 'the frontend frame');
   await frontend.evaluate(keep => parent.postMessage({ devtoolsAnywhere: { type: 'keep-open', keep } }, '*'), keep);
   // Time for a reload into or out of the shell to start, if it were to.

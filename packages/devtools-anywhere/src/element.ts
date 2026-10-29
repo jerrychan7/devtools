@@ -119,7 +119,8 @@ function setPopoverOpen(el: HTMLElement, open: boolean) {
 }
 
 const STYLE = `
-:host { all: initial; }
+:host { all: initial; display: block; }
+:host([hidden]) { display: none; }
 /* Both go into the top layer as popovers (see TOP_LAYER): undo the browser's popover style. */
 .toggler, .panel {
   inset: auto; width: auto; height: auto; margin: 0; padding: 0; border: 0; overflow: visible; color: inherit;
@@ -200,6 +201,12 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 }
 
 /* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
+/* An element placed by the page: a box in the page's flow, sized by its CSS, always loaded. */
+.panel[data-custom] {
+  position: static; display: flex; width: 100%; height: 100%; border: 0; padding: 0;
+}
+[data-custom] .bar, .toggler[data-custom] { display: none; }
+
 :host([shell]) { display: flex; flex: none; }
 :host([shell]) .panel { position: static; flex: 1 1 auto; }
 :host([shell]) .panel[data-dock=undocked] { position: fixed; }
@@ -215,7 +222,9 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  *
  * Fires `toggle` (a ToggleEvent where supported, with `oldState` and `newState`) when it opens
  * or closes. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
- * attribute's value is the element's id, or empty for the first element on the page. They
+ * attribute is empty for the probe's element. An element the page placed itself is a box in its
+ * flow with DevTools always loaded, no open state and no shell mode: a toggler set to its id only
+ * fires `devtools-toggle-request` on it. They
  * work once the element is registered with defineDevtoolsAnywhere(); in the shell's page iframe,
  * they control the shell's `<devtools-anywhere>`, whatever their value.
  *
@@ -299,6 +308,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (event.source !== this.frame.contentWindow || event.origin !== this.frontendOrigin) return;
     const request: unknown = event.data?.[REQUEST_KEY];
     if (!isEmbedderRequest(request)) return;
+    // An element placed by the page only takes the frontend's colors: it has no dock side,
+    // shell mode or open state.
+    if (this.custom && request.type !== 'theme') return;
     if (request.type === 'dock') {
       store(DOCK_KEY, request.side);
       this.dock = request.side;
@@ -329,6 +341,26 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    * A toggler's request (see togglerTarget), maybe from another window: toggles when asked, and
    * answers whether DevTools is shown.
    */
+  /** Whether the page placed this element itself: neither the probe's nor the shell's. */
+  private get custom() {
+    return !globalElements.has(this) && !this.hasAttribute('shell');
+  }
+
+  /**
+   * An element placed by the page: a box in its flow, with DevTools loaded at once, as long as it
+   * is connected. Its CSS shows and hides it; it never enters shell mode.
+   */
+  private connectCustom() {
+    this.panel.toggleAttribute('data-custom', true);
+    this.toggler.toggleAttribute('data-custom', true);
+    window.addEventListener('message', this.onFrontendRequest);
+    // Inside the shell's page iframe too: it inspects that page.
+    this.session ??= createPageSession();
+    // Loaded again once the probe gives its frontend URL.
+    customElementsLoading.set(this, () => this.loadFrontend());
+    this.loadFrontend();
+  }
+
   private onControl = (event: Event) => {
     // From another window, the event is not of this window's CustomEvent.
     const detail: unknown = Reflect.get(event, 'detail');
@@ -347,7 +379,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** The frontend's URL: the attribute, else the probe's. */
   private get frontendUrl() {
-    return this.getAttribute('devtools-frontend-url') || this.config.frontend || '';
+    return this.getAttribute('devtools-frontend-url') || this.config.frontend || probeFrontend;
   }
 
   /**
@@ -470,6 +502,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // whatever it puts inside.
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
+    if (this.custom) return this.connectCustom();
     // Only the first global element connected works, even once it is gone.
     if (globalElements.has(this) && !this.firstGlobal) {
       if (globalTaken) {
@@ -515,6 +548,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Disconnects the frontend and stops listening to it. */
   disconnectedCallback() {
+    customElementsLoading.delete(this);
     // A detached iframe is unloaded; it reconnects and reloads when attached again.
     this.disconnect?.();
     this.disconnect = null;
@@ -527,6 +561,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Loads the new frontend if DevTools is open. */
   attributeChangedCallback() {
+    if (this.custom) {
+      if (this.isConnected) this.loadFrontend();
+      return;
+    }
     if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
   }
 
@@ -622,7 +660,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (!frontend || (!this.session && !(this.hasAttribute('shell') && page))) return;
     const url = new URL(frontend, location.href);
     // The frontend's own switch for shell mode is hidden.
-    if (this.config.locked) url.searchParams.set('shellModeLocked', '');
+    if (this.config.locked || this.custom) url.searchParams.set('shellModeLocked', '');
     if (url.href === this.loadedUrl) return;
     this.loadedUrl = url.href;
     // The frontend's document is not one of the page's requests.
@@ -636,7 +674,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const hash = new URLSearchParams({
       embedded: location.origin,
       dock: this.dock,
-      keep: !shell && bundleUrl ? '1' : '0',
+      keep: !shell && !this.custom && bundleUrl ? '1' : '0',
       shell: shell ? '1' : '0',
     } satisfies FrontendHash);
     this.frame.src = `${url.href.split('#')[0]}#?${hash}`;
@@ -718,6 +756,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 const globalElements = new WeakSet<Element>();
 let globalTaken = false;
 const inactiveGlobals = new WeakSet<Element>();
+/** The probe's frontend URL, for the elements placed by the page without one. */
+let probeFrontend = '';
+/** The connected elements placed by the page, each with what loads its frontend. */
+const customElementsLoading = new Map<Element, () => void>();
 /** The probe's options for each global element, taken when it first connects. */
 const globalConfigs = new WeakMap<Element, GlobalElementConfig>();
 
@@ -727,6 +769,10 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
     const element = new DevtoolsAnywhereElement();
     globalElements.add(element);
     globalConfigs.set(element, config);
+    if (config.frontend && !probeFrontend) {
+      probeFrontend = config.frontend;
+      customElementsLoading.forEach(load => load());
+    }
     return element;
   } catch {
     // The page registered devtools-anywhere itself, with a class of its own.
@@ -734,6 +780,12 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
     return null;
   }
 }
+
+/** What a toggler fires on an element placed by the page, which has no open state. */
+const TOGGLE_REQUEST_EVENT = 'devtools-toggle-request';
+/** Whether `el` is an element placed by the page (of this window). */
+const isCustom = (el: Element) =>
+  el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !el.hasAttribute('shell');
 
 /** The event a toggler controls its element with (see controlElement). */
 const CONTROL_EVENT = 'devtools-anywhere-control';
@@ -750,14 +802,20 @@ const warned = new Set<string>();
  * element whose id is the attribute's value, or the first element when it has none.
  */
 function togglerTarget(toggler: Element, warn: boolean): Element | null {
+  // An element the page placed in the shell's page: the toggler names it.
+  const named = toggler.ownerDocument.getElementById(toggler.getAttribute(TOGGLE_ATTRIBUTE) || '');
+  if (isShellPage() && named && customElementsLoading.has(named)) return named;
   // The shell's element is of the shell window's class: it is toggled through an event.
   if (isShellPage()) return window.frameElement?.ownerDocument.querySelector('devtools-anywhere[shell]') ?? null;
   const id = toggler.getAttribute(TOGGLE_ATTRIBUTE) ?? '';
   const doc = toggler.ownerDocument;
-  // Global elements after the first do nothing: they are not targets.
+  // Without a value, the global element (or the shell's); global elements after the first do
+  // nothing: they are not targets.
   const target = id
     ? doc.getElementById(id)
-    : [...doc.querySelectorAll(togglerTag)].find(el => !inactiveGlobals.has(el));
+    : [...doc.querySelectorAll(togglerTag)].find(
+        el => (globalElements.has(el) || el.hasAttribute('shell')) && !inactiveGlobals.has(el)
+      );
   if (target instanceof DevtoolsAnywhereElement && !inactiveGlobals.has(target)) return target;
   if (warn && !warned.has(id)) {
     warned.add(id);
@@ -779,6 +837,8 @@ function controlElement(target: Element, toggle: boolean): boolean | undefined {
 /** Sets aria-expanded on a toggler from the state of its element. */
 function refreshToggler(toggler: Element, warn = false) {
   const target = togglerTarget(toggler, warn);
+  // An element placed by the page has no open state.
+  if (target && isCustom(target)) return target;
   const open = target && controlElement(target, false);
   if (open !== undefined && open !== null) toggler.setAttribute('aria-expanded', String(open));
   return target;
@@ -803,7 +863,9 @@ function installTogglers(tag: string) {
       if (!toggler || (control && control !== clicked && toggler.contains(control))) return;
       const target = toggler && refreshToggler(toggler, true);
       if (!target) return;
-      controlElement(target, true);
+      // An element placed by the page only tells its listeners, which decide.
+      if (isCustom(target)) target.dispatchEvent(new Event(TOGGLE_REQUEST_EVENT));
+      else controlElement(target, true);
       refreshToggler(toggler);
     },
     true
