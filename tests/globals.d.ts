@@ -1,7 +1,7 @@
 // Globals the tests read and write inside test pages (through page.evaluate).
-// Types come from the built packages (`pnpm build`), like the code the pages load. Their entry
-// points export only what the other packages use, not what the tests would like: types they do
-// not export are derived from those they do.
+// Types come straight from the devtools-anywhere sources (api.ts, cdp-agent/probe/types.ts), so
+// no build is needed. Those modules export only what the other code uses, not what the tests would like:
+// types they do not export are derived from those they do.
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
 import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
 
