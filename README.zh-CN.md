@@ -79,11 +79,11 @@
 
 不托管独立的 `devtools.html`，也不跳转到 blob URL，因为 blob 会导致刷新失效、地址无法分享。做法是：
 
-1. 使用零配置探针（`data-devtools-frontend-url`，或 Vite 插件）时，顶层页面首次加载就默认进入外壳模式：探针在页面脚本运行前自己把前端地址和 bundle 地址写入 `sessionStorage`，不需要再刷新一次。除非设置了 `data-open-immediately`，devtools 一开始是隐藏的。其他情况下，点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”（`element.enterShell()`），写入这些地址后刷新页面。
+1. 使用零配置探针（`data-devtools-frontend-url`，或 Vite 插件）时，顶层页面首次加载就默认进入外壳模式：探针在页面脚本运行前自己把前端地址和 bundle 地址写入 `sessionStorage`，不需要再刷新一次。除非设置了 `data-open-immediately`，devtools 一开始是隐藏的。其他情况下，点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”，写入这些地址后刷新页面。
 2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere shell>`。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
 3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间转发消息。
 4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化，包括加载、前进后退和同文档导航（有 Navigation API 时也包括 `pushState`），因此刷新或复制链接打开的都是当前显示的页面。
-5. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式。再点一次锁形按钮（`element.exitShell()`）会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
+5. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式。再点一次锁形按钮会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
 
 只有与探针脚本同源的地址才会被采信，否则清除配置、页面照常加载。因此外壳模式要求探针、bundle 和前端都由页面所在的源提供。
 
@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`devtoolsFrontendPath`（本地另一份前端构建的入口文件路径，如 `…/anywhere_app.html`，托管它所在的目录）、`devtoolsFrontendUrl`（托管在别处的前端，设置后不再托管本地文件）、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`devtoolsFrontendPath`（本地另一份前端构建的入口文件路径，如 `…/anywhere_app.html`，托管它所在的目录）、`devtoolsFrontendUrl`（托管在别处的前端，设置后不再托管本地文件）、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件），以及配合它的 `idInQuery`（`data-id-in-query`，对应服务端的 `idInQuery`）。
 
 ### 远程调试
 
@@ -162,7 +162,7 @@ npx devtools-anywhere-remote --port 8080
 
 - 服务端同时提供探针、bundle 和 DevTools 前端；前端运行在电脑上，不受“前端要和页面不同源”的限制。
 - 调试一个页面就意味着能在其中执行任意脚本：目标列表和 DevTools 连接都需要 token（`--token <值>`，默认随机生成；`--no-token` 关闭）。页面连接不需要 token。
-- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--id-in-query`（即下文的 `idInQuery`）、`--devtools-frontend-path`，以及 `--devtools-frontend-url`（打开托管在别处的前端，如 CDN；HTTPS 的前端要求服务端也用 HTTPS）。在 Node.js 中也可以调用 `startRemoteServer(options)`；`createRemoteHandler(options)` 提供请求和 upgrade 两个处理函数，可以挂在自己的服务（Express、Koa 等）的某个 base path 下，不属于它的请求返回 false。页面连接 `<base>target/<id>`，DevTools 连接 `<base>client/<id>`；宿主只能按精确路径分发 WebSocket upgrade 时，用 `idInQuery: true`，两者都连到 base path 本身（`<base>?target=<id>`、`<base>?client=<id>`）：目标列表和打印的 script 标签改用这种形式，标签上带 `data-id-in-query`，宿主只需为 upgrade 注册 base path（带结尾斜杠）。两种形式始终都接受。单独打开的前端可以用 `anywhere_app.html?ws=<host:port/path>`（HTTPS 用 `wss=`）连接任一目标，参数是去掉协议的 WebSocket 地址，和 Chrome 的 `devtools_app.html?ws=` 一样。
+- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--id-in-query`（即下文的 `idInQuery`）、`--devtools-frontend-path`，以及 `--devtools-frontend-url`（打开托管在别处的前端，如 CDN；HTTPS 的前端要求服务端也用 HTTPS；它的链接把 `ws=`/`wss=` 和 token 放在 URL 片段里，所以不会发给 CDN）。在 Node.js 中也可以调用 `startRemoteServer(options)`；`createRemoteHandler(options)` 提供请求和 upgrade 两个处理函数，可以挂在自己的服务（Express、Koa 等）的某个 base path 下，不属于它的请求返回 false。页面连接 `<base>target/<id>`，DevTools 连接 `<base>client/<id>`；宿主只能按精确路径分发 WebSocket upgrade 时，用 `idInQuery: true`，两者都连到 base path 本身（`<base>?target=<id>`、`<base>?client=<id>`）：目标列表和打印的 script 标签改用这种形式，标签上带 `data-id-in-query`，宿主只需为 upgrade 注册 base path（带结尾斜杠）。两种形式始终都接受。单独打开的前端可以用 `anywhere_app.html?ws=<host:port/path>`（HTTPS 用 `wss=`；也可以从片段 `#?ws=` 读取）连接任一目标，参数是去掉协议的 WebSocket 地址，和 Chrome 的 `devtools_app.html?ws=` 一样。
 - `/json/list`（带 token）按 Chrome 的格式列出目标。
 
 ### 组件
