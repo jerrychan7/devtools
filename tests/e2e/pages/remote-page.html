@@ -2,8 +2,8 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <!-- The remote server's port is only known at run time: `?remote=<its URL>`, and `&single` for
-         its single-path form. -->
+    <!-- The remote server's port is only known at run time: `?remote=<its URL>`, `&single` for
+         its single-path form, and `&panel` for DevTools in the page too. -->
     <script>
       const query = new URLSearchParams(location.search);
       document.write(
@@ -11,6 +11,11 @@
           query.get('remote') +
           'probe.iife.js" data-remote' +
           (query.has('single') ? ' data-single-path' : '') +
+          (query.has('panel')
+            ? ' data-devtools-frontend-url="' +
+              location.origin +
+              '/tests/e2e/frontends/fake-frontend.html" data-default-shell-mode="off" data-open-immediately'
+            : '') +
           '><\/script>'
       );
     </script>

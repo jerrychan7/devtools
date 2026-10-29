@@ -539,3 +539,35 @@ test(
     await devtools.close();
   }
 );
+
+test('a page with its own DevTools panel is inspected remotely too, each in its own session', async () => {
+  const both = await env.browser.newPage();
+  try {
+    await both.goto(
+      `${env.baseUrl}/tests/e2e/pages/remote-page.html?panel&remote=${encodeURIComponent(origin() + '/')}`
+    );
+    const listed = await waitFor(async () => (await targets()).find(t => t.url.includes('?panel')));
+    const client = await Client.connect(listed.webSocketDebuggerUrl);
+    await client.call('Runtime.enable');
+    await waitFor(() => client.logged('remote early'));
+    // The panel's frontend gets the page's output too.
+    const frontend = await waitFor(async () => {
+      const handle = await both.$('html > devtools-anywhere');
+      const frame = await (await handle?.$('pierce/iframe'))?.contentFrame();
+      const ready = await frame?.evaluate(() => (window.received ?? []).length > 0);
+      return ready ? frame : null;
+    });
+    await both.evaluate(() => console.log('seen by both'));
+    await waitFor(() => client.logged('seen by both'));
+    await waitFor(() =>
+      frontend.evaluate(() =>
+        (window.received ?? []).some(
+          m => m.method === 'Runtime.consoleAPICalled' && JSON.stringify(m.params).includes('seen by both')
+        )
+      )
+    );
+    client.socket.close();
+  } finally {
+    await both.close();
+  }
+});

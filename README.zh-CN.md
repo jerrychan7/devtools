@@ -158,7 +158,7 @@ npx devtools-anywhere-remote --port 8080
 <script src="http://192.168.1.2:8080/probe.iife.js" data-remote></script>
 ```
 
-页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；列表可以筛选，也会显示连着几个 DevTools。点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连，期间它仍留在列表中。一个页面可以同时被多个 DevTools 调试，和 Chrome 一样各有独立的会话：页面为每个会话运行一个 CDP 会话。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。它像链接一样相对探针的地址解析，所以挂在路径下的服务端要带结尾斜杠：`/devtools/` 指 `/devtools/` 下的服务端，`/devtools` 指的却是 `/` 下的。
+页面加载完成后连接到服务端（早期输出照常捕获），并出现在目标列表中；列表可以筛选，也会显示连着几个 DevTools。点“inspect”会在新标签页里打开它的 DevTools。页面在同一个标签页里刷新或跳转时，DevTools 保持连接；连接断开后页面会自动重连，期间它仍留在列表中。一个页面可以同时被多个 DevTools 调试，和 Chrome 一样各有独立的会话：页面为每个会话运行一个 CDP 会话。探针从别处加载时，`data-remote` 也可以写服务端地址（`data-remote="http://host:8080/"`）。它像链接一样相对探针的地址解析，所以挂在路径下的服务端要带结尾斜杠：`/devtools/` 指 `/devtools/` 下的服务端，`/devtools` 指的却是 `/` 下的。再加上 `data-devtools-frontend-url` 时，页面同时还有自己的 DevTools 面板，两边可以同时调试，各自有独立的会话。
 
 - 服务端同时提供探针、bundle 和 DevTools 前端；前端运行在电脑上，不受“前端要和页面不同源”的限制。
 - 调试一个页面就意味着能在其中执行任意脚本：目标列表和 DevTools 连接都需要 token（`--token <值>`，默认随机生成；`--no-token` 关闭）。页面连接不需要 token。

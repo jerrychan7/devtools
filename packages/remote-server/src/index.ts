@@ -122,7 +122,10 @@ export interface RemoteServer {
   readonly url: string;
   /** The server's URL as pages reach it. */
   readonly publicUrl: string;
-  /** The script tag for pages to connect with. */
+  /**
+   * The script tag for pages to connect with. With `data-devtools-frontend-url` added, a page
+   * also gets DevTools of its own, alongside the remote ones.
+   */
   readonly scriptTag: string;
   /** The token the target list and DevTools connections need, or false if none is. */
   readonly token: string | false;

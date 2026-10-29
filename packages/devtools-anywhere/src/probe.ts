@@ -16,9 +16,10 @@
 // another origin. `data-shell-mode-locked` ignores the user's choice (it stays stored) and has
 // DevTools offer none; a page that cannot be framed still leaves shell mode.
 //
-// With `data-remote` instead, it connects the page to a remote debugging server
+// With `data-remote`, it connects the page to a remote debugging server
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
-// where DevTools on another machine inspects it. No <devtools-anywhere> is mounted then.
+// where DevTools on another machine inspects it. With `data-devtools-frontend-url` too, the page
+// also gets its own panel: the two are CDP sessions of their own over the one probe.
 // `data-single-path` connects to that URL itself, the target in the query, for a server whose
 // host routes WebSocket upgrades by exact path (remote-server's `singlePath`).
 //
@@ -144,7 +145,6 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
         api.connectRemote(new URL(remote || '.', script.src).href, {
           singlePath: attribute('data-single-path') !== null,
         });
-        return;
       }
       if (!frontend || !hasApi(api, 'createGlobalElement')) return;
       // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
