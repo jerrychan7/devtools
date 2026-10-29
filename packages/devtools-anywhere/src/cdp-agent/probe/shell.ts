@@ -85,16 +85,17 @@ export function isTrustedShellConfig(config: ShellConfig): boolean {
 /**
  * Stores the shell config for the next load of the top-level page: DevTools' `frontend`, the
  * bundle, `sw` as the element's attribute (`''`: next to the bundle), and the element's flags.
- * False when the URLs are not all on the trusted origin, which the probe would refuse, or
- * storage throws.
+ * False when the URLs do not parse or are not all on the trusted origin, which the probe would
+ * refuse, or storage throws.
  *
  * @internal
  */
 export function storeShellConfig(frontend: string, bundle: string, sw: string | null, flags: ShellFlags): boolean {
-  const config: ShellConfig = { ...flags, frontend: new URL(frontend, location.href).href, bundle };
-  if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundle).href;
-  if (!isTrustedShellConfig(config)) return false;
   try {
+    // URLs that do not parse are refused too.
+    const config: ShellConfig = { ...flags, frontend: new URL(frontend, location.href).href, bundle };
+    if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundle).href;
+    if (!isTrustedShellConfig(config)) return false;
     sessionStorage.setItem(SHELL_KEY, JSON.stringify(config));
     return true;
   } catch {
@@ -113,6 +114,17 @@ export function readShellConfig(): ShellConfig | null {
     return null;
   } catch {
     return null;
+  }
+}
+
+/** Keeps whether DevTools is shown in the stored shell config, for the shell's next reload. @internal */
+export function storeShellOpen(open: boolean) {
+  const config = readShellConfig();
+  if (!config) return;
+  try {
+    sessionStorage.setItem(SHELL_KEY, JSON.stringify({ ...config, open }));
+  } catch {
+    // Then the shell starts as the config says.
   }
 }
 

@@ -10,6 +10,7 @@ import {
   refuseShell,
   SHELL_MODE_KEY,
   storeShellConfig,
+  storeShellOpen,
   type CdpSession,
   type SnapdomLoader,
 } from './cdp-agent';
@@ -223,9 +224,10 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * Whether it is open shows in its togglers' `aria-expanded`. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
  * attribute is empty for the probe's element. An element the page placed itself is a box in its
  * flow with DevTools always loaded, no open state and no shell mode: a toggler set to its id only
- * fires `devtools-toggle-request` on it. They
- * work once the element is registered with defineDevtoolsAnywhere(); in the shell's page iframe,
- * they control the shell's `<devtools-anywhere>`, whatever their value.
+ * fires `devtools-toggle-request` on it.
+ *
+ * The togglers work once the element is registered with defineDevtoolsAnywhere(); in the shell's
+ * page iframe, they control the shell's `<devtools-anywhere>`, whatever their value.
  *
  * The dock side (DevTools' main menu, "Dock side") and the sizes (dragging the bar) are the
  * user's: remembered in localStorage, sizes as percentages of the viewport (`dvh`/`dvw`).
@@ -238,8 +240,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
   static observedAttributes: (keyof DevtoolsAnywhereAttributes)[] = ['devtools-frontend-url'];
 
-  /** The CDP session for this page. Created when the element is first connected. @internal */
-  session: CdpSession | null = null;
+  /** The CDP session for this page. Created when the element is first connected. */
+  private session: CdpSession | null = null;
 
   private panel: HTMLDivElement;
   private toggler: HTMLButtonElement;
@@ -336,10 +338,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     }
   };
 
-  /**
-   * A toggler's request (see togglerTarget), maybe from another window: toggles when asked, and
-   * answers whether DevTools is shown.
-   */
   /** Whether the page placed this element itself: neither the probe's nor the shell's. */
   private get custom() {
     return !globalElements.has(this) && !this.hasAttribute('shell');
@@ -360,6 +358,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.loadFrontend();
   }
 
+  /**
+   * A toggler's request (see togglerTarget), maybe from another window: toggles when asked, and
+   * answers whether DevTools is shown.
+   */
   private onControl = (event: Event) => {
     // From another window, the event is not of this window's CustomEvent.
     const detail: unknown = Reflect.get(event, 'detail');
@@ -372,6 +374,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private setOpen(open: boolean) {
     if (open === this.isOpen) return;
     this.isOpen = open;
+    // In the shell, DevTools stays shown (or hidden) across reloads of the top-level page.
+    if (this.hasAttribute('shell')) storeShellOpen(open);
     this.syncOpen();
     if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
   }

@@ -30,6 +30,7 @@ export {
   refuseShell,
   setShellScriptUrl,
   storeShellConfig,
+  storeShellOpen,
 } from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
 export type { SnapdomLoader } from './domains/page/screencast';
