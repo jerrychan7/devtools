@@ -12,7 +12,7 @@
 export const SHELL_KEY = 'devtools-anywhere:shell';
 /**
  * localStorage: `off` once the user turned shell mode off in DevTools, `on` once they turned it
- * on; either wins over the page's `data-shell`. @internal
+ * on; either wins over the page's `data-default-shell-mode`, unless the page locks it. @internal
  */
 export const SHELL_MODE_KEY = 'devtools-anywhere:shell-mode';
 /**
@@ -35,7 +35,12 @@ export interface ShellConfig {
   sw?: string;
   /** False to start with DevTools hidden (shell mode entered by default); shown otherwise. */
   open?: boolean;
+  /** The element's `shell-mode-locked`: DevTools offers no way out of shell mode. */
+  locked?: boolean;
 }
+
+/** What the shell's element takes from the page besides its URLs. @internal */
+export type ShellFlags = Pick<ShellConfig, 'open' | 'locked'>;
 
 let trustedOrigin = '';
 
@@ -77,15 +82,15 @@ export function isTrustedShellConfig(config: ShellConfig): boolean {
 
 /**
  * Stores the shell config for the next load of the top-level page: DevTools' `frontend`, the
- * bundle, and `sw` as the element's attribute (`''`: next to the bundle). False when the URLs
- * are not all on the trusted origin, which the probe would refuse, or storage throws.
+ * bundle, `sw` as the element's attribute (`''`: next to the bundle), and the element's flags.
+ * False when the URLs are not all on the trusted origin, which the probe would refuse, or
+ * storage throws.
  *
  * @internal
  */
-export function storeShellConfig(frontend: string, bundle: string, sw: string | null, open?: boolean): boolean {
-  const config: ShellConfig = { frontend: new URL(frontend, location.href).href, bundle };
+export function storeShellConfig(frontend: string, bundle: string, sw: string | null, flags: ShellFlags): boolean {
+  const config: ShellConfig = { ...flags, frontend: new URL(frontend, location.href).href, bundle };
   if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundle).href;
-  if (open !== undefined) config.open = open;
   if (!isTrustedShellConfig(config)) return false;
   try {
     sessionStorage.setItem(SHELL_KEY, JSON.stringify(config));
@@ -111,12 +116,12 @@ export function readShellConfig(): ShellConfig | null {
 
 function isShellConfig(value: unknown): value is ShellConfig {
   if (typeof value !== 'object' || value === null) return false;
-  const { frontend, bundle, sw, open } = value as Record<string, unknown>;
+  const { frontend, bundle, sw, open, locked } = value as Record<string, unknown>;
   return (
     typeof frontend === 'string' &&
     typeof bundle === 'string' &&
     (sw === undefined || typeof sw === 'string') &&
-    (open === undefined || typeof open === 'boolean')
+    [open, locked].every(flag => flag === undefined || typeof flag === 'boolean')
   );
 }
 
@@ -182,6 +187,6 @@ function replaceDocument(config: ShellConfig) {
 #${SHELL_PAGE_ID}{flex:1;min-height:0;width:100%;border:0;display:block}</style></head>
 <body><iframe id="${SHELL_PAGE_ID}" src="${escapeAttr(location.href)}"></iframe>
 <script src="${escapeAttr(config.bundle)}"></script>
-<devtools-anywhere shell${config.open === false ? '' : ' open'} frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
+<devtools-anywhere shell${config.open === false ? '' : ' open'}${config.locked ? ' shell-mode-locked' : ''} frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
   document.close();
 }

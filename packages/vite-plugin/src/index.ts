@@ -25,14 +25,19 @@ export interface DevtoolsAnywhereOptions {
   frontendEntry?: string;
   /** URL of a frontend hosted elsewhere; used instead of `frontendDir`. */
   frontendUrl?: string;
-  /** Open DevTools as soon as it is mounted. Default: false. */
-  open?: boolean;
+  /** Open DevTools as soon as it is mounted (`data-open-immediately`). Default: false. */
+  openImmediately?: boolean;
   /**
-   * Shell mode: the page runs in an iframe next to DevTools, which stays open across reloads.
-   * Entered by default; false to leave it off, unless the user turns it on in DevTools.
-   * Default: true.
+   * Shell mode, where the page runs in an iframe next to DevTools, which stays open across
+   * reloads: `off` leaves it off unless the user turns it on in DevTools
+   * (`data-default-shell-mode`). Default: `on`.
    */
-  shell?: boolean;
+  defaultShellMode?: 'on' | 'off';
+  /**
+   * Keeps shell mode as `defaultShellMode` says, whatever the user chose: DevTools offers no
+   * switch (`data-shell-mode-locked`). Default: false.
+   */
+  shellModeLocked?: boolean;
   /** Use the Service Worker in shell mode to inject the probe into iframe pages. Default: false. */
   serviceWorker?: boolean;
   /**
@@ -140,8 +145,9 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         const attrs: { src: string } & ProbeScriptAttributes = { src: `${BASE}probe.iife.js` };
         if (options.remote) attrs['data-remote'] = options.remote;
         else if (frontend) attrs['data-frontend'] = frontend;
-        if (options.open) attrs['data-open'] = true;
-        if (options.shell === false) attrs['data-shell'] = 'off';
+        if (options.openImmediately) attrs['data-open-immediately'] = true;
+        if (options.defaultShellMode) attrs['data-default-shell-mode'] = options.defaultShellMode;
+        if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;
         if (options.serviceWorker) attrs['data-sw'] = true;
         return [{ tag: 'script', attrs, injectTo: 'head-prepend' }];
       },

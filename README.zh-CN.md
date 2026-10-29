@@ -79,15 +79,15 @@
 
 不托管独立的 `devtools.html`，也不跳转到 blob URL，因为 blob 会导致刷新失效、地址无法分享。做法是：
 
-1. 使用零配置探针（`data-frontend`，或 Vite 插件）时，顶层页面首次加载就默认进入外壳模式：探针在页面脚本运行前自己把前端地址和 bundle 地址写入 `sessionStorage`，不需要再刷新一次。除非设置了 `data-open`，devtools 一开始是隐藏的。其他情况下，点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”（`element.enterShell()`），写入这些地址后刷新页面。
+1. 使用零配置探针（`data-frontend`，或 Vite 插件）时，顶层页面首次加载就默认进入外壳模式：探针在页面脚本运行前自己把前端地址和 bundle 地址写入 `sessionStorage`，不需要再刷新一次。除非设置了 `data-open-immediately`，devtools 一开始是隐藏的。其他情况下，点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”（`element.enterShell()`），写入这些地址后刷新页面。
 2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere shell>`。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
 3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间转发消息。
 4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化，包括加载、前进后退和同文档导航（有 Navigation API 时也包括 `pushState`），因此刷新或复制链接打开的都是当前显示的页面。
-5. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式。再点一次锁形按钮（`element.exitShell()`）会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-shell`。
+5. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式。再点一次锁形按钮（`element.exitShell()`）会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
 
 只有与探针脚本同源的地址才会被采信，否则清除配置、页面照常加载。因此外壳模式要求探针、bundle 和前端都由页面所在的源提供。
 
-页面放进 iframe 后，`viewport`、`100vh`、`position: fixed`、`window.top` 等的行为可能和直接打开时不同；页面的 HTML 会被请求两次（顶层窗口一次，iframe 一次），表单 POST 返回的页面会被用 GET 再请求一次。用 `data-shell="off"`（Vite 插件的 `shell: false`）可以关闭外壳模式，改为把 devtools 直接嵌在页面中。拒绝被嵌入（`X-Frame-Options`、CSP `frame-ancestors`）或反复把外壳跳走的页面，在本会话剩下的时间里会单独显示。
+页面放进 iframe 后，`viewport`、`100vh`、`position: fixed`、`window.top` 等的行为可能和直接打开时不同；页面的 HTML 会被请求两次（顶层窗口一次，iframe 一次），表单 POST 返回的页面会被用 GET 再请求一次。用 `data-default-shell-mode="off"`（Vite 插件的 `defaultShellMode: 'off'`）可以关闭外壳模式，改为把 devtools 直接嵌在页面中。拒绝被嵌入（`X-Frame-Options`、CSP `frame-ancestors`）或反复把外壳跳走的页面，在本会话剩下的时间里会单独显示。
 
 #### 3. 注入方式
 
@@ -129,7 +129,7 @@
 </head>
 ```
 
-页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并挂载 `<devtools-anywhere>`。可选属性：`data-open` 立即打开 devtools；`data-shell="off"` 不进入外壳模式（顶层页面默认进入）；`data-sw` 在外壳模式下启用 Service Worker。
+页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并挂载 `<devtools-anywhere>`。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-sw` 在外壳模式下启用 Service Worker。
 
 ### Vite
 
@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`open`、`shell`（默认 `true`；`false` 不进入外壳模式）、`serviceWorker`、`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
 
 ### 远程调试
 
@@ -167,7 +167,7 @@ npx devtools-anywhere-remote --port 8080
 
 ### 组件
 
-点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。属性：`frontend`、`open`、`dock`、`height`、`width`、`no-toggler`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。属性：`frontend`、`open`、`dock`、`height`、`width`、`no-toggler`、`shell-mode-locked`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 页面上任意元素都能开关面板：加上 `data-devtools-anywhere-toggle`，值为某个 `<devtools-anywhere>` 的 id，留空则指向页面上第一个。点击在 document 上统一捕获，后加入的切换器同样生效；不阻止默认行为，切换器的 `aria-expanded` 跟随面板状态。找不到目标时只打一条警告（同一个值只警告一次）。`open` 变化时元素派发 `toggle` 事件，浏览器支持时为 `ToggleEvent`，带 `oldState`、`newState`（`'open'` 或 `'closed'`）。
 

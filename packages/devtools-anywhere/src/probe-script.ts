@@ -10,13 +10,15 @@ export type ProbeScriptAttributes = {
   /** Where devtools-anywhere.iife.js is, by default next to the probe. */
   'data-bundle'?: string;
   /** Opens DevTools right away. */
-  'data-open'?: true;
+  'data-open-immediately'?: true;
   /**
    * `off` to stay out of shell mode, which the top-level page enters by default (the page runs in
    * an iframe next to DevTools, which stays open across reloads). The user's choice in DevTools
-   * wins over it.
+   * wins over it, unless `data-shell-mode-locked` is set.
    */
-  'data-shell'?: 'on' | 'off';
+  'data-default-shell-mode'?: 'on' | 'off';
+  /** Keeps shell mode as `data-default-shell-mode` says: DevTools offers no choice. */
+  'data-shell-mode-locked'?: true;
   /** Passed on as the element's `sw` attribute (shell mode's Service Worker). */
   'data-sw'?: string | true;
   /** Connects to a remote debugging server: this URL, by default the one the probe is served from. */

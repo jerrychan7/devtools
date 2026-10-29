@@ -114,9 +114,9 @@ test('a page that navigates the shell away is shown on its own after a few tries
   assert.equal(await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell-refused')), '1');
 });
 
-test("the user's choice wins over data-shell", async () => {
+test("the user's choice wins over data-default-shell-mode", async () => {
   await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
-  // data-shell="off" there: the page on its own.
+  // data-default-shell-mode="off" there: the page on its own.
   await page.waitForFunction(() => document.querySelector('devtools-anywhere'));
   assert.equal((await shellState()).inShell, false);
   await page.evaluate(() => localStorage.setItem('devtools-anywhere:shell-mode', 'on'));

@@ -35,8 +35,9 @@ export type DockSide = (typeof DOCK_SIDES)[number];
 export type ProbeScriptAttributes = {
     'data-frontend'?: string;
     'data-bundle'?: string;
-    'data-open'?: true;
-    'data-shell'?: 'on' | 'off';
+    'data-open-immediately'?: true;
+    'data-default-shell-mode'?: 'on' | 'off';
+    'data-shell-mode-locked'?: true;
     'data-sw'?: string | true;
     'data-remote'?: string | true;
     'data-single-path'?: true;

@@ -32,8 +32,9 @@ before(async () => {
       devtoolsAnywhere({
         frontendDir: path.join(here, 'frontends'),
         frontendEntry: 'fake-frontend.html',
-        open: true,
-        shell: false,
+        openImmediately: true,
+        defaultShellMode: 'off',
+        shellModeLocked: true,
       }),
     ],
   });
@@ -60,12 +61,30 @@ test('the probe is the first script to run', async () => {
   assert.equal(first, '/@devtools-anywhere/probe.iife.js');
 });
 
-test('shell: false keeps the page out of shell mode', async () => {
-  const shell = await page.evaluate(() =>
-    document.head.querySelector('script[src="/@devtools-anywhere/probe.iife.js"]')?.getAttribute('data-shell')
+test('the options become the probe script attributes', async () => {
+  const attributes = await page.evaluate(() => {
+    const script = document.head.querySelector('script[src="/@devtools-anywhere/probe.iife.js"]');
+    if (!script) throw new Error('no probe script');
+    return Object.fromEntries(
+      [...script.attributes]
+        .filter(a => a.name.startsWith('data-') && a.name !== 'data-frontend')
+        .map(a => [a.name, a.value])
+    );
+  });
+  assert.deepEqual(attributes, {
+    'data-open-immediately': '',
+    'data-default-shell-mode': 'off',
+    'data-shell-mode-locked': '',
+  });
+  // Out of shell mode, with the element as the options say.
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.open);
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const el = document.querySelector('devtools-anywhere');
+      return [!!el?.hasAttribute('shell'), !!el?.hasAttribute('shell-mode-locked')];
+    }),
+    [false, true]
   );
-  assert.equal(shell, 'off');
-  assert.equal(await page.evaluate(() => document.querySelector('devtools-anywhere[shell]')), null);
 });
 
 test('DevTools mounts and receives output from before any app code ran', async () => {

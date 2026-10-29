@@ -4,14 +4,16 @@
 //
 // As the first script in <head>, it captures from the very start. With `data-frontend`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
-// the page has loaded and mounts <devtools-anywhere>. `data-open` opens DevTools right away;
-// `data-sw` is passed on as the element's `sw` attribute (see shell mode).
+// the page has loaded and mounts <devtools-anywhere>. `data-open-immediately` opens DevTools right away; `data-sw` is passed on as the element's `sw`
+// attribute (see shell mode).
 //
 // With `data-frontend`, the top-level page enters shell mode by default, on its first load: the
 // probe stores the shell config itself before the page's scripts run, so the page is not
-// loaded twice over. It does not when `data-shell="off"`, when the user turned shell mode off
-// in DevTools (or on again, whatever `data-shell` says), when the page cannot be framed
-// (SHELL_REFUSED_KEY), or when the frontend, bundle or Service Worker is on another origin.
+// loaded twice over. It does not when `data-default-shell-mode="off"`, when the user turned shell
+// mode off in DevTools (or on again, whatever `data-default-shell-mode` says), when the page
+// cannot be framed (SHELL_REFUSED_KEY), or when the frontend, bundle or Service Worker is on
+// another origin. `data-shell-mode-locked` ignores the user's choice (it stays stored) and has
+// DevTools offer none; a page that cannot be framed still leaves shell mode.
 //
 // With `data-remote` instead, it connects the page to a remote debugging server
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
@@ -24,6 +26,7 @@
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
 // another tab still uses it. The page's own workers are left alone.
 import {
+  SHELL_KEY,
   SHELL_MODE_KEY,
   SHELL_REFUSED_KEY,
   installProbe,
@@ -46,21 +49,33 @@ const frontend = attribute('data-frontend');
 const remote = attribute('data-remote');
 // A probe inlined, without a URL, has no bundle next to it.
 const bundle = script?.src ? new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href : null;
-const open = attribute('data-open') !== null;
+const open = attribute('data-open-immediately') !== null;
+const locked = attribute('data-shell-mode-locked') !== null;
+const shellOff = attribute('data-default-shell-mode') === 'off';
 
 /** Whether to enter shell mode by default; storage that throws counts as no. */
 const shellByDefault = () => {
   try {
     if (sessionStorage.getItem(SHELL_REFUSED_KEY)) return false;
-    const chosen = localStorage.getItem(SHELL_MODE_KEY);
-    return chosen ? chosen === 'on' : attribute('data-shell') !== 'off';
+    // Locked, the user's choice is ignored but kept.
+    const chosen = locked ? null : localStorage.getItem(SHELL_MODE_KEY);
+    return chosen ? chosen === 'on' : !shellOff;
   } catch {
     return false;
   }
 };
+// A shell entered before takes the page's flags as they are now; locked out of shell mode, it is left.
+const entered = bundle && frontend && remote === null && window === top ? readShellConfig() : null;
+if (entered && locked && shellOff) {
+  try {
+    sessionStorage.removeItem(SHELL_KEY);
+  } catch {}
+} else if (entered) {
+  storeShellConfig(entered.frontend, entered.bundle, entered.sw ?? null, { ...entered, locked });
+}
 // installProbe() reads the config next and writes the shell.
 if (bundle && frontend && remote === null && window === top && !readShellConfig() && shellByDefault()) {
-  storeShellConfig(frontend, bundle, attribute('data-sw'), open);
+  storeShellConfig(frontend, bundle, attribute('data-sw'), { open, locked });
 }
 
 const probe = installProbe();
@@ -128,6 +143,7 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
       const element = document.createElement('devtools-anywhere');
       element.setAttribute('frontend', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');
+      if (locked) element.setAttribute('shell-mode-locked', '');
       const sw = attribute('data-sw');
       if (sw !== null) element.setAttribute('sw', sw);
       document.body.appendChild(element);

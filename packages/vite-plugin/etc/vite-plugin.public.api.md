@@ -12,13 +12,14 @@ export default devtoolsAnywhere;
 
 // @public
 export interface DevtoolsAnywhereOptions {
+    defaultShellMode?: 'on' | 'off';
     frontendDir?: string;
     frontendEntry?: string;
     frontendUrl?: string;
-    open?: boolean;
+    openImmediately?: boolean;
     remote?: string;
     serviceWorker?: boolean;
-    shell?: boolean;
+    shellModeLocked?: boolean;
 }
 
 ```

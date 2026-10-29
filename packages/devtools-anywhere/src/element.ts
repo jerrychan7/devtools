@@ -218,6 +218,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  *   Dragging the bar overrides either size; the size is remembered in localStorage as a
  *   percentage of the viewport (`dvh`/`dvw`), so it fits other screens and orientations.
  * - `no-toggler`: hides the toggler button.
+ * - `shell-mode-locked`: DevTools offers no way in or out of shell mode, and ignores requests to.
  * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
  *   bundle when the value is empty), which injects the probe into iframe pages that do not
  *   include it. Needs a secure context and a scope covering the pages.
@@ -303,6 +304,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       store(DOCK_KEY, request.side);
       this.dock = request.side;
     } else if (request.type === 'keep-open') {
+      // The page decides, not the user.
+      if (this.hasAttribute('shell-mode-locked')) return;
       // The user's choice: the probe enters shell mode by default, unless they turned it off.
       store(SHELL_MODE_KEY, request.keep ? 'on' : 'off');
       if (request.keep) this.enterShell();
@@ -351,7 +354,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const frontend = this.getAttribute('frontend');
     if (!bundleUrl || !frontend) return;
     // The probe ignores (and removes) a config whose URLs are not on its own origin.
-    if (!storeShellConfig(frontend, bundleUrl, this.getAttribute('sw'))) {
+    const flags = { locked: this.hasAttribute('shell-mode-locked') };
+    if (!storeShellConfig(frontend, bundleUrl, this.getAttribute('sw'), flags)) {
       console.warn('devtools-anywhere: shell mode needs the frontend, bundle and sw on one origin');
       return;
     }
@@ -590,6 +594,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const page = pageElement instanceof HTMLIFrameElement ? pageElement : null;
     if (!frontend || (!this.session && !(this.hasAttribute('shell') && page))) return;
     const url = new URL(frontend, location.href);
+    // The frontend's own switch for shell mode is hidden.
+    if (this.hasAttribute('shell-mode-locked')) url.searchParams.set('shellModeLocked', '');
     if (url.href === this.loadedUrl) return;
     this.loadedUrl = url.href;
     // The frontend's document is not one of the page's requests.
