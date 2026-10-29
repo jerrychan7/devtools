@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { launch } from '../support/browser.ts';
+import { chooseDockSide, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -69,9 +69,11 @@ const panelSize = () =>
 test('an undocked panel ignores a stored size that is not numbers', async () => {
   await page.evaluate(() => {
     localStorage.setItem('devtools-anywhere:float%', 'null');
-    const devtools = document.querySelector('devtools-anywhere');
-    if (!devtools) throw new Error('no <devtools-anywhere>');
-    devtools.setAttribute('dock', 'undocked');
+  });
+  await chooseDockSide(page, 'undocked');
+  await page.waitForFunction(() => {
+    const corner = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.corner');
+    return corner && corner.getBoundingClientRect().width > 0;
   });
   const size = await panelSize();
   assert.ok(Math.abs(size.widthRatio - 0.8) < 0.01, `width ${size.widthRatio}`);
@@ -94,9 +96,13 @@ test('the undocked panel is resized by touch from its corner', async () => {
   assert.ok(Math.abs(before.height - after.height - 50) < 2, `height ${before.height} -> ${after.height}`);
   await page.evaluate(() => {
     localStorage.removeItem('devtools-anywhere:float%');
-    localStorage.removeItem('devtools-anywhere:dock');
-    document.querySelector('devtools-anywhere')?.setAttribute('dock', 'bottom');
   });
+  await chooseDockSide(page, 'bottom');
+  await page.waitForFunction(() => {
+    const corner = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.corner');
+    return corner && corner.getBoundingClientRect().width === 0;
+  });
+  await page.evaluate(() => localStorage.removeItem('devtools-anywhere:dock'));
 });
 
 test('in shell mode the Service Worker injects the probe into pages without it', async () => {

@@ -3,7 +3,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { chooseDockSide, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -51,14 +51,37 @@ test('the docked panel is above a page element at the highest z-index, laid out 
 });
 
 test('docked to a side, the panel keeps its full height', async () => {
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.setAttribute('dock', 'right'));
+  await chooseDockSide(page, 'right');
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return panel && panel.getBoundingClientRect().top === 0;
+  });
   const panel = await probe('.panel');
   assert.equal(panel.hitsElement, true);
   const [left = 0, top = 0, width = 0, height = 0] = panel.box;
   assert.equal(top, 0);
   assert.equal(height, 800);
   assert.equal(left + width, 1000);
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.setAttribute('dock', 'bottom'));
+  // The dock side is the user's: not an attribute the page reads or sees.
+  const dock = await page.evaluate(() => {
+    const el = document.querySelector('devtools-anywhere');
+    el?.setAttribute('dock', 'bottom');
+    el?.setAttribute('width', '10px');
+    return el?.getAttribute('dock');
+  });
+  assert.equal(dock, 'bottom');
+  assert.deepEqual((await probe('.panel')).box, panel.box);
+  await page.evaluate(() => {
+    const el = document.querySelector('devtools-anywhere');
+    el?.removeAttribute('dock');
+    el?.removeAttribute('width');
+  });
+  await chooseDockSide(page, 'bottom');
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return panel && panel.getBoundingClientRect().left === 0 && panel.getBoundingClientRect().top > 0;
+  });
+  await page.evaluate(() => localStorage.removeItem('devtools-anywhere:dock'));
 });
 
 test('the toggler is above the page too while DevTools is hidden', async () => {

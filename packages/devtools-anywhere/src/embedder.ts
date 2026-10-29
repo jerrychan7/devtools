@@ -6,11 +6,9 @@
 /**
  * Where the panel is: docked to a side of the viewport, or floating over the page. The same
  * values as Chromium's UI.DockController.DockState, which the frontend checks at build time.
- *
- * @public
  */
 export const DOCK_SIDES = ['bottom', 'right', 'left', 'undocked'] as const;
-/** One of {@link DOCK_SIDES}. @public */
+/** One of {@link DOCK_SIDES}. */
 export type DockSide = (typeof DOCK_SIDES)[number];
 
 /**

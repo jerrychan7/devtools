@@ -1,5 +1,5 @@
 // Launches headless Chrome with the repository's static server, for the tests that drive pages.
-import puppeteer, { type Browser } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 import { startServer } from '../../playground/server.ts';
 
 const CHROME = process.env['CHROME_PATH'] || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -30,4 +30,15 @@ export async function launch(args: string[] = []): Promise<Env> {
       server.close();
     },
   };
+}
+
+/**
+ * Chooses a dock side as the user does, from DevTools' main menu: the frontend in the panel's
+ * iframe asks the element (embedder.ts).
+ */
+export async function chooseDockSide(page: Page, side: string): Promise<void> {
+  const frame = await page.waitForFrame(
+    frame => frame.parentFrame() === page.mainFrame() && /frontend/.test(frame.url())
+  );
+  await frame.evaluate(side => parent.postMessage({ devtoolsAnywhere: { type: 'dock', side } }, '*'), side);
 }

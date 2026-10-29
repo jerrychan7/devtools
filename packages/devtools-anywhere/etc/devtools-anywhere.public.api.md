@@ -13,8 +13,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     attributeChangedCallback(name: string): void;
     connectedCallback(): void;
     disconnectedCallback(): void;
-    get dock(): DockSide;
-    set dock(side: DockSide);
     enterShell(): void;
     exitShell(): Promise<void>;
     hide(): void;
@@ -24,12 +22,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     show(): void;
     toggle(): void;
 }
-
-// @public
-export const DOCK_SIDES: readonly ['bottom', 'right', 'left', 'undocked'];
-
-// @public
-export type DockSide = (typeof DOCK_SIDES)[number];
 
 // @public
 export type ProbeScriptAttributes = {

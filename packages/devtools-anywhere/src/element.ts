@@ -154,54 +154,54 @@ const STYLE = `
 }
 /* DevTools' own toolbar has a close button, except when undocked: then the bar has one. */
 .close { right: 4px; display: none; }
-:host([dock=undocked]) .close { display: block; }
+[data-dock=undocked] .close { display: block; }
 /* The undocked window's resize corner, for touch screens where CSS resize does not work. */
 .corner {
   position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; display: none;
   cursor: nwse-resize; touch-action: none;
 }
-:host([dock=undocked]) .corner { display: block; }
+[data-dock=undocked] .corner { display: block; }
 iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 .dragging iframe { pointer-events: none; }
 
 /* Docked to a side: full height, with the bar as a vertical strip on the inner edge. */
-:host([dock=right]) .panel, :host([dock=left]) .panel { top: 0; border-top: 0; }
-:host([dock=right]) .panel {
+.panel[data-dock=right], .panel[data-dock=left] { top: 0; border-top: 0; }
+.panel[data-dock=right] {
   left: auto; flex-direction: row; border-left: 1px solid var(--bar-border, #cacdd1);
   padding-right: env(safe-area-inset-right, 0px);
 }
-:host([dock=left]) .panel {
+.panel[data-dock=left] {
   right: auto; flex-direction: row-reverse; border-right: 1px solid var(--bar-border, #cacdd1);
   padding-left: env(safe-area-inset-left, 0px);
 }
-:host([dock=right]) .bar, :host([dock=left]) .bar { width: 16px; height: auto; cursor: col-resize; }
-:host([dock=right]) .bar::before, :host([dock=left]) .bar::before {
+[data-dock=right] .bar, [data-dock=left] .bar { width: 16px; height: auto; cursor: col-resize; }
+[data-dock=right] .bar::before, [data-dock=left] .bar::before {
   left: 6px; top: 50%; width: 4px; height: 32px; margin: -16px 0 0;
 }
-:host([dock=right]) .bar button, :host([dock=left]) .bar button { left: 0; right: auto; width: 16px; }
+[data-dock=right] .bar button, [data-dock=left] .bar button { left: 0; right: auto; width: 16px; }
 
 /* Undocked: a window over the page, moved by its bar and resized from its corner. */
-:host([dock=undocked]) .panel {
+.panel[data-dock=undocked] {
   right: auto; bottom: auto; border: 1px solid var(--bar-border, #cacdd1); border-radius: 6px; overflow: hidden;
   box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both; padding-bottom: 0;
 }
-:host([dock=undocked]) .bar { cursor: move; }
+[data-dock=undocked] .bar { cursor: move; }
 
 /* Touch screens: targets large enough for a finger. */
 @media (pointer: coarse) {
   .bar { height: 28px; }
   .bar::before { top: 12px; }
   .bar button { width: 44px; height: 28px; line-height: 28px; font-size: 18px; }
-  :host([dock=right]) .bar, :host([dock=left]) .bar { width: 28px; }
-  :host([dock=right]) .bar::before, :host([dock=left]) .bar::before { left: 12px; }
-  :host([dock=right]) .bar button, :host([dock=left]) .bar button { width: 28px; height: 44px; }
+  [data-dock=right] .bar, [data-dock=left] .bar { width: 28px; }
+  [data-dock=right] .bar::before, [data-dock=left] .bar::before { left: 12px; }
+  [data-dock=right] .bar button, [data-dock=left] .bar button { width: 28px; height: 44px; }
   .corner { width: 32px; height: 32px; }
 }
 
 /* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
 :host([shell]) { display: flex; flex: none; }
 :host([shell]) .panel { position: static; flex: 1 1 auto; }
-:host([shell][dock=undocked]) .panel { position: fixed; }
+:host([shell]) .panel[data-dock=undocked] { position: fixed; }
 :host([data-shell-page]) { display: none !important; }
 `;
 
@@ -211,12 +211,6 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * Attributes:
  * - `frontend`: URL of the DevTools frontend entry page. Loaded on first open.
  * - `open`: shows the panel; otherwise a small toggler button is shown.
- * - `dock`: `bottom` (default), `right`, `left` or `undocked` (a window over the page). The
- *   main menu's "Dock side" in DevTools changes it; the choice is remembered in localStorage.
- * - `height`: panel height when docked to the bottom, as a CSS length (default `50dvh`).
- * - `width`: panel width when docked to a side, as a CSS length (default `50dvw`).
- *   Dragging the bar overrides either size; the size is remembered in localStorage as a
- *   percentage of the viewport (`dvh`/`dvw`), so it fits other screens and orientations.
  * - `no-toggler`: hides the toggler button.
  * - `shell-mode-locked`: DevTools offers no way in or out of shell mode, and ignores requests to.
  * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
@@ -230,13 +224,16 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * work once the element is registered with defineDevtoolsAnywhere(); in the shell's page iframe,
  * they control the shell's `<devtools-anywhere>`, whatever their value.
  *
+ * The dock side (DevTools' main menu, "Dock side") and the sizes (dragging the bar) are the
+ * user's: remembered in localStorage, sizes as percentages of the viewport (`dvh`/`dvw`).
+ *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
  *
  * @public
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
-  static observedAttributes = ['open', 'frontend', 'height', 'width', 'dock'];
+  static observedAttributes = ['open', 'frontend'];
 
   /** The CDP session for this page. Created when the element is first connected. @internal */
   session: CdpSession | null = null;
@@ -288,13 +285,13 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     }).observe(this.panel);
   }
 
-  /** Where the panel is. */
-  get dock(): DockSide {
-    const value = this.getAttribute('dock');
+  /** Where the panel is: shown to the style sheet as the panel's data-dock. */
+  private get dock(): DockSide {
+    const value = this.panel.dataset['dock'];
     return isDockSide(value) ? value : 'bottom';
   }
-  set dock(side: DockSide) {
-    this.setAttribute('dock', side);
+  private set dock(side: DockSide) {
+    this.panel.dataset['dock'] = side;
   }
 
   /** Requests from the frontend (embedder.ts): its dock side menu, its close button, … */
@@ -305,6 +302,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (request.type === 'dock') {
       store(DOCK_KEY, request.side);
       this.dock = request.side;
+      if (!this.hasAttribute('data-shell-page')) this.update();
     } else if (request.type === 'keep-open') {
       // The page decides, not the user.
       if (this.hasAttribute('shell-mode-locked')) return;
@@ -553,7 +551,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const dock = this.dock;
     if (dock === 'bottom') {
       const stored = Number(readStored(HEIGHT_KEY));
-      style.height = stored ? `${stored}${VH}` : this.getAttribute('height') || `50${VH}`;
+      style.height = stored ? `${stored}${VH}` : `50${VH}`;
     } else if (dock === 'undocked') {
       const rect = this.floatRect();
       style.left = `${rect.left}${VW}`;
@@ -562,7 +560,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       style.height = `${rect.height}${VH}`;
     } else {
       const stored = Number(readStored(WIDTH_KEY));
-      style.width = stored ? `${stored}${VW}` : this.getAttribute('width') || `50${VW}`;
+      style.width = stored ? `${stored}${VW}` : `50${VW}`;
     }
     // The shell document is ours: the page iframe comes first, then this element.
     if (this.hasAttribute('shell')) {

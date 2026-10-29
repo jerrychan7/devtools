@@ -649,9 +649,10 @@ test('the Dock side menu moves the panel to each side, and floats it', { skip },
     }, side);
   const panel = () =>
     page.evaluate(() => {
-      const el = document.querySelector('devtools-anywhere');
-      const rect = el?.shadowRoot?.querySelector('.panel')?.getBoundingClientRect();
-      return rect && { dock: el?.getAttribute('dock'), x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      const el = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      if (!(el instanceof HTMLElement)) return null;
+      const rect = el.getBoundingClientRect();
+      return { dock: el.dataset['dock'], x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     });
   const { width, height } = page.viewport() ?? { width: 0, height: 0 };
   try {
