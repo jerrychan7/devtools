@@ -9,7 +9,7 @@ export interface RemoteOptions {
    * Connect to the server's URL itself, the target in the query (`?target=<id>`), instead of to
    * `target/<id>` under it: for a server whose host routes upgrades by exact path.
    */
-  singlePath?: boolean;
+  idInQuery?: boolean;
 }
 
 export interface DevtoolsAnywhereApi {

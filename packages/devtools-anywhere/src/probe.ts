@@ -20,8 +20,8 @@
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
 // where DevTools on another machine inspects it. With `data-devtools-frontend-url` too, the page
 // also gets its own panel: the two are CDP sessions of their own over the one probe.
-// `data-single-path` connects to that URL itself, the target in the query, for a server whose
-// host routes WebSocket upgrades by exact path (remote-server's `singlePath`).
+// `data-id-in-query` connects to that URL itself, the target in the query, for a server whose
+// host routes WebSocket upgrades by exact path (remote-server's `idInQuery`).
 //
 // Outside shell mode it unregisters the shell's Service Worker if one is left over (shell mode
 // ended without exitShell): recognized by its script URL, which the shell gives `probe` (ending
@@ -143,7 +143,7 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
       if (remote !== null) {
         if (!hasApi(api, 'connectRemote')) return;
         api.connectRemote(new URL(remote || '.', script.src).href, {
-          singlePath: attribute('data-single-path') !== null,
+          idInQuery: attribute('data-id-in-query') !== null,
         });
       }
       if (!frontend || !hasApi(api, 'createGlobalElement')) return;

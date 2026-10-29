@@ -26,5 +26,5 @@ export type ProbeScriptAttributes = {
   /** Connects to a remote debugging server: this URL, by default the one the probe is served from. */
   'data-remote'?: string | true;
   /** Connects to the remote server's URL itself, the target in the query. */
-  'data-single-path'?: true;
+  'data-id-in-query'?: true;
 };

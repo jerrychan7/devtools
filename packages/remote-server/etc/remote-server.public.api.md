@@ -24,8 +24,8 @@ export interface RemoteHandlerOptions {
     basePath?: string;
     devtoolsFrontendPath?: string;
     devtoolsFrontendUrl?: string;
+    idInQuery?: boolean;
     publicUrl?: string;
-    singlePath?: boolean;
     token?: string | false;
 }
 

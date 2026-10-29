@@ -67,7 +67,7 @@ export type ProbeScriptAttributes = {
     'data-no-toggler'?: true;
     'data-sw'?: string | true;
     'data-remote'?: string | true;
-    'data-single-path'?: true;
+    'data-id-in-query'?: true;
 };
 
 // @internal

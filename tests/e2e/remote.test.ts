@@ -242,10 +242,10 @@ test('the handlers mount in a server of its own, under a base path, with a publi
   }
 });
 
-test('with singlePath, pages and DevTools connect at the base path itself, for hosts that route by exact path', async () => {
+test('with idInQuery, pages and DevTools connect at the base path itself, for hosts that route by exact path', async () => {
   const { createServer } = await import('node:http');
   const { createRemoteHandler } = await import('@devtools-anywhere/remote-server');
-  const handler = createRemoteHandler({ basePath: '/bridge/', token: TOKEN, singlePath: true });
+  const handler = createRemoteHandler({ basePath: '/bridge/', token: TOKEN, idInQuery: true });
   const server = createServer((req, res) => {
     if (!handler.handleRequest(req, res)) res.end('app');
   });
@@ -260,11 +260,11 @@ test('with singlePath, pages and DevTools connect at the base path itself, for h
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   const host = `127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
-  const singlePage = await env.browser.newPage();
+  const idInQueryPage = await env.browser.newPage();
   try {
-    assert.ok((await (await fetch(`http://${host}/bridge/?token=${TOKEN}`)).text()).includes('data-single-path'));
-    await singlePage.goto(
-      `${env.baseUrl}/tests/e2e/pages/remote-page.html?single&remote=${encodeURIComponent(`http://${host}/bridge/`)}`
+    assert.ok((await (await fetch(`http://${host}/bridge/?token=${TOKEN}`)).text()).includes('data-id-in-query'));
+    await idInQueryPage.goto(
+      `${env.baseUrl}/tests/e2e/pages/remote-page.html?idInQuery&remote=${encodeURIComponent(`http://${host}/bridge/`)}`
     );
     const listed = await waitFor(async (): Promise<Listed | undefined> =>
       ((await (await fetch(`http://${host}/bridge/json/list?token=${TOKEN}`)).json()) as Listed[]).find(
@@ -294,7 +294,7 @@ test('with singlePath, pages and DevTools connect at the base path itself, for h
       );
     }
   } finally {
-    await singlePage.close();
+    await idInQueryPage.close();
     handler.close();
     server.close();
   }
@@ -504,12 +504,12 @@ test('the printed script tag names the public URL', () => {
   assert.equal(remote.scriptTag, `<script src="${remote.publicUrl}probe.iife.js" data-remote></script>`);
 });
 
-test('with singlePath, the printed script tag says so', async () => {
-  const server = await startRemoteServer({ port: 0, host: '127.0.0.1', token: false, singlePath: true });
+test('with idInQuery, the printed script tag says so', async () => {
+  const server = await startRemoteServer({ port: 0, host: '127.0.0.1', token: false, idInQuery: true });
   try {
     assert.equal(
       server.scriptTag,
-      `<script src="${server.publicUrl}probe.iife.js" data-remote data-single-path></script>`
+      `<script src="${server.publicUrl}probe.iife.js" data-remote data-id-in-query></script>`
     );
   } finally {
     await server.close();

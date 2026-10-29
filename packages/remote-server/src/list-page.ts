@@ -1,9 +1,9 @@
 import type { ProbeScriptAttributes } from 'devtools-anywhere';
 
 /** The probe script's attributes that connect a page to this server, as written in a tag. */
-export function probeAttributes(singlePath: boolean): string {
+export function probeAttributes(idInQuery: boolean): string {
   const attributes: ProbeScriptAttributes = { 'data-remote': true };
-  if (singlePath) attributes['data-single-path'] = true;
+  if (idInQuery) attributes['data-id-in-query'] = true;
   return Object.keys(attributes).join(' ');
 }
 
@@ -12,7 +12,7 @@ export function probeAttributes(singlePath: boolean): string {
  * on it, and the script tag for pages (naming the server at `publicUrl`). It polls `json/list` with the token it was opened with, and builds every row from
  * text (titles and URLs come from the pages).
  */
-export function listPage(base: string, publicUrl?: string, singlePath = false): string {
+export function listPage(base: string, publicUrl?: string, idInQuery = false): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -52,7 +52,7 @@ export function listPage(base: string, publicUrl?: string, singlePath = false): 
   const base = ${JSON.stringify(base)};
   const server = ${JSON.stringify(publicUrl ?? '')} || location.origin + base;
   document.getElementById('snippet').textContent =
-    '<script src="' + server + 'probe.iife.js" ${probeAttributes(singlePath)}></' + 'script>';
+    '<script src="' + server + 'probe.iife.js" ${probeAttributes(idInQuery)}></' + 'script>';
   const query = location.search;
   const list = document.getElementById('targets');
   const filter = document.getElementById('filter');

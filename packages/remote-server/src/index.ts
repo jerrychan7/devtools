@@ -13,7 +13,7 @@
 //   DevTools ──ws──▶ <base>client/<id>      the frontend, opened from the target list
 //
 // Both are also taken at <base> itself, the id in the query (<base>?target=<id>,
-// <base>?client=<id>), for hosts that route upgrades by exact path only; with `singlePath` the
+// <base>?client=<id>), for hosts that route upgrades by exact path only; with `idInQuery` the
 // target list and the script tag use that form.
 //
 // The server also serves what both sides load: the probe and its bundle for the page, the
@@ -71,7 +71,7 @@ export interface RemoteHandlerOptions {
    * (`<basePath>?target=<id>`, `<basePath>?client=<id>`), instead of under it: for a host that
    * routes WebSocket upgrades by exact path only. Both forms are always accepted. Default: false.
    */
-  singlePath?: boolean;
+  idInQuery?: boolean;
 }
 
 /**
@@ -239,7 +239,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     const inFragment = options.devtoolsFrontendUrl !== undefined;
     return [...targets.values()].map(target => {
       const host = req.headers.host ?? 'localhost';
-      const socket = options.singlePath
+      const socket = options.idInQuery
         ? `${host}${base}?client=${target.id}${query.replace('?', '&')}`
         : `${host}${base}client/${target.id}${query}`;
       return {
@@ -272,7 +272,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
       if (!authorized(url)) {
         send(401, 'text/plain; charset=utf-8', 'Open the URL the server printed: it has the token.');
       } else if (rel === '') {
-        send(200, 'text/html; charset=utf-8', listPage(base, options.publicUrl, options.singlePath));
+        send(200, 'text/html; charset=utf-8', listPage(base, options.publicUrl, options.idInQuery));
       } else {
         send(200, 'application/json; charset=utf-8', JSON.stringify(list(req)));
       }
@@ -317,7 +317,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
     let kind: string | undefined;
     let id = '';
     if (url.pathname === base || `${url.pathname}/` === base) {
-      // The single-path form: the target in the query, under one of the two names.
+      // The id-in-query form: the target in the query, under one of the two names.
       const target = url.searchParams.get('target');
       const client = url.searchParams.get('client');
       if (target !== null && client === null) [kind, id] = ['target', target];
@@ -411,7 +411,7 @@ export async function startRemoteServer(options: RemoteServerOptions = {}): Prom
   return {
     url: `${local}${token === false ? '' : `?token=${token}`}`,
     publicUrl,
-    scriptTag: `<script src="${publicUrl}probe.iife.js" ${probeAttributes(options.singlePath ?? false)}></script>`,
+    scriptTag: `<script src="${publicUrl}probe.iife.js" ${probeAttributes(options.idInQuery ?? false)}></script>`,
     token,
     server,
     close() {

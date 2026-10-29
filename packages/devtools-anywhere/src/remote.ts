@@ -43,18 +43,18 @@ function favicon() {
  * a session with a CDP session of its own, from `createSession`: one frontend's domains, node ids
  * and remote objects are not another's. CDP sessions of ended sessions are kept, their domains
  * disabled, for the next ones. The connection comes back when it drops, and what the page
- * sends meanwhile is queued. With `singlePath`, the page connects to `serverUrl` itself, the
+ * sends meanwhile is queued. With `idInQuery`, the page connects to `serverUrl` itself, the
  * target in the query (for a server mounted where upgrades are routed by exact path), instead of
  * to `target/<id>` under it. Returns a function that disconnects.
  */
 export function connectRemote(
   createSession: () => CdpSession,
   serverUrl: string,
-  { singlePath = false }: RemoteOptions = {}
+  { idInQuery = false }: RemoteOptions = {}
 ): () => void {
   const targetUrl = (id: string) => {
     const base = new URL(serverUrl, location.href);
-    const url = singlePath ? new URL(`?target=${id}`, base) : new URL(`target/${id}`, base);
+    const url = idInQuery ? new URL(`?target=${id}`, base) : new URL(`target/${id}`, base);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     return url;
   };

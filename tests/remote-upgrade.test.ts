@@ -22,8 +22,8 @@ function upgrade(handler: ReturnType<typeof createRemoteHandler>, url: string) {
   return { handled, written: written.join('') };
 }
 
-test("with singlePath, the base path short of its slash is left to the host's own socket", () => {
-  const handler = createRemoteHandler({ basePath: '/devtools/', token: false, singlePath: true });
+test("with idInQuery, the base path short of its slash is left to the host's own socket", () => {
+  const handler = createRemoteHandler({ basePath: '/devtools/', token: false, idInQuery: true });
   assert.equal(upgrade(handler, '/devtools').handled, false);
   assert.equal(upgrade(handler, '/devtools?other=1').handled, false);
   // With the target in the query it is the relay's.
