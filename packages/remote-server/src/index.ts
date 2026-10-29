@@ -204,6 +204,10 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
       packageFile(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html') ??
       '@devtools-anywhere/devtools-frontend is not installed/anywhere_app.html'
   );
+  // Its directory is served without the token: a directory given here would serve its parent.
+  if (options.devtoolsFrontendPath !== undefined && !(existsSync(entry) && statSync(entry).isFile())) {
+    throw new Error(`devtoolsFrontendPath is not a file: ${entry}`);
+  }
   const frontendDir = path.dirname(entry);
   // Optional: translations beyond English and Chinese, laid out like the frontend.
   const localesDir = packageDir(require, '@devtools-anywhere/devtools-frontend-locales/REVISION');
@@ -405,7 +409,13 @@ export async function startRemoteServer(options: RemoteServerOptions = {}): Prom
     : lan
       ? `${scheme}://${lan}:${port}${base}`
       : local;
-  const ready = createRemoteHandler({ ...options, publicUrl });
+  let ready: RemoteHandler;
+  try {
+    ready = createRemoteHandler({ ...options, publicUrl });
+  } catch (error) {
+    server.close(); // A bad option: nothing is left listening.
+    throw error;
+  }
   handler = ready;
   const { token } = ready;
   return {

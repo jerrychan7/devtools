@@ -4,10 +4,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const FRONTENDS = fileURLToPath(new URL('e2e/frontends/', import.meta.url));
+
 const CLI = fileURLToPath(new URL('../packages/remote-server/dist/cli.js', import.meta.url));
 
-/** Runs the CLI with `args` until it has printed the script tag (or exits), and returns its output. */
-function run(args: string[]): Promise<string> {
+/**
+ * Runs the CLI with `args` until it has printed the script tag (or exits), and returns its output
+ * (stderr included). `meanwhile` runs, with the output so far, before the server is stopped.
+ */
+function run(args: string[], meanwhile?: (out: string) => Promise<void>): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, ...args]);
     let out = '';
@@ -20,9 +25,16 @@ function run(args: string[]): Promise<string> {
       child.kill();
       resolve(out);
     };
+    child.stderr.on('data', chunk => (out += String(chunk)));
     child.stdout.on('data', chunk => {
       out += String(chunk);
-      if (out.includes('</script>')) done();
+      if (!out.includes('</script>')) return;
+      if (!meanwhile) return done();
+      meanwhile(out).then(done, (error: unknown) => {
+        clearTimeout(timer);
+        child.kill();
+        reject(error);
+      });
     });
     child.on('exit', done);
   });
@@ -40,4 +52,20 @@ test('without it, pages connect by path', async () => {
 
 test('--help lists --id-in-query', async () => {
   assert.match(await run(['--help']), /--id-in-query/);
+});
+
+test('--devtools-frontend-path serves that entry page and its directory', async () => {
+  const args = ['--port', '0', '--host', '127.0.0.1', '--no-token'];
+  await run([...args, '--devtools-frontend-path', `${FRONTENDS}fake-frontend.html`], async out => {
+    const url = /Inspect pages at (\S+)/.exec(out)?.[1];
+    assert.ok(url, out);
+    const res = await fetch(new URL('front_end/fake-frontend.html', url));
+    assert.equal(res.status, 200);
+  });
+});
+
+test('--devtools-frontend-path refuses a directory', async () => {
+  const out = await run(['--port', '0', '--host', '127.0.0.1', '--devtools-frontend-path', `${FRONTENDS}frontend-dir`]);
+  assert.match(out, /not a file/);
+  assert.doesNotMatch(out, /<\/script>/);
 });
