@@ -80,7 +80,8 @@ packages/
                       包内其他代码只通过 index.ts 和 probe/ 使用它
       probe/          早期捕获：零依赖，有体积上限，单独的构建入口
       core/           跨域共享的状态：远程对象、节点 id、DOM 变化监听、样式表
-      domains/        每个域一个文件：runtime、network、dom、css、overlay、storage……
+      domains/        每个域一个目录：runtime/、network/、dom/、css/、overlay/、storage/……
+                      一致性测试放在所属域的目录里
     test-support/     一致性测试的 harness、夹具页面和资源
   vite-plugin/    零配置注入
   remote-server/  远程调试：页面与另一处 DevTools 之间的中继、目标列表、命令行工具
@@ -133,7 +134,7 @@ experiments/      验证记录
 
 ```bash
 pnpm test                                     # 构建并运行全部测试
-node --test packages/devtools-anywhere/src/cdp-agent/domains/css.conformance.test.ts
+node --test packages/devtools-anywhere/src/cdp-agent/domains/css/css.conformance.test.ts
                                               # 只跑一个文件（需先构建，或 pnpm dev 正在运行）
 pnpm typecheck                                # 先构建，再检查所有包、构建脚本、测试和 playground 的类型
 ```

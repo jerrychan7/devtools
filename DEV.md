@@ -80,7 +80,8 @@ packages/
                       the rest of the package uses it through index.ts and probe/
       probe/          early capture: zero dependencies, size budget, separate build entry
       core/           state shared across domains: remote objects, node ids, DOM observer, stylesheets
-      domains/        one file per domain: runtime, network, dom, css, overlay, storage, ...
+      domains/        one directory per domain: runtime/, network/, dom/, css/, overlay/, storage/, ...,
+                      with its conformance tests
     test-support/     conformance harness, fixture page and assets
   vite-plugin/    zero-config injection
   remote-server/  remote debugging: relay between a page and DevTools elsewhere, target list, CLI
@@ -133,7 +134,7 @@ What two pieces of code must agree on is written once, where it is owned, and im
 
 ```bash
 pnpm test                                     # build + all tests
-node --test packages/devtools-anywhere/src/cdp-agent/domains/css.conformance.test.ts
+node --test packages/devtools-anywhere/src/cdp-agent/domains/css/css.conformance.test.ts
                                               # one file (after a build or with pnpm dev running)
 pnpm typecheck                                # builds, then checks packages, build scripts, tests and playground
 ```

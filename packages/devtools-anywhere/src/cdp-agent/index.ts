@@ -3,19 +3,19 @@ import { NodeRegistry } from './core/nodes';
 import { ObjectRegistry } from './core/objects';
 import { viewProbe } from './core/probe-view';
 import { CdpSession } from './core/session';
-import { registerCss } from './domains/css';
-import { registerDebugger } from './domains/debugger';
-import { registerDom } from './domains/dom';
-import { registerDomDebugger } from './domains/dom-debugger';
-import { registerInput } from './domains/input';
-import { registerNetwork } from './domains/network';
-import { registerOverlay } from './domains/overlay';
-import { registerPage } from './domains/page';
-import { registerRuntime } from './domains/runtime';
-import { registerScreencast, type SnapdomLoader } from './domains/screencast';
-import { registerStorage } from './domains/storage';
+import { registerCss } from './domains/css/css';
+import { registerDebugger } from './domains/debugger/debugger';
+import { registerDom } from './domains/dom/dom';
+import { registerDomDebugger } from './domains/dom-debugger/dom-debugger';
+import { registerInput } from './domains/input/input';
+import { registerNetwork } from './domains/network/network';
+import { registerOverlay } from './domains/overlay/overlay';
+import { registerPage } from './domains/page/page';
+import { registerRuntime } from './domains/runtime/runtime';
+import { registerScreencast, type SnapdomLoader } from './domains/page/screencast';
+import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
-import { registerWebMcp } from './domains/webmcp';
+import { registerWebMcp } from './domains/webmcp/webmcp';
 import { installProbe, keep } from './probe';
 
 export { CdpSession } from './core/session';
@@ -31,7 +31,7 @@ export {
   type ShellConfig,
 } from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
-export type { SnapdomLoader } from './domains/screencast';
+export type { SnapdomLoader } from './domains/page/screencast';
 
 /** @internal */
 export interface CdpSessionOptions {
