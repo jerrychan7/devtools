@@ -65,7 +65,7 @@ export function setShellScriptUrl(url: string) {
  * True when every URL of the config is http(s) on the trusted origin. sessionStorage can be
  * written by any script of the page, so a config pointing elsewhere is not trusted. Only the
  * origin is checked: the frontend, bundle and probe may sit in different directories (e.g. the
- * Vite plugin's base vs. a zero-config `data-frontend`).
+ * Vite plugin's base vs. a zero-config `data-devtools-frontend-url`).
  *
  * @internal
  */
@@ -189,6 +189,6 @@ function replaceDocument(config: ShellConfig) {
 #${SHELL_PAGE_ID}{flex:1;min-height:0;width:100%;border:0;display:block}</style></head>
 <body><iframe id="${SHELL_PAGE_ID}" src="${escapeAttr(location.href)}"></iframe>
 <script src="${escapeAttr(config.bundle)}"></script>
-<devtools-anywhere shell${config.open === false ? '' : ' open'}${config.locked ? ' shell-mode-locked' : ''}${config.noToggler ? ' no-toggler' : ''} frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
+<devtools-anywhere shell${config.open === false ? '' : ' open'}${config.locked ? ' shell-mode-locked' : ''}${config.noToggler ? ' no-toggler' : ''} devtools-frontend-url="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
   document.close();
 }

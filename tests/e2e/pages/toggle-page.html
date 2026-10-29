@@ -10,6 +10,10 @@
     <button id="named" data-devtools-anywhere-toggle="devtools"><span>named</span></button>
     <button id="missing" data-devtools-anywhere-toggle="nowhere">missing</button>
     <script src="/packages/devtools-anywhere/dist/devtools-anywhere.iife.js"></script>
-    <devtools-anywhere id="devtools" frontend="/tests/e2e/frontends/fake-frontend.html" no-toggler></devtools-anywhere>
+    <devtools-anywhere
+      id="devtools"
+      devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"
+      no-toggler
+    ></devtools-anywhere>
   </body>
 </html>

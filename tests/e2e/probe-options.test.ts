@@ -161,7 +161,7 @@ test('a second global element only warns and does nothing, even once the first i
     page.evaluate(() => {
       const el = window.DevtoolsAnywhere.createGlobalElement();
       if (!el) throw new Error('no element');
-      el.setAttribute('frontend', '/tests/e2e/frontends/fake-frontend.html');
+      el.setAttribute('devtools-frontend-url', '/tests/e2e/frontends/fake-frontend.html');
       el.setAttribute('open', '');
       document.documentElement.append(el);
       el.removeAttribute('open');

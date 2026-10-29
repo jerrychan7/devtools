@@ -20,11 +20,11 @@ export interface DevtoolsAnywhereOptions {
    * Directory of a built DevTools frontend to serve, under `/@devtools-anywhere/front_end/`.
    * Default: the build of `@devtools-anywhere/devtools-frontend`.
    */
-  frontendDir?: string;
-  /** Entry page inside `frontendDir`. Default: `anywhere_app.html`. */
-  frontendEntry?: string;
-  /** URL of a frontend hosted elsewhere; used instead of `frontendDir`. */
-  frontendUrl?: string;
+  devtoolsFrontendDir?: string;
+  /** Entry page inside `devtoolsFrontendDir`. Default: `anywhere_app.html`. */
+  devtoolsFrontendEntry?: string;
+  /** URL of a frontend hosted elsewhere; used instead of `devtoolsFrontendDir`. */
+  devtoolsFrontendUrl?: string;
   /** Open DevTools as soon as it is mounted (`data-open-immediately`). Default: false. */
   openImmediately?: boolean;
   /**
@@ -83,13 +83,13 @@ function packageDir(require: NodeJS.Require, file: string): string | undefined {
 export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}): Plugin {
   const require = createRequire(import.meta.url);
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'));
-  const dir = options.frontendUrl
+  const dir = options.devtoolsFrontendUrl
     ? undefined
-    : (options.frontendDir ?? packageDir(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'));
+    : (options.devtoolsFrontendDir ?? packageDir(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'));
   const frontendDir = dir && path.resolve(dir);
   const frontend =
-    options.frontendUrl ??
-    (frontendDir ? `${BASE}front_end/${options.frontendEntry ?? 'anywhere_app.html'}` : undefined);
+    options.devtoolsFrontendUrl ??
+    (frontendDir ? `${BASE}front_end/${options.devtoolsFrontendEntry ?? 'anywhere_app.html'}` : undefined);
 
   // Optional: translations beyond English and Chinese, laid out like the frontend.
   const localesDir = frontendDir && packageDir(require, '@devtools-anywhere/devtools-frontend-locales/REVISION');
@@ -122,7 +122,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
     configResolved(config) {
       if (!frontend)
         config.logger.warn(
-          '[devtools-anywhere] No DevTools frontend found: install @devtools-anywhere/devtools-frontend, or set `frontendDir` or `frontendUrl`.'
+          '[devtools-anywhere] No DevTools frontend found: install @devtools-anywhere/devtools-frontend, or set `devtoolsFrontendDir` or `devtoolsFrontendUrl`.'
         );
     },
 
@@ -146,7 +146,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
       handler() {
         const attrs: { src: string } & ProbeScriptAttributes = { src: `${BASE}probe.iife.js` };
         if (options.remote) attrs['data-remote'] = options.remote;
-        else if (frontend) attrs['data-frontend'] = frontend;
+        else if (frontend) attrs['data-devtools-frontend-url'] = frontend;
         if (options.openImmediately) attrs['data-open-immediately'] = true;
         if (options.defaultShellMode) attrs['data-default-shell-mode'] = options.defaultShellMode;
         if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;

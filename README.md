@@ -79,7 +79,7 @@ This approach has been validated: see [experiments/early-capture/RESULTS.md](exp
 
 No standalone `devtools.html` is hosted, and there is no navigation to a blob URL, since blob URLs break on reload and cannot be shared. Instead:
 
-1. With the zero-config probe (`data-frontend`, or the Vite plugin), the top-level page enters shell mode by default on its first load: the probe stores the frontend and bundle URLs in `sessionStorage` itself, before the page's scripts run, so the page is not reloaded. DevTools starts hidden unless `data-open-immediately` is set. Otherwise, the lock button in DevTools' toolbar, "Keep DevTools open across reloads" (`element.enterShell()`), stores them and reloads the page.
+1. With the zero-config probe (`data-devtools-frontend-url`, or the Vite plugin), the top-level page enters shell mode by default on its first load: the probe stores the frontend and bundle URLs in `sessionStorage` itself, before the page's scripts run, so the page is not reloaded. DevTools starts hidden unless `data-open-immediately` is set. Otherwise, the lock button in DevTools' toolbar, "Keep DevTools open across reloads" (`element.enterShell()`), stores them and reloads the page.
 2. The probe, being the first script, sees the config in the top-level window. It writes an unclosed `<plaintext>` so the rest of the page becomes inert text (none of its scripts run), then replaces the document with the shell via `document.open()` / `document.write()`. The shell contains the page iframe (pointing to `location.href`) and `<devtools-anywhere shell>`. (Chrome ignores `document.open()` after `window.stop()`, hence `<plaintext>`.)
 3. Inside the iframe, the probe captures as usual and loads the bundle, which connects the page's CDP session to the shell. The shell relays messages between the page and the frontend.
 4. When the page reloads or navigates, the new page says hello; the shell tells the frontend the page navigated and re-sends every `enable` command the frontend has sent, so the new page replays its own earliest output. The address bar and title follow the page, through loads, history traversals and same-document navigations (`pushState` where the Navigation API exists), so that a reload or a copied link opens the page shown.
@@ -117,14 +117,14 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 ## Usage (preview)
 
-The packages are not published yet; the paths below refer to the builds in this repository. `data-frontend` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build. Its `bundle/` files are named after their content and can be cached for good; serve `anywhere_app.html` itself with revalidation (`Cache-Control: no-cache`), so that an update reaches the browser.
+The packages are not published yet; the paths below refer to the builds in this repository. `data-devtools-frontend-url` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build. Its `bundle/` files are named after their content and can be cached for good; serve `anywhere_app.html` itself with revalidation (`Cache-Control: no-cache`), so that an update reaches the browser.
 
 ### One script tag
 
 ```html
 <head>
   <!-- First synchronous script: captures output from the very start. -->
-  <script src="/path/to/devtools-anywhere/dist/probe.iife.js" data-frontend="/path/to/devtools-frontend/dist/anywhere_app.html"></script>
+  <script src="/path/to/devtools-anywhere/dist/probe.iife.js" data-devtools-frontend-url="/path/to/devtools-frontend/dist/anywhere_app.html"></script>
   ...
 </head>
 ```
@@ -142,11 +142,11 @@ export default {
 }
 ```
 
-Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `openImmediately`, `defaultShellMode` (`'on'` or `'off'`), `shellModeLocked`, `noToggler` (hides the F12 button), `serviceWorker`, which match the probe's attributes, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
+Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `devtoolsFrontendDir` (another frontend build), `devtoolsFrontendEntry` (default `anywhere_app.html`), `devtoolsFrontendUrl`, `openImmediately`, `defaultShellMode` (`'on'` or `'off'`), `shellModeLocked`, `noToggler` (hides the F12 button), `serviceWorker`, which match the probe's attributes, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
 
 ### The element
 
-A floating F12 button opens the panel; drag its bar to resize. Left of DevTools' settings button, the lock button switches shell mode on and off (a dialog explains it first, and an info bar shows while it is on) and the refresh button reloads the page; the toolbar's × closes the panel. DevTools' main menu (⋮) has "Dock side": bottom (the default), right, left, or undocked, a window over the page moved by its bar and resized from its corner. In shell mode the page shrinks to make room, as in Chrome; otherwise the panel covers the page. The side and sizes are remembered in localStorage, sizes as percentages of the viewport (`dvh`/`dvw`), so they fit any screen and orientation. Attributes: `frontend`, `open`, `no-toggler`, `shell-mode-locked`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
+A floating F12 button opens the panel; drag its bar to resize. Left of DevTools' settings button, the lock button switches shell mode on and off (a dialog explains it first, and an info bar shows while it is on) and the refresh button reloads the page; the toolbar's × closes the panel. DevTools' main menu (⋮) has "Dock side": bottom (the default), right, left, or undocked, a window over the page moved by its bar and resized from its corner. In shell mode the page shrinks to make room, as in Chrome; otherwise the panel covers the page. The side and sizes are remembered in localStorage, sizes as percentages of the viewport (`dvh`/`dvw`), so they fit any screen and orientation. Attributes: `devtools-frontend-url`, `open`, `no-toggler`, `shell-mode-locked`, `sw`; methods: `show()`, `hide()`, `toggle()`, `enterShell()`, `exitShell()`. Keep the element in one place, since moving it reloads the iframe.
 
 Any element can open and close the panel: give it `data-devtools-anywhere-toggle`, set to the id of a `<devtools-anywhere>`, or empty for the first one on the page. Clicks are caught on the document, so togglers added later work too; the default action is not prevented, and the togglers' `aria-expanded` follows the panel. A toggler whose element is missing logs a warning, once per value. The element fires `toggle` when `open` changes, a `ToggleEvent` with `oldState` and `newState` (`'open'` or `'closed'`) where the browser has it.
 

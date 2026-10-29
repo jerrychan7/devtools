@@ -206,10 +206,10 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 `;
 
 /**
- * `<devtools-anywhere frontend="…/anywhere_app.html" open>`
+ * `<devtools-anywhere devtools-frontend-url="…/anywhere_app.html" open>`
  *
  * Attributes:
- * - `frontend`: URL of the DevTools frontend entry page. Loaded on first open.
+ * - `devtools-frontend-url`: URL of the DevTools frontend entry page. Loaded on first open.
  * - `open`: shows the panel; otherwise a small toggler button is shown.
  * - `no-toggler`: hides the toggler button.
  * - `shell-mode-locked`: DevTools offers no way in or out of shell mode, and ignores requests to.
@@ -233,7 +233,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
-  static observedAttributes = ['open', 'frontend'];
+  static observedAttributes = ['open', 'devtools-frontend-url'];
 
   /** The CDP session for this page. Created when the element is first connected. @internal */
   session: CdpSession | null = null;
@@ -351,7 +351,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    * stays open across reloads and navigations of the page. Needs the bundle URL.
    */
   enterShell() {
-    const frontend = this.getAttribute('frontend');
+    const frontend = this.getAttribute('devtools-frontend-url');
     if (!bundleUrl || !frontend) return;
     // The probe ignores (and removes) a config whose URLs are not on its own origin.
     const flags = { locked: this.hasAttribute('shell-mode-locked'), noToggler: this.hasAttribute('no-toggler') };
@@ -601,7 +601,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   private loadFrontend() {
-    const frontend = this.getAttribute('frontend');
+    const frontend = this.getAttribute('devtools-frontend-url');
     const pageElement = document.getElementById(SHELL_PAGE_ID);
     const page = pageElement instanceof HTMLIFrameElement ? pageElement : null;
     if (!frontend || (!this.session && !(this.hasAttribute('shell') && page))) return;

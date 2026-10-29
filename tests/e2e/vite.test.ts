@@ -30,8 +30,8 @@ before(async () => {
     server: { port: 0, strictPort: false },
     plugins: [
       devtoolsAnywhere({
-        frontendDir: path.join(here, 'frontends'),
-        frontendEntry: 'fake-frontend.html',
+        devtoolsFrontendDir: path.join(here, 'frontends'),
+        devtoolsFrontendEntry: 'fake-frontend.html',
         openImmediately: true,
         defaultShellMode: 'off',
         shellModeLocked: true,
@@ -68,7 +68,7 @@ test('the options become the probe script attributes', async () => {
     if (!script) throw new Error('no probe script');
     return Object.fromEntries(
       [...script.attributes]
-        .filter(a => a.name.startsWith('data-') && a.name !== 'data-frontend')
+        .filter(a => a.name.startsWith('data-') && a.name !== 'data-devtools-frontend-url')
         .map(a => [a.name, a.value])
     );
   });

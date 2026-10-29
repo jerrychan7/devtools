@@ -1,14 +1,14 @@
 // Entry of devtools-anywhere's probe.iife.js: the probe plus zero-config mounting.
 //
-//   <script src="…/devtools-anywhere/dist/probe.iife.js" data-frontend="…/anywhere_app.html"></script>
+//   <script src="…/devtools-anywhere/dist/probe.iife.js" data-devtools-frontend-url="…/anywhere_app.html"></script>
 //
-// As the first script in <head>, it captures from the very start. With `data-frontend`, it
+// As the first script in <head>, it captures from the very start. With `data-devtools-frontend-url`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
 // the page has loaded and mounts its own <devtools-anywhere> under <html>, whatever the page has.
 // `data-open-immediately` opens DevTools right away; `data-sw` is passed on as the element's `sw`
 // attribute (see shell mode), `data-no-toggler` as its `no-toggler`.
 //
-// With `data-frontend`, the top-level page enters shell mode by default, on its first load: the
+// With `data-devtools-frontend-url`, the top-level page enters shell mode by default, on its first load: the
 // probe stores the shell config itself before the page's scripts run, so the page is not
 // loaded twice over. It does not when `data-default-shell-mode="off"`, when the user turned shell
 // mode off in DevTools (or on again, whatever `data-default-shell-mode` says), when the page
@@ -46,7 +46,7 @@ if (script?.src) setShellScriptUrl(script.src);
 
 /** One of the script's attributes (probe-script.ts); `null` when it is absent. */
 const attribute = (name: keyof ProbeScriptAttributes) => script?.getAttribute(name) ?? null;
-const frontend = attribute('data-frontend');
+const frontend = attribute('data-devtools-frontend-url');
 const remote = attribute('data-remote');
 // A probe inlined, without a URL, has no bundle next to it.
 const bundle = script?.src ? new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href : null;
@@ -150,7 +150,7 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
       // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
       const element = api.createGlobalElement();
       if (!element) return;
-      element.setAttribute('frontend', new URL(frontend, location.href).href);
+      element.setAttribute('devtools-frontend-url', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');
       if (locked) element.setAttribute('shell-mode-locked', '');
       if (noToggler) element.setAttribute('no-toggler', '');

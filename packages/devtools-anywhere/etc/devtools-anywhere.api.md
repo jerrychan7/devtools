@@ -45,7 +45,7 @@ export type Handler = (params: never) => unknown;
 
 // @public
 export type ProbeScriptAttributes = {
-    'data-frontend'?: string;
+    'data-devtools-frontend-url'?: string;
     'data-bundle'?: string;
     'data-open-immediately'?: true;
     'data-default-shell-mode'?: 'on' | 'off';

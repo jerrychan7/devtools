@@ -6,7 +6,7 @@
  */
 export type ProbeScriptAttributes = {
   /** The frontend to mount <devtools-anywhere> with, after the page has loaded. */
-  'data-frontend'?: string;
+  'data-devtools-frontend-url'?: string;
   /** Where devtools-anywhere.iife.js is, by default next to the probe. */
   'data-bundle'?: string;
   /** Opens DevTools right away. */
