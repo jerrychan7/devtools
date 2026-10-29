@@ -36,6 +36,8 @@ declare global {
     /** The harness's CDP session in the page, and the events it emitted. */
     __session: CdpSession;
     __ours: { method: string; params: unknown }[];
+    /** More CDP sessions in the page (multi-session.test.ts). */
+    __sessions?: CdpSession[];
     /** A CDP session with a stand-in snapDOM, the frames it sent and the scales it rendered at. */
     __screencast?: {
       session: CdpSession;

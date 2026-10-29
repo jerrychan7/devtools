@@ -9,11 +9,13 @@ export interface ProbeView extends Omit<Probe, 'logs' | 'requests' | 'onLog' | '
   onLog(listener: (entry: LogEntry) => void): () => void;
   onRequest(listener: (record: RequestRecord) => void): () => void;
   /**
-   * Sets how many bytes of request and response bodies are kept in all and for one request
-   * (Network.enable's maxTotalBufferSize and maxResourceBufferSize); past the total the oldest
-   * are dropped.
+   * Sets how many bytes of request and response bodies this view keeps in all and for one
+   * request (Network.enable's maxTotalBufferSize and maxResourceBufferSize); past the total the
+   * oldest are dropped from this view, not from the probe.
    */
   bodyLimits(total: number, resource: number): void;
+  /** Stops following the probe and forgets the bodies dropped and the limits (the session ended). */
+  close(): void;
 }
 
 const CONSOLE_TYPES: Record<string, ConsoleType> = {
@@ -89,12 +91,34 @@ function headersToObject(headers: Record<string, string> | Headers | string): Re
   return obj;
 }
 
+/** Chrome's defaults for the bodies one session keeps (desktop kDefaultTotalBufferSize, kDefaultResourceBufferSize). */
+const DEFAULT_TOTAL_BODIES = 200 * 1000 * 1000;
+const DEFAULT_RESOURCE_BODY = 20 * 1000 * 1000;
+
+/** Each probe's sessions' limits for one body, by session. */
+const resourceLimits = new WeakMap<Probe, Map<object, number>>();
+
+/**
+ * Sets a session's limit for one body (none: back to the default), and with it the probe's:
+ * the largest of them, so that every session can keep what its own limit allows.
+ */
+function setResourceLimit(probe: Probe, session: object, limit: number | undefined) {
+  let limits = resourceLimits.get(probe);
+  if (!limits) resourceLimits.set(probe, (limits = new Map()));
+  if (limit === undefined) limits.delete(session);
+  else limits.set(session, limit);
+  probe.limits.body = Math.max(DEFAULT_RESOURCE_BODY, ...limits.values());
+}
+
 const bodySize = (body: string | Blob) => (typeof body === 'string' ? body.length : body.size);
 
 export function viewProbe(probe: Probe): ProbeView {
   // Same object for the same record: domains keep records in sets and maps.
   const logs = new WeakMap<ProbeLog, LogEntry>();
-  const requests = new WeakMap<ProbeRequest, RequestRecord>();
+  let requests = new WeakMap<ProbeRequest, RequestRecord>();
+  const token = {};
+  // Bodies up to Chrome's default are kept from now on, before Network.enable.
+  setResourceLimit(probe, token, undefined);
   const log = (raw: ProbeLog): LogEntry => {
     let entry = logs.get(raw);
     if (!entry) {
@@ -113,51 +137,62 @@ export function viewProbe(probe: Probe): ProbeView {
   };
   // Records change in place, and the probe reports every change: only a changed record is
   // copied again, so reading all of them stays cheap.
-  const changed = new WeakSet<ProbeRequest>();
-  // Like Chrome's NetworkResourcesData: the request and response bodies kept, by request in
-  // the order they were first kept, with their size; past the total the oldest are dropped.
+  let changed = new WeakSet<ProbeRequest>();
+  // Like Chrome's NetworkResourcesData, one per session: the request and response bodies kept,
+  // by request in the order they were first kept, with their size; past the total the oldest
+  // are dropped. Dropped here only: the probe's record stays whole for the other sessions.
   const kept = new Map<ProbeRequest, number>();
+  let evicted = new WeakSet<ProbeRequest>();
   let total = 0;
-  // Chrome's default until Network.enable sets it (desktop kDefaultTotalBufferSize).
-  let maxTotal = 200 * 1000 * 1000;
+  // Chrome's defaults until Network.enable sets them.
+  let maxTotal = DEFAULT_TOTAL_BODIES;
+  let maxResource = DEFAULT_RESOURCE_BODY;
   const drop = (raw: ProbeRequest) => {
     total -= kept.get(raw) ?? 0;
     kept.delete(raw);
-    raw.body = undefined;
-    // Still pending, the request is yet to be reported with its body (as Chrome does).
-    if (raw.state !== 'pending') raw.postData = undefined;
-    raw.bodyEvicted = true;
+    evicted.add(raw);
     changed.add(raw);
   };
   const evict = () => {
-    for (const [old, size] of kept) if (size > probe.limits.body) drop(old);
+    for (const [old, size] of kept) if (size > maxResource) drop(old);
     for (const old of kept.keys()) {
       if (total <= maxTotal) break;
       drop(old);
     }
   };
   const account = (raw: ProbeRequest) => {
-    if (raw.bodyEvicted) return;
+    if (evicted.has(raw)) return;
     const size =
       (raw.postData ? new TextEncoder().encode(raw.postData).length : 0) + (raw.body ? bodySize(raw.body) : 0);
     const before = kept.get(raw) ?? 0;
     if (size === before) return;
-    if (size > probe.limits.body) return drop(raw);
+    if (size > maxResource) return drop(raw);
     kept.set(raw, size);
     total += size - before;
     evict();
   };
-  probe.requests.forEach(account);
-  probe.onRequest(raw => {
-    changed.add(raw);
-    account(raw);
-  });
+  let unwatch: (() => void) | null = null;
+  /** Follows the probe's requests from the first read on, until close(). */
+  const watch = () => {
+    if (unwatch) return;
+    probe.requests.forEach(account);
+    unwatch = probe.onRequest(raw => {
+      changed.add(raw);
+      account(raw);
+    });
+  };
   const request = (raw: ProbeRequest): RequestRecord => {
     const cached = requests.get(raw);
     if (cached && !changed.has(raw)) return cached;
     changed.delete(raw);
     const { headers, requestHeaders, ...rest } = raw;
     const fields: RequestRecord = { ...rest, requestHeaders: headersToObject(requestHeaders) };
+    if (evicted.has(raw)) {
+      fields.body = undefined;
+      // Still pending, the request is yet to be reported with its body (as Chrome does).
+      if (raw.state !== 'pending') fields.postData = undefined;
+      fields.bodyEvicted = true;
+    }
     if (headers !== undefined) {
       const responseHeaders = headersToObject(headers);
       fields.responseHeaders = responseHeaders;
@@ -167,8 +202,7 @@ export function viewProbe(probe: Probe): ProbeView {
         fields.encodedDataLength = Number(responseHeaders['content-length']) || raw.encodedDataLength;
     }
     // A body the probe did not keep for being too large: Chrome reports it as evicted too.
-    if (raw.state === 'done' && !raw.body && (fields.encodedDataLength ?? 0) > probe.limits.body)
-      fields.bodyEvicted = true;
+    if (raw.state === 'done' && !raw.body && (fields.encodedDataLength ?? 0) > maxResource) fields.bodyEvicted = true;
     if (cached) return Object.assign(cached, fields);
     requests.set(raw, fields);
     return fields;
@@ -179,11 +213,15 @@ export function viewProbe(probe: Probe): ProbeView {
       return probe.logs.map(log);
     },
     get requests() {
+      watch();
       return probe.requests.map(request);
     },
     sockets: probe.sockets,
     onLog: listener => probe.onLog(raw => listener(log(raw))),
-    onRequest: listener => probe.onRequest(raw => listener(request(raw))),
+    onRequest: listener => {
+      watch();
+      return probe.onRequest(raw => listener(request(raw)));
+    },
     onSocket: listener => probe.onSocket(listener),
     clearLogs: () => probe.clearLogs(),
     shadowRoots: probe.shadowRoots,
@@ -194,8 +232,22 @@ export function viewProbe(probe: Probe): ProbeView {
     tools: probe.tools,
     bodyLimits(totalSize, resourceSize) {
       maxTotal = totalSize;
-      probe.limits.body = resourceSize;
+      maxResource = resourceSize;
+      setResourceLimit(probe, token, resourceSize);
+      watch();
       evict();
+    },
+    close() {
+      unwatch?.();
+      unwatch = null;
+      kept.clear();
+      total = 0;
+      evicted = new WeakSet();
+      changed = new WeakSet();
+      requests = new WeakMap();
+      maxTotal = DEFAULT_TOTAL_BODIES;
+      maxResource = DEFAULT_RESOURCE_BODY;
+      setResourceLimit(probe, token, undefined);
     },
   };
 }
