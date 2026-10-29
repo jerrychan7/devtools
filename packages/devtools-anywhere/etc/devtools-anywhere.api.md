@@ -10,27 +10,19 @@ export function defineDevtoolsAnywhere(tag?: string): void;
 // @internal
 export class DevtoolsAnywhereElement extends HTMLElement {
     constructor();
-    // (undocumented)
     attributeChangedCallback(): void;
-    // (undocumented)
     connectedCallback(): void;
-    // (undocumented)
     disconnectedCallback(): void;
     get dock(): DockSide;
     set dock(side: DockSide);
     enterShell(): void;
     exitShell(): Promise<void>;
-    // (undocumented)
     hide(): void;
-    // (undocumented)
     static observedAttributes: string[];
-    // (undocumented)
     get open(): boolean;
     set open(value: boolean);
     session: CdpSession | null;
-    // (undocumented)
     show(): void;
-    // (undocumented)
     toggle(): void;
 }
 

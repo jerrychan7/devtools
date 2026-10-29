@@ -212,6 +212,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * @internal
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
+  /** The attributes whose changes update the element. */
   static observedAttributes = ['open', 'frontend', 'height', 'width', 'dock'];
 
   /** The CDP session for this page. Created when the element is first connected. */
@@ -294,6 +295,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     }
   };
 
+  /** Whether DevTools is shown: the `open` attribute. */
   get open() {
     return this.hasAttribute('open');
   }
@@ -301,12 +303,15 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.toggleAttribute('open', value);
   }
 
+  /** Shows DevTools, loading the frontend the first time. */
   show() {
     this.open = true;
   }
+  /** Hides DevTools; the frontend stays loaded and connected. */
   hide() {
     this.open = false;
   }
+  /** Shows DevTools if hidden, hides it if shown. */
   toggle() {
     this.open = !this.open;
   }
@@ -376,6 +381,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     }
   }
 
+  /** Connects the page's CDP session (or, with `shell`, registers the Service Worker) and lays out the panel. */
   connectedCallback() {
     // Registers the element so the CDP domains hide it from the Elements panel; the
     // attribute only isolates its styles, as the page can set it too. A page that writes
@@ -399,6 +405,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.update();
   }
 
+  /** Disconnects the frontend and stops listening to it. */
   disconnectedCallback() {
     // A detached iframe is unloaded; it reconnects and reloads when attached again.
     this.disconnect?.();
@@ -408,6 +415,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     window.removeEventListener('pageshow', this.onShellPageshow);
   }
 
+  /** Lays out the panel again, and loads the frontend if DevTools is now open. */
   attributeChangedCallback() {
     if (this.isConnected && !this.hasAttribute('data-shell-page')) this.update();
   }

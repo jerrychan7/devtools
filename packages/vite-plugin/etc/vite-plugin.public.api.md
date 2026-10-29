@@ -10,7 +10,7 @@ import type { Plugin } from 'vite';
 function devtoolsAnywhere(options?: DevtoolsAnywhereOptions): Plugin;
 export default devtoolsAnywhere;
 
-// @public (undocumented)
+// @public
 export interface DevtoolsAnywhereOptions {
     frontendDir?: string;
     frontendEntry?: string;

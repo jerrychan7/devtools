@@ -4,7 +4,11 @@ import path from 'node:path';
 import type { Plugin } from 'vite';
 import type { ProbeScriptAttributes } from 'devtools-anywhere';
 
-/** @public */
+/**
+ * Options of the devtools-anywhere Vite plugin.
+ *
+ * @public
+ */
 export interface DevtoolsAnywhereOptions {
   /**
    * Directory of a built DevTools frontend to serve, under `/@devtools-anywhere/front_end/`.

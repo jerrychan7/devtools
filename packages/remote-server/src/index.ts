@@ -28,7 +28,11 @@ import { WebSocketServer } from 'ws';
 import { listPage, probeAttributes } from './list-page';
 import { Target, type Peer } from './relay';
 
-/** @public */
+/**
+ * Options of {@link createRemoteHandler}.
+ *
+ * @public
+ */
 export interface RemoteHandlerOptions {
   /** Path everything is served under, such as `/devtools/`. Default: `/`. */
   basePath?: string;
@@ -70,7 +74,9 @@ export interface RemoteHandlerOptions {
  * @public
  */
 export interface RemoteHandler {
+  /** The path everything is served under, always starting and ending with `/`. */
   readonly basePath: string;
+  /** The token the target list and DevTools connections need, or false if none is. */
   readonly token: string | false;
   /** Answers a request under basePath and returns true; returns false for any other. */
   handleRequest(req: http.IncomingMessage, res: http.ServerResponse): boolean;
@@ -80,7 +86,11 @@ export interface RemoteHandler {
   close(): void;
 }
 
-/** @public */
+/**
+ * Options of {@link startRemoteServer}: those of {@link createRemoteHandler}, and where to listen.
+ *
+ * @public
+ */
 export interface RemoteServerOptions extends RemoteHandlerOptions {
   /** Default: 8080. 0 picks a free port. */
   port?: number;
@@ -90,7 +100,11 @@ export interface RemoteServerOptions extends RemoteHandlerOptions {
   https?: { cert: string | Buffer; key: string | Buffer };
 }
 
-/** @public */
+/**
+ * A running remote debugging server, from {@link startRemoteServer}.
+ *
+ * @public
+ */
 export interface RemoteServer {
   /** The target list, with the token: what to open on this machine. */
   readonly url: string;
@@ -98,8 +112,11 @@ export interface RemoteServer {
   readonly publicUrl: string;
   /** The script tag for pages to connect with. */
   readonly scriptTag: string;
+  /** The token the target list and DevTools connections need, or false if none is. */
   readonly token: string | false;
+  /** The underlying HTTP or HTTPS server. */
   readonly server: http.Server;
+  /** Closes every connection and stops listening. */
   close(): Promise<void>;
 }
 

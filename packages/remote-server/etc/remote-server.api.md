@@ -12,16 +12,14 @@ export function createRemoteHandler(options?: RemoteHandlerOptions): RemoteHandl
 
 // @public
 export interface RemoteHandler {
-    // (undocumented)
     readonly basePath: string;
     close(): void;
     handleRequest(req: http.IncomingMessage, res: http.ServerResponse): boolean;
     handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): boolean;
-    // (undocumented)
     readonly token: string | false;
 }
 
-// @public (undocumented)
+// @public
 export interface RemoteHandlerOptions {
     basePath?: string;
     frontendDir?: string;
@@ -31,20 +29,17 @@ export interface RemoteHandlerOptions {
     token?: string | false;
 }
 
-// @public (undocumented)
+// @public
 export interface RemoteServer {
-    // (undocumented)
     close(): Promise<void>;
     readonly publicUrl: string;
     readonly scriptTag: string;
-    // (undocumented)
     readonly server: http.Server;
-    // (undocumented)
     readonly token: string | false;
     readonly url: string;
 }
 
-// @public (undocumented)
+// @public
 export interface RemoteServerOptions extends RemoteHandlerOptions {
     host?: string;
     https?: {
