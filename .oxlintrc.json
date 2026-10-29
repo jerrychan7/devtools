@@ -30,7 +30,7 @@
           {
             "patterns": [
               {
-                "group": ["./cdp-agent/core/*", "./cdp-agent/domains/*"],
+                "group": ["./cdp-agent/core/**", "./cdp-agent/domains/**"],
                 "message": "Use the CDP agent through its entry points: ./cdp-agent (index.ts) and ./cdp-agent/probe."
               }
             ]
