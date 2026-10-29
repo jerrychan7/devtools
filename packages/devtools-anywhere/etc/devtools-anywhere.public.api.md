@@ -4,9 +4,41 @@
 
 ```ts
 
-// Warnings were encountered during analysis:
-//
-// dist/types/element.d.ts:36:5 - (ae-forgotten-export) The symbol "CdpSession" needs to be exported by the entry point index.d.ts
-// dist/types/element.d.ts:44:5 - (ae-forgotten-export) The symbol "DockSide" needs to be exported by the entry point index.d.ts
+// @public
+export function defineDevtoolsAnywhere(tag?: string): void;
+
+// @public
+export class DevtoolsAnywhereElement extends HTMLElement {
+    constructor();
+    attributeChangedCallback(): void;
+    connectedCallback(): void;
+    disconnectedCallback(): void;
+    get dock(): DockSide;
+    set dock(side: DockSide);
+    enterShell(): void;
+    exitShell(): Promise<void>;
+    hide(): void;
+    static observedAttributes: string[];
+    get open(): boolean;
+    set open(value: boolean);
+    show(): void;
+    toggle(): void;
+}
+
+// @public
+export const DOCK_SIDES: readonly ['bottom', 'right', 'left', 'undocked'];
+
+// @public
+export type DockSide = (typeof DOCK_SIDES)[number];
+
+// @public
+export type ProbeScriptAttributes = {
+    'data-frontend'?: string;
+    'data-bundle'?: string;
+    'data-open'?: true;
+    'data-sw'?: string | true;
+    'data-remote'?: string | true;
+    'data-single-path'?: true;
+};
 
 ```

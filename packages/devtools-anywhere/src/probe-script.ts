@@ -2,7 +2,7 @@
  * The attributes of the probe's script tag (probe.iife.js), which the probe reads and the Vite
  * plugin and the remote server write. Those set to `true` are written without a value.
  *
- * @internal
+ * @public
  */
 export type ProbeScriptAttributes = {
   /** The frontend to mount <devtools-anywhere> with, after the page has loaded. */

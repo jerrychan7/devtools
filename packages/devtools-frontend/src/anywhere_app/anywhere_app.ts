@@ -31,7 +31,14 @@ import * as Root from '../../core/root/root.js';
 import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import {type DockSide, type EmbedderRequest, type FrontendHash, OWN_SCRIPTS, REQUEST_KEY} from './embedder.js';
+import {
+  type DockSide,
+  type EmbedderRequest,
+  type FrontendHash,
+  OWN_SCRIPTS,
+  type RemoteFrontendHash,
+  REQUEST_KEY,
+} from './embedder.js';
 import * as Main from '../main/main.js';
 
 // The Sources panel's Page tab lists the page's resources. Upstream registers it in
@@ -133,7 +140,8 @@ const DOCK_SIDE_OF: Record<UI.DockController.DockState, DockSide>&Record<DockSid
 // relay with upstream's `?ws=`/`?wss=` (its WebSocket transport), and there is no embedder.
 // A frontend hosted elsewhere (a CDN) is given them as `#?ws=`/`#?wss=`, so that the socket's token
 // is not sent there: upstream reads only the query, which they are copied to.
-for (const name of ['ws', 'wss']) {
+const REMOTE_PARAMS: ReadonlyArray<keyof RemoteFrontendHash> = ['ws', 'wss'];
+for (const name of REMOTE_PARAMS) {
   const value = params.get(name);
   if (value && !Root.Runtime.Runtime.queryParam(name)) {
     Root.Runtime.Runtime.setQueryParamForTesting(name, value);

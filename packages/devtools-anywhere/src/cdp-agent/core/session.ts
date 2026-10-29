@@ -1,6 +1,8 @@
 /**
  * A CDP method handler. Each handler declares its own params type; `never` accepts all of
  * them, and the dispatcher passes whatever the client sent.
+ *
+ * @internal
  */
 export type Handler = (params: never) => unknown;
 
@@ -28,10 +30,12 @@ export class CdpSession {
   private listeners = new Set<(message: string) => void>();
   private resets = new Set<() => void>();
 
+  /** Adds the handlers of `domain`'s methods, keeping those registered before. */
   register(domain: string, handlers: Record<string, Handler>) {
     this.domains.set(domain, { ...this.domains.get(domain), ...handlers });
   }
 
+  /** Adds a listener for the messages to send to the client; returns its removal. */
   onMessage(listener: (message: string) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -50,6 +54,7 @@ export class CdpSession {
     this.resets.forEach(fn => fn());
   }
 
+  /** Sends the client an event. */
   emit(method: string, params: object) {
     this.send({ method, params });
   }

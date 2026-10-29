@@ -5,9 +5,24 @@
 ```ts
 
 // @internal
+export class CdpSession {
+    call(method: string, params?: object): Promise<unknown>;
+    dispatch(message: string | {
+        id: number | string;
+        method: string;
+        params?: object;
+    }): Promise<void>;
+    emit(method: string, params: object): void;
+    onMessage(listener: (message: string) => void): () => void;
+    onReset(fn: () => void): void;
+    register(domain: string, handlers: Record<string, Handler>): void;
+    reset(): void;
+}
+
+// @public
 export function defineDevtoolsAnywhere(tag?: string): void;
 
-// @internal
+// @public
 export class DevtoolsAnywhereElement extends HTMLElement {
     constructor();
     attributeChangedCallback(): void;
@@ -21,12 +36,22 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     static observedAttributes: string[];
     get open(): boolean;
     set open(value: boolean);
+    // @internal
     session: CdpSession | null;
     show(): void;
     toggle(): void;
 }
 
+// @public
+export const DOCK_SIDES: readonly ['bottom', 'right', 'left', 'undocked'];
+
+// @public
+export type DockSide = (typeof DOCK_SIDES)[number];
+
 // @internal
+export type Handler = (params: never) => unknown;
+
+// @public
 export type ProbeScriptAttributes = {
     'data-frontend'?: string;
     'data-bundle'?: string;
@@ -35,5 +60,11 @@ export type ProbeScriptAttributes = {
     'data-remote'?: string | true;
     'data-single-path'?: true;
 };
+
+// @internal
+export interface RemoteFrontendHash {
+    ws: string;
+    wss: string;
+}
 
 ```

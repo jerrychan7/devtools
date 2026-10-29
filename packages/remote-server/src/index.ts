@@ -32,6 +32,7 @@ import path from 'node:path';
 import type { Duplex } from 'node:stream';
 import { TLSSocket } from 'node:tls';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import type { RemoteFrontendHash } from 'devtools-anywhere';
 import { WebSocketServer } from 'ws';
 import { listPage, probeAttributes } from './list-page';
 import { Target, type Peer } from './relay';
@@ -215,7 +216,7 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
   /** The target list as JSON, in the shape of Chrome's /json/list (plus its own fields). */
   function list(req: http.IncomingMessage) {
     const query = token === false ? '' : `?token=${token}`;
-    const ws = secure(req) ? 'wss' : 'ws';
+    const ws: keyof RemoteFrontendHash = secure(req) ? 'wss' : 'ws';
     const frontend = options.frontendUrl ?? `${base}front_end/anywhere_app.html`;
     // The frontend's URL may have a query (a version) and a fragment of its own.
     const hash = frontend.indexOf('#');

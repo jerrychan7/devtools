@@ -6,8 +6,11 @@
 /**
  * Where the panel is: docked to a side of the viewport, or floating over the page. The same
  * values as Chromium's UI.DockController.DockState, which the frontend checks at build time.
+ *
+ * @public
  */
 export const DOCK_SIDES = ['bottom', 'right', 'left', 'undocked'] as const;
+/** One of {@link DOCK_SIDES}. @public */
 export type DockSide = (typeof DOCK_SIDES)[number];
 
 /**
@@ -46,4 +49,19 @@ export interface FrontendHash {
   keep: '0' | '1';
   /** Whether it is on. */
   shell: '0' | '1';
+}
+
+/**
+ * What remote-server passes a frontend it does not serve itself (a CDN build) in its URL's hash
+ * (`#?ws=…`): the relay's socket, without the scheme, under the parameter naming the scheme. The
+ * frontend copies it to its query, which upstream reads, so that the socket's token stays out of
+ * requests to that host.
+ *
+ * @internal
+ */
+export interface RemoteFrontendHash {
+  /** The relay's socket over plain `ws:`. */
+  ws: string;
+  /** The relay's socket over `wss:`. */
+  wss: string;
 }

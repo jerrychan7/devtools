@@ -18,7 +18,7 @@ import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp/webmcp';
 import { installProbe, keep } from './probe';
 
-export { CdpSession } from './core/session';
+export { CdpSession, type Handler } from './core/session';
 export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {

@@ -8,3 +8,5 @@
 
 export { DevtoolsAnywhereElement, defineDevtoolsAnywhere } from './element';
 export type { ProbeScriptAttributes } from './probe-script';
+export { DOCK_SIDES, type DockSide, type RemoteFrontendHash } from './embedder';
+export type { CdpSession, Handler } from './cdp-agent';

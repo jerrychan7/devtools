@@ -209,13 +209,13 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
  *
- * @internal
+ * @public
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
   static observedAttributes = ['open', 'frontend', 'height', 'width', 'dock'];
 
-  /** The CDP session for this page. Created when the element is first connected. */
+  /** The CDP session for this page. Created when the element is first connected. @internal */
   session: CdpSession | null = null;
 
   private panel: HTMLDivElement;
@@ -576,7 +576,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
-/** Registers the element under `tag` unless something is already registered there. @internal */
+/** Registers the element under `tag` unless something is already registered there. @public */
 export function defineDevtoolsAnywhere(tag = 'devtools-anywhere') {
   if (!customElements.get(tag)) customElements.define(tag, DevtoolsAnywhereElement);
 }
