@@ -9,6 +9,4 @@
 // dist/types/element.d.ts:36:5 - (ae-forgotten-export) The symbol "CdpSession" needs to be exported by the entry point index.d.ts
 // dist/types/element.d.ts:44:5 - (ae-forgotten-export) The symbol "DockSide" needs to be exported by the entry point index.d.ts
 
-// (No @packageDocumentation comment for this package)
-
 ```

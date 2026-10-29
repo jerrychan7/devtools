@@ -1,3 +1,9 @@
+/**
+ * Vite plugin that injects devtools-anywhere into every page during development.
+ *
+ * @packageDocumentation
+ */
+
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';

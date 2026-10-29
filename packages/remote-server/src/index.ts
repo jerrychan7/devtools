@@ -1,3 +1,11 @@
+/**
+ * Remote debugging for devtools-anywhere: lets Chrome DevTools on one machine inspect a page
+ * running on another device. {@link startRemoteServer} runs a server of its own;
+ * {@link createRemoteHandler} mounts the same in an existing Node.js server.
+ *
+ * @packageDocumentation
+ */
+
 // Remote debugging: a page on one device (a phone, mostly) connects here, and Chrome DevTools on
 // another machine inspects it through this server.
 //

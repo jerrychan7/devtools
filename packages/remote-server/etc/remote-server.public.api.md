@@ -52,6 +52,4 @@ export interface RemoteServerOptions extends RemoteHandlerOptions {
 // @public
 export function startRemoteServer(options?: RemoteServerOptions): Promise<RemoteServer>;
 
-// (No @packageDocumentation comment for this package)
-
 ```

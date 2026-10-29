@@ -36,6 +36,4 @@ export type ProbeScriptAttributes = {
     'data-single-path'?: true;
 };
 
-// (No @packageDocumentation comment for this package)
-
 ```

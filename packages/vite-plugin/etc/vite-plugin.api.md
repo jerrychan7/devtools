@@ -20,6 +20,4 @@ export interface DevtoolsAnywhereOptions {
     serviceWorker?: boolean;
 }
 
-// (No @packageDocumentation comment for this package)
-
 ```
