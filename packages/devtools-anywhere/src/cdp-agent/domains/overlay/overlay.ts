@@ -216,16 +216,20 @@ export function registerOverlay(ctx: Context) {
       const nodeId = nodes.pushToClient?.(el);
       if (nodeId !== undefined) session.emit('Overlay.nodeHighlightRequested', { nodeId });
     };
-    const onMove = (event: Event) => {
-      const el = targetOf(event);
-      if (!el) return;
-      next = el;
-      if (!frame) frame = requestAnimationFrame(onFrame);
-    };
     const swallow = (event: Event) => {
       if (!targetOf(event)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+    };
+    // Like Chrome, a move over a node is the inspecting session's: neither the page nor another
+    // session in inspect mode (started later) sees it. A cross-origin iframe's content sends this
+    // window nothing, so Chrome's exception for out-of-process frames has nothing to apply to.
+    const onMove = (event: Event) => {
+      const el = targetOf(event);
+      if (!el) return;
+      swallow(event);
+      next = el;
+      if (!frame) frame = requestAnimationFrame(onFrame);
     };
     const onClick = (event: Event) => {
       const el = targetOf(event);
@@ -239,6 +243,9 @@ export function registerOverlay(ctx: Context) {
     const listening = new AbortController();
     const options = { capture: true, signal: listening.signal };
     window.addEventListener('pointermove', onMove, options);
+    window.addEventListener('mousemove', swallow, options);
+    window.addEventListener('mouseover', swallow, options);
+    window.addEventListener('mouseout', swallow, options);
     window.addEventListener('pointerdown', swallow, options);
     window.addEventListener('mousedown', swallow, options);
     window.addEventListener('pointerup', swallow, options);

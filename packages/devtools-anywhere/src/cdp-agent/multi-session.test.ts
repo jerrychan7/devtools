@@ -145,3 +145,42 @@ test('new sessions do not stack listeners or patches on the page', async () => {
   assert.deepEqual(result, { listening: 0, samePatch: true, added: 0 });
   await call(0, 'DOMStorage.disable');
 });
+
+test("in inspect mode, a hovered node is one session's only, and the page does not see the move", async () => {
+  await page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="hover-a" style="position:fixed;left:0;top:0;width:100px;height:100px">a</div>' +
+        '<div id="hover-b" style="position:fixed;left:200px;top:0;width:100px;height:100px">b</div>'
+    );
+    const counts = { first: 0, second: 0, page: 0 };
+    window.__hoverEvents = counts;
+    window.__sessions?.forEach((session, index) =>
+      session.onMessage(m => {
+        if (m.includes('Overlay.nodeHighlightRequested')) counts[index ? 'second' : 'first']++;
+      })
+    );
+    for (const type of ['mousemove', 'mouseover', 'pointermove']) document.addEventListener(type, () => counts.page++);
+  });
+  for (const index of [0, 1]) {
+    await call(index, 'DOM.getDocument');
+    await call(index, 'Overlay.setInspectMode', { mode: 'searchForNode', highlightConfig: {} });
+  }
+  const hover = async (x: number) => {
+    await page.mouse.move(x, 50, { steps: 3 });
+    await new Promise(r => setTimeout(r, 100));
+    const counts = await page.evaluate(() => window.__hoverEvents);
+    assert.ok(counts);
+    return { ...counts };
+  };
+  const first = await hover(50);
+  assert.ok(first.first > 0);
+  assert.deepEqual({ second: first.second, page: first.page }, { second: 0, page: 0 });
+  // The first session leaves inspect mode: the other takes over.
+  await call(0, 'Overlay.setInspectMode', { mode: 'none', highlightConfig: {} });
+  const second = await hover(250);
+  assert.ok(second.second > 0);
+  assert.deepEqual({ first: second.first, page: second.page }, { first: first.first, page: 0 });
+  await call(1, 'Overlay.setInspectMode', { mode: 'none', highlightConfig: {} });
+  assert.ok((await hover(50)).page > 0, 'the page sees moves again');
+});

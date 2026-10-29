@@ -32,6 +32,8 @@ declare global {
     __ours: { method: string; params: unknown }[];
     /** More CDP sessions in the page (multi-session.test.ts). */
     __sessions?: CdpSession[];
+    /** nodeHighlightRequested per session, and the page's moves (multi-session.test.ts). */
+    __hoverEvents?: { first: number; second: number; page: number };
     /** A CDP session with a stand-in snapDOM, the frames it sent and the scales it rendered at. */
     __screencast?: {
       session: CdpSession;
