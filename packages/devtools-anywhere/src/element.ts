@@ -234,6 +234,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  *
  * @public
  */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- the interface adds typed listeners only
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
   static observedAttributes = ['devtools-frontend-url'];
@@ -261,7 +262,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>${STYLE}</style>
 <button class="toggler" part="toggler" popover="manual" aria-label="Open DevTools">F12</button>
-<div class="panel" part="panel" popover="manual">
+<div class="panel" popover="manual">
   <div class="bar">
     <button class="close" aria-label="Close DevTools" title="Close DevTools">×</button>
   </div>
@@ -748,6 +749,79 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 }
 
 /**
+ * The events of `<devtools-anywhere>`, besides those of any element: `devtools-toggle-request`,
+ * fired on an element the page placed itself when a toggler naming it is clicked.
+ *
+ * @public
+ */
+export interface DevtoolsAnywhereElementEventMap extends HTMLElementEventMap {
+  /** A toggler naming this element, which the page placed itself, was clicked. */
+  'devtools-toggle-request': Event;
+}
+
+/** Typed listeners for {@link DevtoolsAnywhereElementEventMap}. @public */
+export interface DevtoolsAnywhereElement {
+  /** Listens to an event of {@link DevtoolsAnywhereElementEventMap}, typed. */
+  addEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(
+    type: K,
+    listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown,
+    options?: boolean | AddEventListenerOptions
+  ): void;
+  /** Listens to any other event. */
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ): void;
+  /** Stops listening to an event of {@link DevtoolsAnywhereElementEventMap}. */
+  removeEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(
+    type: K,
+    listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown,
+    options?: boolean | EventListenerOptions
+  ): void;
+  /** Stops listening to any other event. */
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions
+  ): void;
+}
+
+/**
+ * The attribute that makes any element a toggler: clicked, it opens and closes the probe's
+ * `<devtools-anywhere>` (empty), or asks an element the page placed (its id) with
+ * `devtools-toggle-request`. Its `aria-expanded` follows whether DevTools is open.
+ *
+ * @public
+ */
+export type TogglerAttributes = {
+  'data-devtools-anywhere-toggle'?: string;
+};
+
+/**
+ * The parts of `<devtools-anywhere>` the page can style with `::part()`: `toggler`, the F12
+ * button (`devtools-anywhere::part(toggler)`).
+ *
+ * @public
+ */
+export type DevtoolsAnywherePart = 'toggler';
+
+/**
+ * The element's tag, typed: what `HTMLElementTagNameMap` gets from this package, so that
+ * `document.querySelector('devtools-anywhere')` is a `DevtoolsAnywhereElement`.
+ *
+ * @public
+ */
+export interface DevtoolsAnywhereTagNameMap {
+  /** The element, registered by defineDevtoolsAnywhere() under its default tag. */
+  'devtools-anywhere': DevtoolsAnywhereElement;
+}
+
+declare global {
+  interface HTMLElementTagNameMap extends DevtoolsAnywhereTagNameMap {}
+}
+
+/**
  * The global elements, created for the probe (createGlobalElement), whether one has connected, and
  * those connected after it, which do nothing.
  */
@@ -795,7 +869,7 @@ const STATE_EVENT = 'devtools-anywhere-state';
 const CONTROL_EVENT = 'devtools-anywhere-control';
 
 /** Elements with this attribute open and close DevTools when clicked (see togglerTarget). */
-const TOGGLE_ATTRIBUTE = 'data-devtools-anywhere-toggle';
+const TOGGLE_ATTRIBUTE: keyof TogglerAttributes = 'data-devtools-anywhere-toggle';
 /** The tag the togglers look for, once they are installed. */
 let togglerTag = '';
 /** Toggler values already warned about. */

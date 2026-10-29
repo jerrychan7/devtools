@@ -21,7 +21,7 @@ export type ProbeScriptAttributes = {
   'data-shell-mode-locked'?: true;
   /** Hides the element's toggler button. */
   'data-no-toggler'?: true;
-  /** Passed on as the element's `sw` attribute (shell mode's Service Worker). */
+  /** In shell mode, registers its Service Worker from this URL (or next to the bundle when empty). */
   'data-sw'?: string | true;
   /** Connects to a remote debugging server: this URL, by default the one the probe is served from. */
   'data-remote'?: string | true;

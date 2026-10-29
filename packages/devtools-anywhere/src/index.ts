@@ -6,7 +6,14 @@
  * @packageDocumentation
  */
 
-export { DevtoolsAnywhereElement, defineDevtoolsAnywhere } from './element';
+export {
+  DevtoolsAnywhereElement,
+  defineDevtoolsAnywhere,
+  type DevtoolsAnywhereElementEventMap,
+  type DevtoolsAnywherePart,
+  type DevtoolsAnywhereTagNameMap,
+  type TogglerAttributes,
+} from './element';
 export type { ProbeScriptAttributes } from './probe-script';
 export { type RemoteFrontendHash } from './embedder';
 export type { CdpSession, Handler } from './cdp-agent';

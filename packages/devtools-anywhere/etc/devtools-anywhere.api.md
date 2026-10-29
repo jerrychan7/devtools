@@ -33,6 +33,27 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     session: CdpSession | null;
 }
 
+// @public
+export interface DevtoolsAnywhereElement {
+    addEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
+    removeEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
+}
+
+// @public
+export interface DevtoolsAnywhereElementEventMap extends HTMLElementEventMap {
+    'devtools-toggle-request': Event;
+}
+
+// @public
+export type DevtoolsAnywherePart = 'toggler';
+
+// @public
+export interface DevtoolsAnywhereTagNameMap {
+    'devtools-anywhere': DevtoolsAnywhereElement;
+}
+
 // @internal
 export type Handler = (params: never) => unknown;
 
@@ -54,5 +75,10 @@ export interface RemoteFrontendHash {
     ws: string;
     wss: string;
 }
+
+// @public
+export type TogglerAttributes = {
+    'data-devtools-anywhere-toggle'?: string;
+};
 
 ```

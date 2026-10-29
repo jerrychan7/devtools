@@ -17,6 +17,27 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 }
 
 // @public
+export interface DevtoolsAnywhereElement {
+    addEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
+    removeEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
+}
+
+// @public
+export interface DevtoolsAnywhereElementEventMap extends HTMLElementEventMap {
+    'devtools-toggle-request': Event;
+}
+
+// @public
+export type DevtoolsAnywherePart = 'toggler';
+
+// @public
+export interface DevtoolsAnywhereTagNameMap {
+    'devtools-anywhere': DevtoolsAnywhereElement;
+}
+
+// @public
 export type ProbeScriptAttributes = {
     'data-devtools-frontend-url'?: string;
     'data-bundle'?: string;
@@ -27,6 +48,11 @@ export type ProbeScriptAttributes = {
     'data-sw'?: string | true;
     'data-remote'?: string | true;
     'data-single-path'?: true;
+};
+
+// @public
+export type TogglerAttributes = {
+    'data-devtools-anywhere-toggle'?: string;
 };
 
 ```
