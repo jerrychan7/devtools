@@ -25,6 +25,9 @@ export * from './shell';
 const LIMIT = 10_000;
 const MAX_TOOL_OUTCOMES = 50;
 
+/** `performance.now()`, written once: it is called in many places, and the probe is kept small. */
+const now = () => performance.now();
+
 /** Drops the oldest entries of `list` past `max`. */
 export function keep(list: unknown[], max: number): void {
   if (list.length > max) list.splice(0, list.length - max);
@@ -112,7 +115,7 @@ export function installProbe(): Probe {
     return rec;
   }
   const track: Track = record =>
-    add({ ...record, requestId: '', startTime: performance.now(), wallTime: Date.now(), state: 'pending' });
+    add({ ...record, requestId: '', startTime: now(), wallTime: Date.now(), state: 'pending' });
   function update(rec: ProbeRequest, patch: Partial<ProbeRequest>) {
     Object.assign(rec, patch);
     requestListeners.forEach(fn => fn(rec));
@@ -294,7 +297,7 @@ function hookWebSocket(probe: Probe, notify: (rec: SocketRecord) => void) {
   const listen = EventTarget.prototype.addEventListener;
   const records = new WeakMap<WebSocket, SocketRecord>();
   const push = (rec: SocketRecord, type: 'sent' | 'received' | 'error', data?: unknown) => {
-    rec.events.push({ type, time: performance.now(), data });
+    rec.events.push({ type, time: now(), data });
     keep(rec.events, probe.limits.socketEvents);
     notify(rec);
   };
@@ -305,20 +308,20 @@ function hookWebSocket(probe: Probe, notify: (rec: SocketRecord) => void) {
         requestId: '',
         url: this.url,
         stack: new Error().stack,
-        startTime: performance.now(),
+        startTime: now(),
         wallTime: Date.now(),
         events: [],
       };
       records.set(this, rec);
       notify(rec);
       listen.call(this, 'open', () => {
-        rec.openTime = performance.now();
+        rec.openTime = now();
         notify(rec);
       });
       listen.call(this, 'message', e => push(rec, 'received', (e as MessageEvent).data));
       listen.call(this, 'error', () => push(rec, 'error'));
       listen.call(this, 'close', () => {
-        rec.closeTime = performance.now();
+        rec.closeTime = now();
         notify(rec);
       });
     }
@@ -345,7 +348,7 @@ function hookDebugger(addLog: (entry: ProbeLog) => void) {
         kind: 'console',
         type: 'debugger',
         args: [],
-        time: performance.now(),
+        time: now(),
         // The hook's own frame is dropped like the console wrapper's.
         get stack() {
           return error.stack;
@@ -372,7 +375,7 @@ function hookConsole(addLog: (entry: ProbeLog) => void) {
     const orig: unknown = Reflect.get(console, name);
     if (typeof orig !== 'function') continue;
     Reflect.set(console, name, function (this: unknown, ...args: unknown[]) {
-      const time = performance.now();
+      const time = now();
       let entry = args;
       let fact: number | undefined;
       let keep: unknown = args.length || /^(group|trace|clear)/.test(name);
@@ -574,7 +577,7 @@ function hookErrors(addLog: (entry: ProbeLog) => void) {
       kind: 'exception',
       text: 'Uncaught',
       error: e.error !== undefined ? e.error : e.message,
-      time: performance.now(),
+      time: now(),
       stack: stackOf(e.error),
       url: e.filename,
       line: e.lineno,
@@ -586,7 +589,7 @@ function hookErrors(addLog: (entry: ProbeLog) => void) {
       kind: 'exception',
       text: 'Uncaught (in promise)',
       error: e.reason,
-      time: performance.now(),
+      time: now(),
       stack: stackOf(e.reason),
     });
   });
@@ -614,7 +617,7 @@ function hookFetch(track: Track, update: Update, probe: Probe) {
         ? { errorText: 'net::ERR_ABORTED', canceled: true }
         : // The page only sees a TypeError; the net error behind it is not exposed.
           { errorText: 'net::ERR_FAILED' }),
-      endTime: performance.now(),
+      endTime: now(),
     });
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
     const req = input instanceof Request ? input : null;
@@ -668,7 +671,7 @@ function hookFetch(track: Track, update: Update, probe: Probe) {
         const contentType = res.headers.get('content-type');
         update(rec, {
           state: 'headers',
-          responseTime: performance.now(),
+          responseTime: now(),
           status: res.status,
           statusText: res.statusText,
           headers: res.headers,
@@ -679,7 +682,7 @@ function hookFetch(track: Track, update: Update, probe: Probe) {
           contentType?.split(';')[0]?.trim() === 'text/event-stream' ||
           Number(res.headers.get('content-length')) > probe.limits.body
         ) {
-          update(rec, { state: 'done', endTime: performance.now(), encodedDataLength: 0 });
+          update(rec, { state: 'done', endTime: now(), encodedDataLength: 0 });
           return;
         }
         const copy = res.clone().body;
@@ -690,7 +693,7 @@ function hookFetch(track: Track, update: Update, probe: Probe) {
               state: 'done',
               body: blob,
               encodedDataLength: size,
-              endTime: performance.now(),
+              endTime: now(),
             }),
           err => failed(rec, err)
         );
@@ -750,7 +753,7 @@ function hookXhr(track: Track, update: Update, listen: EventTarget['addEventList
     const rec = current.get(this);
     if (rec) {
       current.delete(this);
-      update(rec, { state: 'failed', errorText: 'net::ERR_ABORTED', canceled: true, endTime: performance.now() });
+      update(rec, { state: 'failed', errorText: 'net::ERR_ABORTED', canceled: true, endTime: now() });
     }
     infos.set(this, {
       method: String(args[0]).toUpperCase(),
@@ -793,7 +796,7 @@ function hookXhr(track: Track, update: Update, listen: EventTarget['addEventList
         update(rec, {
           state: 'failed',
           errorText: String((err instanceof Error && err.message) || err),
-          endTime: performance.now(),
+          endTime: now(),
         });
         throw err;
       }
@@ -814,14 +817,14 @@ function watchXhr(
     const rec = current.get(xhr);
     if (!rec) return;
     current.delete(xhr);
-    update(rec, { ...patch, endTime: performance.now() });
+    update(rec, { ...patch, endTime: now() });
   };
   const responseMeta = () => ({ status: xhr.status, statusText: xhr.statusText, headers: xhr.getAllResponseHeaders() });
   listen.call(xhr, 'readystatechange', () => {
     const rec = current.get(xhr);
     if (!rec) return;
     if (xhr.readyState === 2) {
-      update(rec, { state: 'headers', responseTime: performance.now(), ...responseMeta() });
+      update(rec, { state: 'headers', responseTime: now(), ...responseMeta() });
     } else if (xhr.readyState === 4) {
       // Failures are told apart by the event that follows: abort, timeout or error.
       if (!xhr.status) return;
