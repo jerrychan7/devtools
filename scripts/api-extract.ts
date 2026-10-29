@@ -1,6 +1,7 @@
-// Rolls a package's type declarations (emitted by tsc into dist/types/) up into one file per
-// entry point with API Extractor, and writes its API report (etc/<package>.api.md), so that only
-// the public API is published and a change to it shows in review. Run from a package directory,
+// Rolls a package's type declarations (emitted by tsc into dist/types/) up into one untrimmed file
+// per entry point with API Extractor (@internal exports included: other packages in this repo
+// import them), and writes two API reports: etc/<package>.public.api.md for the public API and
+// etc/<package>.api.md for everything, so that a change to the API shows in review. Run from a package directory,
 // after tsc: `node ../../scripts/api-extract.ts [config ...]` (default: api-extractor.json).
 // dist/types/ is removed afterwards: nothing outside the rolled-up files is published.
 //
