@@ -129,6 +129,8 @@ test('new sessions do not stack listeners or patches on the page', async () => {
         });
         await session.call('DOMStorage.enable');
         await session.call('Network.enable');
+        // Runtime watches the page's scripts from its first lookup of the global lexical names.
+        await session.call('Runtime.globalLexicalScopeNames');
         await session.call('DOMStorage.disable');
         await session.call('Network.disable');
         session.reset();

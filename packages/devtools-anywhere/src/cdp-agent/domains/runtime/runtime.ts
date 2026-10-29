@@ -491,23 +491,28 @@ function globalLexicalNames(probe: Context['probe']) {
 
   /** The last result, until a script is added, removed or loaded. */
   let cached: Promise<string[]> | undefined;
-  let watching = false;
+  /** Stops watching the scripts, while watching. */
+  let unwatch: (() => void) | null = null;
   const invalidate = () => {
     cached = undefined;
   };
   const hasScript = (node: Node) =>
     node instanceof HTMLScriptElement || (node instanceof Element && !!node.querySelector('script'));
   function watch() {
-    if (watching) return;
-    watching = true;
-    probe.onRequest(rec => {
+    if (unwatch) return;
+    const offRequest = probe.onRequest(rec => {
       if (rec.type === 'Script' && rec.state === 'done') invalidate();
     });
-    new MutationObserver(records => {
+    const observer = new MutationObserver(records => {
       const inScript = (node: Node) =>
         node instanceof HTMLScriptElement || node.parentNode instanceof HTMLScriptElement;
       if (records.some(r => inScript(r.target) || [...r.addedNodes, ...r.removedNodes].some(hasScript))) invalidate();
-    }).observe(document, { childList: true, subtree: true, characterData: true });
+    });
+    observer.observe(document, { childList: true, subtree: true, characterData: true });
+    unwatch = () => {
+      offRequest();
+      observer.disconnect();
+    };
   }
 
   return {
@@ -517,6 +522,12 @@ function globalLexicalNames(probe: Context['probe']) {
       watch();
       cached ??= compute();
       return cached;
+    },
+    /** Stops watching the scripts (the session ended); the next list() looks again. */
+    stop() {
+      unwatch?.();
+      unwatch = null;
+      invalidate();
     },
   };
 
@@ -557,7 +568,10 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
-  session.onReset(() => (lastResult = undefined));
+  session.onReset(() => {
+    lastResult = undefined;
+    lexicalNames.stop();
+  });
 
   /** Console utilities, available only while console input is evaluated. */
   function commandLineApi(): Record<string, unknown> {
