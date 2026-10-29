@@ -105,8 +105,23 @@ interface FloatRect {
   height: number;
 }
 
+/**
+ * Whether the browser has the top layer for popovers. There the launcher and the panel are above
+ * everything the page draws, whatever its z-index; elsewhere they fall back to the highest z-index.
+ */
+const TOP_LAYER = typeof HTMLElement.prototype.showPopover === 'function';
+
+/** Shows or hides a popover, if not already. */
+function setPopoverOpen(el: HTMLElement, open: boolean) {
+  if (el.matches(':popover-open') !== open) el.togglePopover(open);
+}
+
 const STYLE = `
 :host { all: initial; }
+/* Both go into the top layer as popovers (see TOP_LAYER): undo the browser's popover style. */
+.launcher, .panel {
+  inset: auto; width: auto; height: auto; margin: 0; padding: 0; border: 0; overflow: visible; color: inherit;
+}
 .launcher {
   position: fixed; z-index: 2147483647;
   right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -219,6 +234,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   session: CdpSession | null = null;
 
   private panel: HTMLDivElement;
+  private launcher: HTMLButtonElement;
   private frame: HTMLIFrameElement;
   private loadedUrl = '';
   private disconnect: (() => void) | null = null;
@@ -228,8 +244,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     super();
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>${STYLE}</style>
-<button class="launcher" part="launcher" aria-label="Open DevTools">F12</button>
-<div class="panel" part="panel">
+<button class="launcher" part="launcher" popover="manual" aria-label="Open DevTools">F12</button>
+<div class="panel" part="panel" popover="manual">
   <div class="bar">
     <button class="close" aria-label="Close DevTools" title="Close DevTools">×</button>
   </div>
@@ -244,7 +260,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     };
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
-    part('.launcher').addEventListener('click', () => this.show());
+    this.launcher = part<HTMLButtonElement>('.launcher');
+    this.launcher.addEventListener('click', () => this.show());
     part('.close').addEventListener('click', () => (this.hasAttribute('shell') ? void this.exitShell() : this.hide()));
     this.setupResizer(part<HTMLElement>('.bar'));
     this.setupCorner(part<HTMLElement>('.corner'));
@@ -422,6 +439,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   private update() {
     this.layout();
+    // The shell document is ours: nothing there covers the panel.
+    if (TOP_LAYER && !this.hasAttribute('shell')) {
+      setPopoverOpen(this.panel, this.open);
+      setPopoverOpen(this.launcher, !this.open);
+    }
     // Load the frontend only once DevTools is opened; the probe keeps capturing meanwhile.
     if (this.open) this.loadFrontend();
   }

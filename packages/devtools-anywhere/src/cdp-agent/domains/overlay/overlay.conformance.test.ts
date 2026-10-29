@@ -55,6 +55,12 @@ test('highlightNode draws the box model, hideHighlight removes it', async () => 
   await t.ours.send('Overlay.highlightNode', { nodeId, highlightConfig: {} });
   const boxes = await highlightBoxes();
   assert.deepEqual(boxes.slice(0, 4), [model.margin, model.border, model.padding, model.content].map(quadRect));
+  // Chrome has popovers: the <devtools-anywhere> panel is in the top layer, the overlay can take
+  // the highest z-index.
+  const zIndex = await t.page.evaluate(
+    () => document.querySelector<HTMLElement>('[data-devtools-anywhere="overlay"]')?.style.zIndex
+  );
+  assert.equal(zIndex, '2147483647');
   await t.ours.send('Overlay.hideHighlight');
   assert.deepEqual(await highlightBoxes(), []);
 });

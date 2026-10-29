@@ -3,6 +3,13 @@ import type { Context } from '../../core/context';
 import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../../core/nodes';
 import { boxModel, resolveNode } from '../dom/dom';
 
+/**
+ * The overlay's z-index: the highest there is. Where popovers are missing, <devtools-anywhere>
+ * cannot put its panel and launcher in the top layer, and gives them that z-index instead: the
+ * overlay goes one below them then, so as not to cover them.
+ */
+const Z_INDEX = typeof HTMLElement.prototype.showPopover === 'function' ? 2147483647 : 2147483646;
+
 /** Axis-aligned bounds of a CDP quad (x1 y1 … x4 y4, clockwise from the top left). */
 function bounds(quad: number[]) {
   const xs = quad.filter((_, i) => i % 2 === 0);
@@ -33,7 +40,7 @@ class Highlighter {
     const layer = document.createElement('div');
     layer.setAttribute(OWN_ATTRIBUTE, 'overlay');
     markOwn(layer);
-    layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647';
+    layer.style.cssText = `position:fixed;inset:0;pointer-events:none;z-index:${Z_INDEX}`;
     document.documentElement.appendChild(layer);
     return (this.layer = layer);
   }
@@ -162,7 +169,7 @@ function viewportSizeOnResize() {
       label = document.createElement('div');
       label.setAttribute(OWN_ATTRIBUTE, 'viewport-size');
       markOwn(label);
-      label.style.cssText = `position:fixed;top:0;right:0;z-index:2147483647;pointer-events:none;padding:2px 6px;
+      label.style.cssText = `position:fixed;top:0;right:0;z-index:${Z_INDEX};pointer-events:none;padding:2px 6px;
         background:rgba(255,255,255,.85);color:#222;font:11px/16px system-ui,sans-serif;border-radius:0 0 0 2px`;
     }
     label.textContent = `${innerWidth}px × ${innerHeight}px`;
