@@ -56,7 +56,7 @@ export class CdpSession {
 
   /** Handles one client message and sends the response to the listeners. */
   async dispatch(message: string | { id: number | string; method: string; params?: object }) {
-    let parsed: { id?: number | string; method: string; params?: object };
+    let parsed: unknown;
     try {
       parsed = typeof message === 'string' ? JSON.parse(message) : message;
     } catch (e) {
@@ -64,7 +64,21 @@ export class CdpSession {
       this.send({ error: { code: -32700, message: errorMessage(e) } });
       return;
     }
-    const { id, method, params } = parsed;
+    // Like Chrome, a malformed message gets -32600, with its id once the id is valid. Unlike
+    // Chrome, string ids are accepted too: the relay tags its own requests with them.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      this.send({ error: { code: -32600, message: 'Message must be an object' } });
+      return;
+    }
+    const { id, method, params } = parsed as { id?: unknown; method?: unknown; params?: object };
+    if (typeof id !== 'string' && (typeof id !== 'number' || !Number.isInteger(id))) {
+      this.send({ error: { code: -32600, message: "Message must have integer 'id' property" } });
+      return;
+    }
+    if (typeof method !== 'string') {
+      this.send({ id, error: { code: -32600, message: "Message must have string 'method' property" } });
+      return;
+    }
     try {
       this.send({ id, result: await this.call(method, params) });
     } catch (e) {

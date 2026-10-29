@@ -14,7 +14,7 @@
 // answered while it was away. The same loader id while the page is ready only flushes what was
 // queued (a dropped connection, a repeated hello).
 
-export * from './protocol';
+export * from './protocol.js';
 
 // The core runs in the shell (a browser) and in the remote server (Node): of their globals it
 // only uses URL, which both have. Declared for this module only, instead of taking in either's
@@ -133,7 +133,12 @@ export abstract class RelayCore {
     // Anything else is the page's CDP session's to answer (or reject).
     if (typeof method !== 'string') return this.send(session, data);
     if (method.endsWith('.enable')) session.enabled.set(method, params ?? {});
-    else if (method.endsWith('.disable')) session.enabled.delete(method.replace(/disable$/, 'enable'));
+    else if (method.endsWith('.disable')) {
+      const enable = method.replace(/disable$/, 'enable');
+      session.enabled.delete(enable);
+      // A held Debugger.enable the frontend disabled since is not sent to the next instance.
+      if (enable === HELD_ENABLE) this.release(session);
+    }
     if (!isId(id)) return this.send(session, data);
     // Between two page instances Chrome fails the command too, and the next may never come.
     if (this.loaderId && !this.pageReady) {
@@ -222,6 +227,12 @@ export abstract class RelayCore {
     if (method === HELD_ENABLE) session.held.add(id);
     else if (method.endsWith('.enable')) session.client.send(JSON.stringify({ id, result: {} }));
     else session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+  }
+
+  /** Fails the session's held Debugger.enable commands, as Chrome fails those of a gone document. */
+  private release(session: Session) {
+    for (const id of session.held) session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+    session.held.clear();
   }
 
   private abandonAll() {

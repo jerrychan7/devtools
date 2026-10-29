@@ -43,3 +43,30 @@ test('an unparsable message is answered with a parse error', async () => {
   assert.equal(replies[0]?.id, undefined);
   assert.equal(replies[0]?.error?.code, -32700);
 });
+
+test('a malformed message is answered with an invalid request error', async () => {
+  const cases: [string, number | string | undefined, string][] = [
+    ['null', undefined, 'Message must be an object'],
+    ['5', undefined, 'Message must be an object'],
+    ['{}', undefined, "Message must have integer 'id' property"],
+    ['{"id":true,"method":"Runtime.enable"}', undefined, "Message must have integer 'id' property"],
+    ['{"id":1.5,"method":"Runtime.enable"}', undefined, "Message must have integer 'id' property"],
+    ['{"id":7}', 7, "Message must have string 'method' property"],
+    ['{"id":7,"method":3}', 7, "Message must have string 'method' property"],
+    // String ids are accepted (the relay uses them), so the id is echoed back.
+    ['{"id":"relay-1"}', 'relay-1', "Message must have string 'method' property"],
+  ];
+  for (const [message, id, text] of cases) {
+    const replies = await t.page.evaluate(async m => {
+      const out: string[] = [];
+      const off = window.__session.onMessage(r => out.push(r));
+      await window.__session.dispatch(m);
+      off();
+      return out.map(r => JSON.parse(r) as { id?: number | string; error?: { code: number; message: string } });
+    }, message);
+    assert.equal(replies.length, 1, message);
+    assert.equal(replies[0]?.id, id, message);
+    assert.equal(replies[0]?.error?.code, -32600, message);
+    assert.equal(replies[0]?.error?.message, text, message);
+  }
+});
