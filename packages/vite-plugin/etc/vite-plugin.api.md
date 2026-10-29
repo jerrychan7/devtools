@@ -15,6 +15,7 @@ export interface DevtoolsAnywhereOptions {
     defaultShellMode?: 'on' | 'off';
     devtoolsFrontendPath?: string;
     devtoolsFrontendUrl?: string;
+    idInQuery?: boolean;
     noToggler?: boolean;
     openImmediately?: boolean;
     remote?: string;

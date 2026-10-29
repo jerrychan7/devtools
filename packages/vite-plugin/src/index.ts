@@ -47,6 +47,11 @@ export interface DevtoolsAnywhereOptions {
    * instead of mounting DevTools in the page.
    */
   remote?: string;
+  /**
+   * With `remote`, connects to the server's base path with the target in the query, for a server
+   * with `idInQuery` (`data-id-in-query`). Default: false.
+   */
+  idInQuery?: boolean;
 }
 
 const BASE = '/@devtools-anywhere/';
@@ -87,9 +92,13 @@ function packageDir(require: NodeJS.Require, file: string): string | undefined {
 export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}): Plugin {
   const require = createRequire(import.meta.url);
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'));
-  const entry = options.devtoolsFrontendUrl
-    ? undefined
-    : (options.devtoolsFrontendPath ?? packageFile(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'));
+  const given = options.devtoolsFrontendUrl ? undefined : options.devtoolsFrontendPath;
+  // Its directory is served: a directory given here would serve its parent.
+  const badPath = given !== undefined && !(existsSync(given) && statSync(given).isFile());
+  const entry =
+    options.devtoolsFrontendUrl || badPath
+      ? undefined
+      : (given ?? packageFile(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'));
   const frontendDir = entry && path.dirname(path.resolve(entry));
   const frontend =
     options.devtoolsFrontendUrl ?? (entry ? `${BASE}front_end/${encodeURIComponent(path.basename(entry))}` : undefined);
@@ -123,7 +132,8 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
     apply: 'serve',
 
     configResolved(config) {
-      if (!frontend)
+      if (badPath) config.logger.warn(`[devtools-anywhere] \`devtoolsFrontendPath\` is not a file: ${given}`);
+      else if (!frontend)
         config.logger.warn(
           '[devtools-anywhere] No DevTools frontend found: install @devtools-anywhere/devtools-frontend, or set `devtoolsFrontendPath` or `devtoolsFrontendUrl`.'
         );
@@ -148,8 +158,10 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
       order: 'pre',
       handler() {
         const attrs: { src: string } & ProbeScriptAttributes = { src: `${BASE}probe.iife.js` };
-        if (options.remote) attrs['data-remote'] = options.remote;
-        else if (frontend) attrs['data-devtools-frontend-url'] = frontend;
+        if (options.remote) {
+          attrs['data-remote'] = options.remote;
+          if (options.idInQuery) attrs['data-id-in-query'] = true;
+        } else if (frontend) attrs['data-devtools-frontend-url'] = frontend;
         if (options.openImmediately) attrs['data-open-immediately'] = true;
         if (options.defaultShellMode) attrs['data-default-shell-mode'] = options.defaultShellMode;
         if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;

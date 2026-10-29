@@ -138,3 +138,33 @@ test(
     assert.equal(typeof (await res.json()), 'object');
   }
 );
+
+/** The probe script tag the plugin injects with `options`, from a dev server of its own. */
+async function injected(options: Parameters<typeof devtoolsAnywhere>[0]) {
+  const own = await createServer({
+    root: path.join(here, 'vite-app'),
+    logLevel: 'silent',
+    server: { middlewareMode: true, hmr: false },
+    plugins: [devtoolsAnywhere(options)],
+  });
+  try {
+    const html = await own.transformIndexHtml('/', '<html><head></head><body></body></html>');
+    const tag = /<script src="\/@devtools-anywhere\/probe\.iife\.js"[^>]*>/.exec(html)?.[0];
+    assert.ok(tag, html);
+    return tag;
+  } finally {
+    await own.close();
+  }
+}
+
+test('idInQuery goes with remote as data-id-in-query', async () => {
+  const remote = 'http://127.0.0.1:8080/';
+  assert.match(await injected({ remote, idInQuery: true }), / data-remote="[^"]+" data-id-in-query[ >]/);
+  assert.doesNotMatch(await injected({ remote }), /data-id-in-query/);
+});
+
+test('a devtoolsFrontendPath that is not a file serves no frontend', async () => {
+  // A directory would otherwise have its parent served.
+  const tag = await injected({ devtoolsFrontendPath: path.join(here, 'frontends', 'frontend-dir') });
+  assert.doesNotMatch(tag, /data-devtools-frontend-url/);
+});
