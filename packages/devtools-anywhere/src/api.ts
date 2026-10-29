@@ -18,4 +18,10 @@ export interface DevtoolsAnywhereApi {
   connectRemote(serverUrl: string, options?: RemoteOptions): () => void;
   createCdpSession: typeof createCdpSession;
   defineDevtoolsAnywhere(tag?: string): void;
+  /**
+   * Creates the page's global <devtools-anywhere>, which the probe mounts. Only the first one
+   * connected works; later ones warn and stay hidden. Null, with a warning, when the page has
+   * registered `devtools-anywhere` itself.
+   */
+  createGlobalElement(): HTMLElement | null;
 }

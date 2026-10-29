@@ -3,7 +3,13 @@
 // Inside the page iframe of shell mode, it connects the page's CDP session to the shell.
 import { createCdpSession, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
 import { connectFrontend, connectToShell } from './connection';
-import { DevtoolsAnywhereElement, createPageSession, defineDevtoolsAnywhere, setBundleUrl } from './element';
+import {
+  DevtoolsAnywhereElement,
+  createGlobalElement,
+  createPageSession,
+  defineDevtoolsAnywhere,
+  setBundleUrl,
+} from './element';
 import type { DevtoolsAnywhereApi } from './api';
 import { SNAPDOM_SCRIPT } from './embedder';
 import { connectRemote } from './remote';
@@ -29,6 +35,7 @@ if (!('DevtoolsAnywhere' in window)) {
     connectRemote: (serverUrl, options) => connectRemote(createPageSession, serverUrl, options),
     createCdpSession,
     defineDevtoolsAnywhere,
+    createGlobalElement,
   };
   Object.assign(window, { DevtoolsAnywhere: api });
 }

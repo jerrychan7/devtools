@@ -4,7 +4,8 @@
 //
 // As the first script in <head>, it captures from the very start. With `data-frontend`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
-// the page has loaded and mounts <devtools-anywhere>. `data-open-immediately` opens DevTools right away; `data-sw` is passed on as the element's `sw`
+// the page has loaded and mounts its own <devtools-anywhere> under <html>, whatever the page has.
+// `data-open-immediately` opens DevTools right away; `data-sw` is passed on as the element's `sw`
 // attribute (see shell mode), `data-no-toggler` as its `no-toggler`.
 //
 // With `data-frontend`, the top-level page enters shell mode by default, on its first load: the
@@ -119,9 +120,15 @@ if (!readShellConfig() && navigator.serviceWorker) {
     .catch(() => {});
 }
 
-/** The bundle's API (src/api.ts), once the bundle has run: checked, since it is built separately. */
-const isApi = (api: unknown): api is Pick<DevtoolsAnywhereApi, 'connectRemote'> =>
-  typeof api === 'object' && api !== null && 'connectRemote' in api && typeof api.connectRemote === 'function';
+/**
+ * Whether the bundle's API (src/api.ts) has the function `name`, once the bundle has run: checked,
+ * since it is built separately.
+ */
+const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
+  api: unknown,
+  name: K
+): api is Pick<DevtoolsAnywhereApi, K> =>
+  typeof api === 'object' && api !== null && typeof Reflect.get(api, name) === 'function';
 
 // In the shell's top window the probe has replaced the document with the shell already.
 if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
@@ -131,24 +138,25 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
     const loader = document.createElement('script');
     loader.src = bundle;
     loader.onload = () => {
+      const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
       if (remote !== null) {
-        const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
-        if (isApi(api)) {
-          api.connectRemote(new URL(remote || '.', script.src).href, {
-            singlePath: attribute('data-single-path') !== null,
-          });
-        }
+        if (!hasApi(api, 'connectRemote')) return;
+        api.connectRemote(new URL(remote || '.', script.src).href, {
+          singlePath: attribute('data-single-path') !== null,
+        });
         return;
       }
-      if (!frontend || document.querySelector('devtools-anywhere')) return;
-      const element = document.createElement('devtools-anywhere');
+      if (!frontend || !hasApi(api, 'createGlobalElement')) return;
+      // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
+      const element = api.createGlobalElement();
+      if (!element) return;
       element.setAttribute('frontend', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');
       if (locked) element.setAttribute('shell-mode-locked', '');
       if (noToggler) element.setAttribute('no-toggler', '');
       const sw = attribute('data-sw');
       if (sw !== null) element.setAttribute('sw', sw);
-      document.body.appendChild(element);
+      document.documentElement.appendChild(element);
     };
     document.head.appendChild(loader);
   };

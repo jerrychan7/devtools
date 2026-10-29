@@ -129,7 +129,7 @@
 </head>
 ```
 
-页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并挂载 `<devtools-anywhere>`。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-sw` 在外壳模式下启用 Service Worker。
+页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并在 `<html>` 下、与 `<body>` 同级挂载它自己的 `<devtools-anywhere>`，不管页面里有没有 `<devtools-anywhere>`；每个页面只有一个这样的全局元素，再出现的只在控制台警告。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-sw` 在外壳模式下启用 Service Worker。
 
 ### Vite
 

@@ -1,4 +1,5 @@
-// The probe's options: a locked shell mode and data-no-toggler.
+// The probe's options: a locked shell mode, data-no-toggler, and the global <devtools-anywhere>
+// the probe mounts under <html>, whatever the page has.
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
@@ -26,16 +27,19 @@ beforeEach(async () => {
 
 const open = async (name: string) => {
   await page.goto(`${env?.baseUrl}/tests/e2e/pages/${name}`);
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('iframe'));
+  await page.waitForFunction(() =>
+    document.querySelector('devtools-anywhere[shell], html > devtools-anywhere')?.shadowRoot?.querySelector('iframe')
+  );
 };
 
 /** The global element (or the shell's): where it is, its flags and its frontend's URL. */
 const globalState = () =>
   page.evaluate(() => {
-    const el = document.querySelector('devtools-anywhere');
+    const el = document.querySelector('devtools-anywhere[shell], html > devtools-anywhere');
     if (!el) throw new Error('no global <devtools-anywhere>');
     return {
       shell: el.hasAttribute('shell'),
+      inHtml: el.parentElement === document.documentElement,
       locked: el.hasAttribute('shell-mode-locked'),
       noToggler: el.hasAttribute('no-toggler'),
       frontend: el.shadowRoot?.querySelector('iframe')?.src ?? '',
@@ -136,7 +140,71 @@ test('locked on, a page that refuses to be framed is shown on its own', async ()
     });
   });
   await page.goto(`${env?.baseUrl}/tests/e2e/pages/locked-on.html`);
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('html > devtools-anywhere'), { timeout: 8000 });
   assert.equal((await globalState()).shell, false);
   assert.equal(await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell-refused')), '1');
+});
+
+test("the probe mounts its element under <html>, beside the page's own", async () => {
+  await open('locked-off.html');
+  const elements = await page.evaluate(() =>
+    [...document.querySelectorAll('devtools-anywhere')].map(el => `${el.parentElement?.localName}#${el.id}`)
+  );
+  assert.deepEqual(elements, ['body#own', 'html#']);
+  assert.equal((await globalState()).inHtml, true);
+});
+
+test('a second global element only warns and does nothing, even once the first is gone', async () => {
+  await open('zero-config.html');
+  /** Mounts another global element, open, shows it again, and says whether it shows and loads anything. */
+  const mountAnother = () =>
+    page.evaluate(() => {
+      const el = window.DevtoolsAnywhere.createGlobalElement();
+      if (!el) throw new Error('no element');
+      el.setAttribute('frontend', '/tests/e2e/frontends/fake-frontend.html');
+      el.setAttribute('open', '');
+      document.documentElement.append(el);
+      el.removeAttribute('open');
+      el.setAttribute('open', '');
+      return {
+        shown: getComputedStyle(el).display !== 'none',
+        frontend: el.shadowRoot?.querySelector('iframe')?.getAttribute('src') ?? null,
+      };
+    });
+  assert.deepEqual(await mountAnother(), { shown: false, frontend: null });
+  // Before the first in the document, it is skipped: a toggler without a value hides the first.
+  const first = await page.evaluate(() => {
+    const [global, other] = document.querySelectorAll('html > devtools-anywhere');
+    if (!global || !other) throw new Error('no global elements');
+    document.documentElement.insertBefore(other, global);
+    document.body.insertAdjacentHTML('beforeend', '<button id="first" data-devtools-anywhere-toggle>first</button>');
+    document.getElementById('first')?.click();
+    return global.hasAttribute('open');
+  });
+  assert.equal(first, false);
+  await page.evaluate(() => document.querySelector('html > devtools-anywhere:not([style])')?.remove());
+  assert.deepEqual(await mountAnother(), { shown: false, frontend: null });
+  assert.equal(warnings.filter(w => w.includes('global <devtools-anywhere>')).length, 2);
+  // Nor is it a toggler's target, nor does it fire toggle.
+  const toggled = await page.evaluate(() => {
+    let fired = 0;
+    for (const el of document.querySelectorAll('devtools-anywhere')) el.addEventListener('toggle', () => fired++);
+    document.body.insertAdjacentHTML('beforeend', '<button id="t" data-devtools-anywhere-toggle>t</button>');
+    const button = document.getElementById('t');
+    button?.click();
+    document.querySelector('devtools-anywhere')?.removeAttribute('open');
+    return { fired, expanded: button?.getAttribute('aria-expanded') ?? null };
+  });
+  assert.deepEqual(toggled, { fired: 0, expanded: null });
+});
+
+test('a page that registers <devtools-anywhere> itself gets no global element, and a warning', async () => {
+  await page.evaluateOnNewDocument(() => customElements.define('devtools-anywhere', class extends HTMLElement {}));
+  await page.goto(`${env?.baseUrl}/tests/e2e/pages/zero-config.html`);
+  for (let start = Date.now(); !warnings.some(w => w.includes('registered by the page'));) {
+    assert.ok(Date.now() - start < 5000, 'a warning');
+    await new Promise(r => setTimeout(r, 50));
+  }
+  assert.equal(await page.evaluate(() => document.querySelector('html > devtools-anywhere')), null);
+  assert.equal(warnings.filter(w => w.includes('registered by the page')).length, 1);
 });

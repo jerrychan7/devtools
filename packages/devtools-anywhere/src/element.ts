@@ -249,6 +249,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private frontendOrigin = '';
   /** `open` as last seen by syncOpen, or null before. */
   private openState: boolean | null = null;
+  /** The first global element connected: the only one that works. */
+  private firstGlobal = false;
 
   constructor() {
     super();
@@ -466,6 +468,17 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // whatever it puts inside.
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
+    // Only the first global element connected works, even once it is gone.
+    if (globalElements.has(this) && !this.firstGlobal) {
+      if (globalTaken) {
+        if (!inactiveGlobals.has(this))
+          console.warn('devtools-anywhere: the page has a global <devtools-anywhere> already');
+        inactiveGlobals.add(this);
+        this.style.setProperty('display', 'none', 'important');
+        return;
+      }
+      globalTaken = this.firstGlobal = true;
+    }
     // Changed while detached, or now the first element for the togglers without a value.
     this.syncOpen();
     refreshTogglers(this.ownerDocument);
@@ -504,7 +517,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    */
   attributeChangedCallback(name: string) {
     if (name === 'open') this.syncOpen();
-    if (this.isConnected && !this.hasAttribute('data-shell-page')) this.update();
+    if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
   }
 
   /**
@@ -512,6 +525,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    * aria-expanded while connected (connectedCallback does when it connects).
    */
   private syncOpen() {
+    if (inactiveGlobals.has(this)) return;
     const open = this.open;
     const old = this.openState;
     this.openState = open;
@@ -684,6 +698,27 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
+/**
+ * The global elements, created for the probe (createGlobalElement), whether one has connected, and
+ * those connected after it, which do nothing.
+ */
+const globalElements = new WeakSet<Element>();
+let globalTaken = false;
+const inactiveGlobals = new WeakSet<Element>();
+
+/** Creates a global element: only the first one connected works. @internal */
+export function createGlobalElement(): DevtoolsAnywhereElement | null {
+  try {
+    const element = new DevtoolsAnywhereElement();
+    globalElements.add(element);
+    return element;
+  } catch {
+    // The page registered devtools-anywhere itself, with a class of its own.
+    console.warn('devtools-anywhere: <devtools-anywhere> is registered by the page; no global element');
+    return null;
+  }
+}
+
 /** Elements with this attribute open and close DevTools when clicked (see togglerTarget). */
 const TOGGLE_ATTRIBUTE = 'data-devtools-anywhere-toggle';
 /** The tag the togglers look for, once they are installed. */
@@ -699,8 +734,12 @@ function togglerTarget(toggler: Element, warn: boolean): Element | null {
   // The shell's element is of the shell window's class: it is toggled through its attribute.
   if (isShellPage()) return window.frameElement?.ownerDocument.querySelector('devtools-anywhere[shell]') ?? null;
   const id = toggler.getAttribute(TOGGLE_ATTRIBUTE) ?? '';
-  const target = id ? toggler.ownerDocument.getElementById(id) : toggler.ownerDocument.querySelector(togglerTag);
-  if (target instanceof DevtoolsAnywhereElement) return target;
+  const doc = toggler.ownerDocument;
+  // Global elements after the first do nothing: they are not targets.
+  const target = id
+    ? doc.getElementById(id)
+    : [...doc.querySelectorAll(togglerTag)].find(el => !inactiveGlobals.has(el));
+  if (target instanceof DevtoolsAnywhereElement && !inactiveGlobals.has(target)) return target;
   if (warn && !warned.has(id)) {
     warned.add(id);
     console.warn(`devtools-anywhere: no <${togglerTag}>${id ? ` with id "${id}"` : ''} for ${TOGGLE_ATTRIBUTE}`);
