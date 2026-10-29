@@ -15,6 +15,7 @@ import {
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
 import { SHELL_HANDSHAKE } from './shell-messages';
+import type { GlobalElementConfig } from './api';
 import {
   DOCK_SIDES,
   PROBE_SCRIPT,
@@ -130,7 +131,7 @@ const STYLE = `
   background: #1a73e8; color: #fff; font: 600 13px/44px system-ui, sans-serif;
   box-shadow: 0 2px 6px rgba(0, 0, 0, .3); cursor: pointer; touch-action: manipulation;
 }
-:host([open]) .toggler, :host([no-toggler]) .toggler { display: none; }
+.toggler[hidden] { display: none; }
 .panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647;
   display: none; flex-direction: column; box-sizing: border-box;
@@ -138,7 +139,7 @@ const STYLE = `
   /* Clear of the home indicator and, docked to a side, of the notch. */
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-:host([open]) .panel { display: flex; }
+.panel[data-open] { display: flex; }
 /* The bar takes the DevTools toolbar's colors, which the frontend reports (theme request). */
 .bar {
   flex: none; position: relative; height: 16px; background: var(--bar-background, #f1f3f4);
@@ -206,20 +207,14 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 `;
 
 /**
- * `<devtools-anywhere devtools-frontend-url="…/anywhere_app.html" open>`
+ * `<devtools-anywhere devtools-frontend-url="…/anywhere_app.html">`
  *
- * Attributes:
- * - `devtools-frontend-url`: URL of the DevTools frontend entry page. Loaded on first open.
- * - `open`: shows the panel; otherwise a small toggler button is shown.
- * - `no-toggler`: hides the toggler button.
- * - `shell-mode-locked`: DevTools offers no way in or out of shell mode, and ignores requests to.
- * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
- *   bundle when the value is empty), which injects the probe into iframe pages that do not
- *   include it. Needs a secure context and a scope covering the pages.
- * - `shell`: set by shell mode on the element inside the shell document.
+ * Attribute: `devtools-frontend-url`, the URL of the DevTools frontend entry page, loaded on
+ * first open; without it, the probe's. The rest of its state is the library's: the probe gives
+ * the global element its options (createGlobalElement), and the user opens and closes it.
  *
- * Fires `toggle` (a ToggleEvent where supported, with `oldState` and `newState`) when `open`
- * changes. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
+ * Fires `toggle` (a ToggleEvent where supported, with `oldState` and `newState`) when it opens
+ * or closes. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
  * attribute's value is the element's id, or empty for the first element on the page. They
  * work once the element is registered with defineDevtoolsAnywhere(); in the shell's page iframe,
  * they control the shell's `<devtools-anywhere>`, whatever their value.
@@ -233,7 +228,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
-  static observedAttributes = ['open', 'devtools-frontend-url'];
+  static observedAttributes = ['devtools-frontend-url'];
 
   /** The CDP session for this page. Created when the element is first connected. @internal */
   session: CdpSession | null = null;
@@ -244,7 +239,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private loadedUrl = '';
   private disconnect: (() => void) | null = null;
   private frontendOrigin = '';
-  /** `open` as last seen by syncOpen, or null before. */
+  /** Whether DevTools is shown. */
+  private isOpen = false;
+  /** The options the probe gave, or the shell config's in the shell. */
+  private config: GlobalElementConfig = {};
+  /** `isOpen` as last seen by syncOpen, or null before. */
   private openState: boolean | null = null;
   /** The first global element connected: the only one that works. */
   private firstGlobal = false;
@@ -270,8 +269,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
     this.toggler = part<HTMLButtonElement>('.toggler');
-    this.toggler.addEventListener('click', () => this.toggle());
-    part('.close').addEventListener('click', () => this.hide());
+    this.toggler.addEventListener('click', () => this.setOpen(!this.isOpen));
+    part('.close').addEventListener('click', () => this.setOpen(false));
+    this.addEventListener(CONTROL_EVENT, this.onControl);
     this.setupResizer(part<HTMLElement>('.bar'));
     this.setupCorner(part<HTMLElement>('.corner'));
     // The undocked panel is resized by the browser (CSS resize): remember its size once it
@@ -280,7 +280,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     new ResizeObserver(() => {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
-        if (this.dock === 'undocked' && this.open && this.panel.offsetWidth) this.saveFloat();
+        if (this.dock === 'undocked' && this.isOpen && this.panel.offsetWidth) this.saveFloat();
       }, 300);
     }).observe(this.panel);
   }
@@ -305,7 +305,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       if (!this.hasAttribute('data-shell-page')) this.update();
     } else if (request.type === 'keep-open') {
       // The page decides, not the user.
-      if (this.hasAttribute('shell-mode-locked')) return;
+      if (this.config.locked) return;
       // The user's choice: the probe enters shell mode by default, unless they turned it off.
       store(SHELL_MODE_KEY, request.keep ? 'on' : 'off');
       if (request.keep) this.enterShell();
@@ -321,41 +321,45 @@ export class DevtoolsAnywhereElement extends HTMLElement {
         for (const property of properties) this.panel.style.setProperty(property, value);
       }
     } else if (request.type === 'close') {
-      this.hide();
+      this.setOpen(false);
     }
   };
 
-  /** Whether DevTools is shown: the `open` attribute. */
-  get open() {
-    return this.hasAttribute('open');
-  }
-  set open(value: boolean) {
-    this.toggleAttribute('open', value);
+  /**
+   * A toggler's request (see togglerTarget), maybe from another window: toggles when asked, and
+   * answers whether DevTools is shown.
+   */
+  private onControl = (event: Event) => {
+    // From another window, the event is not of this window's CustomEvent.
+    const detail: unknown = Reflect.get(event, 'detail');
+    if (typeof detail !== 'object' || !detail || inactiveGlobals.has(this)) return;
+    if (Reflect.get(detail, 'toggle') === true) this.setOpen(!this.isOpen);
+    Reflect.set(detail, 'open', this.isOpen);
+  };
+
+  /** Shows or hides DevTools; the frontend loads the first time and stays loaded. */
+  private setOpen(open: boolean) {
+    if (open === this.isOpen) return;
+    this.isOpen = open;
+    this.syncOpen();
+    if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
   }
 
-  /** Shows DevTools, loading the frontend the first time. */
-  show() {
-    this.open = true;
-  }
-  /** Hides DevTools; the frontend stays loaded and connected. */
-  hide() {
-    this.open = false;
-  }
-  /** Shows DevTools if hidden, hides it if shown. */
-  toggle() {
-    this.open = !this.open;
+  /** The frontend's URL: the attribute, else the probe's. */
+  private get frontendUrl() {
+    return this.getAttribute('devtools-frontend-url') || this.config.frontend || '';
   }
 
   /**
    * Switches to shell mode: the page reloads inside an iframe next to DevTools, which then
    * stays open across reloads and navigations of the page. Needs the bundle URL.
    */
-  enterShell() {
-    const frontend = this.getAttribute('devtools-frontend-url');
+  private enterShell() {
+    const frontend = this.frontendUrl;
     if (!bundleUrl || !frontend) return;
     // The probe ignores (and removes) a config whose URLs are not on its own origin.
-    const flags = { locked: this.hasAttribute('shell-mode-locked'), noToggler: this.hasAttribute('no-toggler') };
-    if (!storeShellConfig(frontend, bundleUrl, this.getAttribute('sw'), flags)) {
+    const flags = { locked: !!this.config.locked, noToggler: !!this.config.noToggler };
+    if (!storeShellConfig(frontend, bundleUrl, this.config.sw ?? null, flags)) {
       console.warn('devtools-anywhere: shell mode needs the frontend, bundle and sw on one origin');
       return;
     }
@@ -363,7 +367,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   /** Leaves shell mode and reloads the page on its own. */
-  async exitShell() {
+  private async exitShell() {
     const config = readShellConfig();
     sessionStorage.removeItem(SHELL_KEY);
     try {
@@ -477,6 +481,18 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       }
       globalTaken = this.firstGlobal = true;
     }
+    // The options, once: the probe's, or in the shell the shell config's, kept for its reloads.
+    if (this.openState === null) {
+      const shell = this.hasAttribute('shell') ? readShellConfig() : null;
+      const given = shell
+        ? { open: shell.open !== false, locked: !!shell.locked, noToggler: !!shell.noToggler, sw: shell.sw ?? null }
+        : globalConfigs.get(this);
+      if (given) {
+        this.config = given;
+        this.isOpen = !!given.open;
+      }
+    }
+    this.toggler.hidden = this.isOpen || !!this.config.noToggler;
     // Changed while detached, or now the first element for the togglers without a value.
     this.syncOpen();
     refreshTogglers(this.ownerDocument);
@@ -509,12 +525,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     refreshTogglers(this.ownerDocument);
   }
 
-  /**
-   * Lays out the panel again, and loads the frontend if DevTools is now open. A change of `open`
-   * also fires `toggle` and updates the togglers.
-   */
-  attributeChangedCallback(name: string) {
-    if (name === 'open') this.syncOpen();
+  /** Loads the new frontend if DevTools is open. */
+  attributeChangedCallback() {
     if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
   }
 
@@ -524,7 +536,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    */
   private syncOpen() {
     if (inactiveGlobals.has(this)) return;
-    const open = this.open;
+    const open = this.isOpen;
     const old = this.openState;
     this.openState = open;
     if (old === open || old === null) return;
@@ -534,14 +546,17 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   private update() {
+    this.toggler.hidden = this.isOpen || !!this.config.noToggler;
+    this.panel.toggleAttribute('data-open', this.isOpen);
     this.layout();
-    // The shell document is ours: nothing there covers the panel.
-    if (TOP_LAYER && !this.hasAttribute('shell')) {
-      setPopoverOpen(this.panel, this.open);
-      setPopoverOpen(this.toggler, !this.open);
+    // The toggler is a popover: shown as one, in the shell too. The shell document is ours:
+    // nothing there covers the panel, which takes its place in the layout.
+    if (TOP_LAYER) {
+      if (!this.hasAttribute('shell')) setPopoverOpen(this.panel, this.isOpen);
+      setPopoverOpen(this.toggler, !this.isOpen && !this.toggler.hidden);
     }
     // Load the frontend only once DevTools is opened; the probe keeps capturing meanwhile.
-    if (this.open) this.loadFrontend();
+    if (this.isOpen) this.loadFrontend();
   }
 
   /** Sizes the panel for its dock side; in shell mode, also lays out the shell around it. */
@@ -601,13 +616,13 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   private loadFrontend() {
-    const frontend = this.getAttribute('devtools-frontend-url');
+    const frontend = this.frontendUrl;
     const pageElement = document.getElementById(SHELL_PAGE_ID);
     const page = pageElement instanceof HTMLIFrameElement ? pageElement : null;
     if (!frontend || (!this.session && !(this.hasAttribute('shell') && page))) return;
     const url = new URL(frontend, location.href);
     // The frontend's own switch for shell mode is hidden.
-    if (this.hasAttribute('shell-mode-locked')) url.searchParams.set('shellModeLocked', '');
+    if (this.config.locked) url.searchParams.set('shellModeLocked', '');
     if (url.href === this.loadedUrl) return;
     this.loadedUrl = url.href;
     // The frontend's document is not one of the page's requests.
@@ -703,12 +718,15 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 const globalElements = new WeakSet<Element>();
 let globalTaken = false;
 const inactiveGlobals = new WeakSet<Element>();
+/** The probe's options for each global element, taken when it first connects. */
+const globalConfigs = new WeakMap<Element, GlobalElementConfig>();
 
-/** Creates a global element: only the first one connected works. @internal */
-export function createGlobalElement(): DevtoolsAnywhereElement | null {
+/** Creates a global element with the probe's options: only the first one connected works. @internal */
+export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhereElement | null {
   try {
     const element = new DevtoolsAnywhereElement();
     globalElements.add(element);
+    globalConfigs.set(element, config);
     return element;
   } catch {
     // The page registered devtools-anywhere itself, with a class of its own.
@@ -716,6 +734,9 @@ export function createGlobalElement(): DevtoolsAnywhereElement | null {
     return null;
   }
 }
+
+/** The event a toggler controls its element with (see controlElement). */
+const CONTROL_EVENT = 'devtools-anywhere-control';
 
 /** Elements with this attribute open and close DevTools when clicked (see togglerTarget). */
 const TOGGLE_ATTRIBUTE = 'data-devtools-anywhere-toggle';
@@ -729,7 +750,7 @@ const warned = new Set<string>();
  * element whose id is the attribute's value, or the first element when it has none.
  */
 function togglerTarget(toggler: Element, warn: boolean): Element | null {
-  // The shell's element is of the shell window's class: it is toggled through its attribute.
+  // The shell's element is of the shell window's class: it is toggled through an event.
   if (isShellPage()) return window.frameElement?.ownerDocument.querySelector('devtools-anywhere[shell]') ?? null;
   const id = toggler.getAttribute(TOGGLE_ATTRIBUTE) ?? '';
   const doc = toggler.ownerDocument;
@@ -745,10 +766,21 @@ function togglerTarget(toggler: Element, warn: boolean): Element | null {
   return null;
 }
 
+/**
+ * Asks a toggler's element, maybe of another window, whether it is open, toggling it first when
+ * `toggle`. Undefined when it does not answer.
+ */
+function controlElement(target: Element, toggle: boolean): boolean | undefined {
+  const detail: { toggle: boolean; open?: boolean } = { toggle };
+  target.dispatchEvent(new CustomEvent(CONTROL_EVENT, { detail }));
+  return detail.open;
+}
+
 /** Sets aria-expanded on a toggler from the state of its element. */
 function refreshToggler(toggler: Element, warn = false) {
   const target = togglerTarget(toggler, warn);
-  if (target) toggler.setAttribute('aria-expanded', String(target.hasAttribute('open')));
+  const open = target && controlElement(target, false);
+  if (open !== undefined && open !== null) toggler.setAttribute('aria-expanded', String(open));
   return target;
 }
 
@@ -771,7 +803,7 @@ function installTogglers(tag: string) {
       if (!toggler || (control && control !== clicked && toggler.contains(control))) return;
       const target = toggler && refreshToggler(toggler, true);
       if (!target) return;
-      target.toggleAttribute('open');
+      controlElement(target, true);
       refreshToggler(toggler);
     },
     true

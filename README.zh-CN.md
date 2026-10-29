@@ -167,9 +167,9 @@ npx devtools-anywhere-remote --port 8080
 
 ### 组件
 
-点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。属性：`devtools-frontend-url`、`open`、`no-toggler`、`shell-mode-locked`、`sw`；方法：`show()`、`hide()`、`toggle()`、`enterShell()`、`exitShell()`。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。唯一的属性 `devtools-frontend-url` 是可选的，不写时沿用探针的 `data-devtools-frontend-url`。其余状态都由库维护：探针的参数决定组件的配置，打开和关闭由用户操作；组件没有自己的方法。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
-页面上任意元素都能开关面板：加上 `data-devtools-anywhere-toggle`，值为某个 `<devtools-anywhere>` 的 id，留空则指向页面上第一个。点击在 document 上统一捕获，后加入的切换器同样生效；不阻止默认行为，切换器的 `aria-expanded` 跟随面板状态。找不到目标时只打一条警告（同一个值只警告一次）。`open` 变化时元素派发 `toggle` 事件，浏览器支持时为 `ToggleEvent`，带 `oldState`、`newState`（`'open'` 或 `'closed'`）。
+页面上任意元素都能开关面板：加上 `data-devtools-anywhere-toggle`，值为某个 `<devtools-anywhere>` 的 id，留空则指向页面上第一个。点击在 document 上统一捕获，后加入的切换器同样生效；不阻止默认行为，切换器的 `aria-expanded` 跟随面板状态。找不到目标时只打一条警告（同一个值只警告一次）。面板打开或关闭时元素派发 `toggle` 事件，浏览器支持时为 `ToggleEvent`，带 `oldState`、`newState`（`'open'` 或 `'closed'`）。
 
 ```html
 <button data-devtools-anywhere-toggle>DevTools</button>

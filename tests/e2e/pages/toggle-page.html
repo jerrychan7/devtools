@@ -3,17 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <title>toggle page</title>
-    <script src="/packages/devtools-anywhere/dist/probe.iife.js"></script>
+    <script
+      src="/packages/devtools-anywhere/dist/probe.iife.js"
+      data-devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"
+      data-default-shell-mode="off"
+      data-no-toggler
+    ></script>
   </head>
   <body>
     <button id="first" data-devtools-anywhere-toggle>first</button>
-    <button id="named" data-devtools-anywhere-toggle="devtools"><span>named</span></button>
+    <button id="second" data-devtools-anywhere-toggle><span>second</span></button>
     <button id="missing" data-devtools-anywhere-toggle="nowhere">missing</button>
-    <script src="/packages/devtools-anywhere/dist/devtools-anywhere.iife.js"></script>
-    <devtools-anywhere
-      id="devtools"
-      devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"
-      no-toggler
-    ></devtools-anywhere>
   </body>
 </html>

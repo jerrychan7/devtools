@@ -23,5 +23,22 @@ export interface DevtoolsAnywhereApi {
    * connected works; later ones warn and stay hidden. Null, with a warning, when the page has
    * registered `devtools-anywhere` itself.
    */
-  createGlobalElement(): HTMLElement | null;
+  createGlobalElement(config: GlobalElementConfig): HTMLElement | null;
+}
+
+/** The probe's options for the global element (its `data-*` attributes). */
+export interface GlobalElementConfig {
+  /** The frontend's URL. */
+  frontend?: string;
+  /** Opens DevTools once mounted. */
+  open?: boolean;
+  /** DevTools offers no way in or out of shell mode, and ignores requests to. */
+  locked?: boolean;
+  /** Hides the toggler button. */
+  noToggler?: boolean;
+  /**
+   * In shell mode, also register devtools-anywhere-sw.js from this URL (or next to the bundle
+   * when empty), which injects the probe into iframe pages that do not include it.
+   */
+  sw?: string | null;
 }

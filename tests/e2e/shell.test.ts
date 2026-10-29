@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { launch } from '../support/browser.ts';
+import { devtoolsShown, frontendRequest, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -61,11 +61,8 @@ const earlyLogs = (state: ShellState) =>
   state.received.filter(m => m.method === 'Runtime.consoleAPICalled' && firstArg(m) === 'early');
 
 test('entering shell mode turns the page into the shell in place', async () => {
-  await page.evaluate(() => {
-    const devtools = document.querySelector('devtools-anywhere');
-    if (!devtools) throw new Error('no <devtools-anywhere>');
-    devtools.enterShell();
-  });
+  // DevTools' lock button.
+  await frontendRequest(page, { type: 'keep-open', keep: true });
   const state = await waitFor(s => s.inShell && earlyLogs(s).length > 0);
   assert.equal(state.shellRanPageScript, false, "the page's scripts do not run in the shell");
   assert.equal(state.pageRanScript, true, 'the page runs inside the iframe');
@@ -102,11 +99,11 @@ test("closing (DevTools' own close button) hides DevTools; stopping keeping it o
   const devtools = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));
   assert.ok(devtools, 'the DevTools frame');
   await devtools.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*'));
-  await page.waitForFunction(
-    () =>
-      document.querySelector('devtools-anywhere')?.hasAttribute('shell') &&
-      document.querySelector('devtools-anywhere')?.open === false
-  );
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere[shell]')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display === 'none';
+  });
+  assert.equal(await devtoolsShown(page), false);
   // Still in the shell, whose address bar follows the page shown.
   assert.match((await waitFor(s => s.inShell)).url, /\?second$/);
   // Its info bar's "Stop keeping open": the user turns shell mode off, which is remembered.

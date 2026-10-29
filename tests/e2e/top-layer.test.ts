@@ -3,7 +3,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { chooseDockSide, launch } from '../support/browser.ts';
+import { chooseDockSide, clickF12, frontendRequest, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -14,7 +14,10 @@ before(async () => {
   page = await env.browser.newPage();
   await page.setViewport({ width: 1000, height: 800 });
   await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.open === true);
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  });
   // A page element at the highest z-index, after the element: without the top layer it would win.
   await page.evaluate(() =>
     document.body.insertAdjacentHTML(
@@ -85,26 +88,22 @@ test('docked to a side, the panel keeps its full height', async () => {
 });
 
 test('the toggler is above the page too while DevTools is hidden', async () => {
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.removeAttribute('open'));
+  await frontendRequest(page, { type: 'close' });
   const toggler = await probe('.toggler');
   assert.equal(toggler.inTopLayer, true);
   assert.equal(toggler.hitsElement, true);
   // 44px, 16px from the bottom right corner.
   assert.deepEqual(toggler.box, [1000 - 16 - 44, 800 - 16 - 44, 44, 44]);
   assert.equal((await probe('.panel')).inTopLayer, false);
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.setAttribute('open', ''));
+  await clickF12(page);
 });
 
 test("showing and hiding DevTools leaves the page's popovers open", async () => {
-  const open = await page.evaluate(() => {
+  await page.evaluate(() => {
     document.body.insertAdjacentHTML('beforeend', '<div id="page-popover" popover>page</div>');
-    const popover = document.getElementById('page-popover');
-    if (!popover) throw new Error('no popover');
-    popover.showPopover();
-    const devtools = document.querySelector('devtools-anywhere');
-    devtools?.removeAttribute('open');
-    devtools?.setAttribute('open', '');
-    return popover.matches(':popover-open');
+    document.getElementById('page-popover')?.showPopover();
   });
-  assert.equal(open, true);
+  await frontendRequest(page, { type: 'close' });
+  await clickF12(page);
+  assert.equal(await page.evaluate(() => !!document.getElementById('page-popover')?.matches(':popover-open')), true);
 });

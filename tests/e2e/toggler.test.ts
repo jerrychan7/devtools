@@ -1,9 +1,9 @@
-// data-devtools-anywhere-toggle: any element of the page opens and closes <devtools-anywhere>,
-// in the page itself and from the page inside the shell.
+// data-devtools-anywhere-toggle: any element of the page opens and closes the global
+// <devtools-anywhere>, in the page itself and from the page inside the shell.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { frontendRequest, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -22,7 +22,10 @@ after(() => env?.close());
 /** Whether DevTools is open, and each toggler's aria-expanded. */
 const state = (frame: Page | Frame = page) =>
   frame.evaluate(() => ({
-    open: document.querySelector('devtools-anywhere')?.open ?? null,
+    open: (() => {
+      const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      return !!panel && getComputedStyle(panel).display !== 'none';
+    })(),
     expanded: Object.fromEntries(
       [...document.querySelectorAll('[data-devtools-anywhere-toggle]')].map(el => [
         el.id,
@@ -46,15 +49,18 @@ async function load() {
   await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.isConnected);
 }
 
+/** Closes DevTools with its own × button. */
+const close = () => frontendRequest(page, { type: 'close' });
+
 test('togglers start with aria-expanded of their element', async () => {
   await load();
   assert.deepEqual(await state(), {
     open: false,
-    expanded: { first: 'false', named: 'false', missing: null },
+    expanded: { first: 'false', second: 'false', missing: null },
   });
 });
 
-test('a toggler with an id and one without both toggle the element, firing toggle', async () => {
+test('the togglers toggle the element, firing toggle', async () => {
   await load();
   await page.evaluate(() => {
     window.__toggles = [];
@@ -63,13 +69,21 @@ test('a toggler with an id and one without both toggle the element, firing toggl
     });
   });
   // A click inside the toggler counts too.
-  await click('#named span');
-  assert.deepEqual(await state(), { open: true, expanded: { first: 'true', named: 'true', missing: null } });
+  await click('#second span');
+  assert.deepEqual(await state(), { open: true, expanded: { first: 'true', second: 'true', missing: null } });
   await click('#first');
-  assert.deepEqual(await state(), { open: false, expanded: { first: 'false', named: 'false', missing: null } });
-  // Setting the same state again fires nothing.
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.removeAttribute('open'));
-  assert.deepEqual(await page.evaluate(() => window.__toggles), ['closed>open', 'open>closed']);
+  assert.deepEqual(await state(), { open: false, expanded: { first: 'false', second: 'false', missing: null } });
+  // Closing it when closed fires nothing.
+  await click('#first');
+  await close();
+  await click('#first');
+  assert.deepEqual(await page.evaluate(() => window.__toggles), [
+    'closed>open',
+    'open>closed',
+    'closed>open',
+    'open>closed',
+    'closed>open',
+  ]);
 });
 
 test('a toggler added later works, and follows the element', async () => {
@@ -80,9 +94,9 @@ test('a toggler added later works, and follows the element', async () => {
   await click('#late');
   assert.deepEqual(await state(), {
     open: true,
-    expanded: { first: 'true', named: 'true', missing: null, late: 'true' },
+    expanded: { first: 'true', second: 'true', missing: null, late: 'true' },
   });
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.hide());
+  await close();
   assert.equal((await state()).expanded['late'], 'false');
 });
 
@@ -100,16 +114,17 @@ test('a label toggler toggles once, though its control is clicked too', async ()
   assert.equal((await state()).open, false);
 });
 
-test('the togglers follow a change made while the element was detached', async () => {
+test('the togglers follow the element when it is attached again', async () => {
   await load();
+  await click('#first');
   await page.evaluate(() => {
     const el = document.querySelector('devtools-anywhere');
     if (!el) throw new Error('no <devtools-anywhere>');
     el.remove();
-    el.open = true;
-    document.body.append(el);
+    document.querySelectorAll('[data-devtools-anywhere-toggle]').forEach(t => t.removeAttribute('aria-expanded'));
+    document.documentElement.append(el);
   });
-  assert.deepEqual(await state(), { open: true, expanded: { first: 'true', named: 'true', missing: null } });
+  assert.deepEqual(await state(), { open: true, expanded: { first: 'true', second: 'true', missing: null } });
 });
 
 test('a toggler without its element only warns, once', async () => {
@@ -141,32 +156,30 @@ const pageReady = (after = 0) =>
     {},
     after
   );
-/** Shows or hides the shell's DevTools from the shell. */
-const setShellOpen = (open: boolean) =>
-  page.evaluate(open => {
-    const el = document.querySelector('devtools-anywhere');
-    if (!el) throw new Error('no <devtools-anywhere>');
-    el.open = open;
-  }, open);
-
-/** Loads the page in the shell, with DevTools hidden. */
+/** Loads the page in the shell (DevTools' lock button), with DevTools hidden. */
 async function loadShell() {
   await load();
-  await page.evaluate(() => document.querySelector('devtools-anywhere')?.enterShell());
+  await click('#first');
+  const reloaded = page.waitForNavigation();
+  await frontendRequest(page, { type: 'keep-open', keep: true });
+  await reloaded;
+  // Not remembered for the next tests.
+  await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
   await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
   await pageReady();
-  await setShellOpen(false);
+  await close();
 }
 
 test("in the shell, the page's togglers toggle the shell's element and follow it", async () => {
   await loadShell();
-  await setShellOpen(true);
-  assert.deepEqual((await state(framed())).expanded, { first: 'true', named: 'true', missing: 'true' });
-  await setShellOpen(false);
-  assert.deepEqual((await state(framed())).expanded, { first: 'false', named: 'false', missing: 'false' });
+  assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: 'false' });
   // The value is ignored there: even the missing id controls the shell.
   await click('#missing', framed());
   assert.equal((await state()).open, true);
+  assert.deepEqual((await state(framed())).expanded, { first: 'true', second: 'true', missing: 'true' });
+  // Closed from the shell (DevTools' × button), the page's togglers follow.
+  await close();
+  assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: 'false' });
 });
 
 test("the page's listener on the shell's element goes with the page", async () => {
@@ -201,6 +214,6 @@ test("the page's listener on the shell's element goes with the page", async () =
   }
   // The second page's listener was removed when the third came, which follows the shell.
   assert.equal(await page.evaluate(() => window.__toggleListeners?.size), 1);
-  await setShellOpen(true);
+  await click('#first', framed());
   assert.equal((await state(framed())).expanded['first'], 'true');
 });

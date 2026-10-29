@@ -32,20 +32,44 @@ const open = async (name: string) => {
   );
 };
 
-/** The global element (or the shell's): where it is, its flags and its frontend's URL. */
+/**
+ * The global element (or the shell's), as the user finds it: in the shell or not, with or
+ * without the F12 button while closed, the lock button hidden (the frontend's URL asks for it).
+ */
 const globalState = () =>
   page.evaluate(() => {
     const el = document.querySelector('devtools-anywhere[shell], html > devtools-anywhere');
     if (!el) throw new Error('no global <devtools-anywhere>');
+    const panel = el.shadowRoot?.querySelector('.panel');
+    const toggler = el.shadowRoot?.querySelector('.toggler');
+    const frontend = el.shadowRoot?.querySelector('iframe')?.src ?? '';
     return {
       shell: el.hasAttribute('shell'),
       inHtml: el.parentElement === document.documentElement,
-      locked: el.hasAttribute('shell-mode-locked'),
-      noToggler: el.hasAttribute('no-toggler'),
-      frontend: el.shadowRoot?.querySelector('iframe')?.src ?? '',
+      shown: !!panel && getComputedStyle(panel).display !== 'none',
+      togglerShown: !!toggler && getComputedStyle(toggler).display !== 'none',
+      locked: /[?&]shellModeLocked/.test(frontend),
+      frontend,
       stored: localStorage.getItem('devtools-anywhere:shell-mode'),
     };
   });
+
+/** Opens DevTools with the page's toggler, in the shell's page frame when in the shell. */
+async function openDevtools() {
+  const frame =
+    page
+      .mainFrame()
+      .childFrames()
+      .find(f => f.url().includes('/pages/')) ?? page.mainFrame();
+  await frame.waitForFunction(() => document.getElementById('toggle')?.getAttribute('aria-expanded'));
+  await frame.evaluate(() => document.getElementById('toggle')?.click());
+  await page.waitForFunction(() =>
+    /fake-frontend/.test(
+      document.querySelector('devtools-anywhere[shell], html > devtools-anywhere')?.shadowRoot?.querySelector('iframe')
+        ?.src ?? ''
+    )
+  );
+}
 
 /** Posts a request to the element from its frontend, as DevTools' lock button does. */
 const keepOpen = async (keep: boolean) => {
@@ -96,14 +120,11 @@ test('locked on, the shell is entered whatever the user chose, and stays locked,
     assert.ok(env);
     page = await env.browser.newPage();
     await open('locked-on.html');
-    await page.evaluate(() => document.querySelector('devtools-anywhere')?.show());
-    await page.waitForFunction(
-      () => document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('iframe')?.src
-    );
+    assert.equal((await globalState()).togglerShown, false, 'data-no-toggler');
+    await openDevtools();
     const state = await globalState();
     assert.equal(state.shell, true);
     assert.equal(state.locked, true);
-    assert.equal(state.noToggler, true);
     assert.equal(state.stored, 'off');
     assert.match(state.frontend, /\?shellModeLocked=?#/);
     // Heeded, this would store 'on' and reload.
@@ -120,12 +141,15 @@ test('locked on, the shell is entered whatever the user chose, and stays locked,
 
 test('a shell entered before the page was locked takes the lock', async () => {
   await open('default-shell.html');
+  assert.equal((await globalState()).togglerShown, true);
+  await openDevtools();
   assert.equal((await globalState()).locked, false);
   await open('locked-on.html');
+  assert.equal((await globalState()).togglerShown, false);
+  await openDevtools();
   const state = await globalState();
   assert.equal(state.shell, true);
   assert.equal(state.locked, true);
-  assert.equal(state.noToggler, true);
 });
 
 test('locked on, a page that refuses to be framed is shown on its own', async () => {
@@ -156,16 +180,15 @@ test("the probe mounts its element under <html>, beside the page's own", async (
 
 test('a second global element only warns and does nothing, even once the first is gone', async () => {
   await open('zero-config.html');
-  /** Mounts another global element, open, shows it again, and says whether it shows and loads anything. */
+  /** Mounts another global element, open, and says whether it shows and loads anything. */
   const mountAnother = () =>
     page.evaluate(() => {
-      const el = window.DevtoolsAnywhere.createGlobalElement();
+      const el = window.DevtoolsAnywhere.createGlobalElement({
+        frontend: '/tests/e2e/frontends/fake-frontend.html',
+        open: true,
+      });
       if (!el) throw new Error('no element');
-      el.setAttribute('devtools-frontend-url', '/tests/e2e/frontends/fake-frontend.html');
-      el.setAttribute('open', '');
       document.documentElement.append(el);
-      el.removeAttribute('open');
-      el.setAttribute('open', '');
       return {
         shown: getComputedStyle(el).display !== 'none',
         frontend: el.shadowRoot?.querySelector('iframe')?.getAttribute('src') ?? null,
@@ -179,7 +202,8 @@ test('a second global element only warns and does nothing, even once the first i
     document.documentElement.insertBefore(other, global);
     document.body.insertAdjacentHTML('beforeend', '<button id="first" data-devtools-anywhere-toggle>first</button>');
     document.getElementById('first')?.click();
-    return global.hasAttribute('open');
+    const panel = global.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
   });
   assert.equal(first, false);
   await page.evaluate(() => document.querySelector('html > devtools-anywhere:not([style])')?.remove());
@@ -192,7 +216,6 @@ test('a second global element only warns and does nothing, even once the first i
     document.body.insertAdjacentHTML('beforeend', '<button id="t" data-devtools-anywhere-toggle>t</button>');
     const button = document.getElementById('t');
     button?.click();
-    document.querySelector('devtools-anywhere')?.removeAttribute('open');
     return { fired, expanded: button?.getAttribute('aria-expanded') ?? null };
   });
   assert.deepEqual(toggled, { fired: 0, expanded: null });

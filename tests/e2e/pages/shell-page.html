@@ -3,7 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <title>shell page</title>
-    <script src="/packages/devtools-anywhere/dist/probe.iife.js"></script>
+    <script
+      src="/packages/devtools-anywhere/dist/probe.iife.js"
+      data-devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"
+      data-default-shell-mode="off"
+      data-open-immediately
+    ></script>
     <script>
       console.log('early', location.search);
     </script>
@@ -13,7 +18,5 @@
     <script>
       window.__pageScriptRan = true;
     </script>
-    <script src="/packages/devtools-anywhere/dist/devtools-anywhere.iife.js"></script>
-    <devtools-anywhere devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html" open></devtools-anywhere>
   </body>
 </html>

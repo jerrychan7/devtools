@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { chooseDockSide, launch } from '../support/browser.ts';
+import { chooseDockSide, devtoolsShown, frontendRequest, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -49,12 +49,7 @@ async function waitFor(predicate: () => unknown, timeout = 8000) {
 
 test('one script tag captures early output and mounts DevTools after load', async () => {
   await waitFor(async () => logged(await received(), 'zero-config early'));
-  const open = await page.evaluate(() => {
-    const devtools = document.querySelector('devtools-anywhere');
-    if (!devtools) throw new Error('no <devtools-anywhere>');
-    return devtools.open;
-  });
-  assert.equal(open, true);
+  assert.equal(await devtoolsShown(page), true);
 });
 
 /** The undocked panel's size, in px and as a fraction of the viewport. */
@@ -105,12 +100,16 @@ test('the undocked panel is resized by touch from its corner', async () => {
   await page.evaluate(() => localStorage.removeItem('devtools-anywhere:dock'));
 });
 
+/** Switches shell mode on or off with DevTools' lock button, without remembering the choice. */
+async function keepOpen(keep: boolean) {
+  const reloaded = page.waitForNavigation();
+  await frontendRequest(page, { type: 'keep-open', keep });
+  await reloaded;
+  await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
+}
+
 test('in shell mode the Service Worker injects the probe into pages without it', async () => {
-  await page.evaluate(() => {
-    const devtools = document.querySelector('devtools-anywhere');
-    if (!devtools) throw new Error('no <devtools-anywhere>');
-    devtools.enterShell();
-  });
+  await keepOpen(true);
   await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere[shell]')));
   await waitFor(() => page.evaluate(() => !!navigator.serviceWorker.controller));
   await page.evaluate(() => {
@@ -359,24 +358,17 @@ test('the Service Worker injects right after the shell reloads', async () => {
 });
 
 test('leaving shell mode unregisters the Service Worker', async () => {
-  await page.evaluate(() => {
-    const devtools = document.querySelector<DevtoolsAnywhereElement>('devtools-anywhere[shell]');
-    if (!devtools) throw new Error('no <devtools-anywhere shell>');
-    return devtools.exitShell();
-  });
+  await keepOpen(false);
   await waitFor(() => page.evaluate(() => !document.getElementById('devtools-anywhere-page')));
   const registrations = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
   assert.equal(registrations, 0);
 });
 
-test('the Service Worker passes requests through once the shell is gone without exitShell', async () => {
+test('the Service Worker passes requests through once the shell is gone without leaving it', async () => {
   await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
   await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere')?.isConnected));
-  await page.evaluate(() => {
-    const devtools = document.querySelector('devtools-anywhere');
-    if (!devtools) throw new Error('no <devtools-anywhere>');
-    devtools.enterShell();
-  });
+  await waitFor(() => devtoolsShown(page));
+  await keepOpen(true);
   await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere[shell]')));
   await waitFor(() => page.evaluate(() => !!navigator.serviceWorker.controller));
   // Another tab outside shell mode keeps the worker while this shell uses it.

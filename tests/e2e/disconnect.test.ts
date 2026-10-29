@@ -13,7 +13,10 @@ before(async () => {
   env = await launch();
   page = await env.browser.newPage();
   await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.open === true);
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  });
   await page.evaluate(() => {
     document.body.insertAdjacentHTML(
       'beforeend',

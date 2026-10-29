@@ -16,14 +16,8 @@ declare global {
     params?: unknown;
   }
 
-  /** The <devtools-anywhere> element (the parts the tests use). */
-  interface DevtoolsAnywhereElement extends HTMLElement {
-    open: boolean;
-    show(): void;
-    hide(): void;
-    enterShell(): void;
-    exitShell(): Promise<void>;
-  }
+  /** The <devtools-anywhere> element: it has no API of its own. */
+  type DevtoolsAnywhereElement = HTMLElement;
 
   interface HTMLElementTagNameMap {
     'devtools-anywhere': DevtoolsAnywhereElement;

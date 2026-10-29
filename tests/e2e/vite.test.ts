@@ -10,6 +10,7 @@ import type { Protocol } from 'devtools-protocol';
 import { createServer } from 'vite';
 import type { ViteDevServer } from 'vite';
 import devtoolsAnywhere from '@devtools-anywhere/vite-plugin';
+import { frontendRequest } from '../support/browser.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let server: ViteDevServer | undefined;
@@ -78,23 +79,25 @@ test('the options become the probe script attributes', async () => {
     'data-shell-mode-locked': '',
     'data-no-toggler': '',
   });
-  // Out of shell mode, with the element as the options say.
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.open);
-  assert.deepEqual(
-    await page.evaluate(() => {
-      const el = document.querySelector('devtools-anywhere');
-      return [!!el?.hasAttribute('shell'), !!el?.hasAttribute('shell-mode-locked'), !!el?.hasAttribute('no-toggler')];
-    }),
-    [false, true, true]
-  );
-  // no-toggler: no F12 button once DevTools is hidden.
-  const togglerShown = await page.evaluate(() => {
+  // Out of shell mode, with DevTools as the options say: open, without the lock button.
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  });
+  const state = await page.evaluate(() => {
     const el = document.querySelector('devtools-anywhere');
-    el?.hide();
-    const toggler = el?.shadowRoot?.querySelector('.toggler');
-    const shown = !!toggler && getComputedStyle(toggler).display !== 'none';
-    el?.show();
-    return shown;
+    const src = el?.shadowRoot?.querySelector('iframe')?.getAttribute('src') ?? '';
+    return {
+      shell: !!el?.hasAttribute('shell'),
+      locked: new URL(src, location.href).searchParams.has('shellModeLocked'),
+    };
+  });
+  assert.deepEqual(state, { shell: false, locked: true });
+  // no-toggler: no F12 button once DevTools is closed (its × button).
+  await frontendRequest(page, { type: 'close' });
+  const togglerShown = await page.evaluate(() => {
+    const toggler = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
+    return !!toggler && getComputedStyle(toggler).display !== 'none';
   });
   assert.equal(togglerShown, false);
 });

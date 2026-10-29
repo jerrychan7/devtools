@@ -30,7 +30,10 @@ const shellState = () =>
       inShell: !!document.querySelector('devtools-anywhere[shell]') && frame instanceof HTMLIFrameElement,
       pageUrl: frame instanceof HTMLIFrameElement ? (frame.contentWindow?.location.href ?? '') : location.href,
       topUrl: location.href,
-      open: document.querySelector('devtools-anywhere')?.open ?? null,
+      open: (() => {
+        const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+        return !!panel && getComputedStyle(panel).display !== 'none';
+      })(),
     };
   });
 

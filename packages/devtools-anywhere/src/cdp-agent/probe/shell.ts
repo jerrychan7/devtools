@@ -35,9 +35,9 @@ export interface ShellConfig {
   sw?: string;
   /** False to start with DevTools hidden (shell mode entered by default); shown otherwise. */
   open?: boolean;
-  /** The element's `shell-mode-locked`: DevTools offers no way out of shell mode. */
+  /** The probe's `data-shell-mode-locked`: DevTools offers no way out of shell mode. */
   locked?: boolean;
-  /** The element's `no-toggler`. */
+  /** The probe's `data-no-toggler`: no toggler button. */
   noToggler?: boolean;
 }
 
@@ -189,6 +189,6 @@ function replaceDocument(config: ShellConfig) {
 #${SHELL_PAGE_ID}{flex:1;min-height:0;width:100%;border:0;display:block}</style></head>
 <body><iframe id="${SHELL_PAGE_ID}" src="${escapeAttr(location.href)}"></iframe>
 <script src="${escapeAttr(config.bundle)}"></script>
-<devtools-anywhere shell${config.open === false ? '' : ' open'}${config.locked ? ' shell-mode-locked' : ''}${config.noToggler ? ' no-toggler' : ''} devtools-frontend-url="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
+<devtools-anywhere shell devtools-frontend-url="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
   document.close();
 }

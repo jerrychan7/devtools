@@ -5,8 +5,8 @@
 // As the first script in <head>, it captures from the very start. With `data-devtools-frontend-url`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
 // the page has loaded and mounts its own <devtools-anywhere> under <html>, whatever the page has.
-// `data-open-immediately` opens DevTools right away; `data-sw` is passed on as the element's `sw`
-// attribute (see shell mode), `data-no-toggler` as its `no-toggler`.
+// `data-open-immediately` opens DevTools right away; `data-sw` and `data-no-toggler` are passed on
+// to the element with the others (createGlobalElement; see shell mode).
 //
 // With `data-devtools-frontend-url`, the top-level page enters shell mode by default, on its first load: the
 // probe stores the shell config itself before the page's scripts run, so the page is not
@@ -148,15 +148,14 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
       }
       if (!frontend || !hasApi(api, 'createGlobalElement')) return;
       // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
-      const element = api.createGlobalElement();
-      if (!element) return;
-      element.setAttribute('devtools-frontend-url', new URL(frontend, location.href).href);
-      if (open) element.setAttribute('open', '');
-      if (locked) element.setAttribute('shell-mode-locked', '');
-      if (noToggler) element.setAttribute('no-toggler', '');
-      const sw = attribute('data-sw');
-      if (sw !== null) element.setAttribute('sw', sw);
-      document.documentElement.appendChild(element);
+      const element = api.createGlobalElement({
+        frontend: new URL(frontend, location.href).href,
+        open,
+        locked,
+        noToggler,
+        sw: attribute('data-sw'),
+      });
+      if (element) document.documentElement.appendChild(element);
     };
     document.head.appendChild(loader);
   };

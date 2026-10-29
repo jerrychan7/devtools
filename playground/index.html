@@ -58,7 +58,6 @@
           s.onload = function () {
             var devtools = document.createElement('devtools-anywhere');
             devtools.setAttribute('devtools-frontend-url', '/packages/devtools-frontend/dist/anywhere_app.html');
-            if (location.hash === '#open') devtools.setAttribute('open', '');
             document.body.appendChild(devtools);
             setTimeout(function () {
               console.log('[late] after attach', { late: true });

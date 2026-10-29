@@ -33,12 +33,32 @@ export async function launch(args: string[] = []): Promise<Env> {
 }
 
 /**
- * Chooses a dock side as the user does, from DevTools' main menu: the frontend in the panel's
- * iframe asks the element (embedder.ts).
+ * Sends a request from the DevTools frontend in the panel's iframe to its element (embedder.ts),
+ * as the frontend does on the user's behalf: its dock side menu, its close button, its lock
+ * button (`keep-open`).
  */
-export async function chooseDockSide(page: Page, side: string): Promise<void> {
+export async function frontendRequest(page: Page, request: object): Promise<void> {
   const frame = await page.waitForFrame(
     frame => frame.parentFrame() === page.mainFrame() && /frontend/.test(frame.url())
   );
-  await frame.evaluate(side => parent.postMessage({ devtoolsAnywhere: { type: 'dock', side } }, '*'), side);
+  await frame.evaluate(request => parent.postMessage({ devtoolsAnywhere: request }, '*'), request);
+}
+
+/** Chooses a dock side as the user does, from DevTools' main menu. */
+export const chooseDockSide = (page: Page, side: string) => frontendRequest(page, { type: 'dock', side });
+
+/** Whether the user sees DevTools: the panel of the page's <devtools-anywhere> is shown. */
+export const devtoolsShown = (page: Page) =>
+  page.evaluate(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  });
+
+/** Clicks the F12 button, as the user does to open DevTools. */
+export async function clickF12(page: Page): Promise<void> {
+  const handle = await page.waitForFunction(() => {
+    const button = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
+    return button instanceof HTMLElement && getComputedStyle(button).display !== 'none' ? button : null;
+  });
+  await page.evaluate(button => button instanceof HTMLElement && button.click(), handle);
 }
