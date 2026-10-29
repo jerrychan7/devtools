@@ -1,16 +1,17 @@
 diff --git a/front_end/ui/visual_logging/KnownContextValues.ts b/front_end/ui/visual_logging/KnownContextValues.ts
-index aa10ccf79b..e07c0e0dd5 100644
+index aa10ccf79b..9003262244 100644
 --- a/front_end/ui/visual_logging/KnownContextValues.ts
 +++ b/front_end/ui/visual_logging/KnownContextValues.ts
-@@ -536,6 +536,7 @@ export const knownContextValues: Set<string> = new Set([
+@@ -536,6 +536,8 @@ export const knownContextValues: Set<string> = new Set([
    'annotations-hidden',
    'another_id',
    'answer',
 +  'anywhere-keep-open-confirmed',
++  'anywhere-kept-open-infobar-disabled',
    'apca',
    'apca-documentation',
    'app-region',
-@@ -4128,6 +4129,7 @@ export const knownContextValues: Set<string> = new Set([
+@@ -4128,6 +4130,7 @@ export const knownContextValues: Set<string> = new Set([
    'stop',
    'stop-color',
    'stop-ignoring-this-retainer',

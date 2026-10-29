@@ -256,14 +256,18 @@ function showKeptOpenInfobar(): void {
   if (!inspectorView) {
     return;
   }
-  const infobar = new UI.Infobar.Infobar(
+  // Like upstream's info bars, it offers "Don't show again", which a setting remembers.
+  const infobar = UI.Infobar.Infobar.create(
       UI.Infobar.Type.INFO, i18nString(UIStrings.keptOpen), shellModeLocked ? [] : [{
         text: i18nString(UIStrings.stopKeeping),
         delegate: () => notifyEmbedder({type: 'keep-open', keep: false}),
         dismiss: true,
         jslogContext: 'stop-keeping-open',
       }],
-      undefined, 'kept-open');
+      Common.Settings.Settings.instance().createSetting('anywhere-kept-open-infobar-disabled', false), 'kept-open');
+  if (!infobar) {
+    return;
+  }
   const container = document.createElement('div');
   container.classList.add('flex-none');
   container.appendChild(infobar.element);

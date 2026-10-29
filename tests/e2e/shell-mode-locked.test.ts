@@ -101,3 +101,39 @@ test('in locked shell mode, the info bar shows without a way to stop', { skip },
   assert.equal(await hasButton(page, 'Stop keeping open'), false);
   await page.close();
 });
+
+// Last: the setting it stores in the frontend's origin would hide the info bar in the tests above.
+test('the info bar\'s "Don\'t show again" keeps it away after a reload, not the toggle', { skip }, async () => {
+  const page = await open('', '#?keep=1&shell=1');
+  try {
+    await waitFor(() => hasText(page, KEPT_OPEN), 'the info bar');
+    await page.evaluate(() => {
+      const find = (root: Document | ShadowRoot): HTMLElement | null => {
+        for (const el of root.querySelectorAll('*')) {
+          if (
+            el.matches('button, devtools-button') &&
+            el.textContent?.trim() === 'Don’t show again' &&
+            el instanceof HTMLElement
+          )
+            return el;
+          const inShadow = el.shadowRoot && find(el.shadowRoot);
+          if (inShadow) return inShadow;
+        }
+        return null;
+      };
+      const button = find(document);
+      if (!button) throw new Error('no "Don’t show again" button');
+      button.click();
+    });
+    await waitFor(async () => !(await hasText(page, KEPT_OPEN)), 'the info bar to close');
+    await page.reload();
+    await waitFor(() => hasLabel(page, 'Reload page'), 'the toolbar');
+    // The bar would go in a task after the toolbar.
+    await new Promise(r => setTimeout(r, 500));
+    assert.equal(await hasText(page, KEPT_OPEN), false);
+    assert.equal(await hasLabel(page, 'Stop keeping DevTools open'), true);
+  } finally {
+    await page.evaluate(() => localStorage.clear());
+    await page.close();
+  }
+});
