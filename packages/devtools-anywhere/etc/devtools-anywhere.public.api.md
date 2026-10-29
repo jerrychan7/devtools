@@ -10,7 +10,7 @@ export function defineDevtoolsAnywhere(tag?: string): void;
 // @public
 export class DevtoolsAnywhereElement extends HTMLElement {
     constructor();
-    attributeChangedCallback(): void;
+    attributeChangedCallback(name: string): void;
     connectedCallback(): void;
     disconnectedCallback(): void;
     get dock(): DockSide;

@@ -5,7 +5,7 @@ import { boxModel, resolveNode } from '../dom/dom';
 
 /**
  * The overlay's z-index: the highest there is. Where popovers are missing, <devtools-anywhere>
- * cannot put its panel and launcher in the top layer, and gives them that z-index instead: the
+ * cannot put its panel and toggler in the top layer, and gives them that z-index instead: the
  * overlay goes one below them then, so as not to cover them.
  */
 const Z_INDEX = typeof HTMLElement.prototype.showPopover === 'function' ? 2147483647 : 2147483646;

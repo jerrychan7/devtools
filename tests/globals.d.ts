@@ -19,6 +19,7 @@ declare global {
   /** The <devtools-anywhere> element (the parts the tests use). */
   interface DevtoolsAnywhereElement extends HTMLElement {
     open: boolean;
+    hide(): void;
     enterShell(): void;
     exitShell(): Promise<void>;
   }
@@ -55,6 +56,9 @@ declare global {
     __frame?: HTMLIFrameElement;
     __hacked?: number;
     __fireOnce?: () => boolean;
+    /** newState of each toggle event, and the shell element's toggle listeners (toggler.test.ts). */
+    __toggles?: string[];
+    __toggleListeners?: Set<unknown>;
     resourceLoaded?: boolean;
   }
 }

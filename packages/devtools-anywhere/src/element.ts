@@ -107,7 +107,7 @@ interface FloatRect {
 }
 
 /**
- * Whether the browser has the top layer for popovers. There the launcher and the panel are above
+ * Whether the browser has the top layer for popovers. There the toggler and the panel are above
  * everything the page draws, whatever its z-index; elsewhere they fall back to the highest z-index.
  */
 const TOP_LAYER = typeof HTMLElement.prototype.showPopover === 'function';
@@ -120,17 +120,17 @@ function setPopoverOpen(el: HTMLElement, open: boolean) {
 const STYLE = `
 :host { all: initial; }
 /* Both go into the top layer as popovers (see TOP_LAYER): undo the browser's popover style. */
-.launcher, .panel {
+.toggler, .panel {
   inset: auto; width: auto; height: auto; margin: 0; padding: 0; border: 0; overflow: visible; color: inherit;
 }
-.launcher {
+.toggler {
   position: fixed; z-index: 2147483647;
   right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: 44px; height: 44px; border: 0; border-radius: 50%;
   background: #1a73e8; color: #fff; font: 600 13px/44px system-ui, sans-serif;
   box-shadow: 0 2px 6px rgba(0, 0, 0, .3); cursor: pointer; touch-action: manipulation;
 }
-:host([open]) .launcher, :host([no-launcher]) .launcher { display: none; }
+:host([open]) .toggler, :host([no-toggler]) .toggler { display: none; }
 .panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647;
   display: none; flex-direction: column; box-sizing: border-box;
@@ -210,18 +210,24 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  *
  * Attributes:
  * - `frontend`: URL of the DevTools frontend entry page. Loaded on first open.
- * - `open`: shows the panel; otherwise a small launcher button is shown.
+ * - `open`: shows the panel; otherwise a small toggler button is shown.
  * - `dock`: `bottom` (default), `right`, `left` or `undocked` (a window over the page). The
  *   main menu's "Dock side" in DevTools changes it; the choice is remembered in localStorage.
  * - `height`: panel height when docked to the bottom, as a CSS length (default `50dvh`).
  * - `width`: panel width when docked to a side, as a CSS length (default `50dvw`).
  *   Dragging the bar overrides either size; the size is remembered in localStorage as a
  *   percentage of the viewport (`dvh`/`dvw`), so it fits other screens and orientations.
- * - `no-launcher`: hides the launcher button.
+ * - `no-toggler`: hides the toggler button.
  * - `sw`: in shell mode, also register devtools-anywhere-sw.js from this URL (or next to the
  *   bundle when the value is empty), which injects the probe into iframe pages that do not
  *   include it. Needs a secure context and a scope covering the pages.
  * - `shell`: set by shell mode on the element inside the shell document.
+ *
+ * Fires `toggle` (a ToggleEvent where supported, with `oldState` and `newState`) when `open`
+ * changes. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
+ * attribute's value is the element's id, or empty for the first element on the page. They
+ * work once the element is registered with defineDevtoolsAnywhere(); in the shell's page iframe,
+ * they control the shell's `<devtools-anywhere>`, whatever their value.
  *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
  *
@@ -235,17 +241,19 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   session: CdpSession | null = null;
 
   private panel: HTMLDivElement;
-  private launcher: HTMLButtonElement;
+  private toggler: HTMLButtonElement;
   private frame: HTMLIFrameElement;
   private loadedUrl = '';
   private disconnect: (() => void) | null = null;
   private frontendOrigin = '';
+  /** `open` as last seen by syncOpen, or null before. */
+  private openState: boolean | null = null;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>${STYLE}</style>
-<button class="launcher" part="launcher" popover="manual" aria-label="Open DevTools">F12</button>
+<button class="toggler" part="toggler" popover="manual" aria-label="Open DevTools">F12</button>
 <div class="panel" part="panel" popover="manual">
   <div class="bar">
     <button class="close" aria-label="Close DevTools" title="Close DevTools">×</button>
@@ -261,8 +269,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     };
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
-    this.launcher = part<HTMLButtonElement>('.launcher');
-    this.launcher.addEventListener('click', () => this.show());
+    this.toggler = part<HTMLButtonElement>('.toggler');
+    this.toggler.addEventListener('click', () => this.toggle());
     part('.close').addEventListener('click', () => this.hide());
     this.setupResizer(part<HTMLElement>('.bar'));
     this.setupCorner(part<HTMLElement>('.corner'));
@@ -454,6 +462,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // whatever it puts inside.
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
+    // Changed while detached, or now the first element for the togglers without a value.
+    this.syncOpen();
+    refreshTogglers(this.ownerDocument);
     const stored = readStored(DOCK_KEY);
     if (isDockSide(stored)) this.dock = stored;
     window.addEventListener('message', this.onFrontendRequest);
@@ -479,11 +490,31 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.loadedUrl = '';
     window.removeEventListener('message', this.onFrontendRequest);
     window.removeEventListener('pageshow', this.onShellPageshow);
+    // The togglers without a value may point to another element now.
+    refreshTogglers(this.ownerDocument);
   }
 
-  /** Lays out the panel again, and loads the frontend if DevTools is now open. */
-  attributeChangedCallback() {
+  /**
+   * Lays out the panel again, and loads the frontend if DevTools is now open. A change of `open`
+   * also fires `toggle` and updates the togglers.
+   */
+  attributeChangedCallback(name: string) {
+    if (name === 'open') this.syncOpen();
     if (this.isConnected && !this.hasAttribute('data-shell-page')) this.update();
+  }
+
+  /**
+   * Fires `toggle` when `open` changes (not when first seen), and updates the togglers'
+   * aria-expanded while connected (connectedCallback does when it connects).
+   */
+  private syncOpen() {
+    const open = this.open;
+    const old = this.openState;
+    this.openState = open;
+    if (old === open || old === null) return;
+    const states = { oldState: old ? 'open' : 'closed', newState: open ? 'open' : 'closed' };
+    this.dispatchEvent(typeof ToggleEvent === 'function' ? new ToggleEvent('toggle', states) : new Event('toggle'));
+    if (this.isConnected) refreshTogglers(this.ownerDocument);
   }
 
   private update() {
@@ -491,7 +522,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // The shell document is ours: nothing there covers the panel.
     if (TOP_LAYER && !this.hasAttribute('shell')) {
       setPopoverOpen(this.panel, this.open);
-      setPopoverOpen(this.launcher, !this.open);
+      setPopoverOpen(this.toggler, !this.open);
     }
     // Load the frontend only once DevTools is opened; the probe keeps capturing meanwhile.
     if (this.open) this.loadFrontend();
@@ -647,7 +678,88 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
-/** Registers the element under `tag` unless something is already registered there. @public */
+/** Elements with this attribute open and close DevTools when clicked (see togglerTarget). */
+const TOGGLE_ATTRIBUTE = 'data-devtools-anywhere-toggle';
+/** The tag the togglers look for, once they are installed. */
+let togglerTag = '';
+/** Toggler values already warned about. */
+const warned = new Set<string>();
+
+/**
+ * The element a toggler controls: in the shell's page iframe, the shell's element; else the
+ * element whose id is the attribute's value, or the first element when it has none.
+ */
+function togglerTarget(toggler: Element, warn: boolean): Element | null {
+  // The shell's element is of the shell window's class: it is toggled through its attribute.
+  if (isShellPage()) return window.frameElement?.ownerDocument.querySelector('devtools-anywhere[shell]') ?? null;
+  const id = toggler.getAttribute(TOGGLE_ATTRIBUTE) ?? '';
+  const target = id ? toggler.ownerDocument.getElementById(id) : toggler.ownerDocument.querySelector(togglerTag);
+  if (target instanceof DevtoolsAnywhereElement) return target;
+  if (warn && !warned.has(id)) {
+    warned.add(id);
+    console.warn(`devtools-anywhere: no <${togglerTag}>${id ? ` with id "${id}"` : ''} for ${TOGGLE_ATTRIBUTE}`);
+  }
+  return null;
+}
+
+/** Sets aria-expanded on a toggler from the state of its element. */
+function refreshToggler(toggler: Element, warn = false) {
+  const target = togglerTarget(toggler, warn);
+  if (target) toggler.setAttribute('aria-expanded', String(target.hasAttribute('open')));
+  return target;
+}
+
+function refreshTogglers(doc: Document) {
+  if (!togglerTag) return;
+  for (const toggler of doc.querySelectorAll(`[${TOGGLE_ATTRIBUTE}]`)) refreshToggler(toggler);
+}
+
+/** Makes any element with TOGGLE_ATTRIBUTE, including those added later, a toggler. */
+function installTogglers(tag: string) {
+  if (togglerTag) return;
+  togglerTag = tag;
+  document.addEventListener(
+    'click',
+    event => {
+      const clicked = event.target instanceof Element ? event.target : null;
+      const toggler = clicked?.closest(`[${TOGGLE_ATTRIBUTE}]`);
+      // A label's click is followed by one on its control: that one toggles, once.
+      const control = clicked?.closest('label')?.control;
+      if (!toggler || (control && control !== clicked && toggler.contains(control))) return;
+      const target = toggler && refreshToggler(toggler, true);
+      if (!target) return;
+      target.toggleAttribute('open');
+      refreshToggler(toggler);
+    },
+    true
+  );
+  const refresh = () => refreshTogglers(document);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refresh);
+  else refresh();
+  // In the shell's page iframe, the togglers follow the shell's element while this page is shown.
+  if (!isShellPage()) return;
+  const shellDocument = window.frameElement?.ownerDocument;
+  let shell: Element | null = null;
+  const listen = () => {
+    shell = togglerTarget(document.documentElement, false);
+    shell?.addEventListener('toggle', refresh);
+    refresh();
+  };
+  // The shell parses its element after its bundle, which may load after this page has run.
+  if (shellDocument?.readyState === 'loading') shellDocument.addEventListener('DOMContentLoaded', listen);
+  else listen();
+  window.addEventListener('pagehide', () => {
+    shellDocument?.removeEventListener('DOMContentLoaded', listen);
+    shell?.removeEventListener('toggle', refresh);
+  });
+  window.addEventListener('pageshow', event => event.persisted && listen());
+}
+
+/**
+ * Registers the element under `tag` unless something is already registered there, and makes
+ * elements with `data-devtools-anywhere-toggle` open and close it. @public
+ */
 export function defineDevtoolsAnywhere(tag = 'devtools-anywhere') {
   if (!customElements.get(tag)) customElements.define(tag, DevtoolsAnywhereElement);
+  installTogglers(tag);
 }

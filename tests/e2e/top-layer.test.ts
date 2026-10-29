@@ -1,4 +1,4 @@
-// <devtools-anywhere> in the top layer: nothing the page draws covers the panel or the launcher,
+// <devtools-anywhere> in the top layer: nothing the page draws covers the panel or the toggler,
 // and the page's own popovers keep working.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,13 +61,13 @@ test('docked to a side, the panel keeps its full height', async () => {
   await page.evaluate(() => document.querySelector('devtools-anywhere')?.setAttribute('dock', 'bottom'));
 });
 
-test('the launcher is above the page too while DevTools is hidden', async () => {
+test('the toggler is above the page too while DevTools is hidden', async () => {
   await page.evaluate(() => document.querySelector('devtools-anywhere')?.removeAttribute('open'));
-  const launcher = await probe('.launcher');
-  assert.equal(launcher.inTopLayer, true);
-  assert.equal(launcher.hitsElement, true);
+  const toggler = await probe('.toggler');
+  assert.equal(toggler.inTopLayer, true);
+  assert.equal(toggler.hitsElement, true);
   // 44px, 16px from the bottom right corner.
-  assert.deepEqual(launcher.box, [1000 - 16 - 44, 800 - 16 - 44, 44, 44]);
+  assert.deepEqual(toggler.box, [1000 - 16 - 44, 800 - 16 - 44, 44, 44]);
   assert.equal((await probe('.panel')).inTopLayer, false);
   await page.evaluate(() => document.querySelector('devtools-anywhere')?.setAttribute('open', ''));
 });
