@@ -1,6 +1,8 @@
-// Keeps directories to a number of files one can take in at a glance (pre-commit).
+// Keeps directories to a number of files one can take in at a glance (pre-commit, and `pnpm lint`
+// with `--all`).
 //
-// Counts the files directly in each directory a commit adds files to, as staged. Past WARN_FILES
+// Counts the files directly in each directory a commit adds files to, as staged; with `--all`, in
+// every directory of the index, so a commit that skipped the hook is caught too. Past WARN_FILES
 // it warns, and the next commit is to sort the directory into subdirectories by concern; past
 // MAX_FILES it rejects the commit. Upstream files of the devtools-frontend checkout are not ours
 // to sort, and are skipped.
@@ -17,8 +19,9 @@ const list = (...args: string[]) =>
     .split('\0')
     .filter(Boolean);
 
+const all = process.argv.includes('--all');
 const dirs = new Set(
-  list('diff', '--cached', '--name-only', '--diff-filter=ACR')
+  (all ? list('ls-files', '--cached') : list('diff', '--cached', '--name-only', '--diff-filter=ACR'))
     .filter(file => !SKIP.test(file))
     .map(file => path.posix.dirname(file))
 );

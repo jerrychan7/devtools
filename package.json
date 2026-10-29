@@ -10,7 +10,7 @@
     "playground": "node playground/server.ts",
     "remote": "node packages/remote-server/dist/cli.js --port 8790 --host 127.0.0.1 --no-token --public-url http://localhost:8790/",
     "licenses:update": "node scripts/third-party-licenses.ts",
-    "lint": "oxlint && node scripts/check-contracts.ts",
+    "lint": "oxlint && node scripts/check-contracts.ts && node scripts/check-file-size.ts --all && node scripts/check-dir-size.ts --all",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "prepare": "husky"

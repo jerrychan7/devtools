@@ -1,6 +1,7 @@
-// Keeps source files to a size one can read through (pre-commit).
+// Keeps source files to a size one can read through (pre-commit, and `pnpm lint` with `--all`).
 //
-// Checks the staged content of the files a commit adds or changes. Past WARN_LINES it warns, and
+// Checks the staged content of the files a commit adds or changes; with `--all`, of every file in
+// the index, so a commit that skipped the hook is caught too. Past WARN_LINES it warns, and
 // the next commit is to split or restructure the file; past MAX_LINES it rejects the commit.
 // Upstream files of the devtools-frontend checkout are not ours to split, and are skipped.
 import { execFileSync } from 'node:child_process';
@@ -12,7 +13,10 @@ const SKIP = /^(packages\/devtools-frontend\/(src|patches)\/|experiments\/)/;
 
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 << 20 });
 
-const staged = git('diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z')
+const all = process.argv.includes('--all');
+const staged = (
+  all ? git('ls-files', '--cached', '-z') : git('diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z')
+)
   .split('\0')
   .filter(file => file && SOURCE.test(file) && !SKIP.test(file));
 
