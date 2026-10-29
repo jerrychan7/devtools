@@ -1,4 +1,4 @@
-// The probe's options: a locked shell mode.
+// The probe's options: a locked shell mode and data-no-toggler.
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
@@ -37,6 +37,7 @@ const globalState = () =>
     return {
       shell: el.hasAttribute('shell'),
       locked: el.hasAttribute('shell-mode-locked'),
+      noToggler: el.hasAttribute('no-toggler'),
       frontend: el.shadowRoot?.querySelector('iframe')?.src ?? '',
       stored: localStorage.getItem('devtools-anywhere:shell-mode'),
     };
@@ -82,7 +83,7 @@ test('locked off, a shell entered before is left', async () => {
   assert.equal(await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell')), null);
 });
 
-test('locked on, the shell is entered whatever the user chose, and stays locked', async () => {
+test('locked on, the shell is entered whatever the user chose, and stays locked, with data-no-toggler', async () => {
   await open('locked-on.html');
   await page.evaluate(() => localStorage.setItem('devtools-anywhere:shell-mode', 'off'));
   try {
@@ -98,6 +99,7 @@ test('locked on, the shell is entered whatever the user chose, and stays locked'
     const state = await globalState();
     assert.equal(state.shell, true);
     assert.equal(state.locked, true);
+    assert.equal(state.noToggler, true);
     assert.equal(state.stored, 'off');
     assert.match(state.frontend, /\?shellModeLocked=?#/);
     // Heeded, this would store 'on' and reload.
@@ -119,6 +121,7 @@ test('a shell entered before the page was locked takes the lock', async () => {
   const state = await globalState();
   assert.equal(state.shell, true);
   assert.equal(state.locked, true);
+  assert.equal(state.noToggler, true);
 });
 
 test('locked on, a page that refuses to be framed is shown on its own', async () => {

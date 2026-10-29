@@ -129,7 +129,7 @@ The packages are not published yet; the paths below refer to the builds in this 
 </head>
 ```
 
-After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts `<devtools-anywhere>`. Optional attributes: `data-open-immediately` opens DevTools right away; `data-default-shell-mode="off"` stays out of shell mode, which the top-level page enters by default (`on`); `data-shell-mode-locked` keeps shell mode as `data-default-shell-mode` says, ignoring the user's choice (which stays stored) and hiding DevTools' switch, though a page that refuses to be framed is still shown on its own; `data-sw` enables the Service Worker in shell mode.
+After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts `<devtools-anywhere>`. Optional attributes: `data-open-immediately` opens DevTools right away; `data-default-shell-mode="off"` stays out of shell mode, which the top-level page enters by default (`on`); `data-shell-mode-locked` keeps shell mode as `data-default-shell-mode` says, ignoring the user's choice (which stays stored) and hiding DevTools' switch, though a page that refuses to be framed is still shown on its own; `data-no-toggler` hides the F12 button, also in shell mode; `data-sw` enables the Service Worker in shell mode.
 
 ### Vite
 
@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `openImmediately`, `defaultShellMode` (`'on'` or `'off'`), `shellModeLocked`, `serviceWorker`, which match the probe's attributes, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
+Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `openImmediately`, `defaultShellMode` (`'on'` or `'off'`), `shellModeLocked`, `toggler` (default `true`; `false` hides the F12 button), `serviceWorker`, which match the probe's attributes, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
 
 ### The element
 

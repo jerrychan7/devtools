@@ -5,7 +5,7 @@
 // As the first script in <head>, it captures from the very start. With `data-frontend`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
 // the page has loaded and mounts <devtools-anywhere>. `data-open-immediately` opens DevTools right away; `data-sw` is passed on as the element's `sw`
-// attribute (see shell mode).
+// attribute (see shell mode), `data-no-toggler` as its `no-toggler`.
 //
 // With `data-frontend`, the top-level page enters shell mode by default, on its first load: the
 // probe stores the shell config itself before the page's scripts run, so the page is not
@@ -51,6 +51,7 @@ const remote = attribute('data-remote');
 const bundle = script?.src ? new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href : null;
 const open = attribute('data-open-immediately') !== null;
 const locked = attribute('data-shell-mode-locked') !== null;
+const noToggler = attribute('data-no-toggler') !== null;
 const shellOff = attribute('data-default-shell-mode') === 'off';
 
 /** Whether to enter shell mode by default; storage that throws counts as no. */
@@ -71,11 +72,11 @@ if (entered && locked && shellOff) {
     sessionStorage.removeItem(SHELL_KEY);
   } catch {}
 } else if (entered) {
-  storeShellConfig(entered.frontend, entered.bundle, entered.sw ?? null, { ...entered, locked });
+  storeShellConfig(entered.frontend, entered.bundle, entered.sw ?? null, { ...entered, locked, noToggler });
 }
 // installProbe() reads the config next and writes the shell.
 if (bundle && frontend && remote === null && window === top && !readShellConfig() && shellByDefault()) {
-  storeShellConfig(frontend, bundle, attribute('data-sw'), { open, locked });
+  storeShellConfig(frontend, bundle, attribute('data-sw'), { open, locked, noToggler });
 }
 
 const probe = installProbe();
@@ -144,6 +145,7 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
       element.setAttribute('frontend', new URL(frontend, location.href).href);
       if (open) element.setAttribute('open', '');
       if (locked) element.setAttribute('shell-mode-locked', '');
+      if (noToggler) element.setAttribute('no-toggler', '');
       const sw = attribute('data-sw');
       if (sw !== null) element.setAttribute('sw', sw);
       document.body.appendChild(element);

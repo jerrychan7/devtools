@@ -129,7 +129,7 @@
 </head>
 ```
 
-页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并挂载 `<devtools-anywhere>`。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-sw` 在外壳模式下启用 Service Worker。
+页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并挂载 `<devtools-anywhere>`。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-sw` 在外壳模式下启用 Service Worker。
 
 ### Vite
 
@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`frontendDir`（使用别的前端构建）、`frontendEntry`（默认 `anywhere_app.html`）、`frontendUrl`、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`toggler`（默认 `true`；`false` 隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
 
 ### 远程调试
 

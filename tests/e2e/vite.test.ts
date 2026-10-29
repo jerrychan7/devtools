@@ -35,6 +35,7 @@ before(async () => {
         openImmediately: true,
         defaultShellMode: 'off',
         shellModeLocked: true,
+        toggler: false,
       }),
     ],
   });
@@ -75,16 +76,27 @@ test('the options become the probe script attributes', async () => {
     'data-open-immediately': '',
     'data-default-shell-mode': 'off',
     'data-shell-mode-locked': '',
+    'data-no-toggler': '',
   });
   // Out of shell mode, with the element as the options say.
   await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.open);
   assert.deepEqual(
     await page.evaluate(() => {
       const el = document.querySelector('devtools-anywhere');
-      return [!!el?.hasAttribute('shell'), !!el?.hasAttribute('shell-mode-locked')];
+      return [!!el?.hasAttribute('shell'), !!el?.hasAttribute('shell-mode-locked'), !!el?.hasAttribute('no-toggler')];
     }),
-    [false, true]
+    [false, true, true]
   );
+  // no-toggler: no F12 button once DevTools is hidden.
+  const togglerShown = await page.evaluate(() => {
+    const el = document.querySelector('devtools-anywhere');
+    el?.hide();
+    const toggler = el?.shadowRoot?.querySelector('.toggler');
+    const shown = !!toggler && getComputedStyle(toggler).display !== 'none';
+    el?.show();
+    return shown;
+  });
+  assert.equal(togglerShown, false);
 });
 
 test('DevTools mounts and receives output from before any app code ran', async () => {

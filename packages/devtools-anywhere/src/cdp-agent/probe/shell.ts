@@ -37,10 +37,12 @@ export interface ShellConfig {
   open?: boolean;
   /** The element's `shell-mode-locked`: DevTools offers no way out of shell mode. */
   locked?: boolean;
+  /** The element's `no-toggler`. */
+  noToggler?: boolean;
 }
 
 /** What the shell's element takes from the page besides its URLs. @internal */
-export type ShellFlags = Pick<ShellConfig, 'open' | 'locked'>;
+export type ShellFlags = Pick<ShellConfig, 'open' | 'locked' | 'noToggler'>;
 
 let trustedOrigin = '';
 
@@ -116,12 +118,12 @@ export function readShellConfig(): ShellConfig | null {
 
 function isShellConfig(value: unknown): value is ShellConfig {
   if (typeof value !== 'object' || value === null) return false;
-  const { frontend, bundle, sw, open, locked } = value as Record<string, unknown>;
+  const { frontend, bundle, sw, open, locked, noToggler } = value as Record<string, unknown>;
   return (
     typeof frontend === 'string' &&
     typeof bundle === 'string' &&
     (sw === undefined || typeof sw === 'string') &&
-    [open, locked].every(flag => flag === undefined || typeof flag === 'boolean')
+    [open, locked, noToggler].every(flag => flag === undefined || typeof flag === 'boolean')
   );
 }
 
@@ -187,6 +189,6 @@ function replaceDocument(config: ShellConfig) {
 #${SHELL_PAGE_ID}{flex:1;min-height:0;width:100%;border:0;display:block}</style></head>
 <body><iframe id="${SHELL_PAGE_ID}" src="${escapeAttr(location.href)}"></iframe>
 <script src="${escapeAttr(config.bundle)}"></script>
-<devtools-anywhere shell${config.open === false ? '' : ' open'}${config.locked ? ' shell-mode-locked' : ''} frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
+<devtools-anywhere shell${config.open === false ? '' : ' open'}${config.locked ? ' shell-mode-locked' : ''}${config.noToggler ? ' no-toggler' : ''} frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
   document.close();
 }

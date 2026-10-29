@@ -354,7 +354,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const frontend = this.getAttribute('frontend');
     if (!bundleUrl || !frontend) return;
     // The probe ignores (and removes) a config whose URLs are not on its own origin.
-    const flags = { locked: this.hasAttribute('shell-mode-locked') };
+    const flags = { locked: this.hasAttribute('shell-mode-locked'), noToggler: this.hasAttribute('no-toggler') };
     if (!storeShellConfig(frontend, bundleUrl, this.getAttribute('sw'), flags)) {
       console.warn('devtools-anywhere: shell mode needs the frontend, bundle and sw on one origin');
       return;

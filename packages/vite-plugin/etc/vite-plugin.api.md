@@ -20,6 +20,7 @@ export interface DevtoolsAnywhereOptions {
     remote?: string;
     serviceWorker?: boolean;
     shellModeLocked?: boolean;
+    toggler?: boolean;
 }
 
 ```

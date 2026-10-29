@@ -19,6 +19,8 @@ export type ProbeScriptAttributes = {
   'data-default-shell-mode'?: 'on' | 'off';
   /** Keeps shell mode as `data-default-shell-mode` says: DevTools offers no choice. */
   'data-shell-mode-locked'?: true;
+  /** Hides the element's toggler button. */
+  'data-no-toggler'?: true;
   /** Passed on as the element's `sw` attribute (shell mode's Service Worker). */
   'data-sw'?: string | true;
   /** Connects to a remote debugging server: this URL, by default the one the probe is served from. */
