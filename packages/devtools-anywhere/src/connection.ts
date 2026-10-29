@@ -17,7 +17,7 @@ const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_
 /** Sent by the shell on startup, in case the page started listening first. */
 const PING = JSON.stringify({ method: PING_METHOD });
 /** Domains that keep state while enabled; a new frontend instance must start from disabled. */
-export const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
 
 interface Link {
   /** Forgets that the peer has spoken; outgoing messages are queued again. */
@@ -66,9 +66,19 @@ function link(session: CdpSession, peer: () => Window | null | undefined, origin
 }
 
 /**
+ * Ends what a frontend started in the page, like a new Chrome session: e.g. Debugger.enable and
+ * CSS.enable only report scripts and style sheets again after a disable.
+ */
+export async function endSession(session: CdpSession): Promise<void> {
+  const calls = [...STATEFUL_DOMAINS.map(domain => `${domain}.disable`), 'Page.stopScreencast'];
+  await Promise.all(calls.map(method => session.call(method).catch(() => {})));
+}
+
+/**
  * Connects a CDP session to a DevTools frontend running in `frame`. When the frame reloads
  * (a new frontend instance), the domains are disabled so that the new instance's `enable`
- * calls replay everything captured so far. Returns a function that disconnects.
+ * calls replay everything captured so far. Returns a function that disconnects, and undoes what
+ * the frontend did to the page.
  */
 export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, frontendOrigin: string): () => void {
   const connection = link(session, () => frame.contentWindow, frontendOrigin);
@@ -76,14 +86,15 @@ export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, f
   const onLoad = () => {
     if (loads++ === 0) return;
     connection.reset();
-    // Like a new Chrome session: e.g. Debugger.enable and CSS.enable only report scripts and
-    // style sheets again after a disable.
-    for (const domain of STATEFUL_DOMAINS) session.call(`${domain}.disable`).catch(() => {});
+    void endSession(session);
   };
   frame.addEventListener('load', onLoad);
   return () => {
     connection.disconnect();
     frame.removeEventListener('load', onLoad);
+    // Nothing the frontend asked for outlives it: inspect mode, highlights, forced states, the
+    // screencast. What the probe captured stays, for the next frontend.
+    void endSession(session).then(() => session.reset());
   };
 }
 

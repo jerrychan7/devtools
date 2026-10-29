@@ -8,7 +8,7 @@ import {
   type HelloParams,
 } from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
-import { STATEFUL_DOMAINS } from './connection';
+import { endSession } from './connection';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -125,11 +125,9 @@ export function connectRemote(
     if (!found) return;
     sessions.delete(id);
     found.off();
-    // Like a new Chrome session for the next frontend: e.g. Debugger.enable and CSS.enable only
-    // report scripts and style sheets again after a disable.
+    // Like a new Chrome session for the next frontend.
     const { cdp } = found;
-    const calls = [...STATEFUL_DOMAINS.map(domain => `${domain}.disable`), 'Page.stopScreencast'];
-    Promise.all(calls.map(method => cdp.call(method).catch(() => {}))).then(() => {
+    void endSession(cdp).then(() => {
       cdp.reset();
       idle.push(cdp);
     });

@@ -60,6 +60,9 @@ declare global {
     /** newState of each toggle event, and the shell element's toggle listeners (toggler.test.ts). */
     __toggles?: string[];
     __toggleListeners?: Set<unknown>;
+    /** Clicks the page's button got, and the removed <devtools-anywhere> (disconnect.test.ts). */
+    __clicks?: number;
+    __devtools?: DevtoolsAnywhereElement;
     resourceLoaded?: boolean;
   }
 }
