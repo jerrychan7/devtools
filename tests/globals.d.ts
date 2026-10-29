@@ -53,7 +53,7 @@ declare global {
     __frame?: HTMLIFrameElement;
     __hacked?: number;
     __fireOnce?: () => boolean;
-    /** newState of each toggle event, and the shell element's toggle listeners (toggler.test.ts). */
+    /** The aria-expanded values a toggler took, and the shell element's state listeners (toggler.test.ts). */
     __toggles?: string[];
     __toggleListeners?: Set<unknown>;
     /** Clicks the page's button got, and the removed <devtools-anywhere> (disconnect.test.ts). */

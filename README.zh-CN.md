@@ -171,7 +171,7 @@ npx devtools-anywhere-remote --port 8080
 
 页面也可以自己放置 `<devtools-anywhere>`，作为显示 DevTools 的一个区域：它是页面文档流里的块级盒子（`display: block`），尺寸由页面的 CSS 决定，一连接就加载 DevTools。页面用 CSS 或 `hidden` 控制它的显示和隐藏；隐藏时 DevTools 不会卸载。它没有 F12 按钮，不能停靠或拖拽调整大小，也不会进入外壳模式（DevTools 里没有入口）；在外壳里的页面中照常工作。它只有 `devtools-frontend-url` 一个属性，其他属性一律忽略。
 
-页面上任意元素都能开关面板：加上 `data-devtools-anywhere-toggle`，留空则指向探针挂载的组件。值为页面自己放置的某个组件的 id 时，点击只会在该组件上派发 `devtools-toggle-request` 事件，由页面自行处理；这类切换器不设置 `aria-expanded`。点击在 document 上统一捕获，后加入的切换器同样生效；不阻止默认行为，切换器的 `aria-expanded` 跟随面板状态。找不到目标时只打一条警告（同一个值只警告一次）。面板打开或关闭时元素派发 `toggle` 事件，浏览器支持时为 `ToggleEvent`，带 `oldState`、`newState`（`'open'` 或 `'closed'`）。
+页面上任意元素都能开关面板：加上 `data-devtools-anywhere-toggle`，留空则指向探针挂载的组件。值为页面自己放置的某个组件的 id 时，点击只会在该组件上派发 `devtools-toggle-request` 事件，由页面自行处理；这类切换器不设置 `aria-expanded`。点击在 document 上统一捕获，后加入的切换器同样生效；不阻止默认行为，切换器的 `aria-expanded` 跟随面板状态。找不到目标时只打一条警告（同一个值只警告一次）。面板是否打开只能从切换器的 `aria-expanded` 得知，组件本身不派发事件。
 
 ```html
 <button data-devtools-anywhere-toggle>DevTools</button>

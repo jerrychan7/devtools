@@ -211,10 +211,11 @@ test('a second global element only warns and does nothing, even once the first i
   await page.evaluate(() => document.querySelector('html > devtools-anywhere:not([style])')?.remove());
   assert.deepEqual(await mountAnother(), { shown: false, frontend: null });
   assert.equal(warnings.filter(w => w.includes('global <devtools-anywhere>')).length, 2);
-  // Nor is it a toggler's target, nor does it fire toggle.
+  // Nor is it a toggler's target.
   const toggled = await page.evaluate(() => {
     let fired = 0;
-    for (const el of document.querySelectorAll('devtools-anywhere')) el.addEventListener('toggle', () => fired++);
+    for (const el of document.querySelectorAll('devtools-anywhere'))
+      el.addEventListener('devtools-anywhere-state', () => fired++);
     document.body.insertAdjacentHTML('beforeend', '<button id="t" data-devtools-anywhere-toggle>t</button>');
     const button = document.getElementById('t');
     button?.click();

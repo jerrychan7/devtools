@@ -220,8 +220,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * first open; without it, the probe's. The rest of its state is the library's: the probe gives
  * the global element its options (createGlobalElement), and the user opens and closes it.
  *
- * Fires `toggle` (a ToggleEvent where supported, with `oldState` and `newState`) when it opens
- * or closes. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
+ * Whether it is open shows in its togglers' `aria-expanded`. Elements with `data-devtools-anywhere-toggle` open and close it when clicked: the
  * attribute is empty for the probe's element. An element the page placed itself is a box in its
  * flow with DevTools always loaded, no open state and no shell mode: a toggler set to its id only
  * fires `devtools-toggle-request` on it. They
@@ -569,8 +568,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   /**
-   * Fires `toggle` when `open` changes (not when first seen), and updates the togglers'
-   * aria-expanded while connected (connectedCallback does when it connects).
+   * Tells STATE_EVENT's listeners when it opens or closes (not when first seen), and updates the
+   * togglers' aria-expanded while connected (connectedCallback does when it connects).
    */
   private syncOpen() {
     if (inactiveGlobals.has(this)) return;
@@ -578,8 +577,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const old = this.openState;
     this.openState = open;
     if (old === open || old === null) return;
-    const states = { oldState: old ? 'open' : 'closed', newState: open ? 'open' : 'closed' };
-    this.dispatchEvent(typeof ToggleEvent === 'function' ? new ToggleEvent('toggle', states) : new Event('toggle'));
+    this.dispatchEvent(new Event(STATE_EVENT));
     if (this.isConnected) refreshTogglers(this.ownerDocument);
   }
 
@@ -787,6 +785,12 @@ const TOGGLE_REQUEST_EVENT = 'devtools-toggle-request';
 const isCustom = (el: Element) =>
   el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !el.hasAttribute('shell');
 
+/**
+ * Fired on the global element when it opens or closes, for the togglers of the shell's page: not
+ * part of the API, which has only their aria-expanded.
+ */
+const STATE_EVENT = 'devtools-anywhere-state';
+
 /** The event a toggler controls its element with (see controlElement). */
 const CONTROL_EVENT = 'devtools-anywhere-control';
 
@@ -879,7 +883,7 @@ function installTogglers(tag: string) {
   let shell: Element | null = null;
   const listen = () => {
     shell = togglerTarget(document.documentElement, false);
-    shell?.addEventListener('toggle', refresh);
+    shell?.addEventListener(STATE_EVENT, refresh);
     refresh();
   };
   // The shell parses its element after its bundle, which may load after this page has run.
@@ -887,7 +891,7 @@ function installTogglers(tag: string) {
   else listen();
   window.addEventListener('pagehide', () => {
     shellDocument?.removeEventListener('DOMContentLoaded', listen);
-    shell?.removeEventListener('toggle', refresh);
+    shell?.removeEventListener(STATE_EVENT, refresh);
   });
   window.addEventListener('pageshow', event => event.persisted && listen());
 }

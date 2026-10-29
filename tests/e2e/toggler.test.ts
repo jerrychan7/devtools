@@ -60,30 +60,27 @@ test('togglers start with aria-expanded of their element', async () => {
   });
 });
 
-test('the togglers toggle the element, firing toggle', async () => {
+test('the togglers toggle the element, which shows only in their aria-expanded', async () => {
   await load();
   await page.evaluate(() => {
     window.__toggles = [];
-    document.querySelector('devtools-anywhere')?.addEventListener('toggle', e => {
-      if (e instanceof ToggleEvent) window.__toggles?.push(`${e.oldState}>${e.newState}`);
-    });
+    const el = document.querySelector('devtools-anywhere');
+    // No toggle event: the state is the togglers' aria-expanded.
+    el?.addEventListener('toggle', () => window.__toggles?.push('toggle event'));
+    new MutationObserver(() =>
+      window.__toggles?.push(document.getElementById('first')?.getAttribute('aria-expanded') ?? '')
+    ).observe(document.getElementById('first') as Element, { attributeFilter: ['aria-expanded'] });
   });
   // A click inside the toggler counts too.
   await click('#second span');
   assert.deepEqual(await state(), { open: true, expanded: { first: 'true', second: 'true', missing: null } });
   await click('#first');
   assert.deepEqual(await state(), { open: false, expanded: { first: 'false', second: 'false', missing: null } });
-  // Closing it when closed fires nothing.
+  // DevTools' own close button too.
   await click('#first');
   await close();
-  await click('#first');
-  assert.deepEqual(await page.evaluate(() => window.__toggles), [
-    'closed>open',
-    'open>closed',
-    'closed>open',
-    'open>closed',
-    'closed>open',
-  ]);
+  await page.waitForFunction(() => document.getElementById('first')?.getAttribute('aria-expanded') === 'false');
+  assert.deepEqual(await page.evaluate(() => window.__toggles), ['true', 'false', 'true', 'false']);
 });
 
 test('a toggler added later works, and follows the element', async () => {
@@ -184,7 +181,7 @@ test("in the shell, the page's togglers toggle the shell's element and follow it
 
 test("the page's listener on the shell's element goes with the page", async () => {
   await loadShell();
-  // Tracks the shell element's toggle listeners from now on.
+  // Tracks the shell element's state listeners from now on.
   await page.evaluate(() => {
     const el = document.querySelector('devtools-anywhere');
     if (!el) throw new Error('no <devtools-anywhere>');
@@ -195,7 +192,7 @@ test("the page's listener on the shell's element goes with the page", async () =
       const original = el[name];
       Object.defineProperty(el, name, {
         value: (type: string, listener: unknown, options: unknown) => {
-          if (type === 'toggle') tracked(listener);
+          if (type === 'devtools-anywhere-state') tracked(listener);
           Reflect.apply(original, el, [type, listener, options]);
         },
       });
