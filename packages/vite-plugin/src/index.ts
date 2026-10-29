@@ -17,13 +17,12 @@ import type { ProbeScriptAttributes } from 'devtools-anywhere';
  */
 export interface DevtoolsAnywhereOptions {
   /**
-   * Directory of a built DevTools frontend to serve, under `/@devtools-anywhere/front_end/`.
-   * Default: the build of `@devtools-anywhere/devtools-frontend`.
+   * Path of a built DevTools frontend's entry page on disk, such as `…/anywhere_app.html`: its
+   * directory is served under `/@devtools-anywhere/front_end/`. Default: `anywhere_app.html` of
+   * `@devtools-anywhere/devtools-frontend`.
    */
-  devtoolsFrontendDir?: string;
-  /** Entry page inside `devtoolsFrontendDir`. Default: `anywhere_app.html`. */
-  devtoolsFrontendEntry?: string;
-  /** URL of a frontend hosted elsewhere; used instead of `devtoolsFrontendDir`. */
+  devtoolsFrontendPath?: string;
+  /** URL of a frontend hosted elsewhere; used instead of `devtoolsFrontendPath`. */
   devtoolsFrontendUrl?: string;
   /** Open DevTools as soon as it is mounted (`data-open-immediately`). Default: false. */
   openImmediately?: boolean;
@@ -65,12 +64,17 @@ const TYPES: Record<string, string> = {
 };
 
 /** Directory of an installed package's file, or undefined if the package is not installed. */
-function packageDir(require: NodeJS.Require, file: string): string | undefined {
+function packageFile(require: NodeJS.Require, file: string): string | undefined {
   try {
-    return path.dirname(require.resolve(file));
+    return require.resolve(file);
   } catch {
     return undefined;
   }
+}
+
+function packageDir(require: NodeJS.Require, file: string): string | undefined {
+  const resolved = packageFile(require, file);
+  return resolved && path.dirname(resolved);
 }
 
 /**
@@ -83,13 +87,12 @@ function packageDir(require: NodeJS.Require, file: string): string | undefined {
 export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}): Plugin {
   const require = createRequire(import.meta.url);
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'));
-  const dir = options.devtoolsFrontendUrl
+  const entry = options.devtoolsFrontendUrl
     ? undefined
-    : (options.devtoolsFrontendDir ?? packageDir(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'));
-  const frontendDir = dir && path.resolve(dir);
+    : (options.devtoolsFrontendPath ?? packageFile(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html'));
+  const frontendDir = entry && path.dirname(path.resolve(entry));
   const frontend =
-    options.devtoolsFrontendUrl ??
-    (frontendDir ? `${BASE}front_end/${options.devtoolsFrontendEntry ?? 'anywhere_app.html'}` : undefined);
+    options.devtoolsFrontendUrl ?? (entry ? `${BASE}front_end/${encodeURIComponent(path.basename(entry))}` : undefined);
 
   // Optional: translations beyond English and Chinese, laid out like the frontend.
   const localesDir = frontendDir && packageDir(require, '@devtools-anywhere/devtools-frontend-locales/REVISION');
@@ -122,7 +125,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
     configResolved(config) {
       if (!frontend)
         config.logger.warn(
-          '[devtools-anywhere] No DevTools frontend found: install @devtools-anywhere/devtools-frontend, or set `devtoolsFrontendDir` or `devtoolsFrontendUrl`.'
+          '[devtools-anywhere] No DevTools frontend found: install @devtools-anywhere/devtools-frontend, or set `devtoolsFrontendPath` or `devtoolsFrontendUrl`.'
         );
     },
 

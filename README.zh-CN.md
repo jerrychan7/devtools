@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`devtoolsFrontendDir`（使用别的前端构建）、`devtoolsFrontendEntry`（默认 `anywhere_app.html`）、`devtoolsFrontendUrl`、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`devtoolsFrontendPath`（本地另一份前端构建的入口文件路径，如 `…/anywhere_app.html`，托管它所在的目录）、`devtoolsFrontendUrl`（托管在别处的前端，设置后不再托管本地文件）、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`，与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面改为连接到它，不再挂载组件）。
 
 ### 远程调试
 
@@ -162,7 +162,7 @@ npx devtools-anywhere-remote --port 8080
 
 - 服务端同时提供探针、bundle 和 DevTools 前端；前端运行在电脑上，不受“前端要和页面不同源”的限制。
 - 调试一个页面就意味着能在其中执行任意脚本：目标列表和 DevTools 连接都需要 token（`--token <值>`，默认随机生成；`--no-token` 关闭）。页面连接不需要 token。
-- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--frontend-dir`，以及 `--frontend-url`（打开托管在别处的前端，如 CDN；HTTPS 的前端要求服务端也用 HTTPS）。在 Node.js 中也可以调用 `startRemoteServer(options)`；`createRemoteHandler(options)` 提供请求和 upgrade 两个处理函数，可以挂在自己的服务（Express、Koa 等）的某个 base path 下，不属于它的请求返回 false。页面连接 `<base>target/<id>`，DevTools 连接 `<base>client/<id>`；宿主只能按精确路径分发 WebSocket upgrade 时，用 `singlePath: true`，两者都连到 base path 本身（`<base>?target=<id>`、`<base>?client=<id>`）：目标列表和打印的 script 标签改用这种形式，标签上带 `data-single-path`，宿主只需为 upgrade 注册 base path（带结尾斜杠）。两种形式始终都接受。单独打开的前端可以用 `anywhere_app.html?ws=<host:port/path>`（HTTPS 用 `wss=`）连接任一目标，参数是去掉协议的 WebSocket 地址，和 Chrome 的 `devtools_app.html?ws=` 一样。
+- HTTPS 页面只能连接 HTTPS 服务端：使用 `--cert` 和 `--key`。其他选项：`--host`、`--base-path`、`--devtools-frontend-path`，以及 `--devtools-frontend-url`（打开托管在别处的前端，如 CDN；HTTPS 的前端要求服务端也用 HTTPS）。在 Node.js 中也可以调用 `startRemoteServer(options)`；`createRemoteHandler(options)` 提供请求和 upgrade 两个处理函数，可以挂在自己的服务（Express、Koa 等）的某个 base path 下，不属于它的请求返回 false。页面连接 `<base>target/<id>`，DevTools 连接 `<base>client/<id>`；宿主只能按精确路径分发 WebSocket upgrade 时，用 `singlePath: true`，两者都连到 base path 本身（`<base>?target=<id>`、`<base>?client=<id>`）：目标列表和打印的 script 标签改用这种形式，标签上带 `data-single-path`，宿主只需为 upgrade 注册 base path（带结尾斜杠）。两种形式始终都接受。单独打开的前端可以用 `anywhere_app.html?ws=<host:port/path>`（HTTPS 用 `wss=`）连接任一目标，参数是去掉协议的 WebSocket 地址，和 Chrome 的 `devtools_app.html?ws=` 一样。
 - `/json/list`（带 token）按 Chrome 的格式列出目标。
 
 ### 组件

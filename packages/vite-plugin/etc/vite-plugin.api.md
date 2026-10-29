@@ -13,8 +13,7 @@ export default devtoolsAnywhere;
 // @public
 export interface DevtoolsAnywhereOptions {
     defaultShellMode?: 'on' | 'off';
-    devtoolsFrontendDir?: string;
-    devtoolsFrontendEntry?: string;
+    devtoolsFrontendPath?: string;
     devtoolsFrontendUrl?: string;
     noToggler?: boolean;
     openImmediately?: boolean;

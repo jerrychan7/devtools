@@ -50,14 +50,17 @@ export interface RemoteHandlerOptions {
    * anyone who can reach the server inspect every page connected to it.
    */
   token?: string | false;
-  /** A DevTools frontend build to serve. Default: `@devtools-anywhere/devtools-frontend`. */
-  frontendDir?: string;
+  /**
+   * Path of a built DevTools frontend's entry page on disk, such as `…/anywhere_app.html`: its
+   * directory is served. Default: `anywhere_app.html` of `@devtools-anywhere/devtools-frontend`.
+   */
+  devtoolsFrontendPath?: string;
   /**
    * URL of the frontend's `anywhere_app.html` hosted elsewhere (a CDN), opened from the target
    * list instead of the one this server serves. An HTTPS frontend can only connect to a server
    * over WSS.
    */
-  frontendUrl?: string;
+  devtoolsFrontendUrl?: string;
   /**
    * The server's URL as pages reach it (behind a proxy, its public URL): what the target list's
    * script tag names. Default: the URL the list is opened at.
@@ -148,12 +151,17 @@ const GONE_TTL = 60_000;
 const MAX_TARGETS = 1000;
 
 /** Directory of an installed package's file, or undefined if the package is not installed. */
-function packageDir(require: NodeJS.Require, file: string): string | undefined {
+function packageFile(require: NodeJS.Require, file: string): string | undefined {
   try {
-    return path.dirname(require.resolve(file));
+    return require.resolve(file);
   } catch {
     return undefined;
   }
+}
+
+function packageDir(require: NodeJS.Require, file: string): string | undefined {
+  const resolved = packageFile(require, file);
+  return resolved && path.dirname(resolved);
 }
 
 /** `rel` inside `dir`, if it is a file there. */
@@ -188,11 +196,12 @@ function lanAddress(): string | undefined {
 export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteHandler {
   const require = createRequire(import.meta.url);
   const dist = path.dirname(require.resolve('devtools-anywhere/probe.iife.js'));
-  const frontendDir = path.resolve(
-    options.frontendDir ??
-      packageDir(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html') ??
-      '@devtools-anywhere/devtools-frontend is not installed'
+  const entry = path.resolve(
+    options.devtoolsFrontendPath ??
+      packageFile(require, '@devtools-anywhere/devtools-frontend/anywhere_app.html') ??
+      '@devtools-anywhere/devtools-frontend is not installed/anywhere_app.html'
   );
+  const frontendDir = path.dirname(entry);
   // Optional: translations beyond English and Chinese, laid out like the frontend.
   const localesDir = packageDir(require, '@devtools-anywhere/devtools-frontend-locales/REVISION');
   const base = `/${(options.basePath ?? '/').replace(/^\/+|\/+$/g, '')}/`.replace('//', '/');
@@ -217,14 +226,14 @@ export function createRemoteHandler(options: RemoteHandlerOptions = {}): RemoteH
   function list(req: http.IncomingMessage) {
     const query = token === false ? '' : `?token=${token}`;
     const ws: keyof RemoteFrontendHash = secure(req) ? 'wss' : 'ws';
-    const frontend = options.frontendUrl ?? `${base}front_end/anywhere_app.html`;
+    const frontend = options.devtoolsFrontendUrl ?? `${base}front_end/${encodeURIComponent(path.basename(entry))}`;
     // The frontend's URL may have a query (a version) and a fragment of its own.
     const hash = frontend.indexOf('#');
     const page = hash < 0 ? frontend : frontend.slice(0, hash);
     const fragment = hash < 0 ? '' : frontend.slice(hash);
     // A frontend served from elsewhere (a CDN) gets the socket, with its token, in the fragment,
     // which the browser does not send there.
-    const inFragment = options.frontendUrl !== undefined;
+    const inFragment = options.devtoolsFrontendUrl !== undefined;
     return [...targets.values()].map(target => {
       const host = req.headers.host ?? 'localhost';
       const socket = options.singlePath

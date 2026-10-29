@@ -22,8 +22,8 @@ export interface RemoteHandler {
 // @public
 export interface RemoteHandlerOptions {
     basePath?: string;
-    frontendDir?: string;
-    frontendUrl?: string;
+    devtoolsFrontendPath?: string;
+    devtoolsFrontendUrl?: string;
     publicUrl?: string;
     singlePath?: boolean;
     token?: string | false;

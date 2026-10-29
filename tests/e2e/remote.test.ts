@@ -201,7 +201,7 @@ test('the handlers mount in a server of its own, under a base path, with a publi
     basePath: '/devtools/',
     token: false,
     publicUrl: 'https://debug.example/devtools/',
-    frontendUrl: 'https://cdn.example/anywhere_app.html?v=1#x',
+    devtoolsFrontendUrl: 'https://cdn.example/anywhere_app.html?v=1#x',
   });
   const server = createServer((req, res) => {
     if (!handler.handleRequest(req, res)) res.end('app');

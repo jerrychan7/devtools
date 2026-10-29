@@ -2,7 +2,7 @@
 //
 //   devtools-anywhere-remote [--port 8080] [--host 0.0.0.0] [--base-path /] [--token <t> | --no-token]
 //                            [--cert cert.pem --key key.pem] [--public-url <url>]
-//                            [--frontend-dir <dir> | --frontend-url <url>]
+//                            [--devtools-frontend-path <file> | --devtools-frontend-url <url>]
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { startRemoteServer, type RemoteServerOptions } from './index';
@@ -17,8 +17,8 @@ const { values } = parseArgs({
     cert: { type: 'string' },
     key: { type: 'string' },
     'public-url': { type: 'string' },
-    'frontend-dir': { type: 'string' },
-    'frontend-url': { type: 'string' },
+    'devtools-frontend-path': { type: 'string' },
+    'devtools-frontend-url': { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -34,8 +34,9 @@ if (values.help) {
       --cert <file>        TLS certificate: serve over HTTPS, for HTTPS pages
       --key <file>         TLS private key
       --public-url <url>   The server's URL as pages reach it (default: this machine's LAN address)
-      --frontend-dir <dir> DevTools frontend build to serve
-      --frontend-url <url> anywhere_app.html hosted elsewhere (a CDN), to open instead`);
+      --devtools-frontend-path <file>  entry page of a DevTools frontend build to serve
+                                       (anywhere_app.html); its directory is served
+      --devtools-frontend-url <url>    anywhere_app.html hosted elsewhere (a CDN), to open instead`);
   process.exit(0);
 }
 if (!!values.cert !== !!values.key) {
@@ -51,8 +52,8 @@ if (values['no-token']) options.token = false;
 else if (values.token !== undefined) options.token = values.token;
 if (values.cert && values.key) options.https = { cert: readFileSync(values.cert), key: readFileSync(values.key) };
 if (values['public-url'] !== undefined) options.publicUrl = values['public-url'];
-if (values['frontend-dir'] !== undefined) options.frontendDir = values['frontend-dir'];
-if (values['frontend-url'] !== undefined) options.frontendUrl = values['frontend-url'];
+if (values['devtools-frontend-path'] !== undefined) options.devtoolsFrontendPath = values['devtools-frontend-path'];
+if (values['devtools-frontend-url'] !== undefined) options.devtoolsFrontendUrl = values['devtools-frontend-url'];
 
 const remote = await startRemoteServer(options);
 console.log(`Inspect pages at ${remote.url}`);

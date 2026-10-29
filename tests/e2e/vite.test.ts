@@ -31,8 +31,7 @@ before(async () => {
     server: { port: 0, strictPort: false },
     plugins: [
       devtoolsAnywhere({
-        devtoolsFrontendDir: path.join(here, 'frontends'),
-        devtoolsFrontendEntry: 'fake-frontend.html',
+        devtoolsFrontendPath: path.join(here, 'frontends', 'fake-frontend.html'),
         openImmediately: true,
         defaultShellMode: 'off',
         shellModeLocked: true,
