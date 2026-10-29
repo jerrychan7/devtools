@@ -14,8 +14,7 @@ const entry = (file: string) => file.replace(/\.js$/, '');
 const common: BuildOptions = { bundle: true, target: 'es2020', sourcemap: true, logLevel: 'info' };
 
 const builds: BuildOptions[] = [
-  // The ESM build leaves snapDOM to the consumer's bundler.
-  { ...common, entryPoints: { index: 'src/index.ts' }, format: 'esm', outdir: 'dist', external: ['@zumer/snapdom'] },
+  // No ESM build: the package's runtime is the two scripts, and its index only types.
   {
     ...common,
     entryPoints: {

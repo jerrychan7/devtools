@@ -13,11 +13,9 @@ export interface RemoteOptions {
 }
 
 export interface DevtoolsAnywhereApi {
-  DevtoolsAnywhereElement: CustomElementConstructor;
   connectFrontend(server: CdpSession, frame: HTMLIFrameElement, frontendOrigin: string): () => void;
   connectRemote(serverUrl: string, options?: RemoteOptions): () => void;
   createCdpSession: typeof createCdpSession;
-  defineDevtoolsAnywhere(tag?: string): void;
   /**
    * Creates the page's global <devtools-anywhere>, which the probe mounts. Only the first one
    * connected works; later ones warn and stay hidden. Null, with a warning, when the page has

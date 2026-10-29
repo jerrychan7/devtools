@@ -16,6 +16,7 @@ import {
 import { connectFrontend, relayShell } from './connection';
 import { SHELL_HANDSHAKE } from './shell-messages';
 import type { GlobalElementConfig } from './api';
+import type { TogglerAttributes } from './public-types';
 import {
   DOCK_SIDES,
   PROBE_SCRIPT,
@@ -38,11 +39,10 @@ export function setBundleUrl(url: string) {
 }
 
 /**
- * snapDOM, which renders the screencast, is loaded only when the screencast starts. The ESM
- * build leaves `import('@zumer/snapdom')` to the bundler; the IIFE build loads the copy
- * next to itself (snapdom.js).
+ * snapDOM, which renders the screencast, is loaded only when the screencast starts: the copy
+ * next to the bundle (snapdom.js), once setBundleUrl has said where that is.
  */
-let loadSnapdom: SnapdomLoader = () => import('@zumer/snapdom');
+let loadSnapdom: SnapdomLoader = () => Promise.reject(new Error('snapDOM: the bundle URL is not known'));
 
 /** The CDP session of a page, with the screencast's renderer. */
 export const createPageSession = () => createCdpSession({ loadSnapdom: () => loadSnapdom() });
@@ -232,9 +232,8 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  *
  * Keep the element attached in one place: moving it in the DOM reloads the iframe.
  *
- * @public
+ * @internal
  */
-// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- the interface adds typed listeners only
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
   static observedAttributes = ['devtools-frontend-url'];
@@ -749,79 +748,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 }
 
 /**
- * The events of `<devtools-anywhere>`, besides those of any element: `devtools-toggle-request`,
- * fired on an element the page placed itself when a toggler naming it is clicked.
- *
- * @public
- */
-export interface DevtoolsAnywhereElementEventMap extends HTMLElementEventMap {
-  /** A toggler naming this element, which the page placed itself, was clicked. */
-  'devtools-toggle-request': Event;
-}
-
-/** Typed listeners for {@link DevtoolsAnywhereElementEventMap}. @public */
-export interface DevtoolsAnywhereElement {
-  /** Listens to an event of {@link DevtoolsAnywhereElementEventMap}, typed. */
-  addEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(
-    type: K,
-    listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown,
-    options?: boolean | AddEventListenerOptions
-  ): void;
-  /** Listens to any other event. */
-  addEventListener(
-    type: string,
-    listener: EventListenerOrEventListenerObject,
-    options?: boolean | AddEventListenerOptions
-  ): void;
-  /** Stops listening to an event of {@link DevtoolsAnywhereElementEventMap}. */
-  removeEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(
-    type: K,
-    listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown,
-    options?: boolean | EventListenerOptions
-  ): void;
-  /** Stops listening to any other event. */
-  removeEventListener(
-    type: string,
-    listener: EventListenerOrEventListenerObject,
-    options?: boolean | EventListenerOptions
-  ): void;
-}
-
-/**
- * The attribute that makes any element a toggler: clicked, it opens and closes the probe's
- * `<devtools-anywhere>` (empty), or asks an element the page placed (its id) with
- * `devtools-toggle-request`. Its `aria-expanded` follows whether DevTools is open.
- *
- * @public
- */
-export type TogglerAttributes = {
-  'data-devtools-anywhere-toggle'?: string;
-};
-
-/**
- * The parts of `<devtools-anywhere>` the page can style with `::part()`: `toggler`, the F12
- * button (`devtools-anywhere::part(toggler)`).
- *
- * @public
- */
-export type DevtoolsAnywherePart = 'toggler';
-
-/**
- * The element's tag, typed: what `HTMLElementTagNameMap` gets from this package, so that
- * `document.querySelector('devtools-anywhere')` is a `DevtoolsAnywhereElement`.
- *
- * @public
- */
-export interface DevtoolsAnywhereTagNameMap {
-  /** The element, registered by defineDevtoolsAnywhere() under its default tag. */
-  'devtools-anywhere': DevtoolsAnywhereElement;
-}
-
-declare global {
-  interface HTMLElementTagNameMap extends DevtoolsAnywhereTagNameMap {}
-}
-
-/**
  * The global elements, created for the probe (createGlobalElement), whether one has connected, and
  * those connected after it, which do nothing.
  */
@@ -972,7 +898,7 @@ function installTogglers(tag: string) {
 
 /**
  * Registers the element under `tag` unless something is already registered there, and makes
- * elements with `data-devtools-anywhere-toggle` open and close it. @public
+ * elements with `data-devtools-anywhere-toggle` open and close it. @internal
  */
 export function defineDevtoolsAnywhere(tag = 'devtools-anywhere') {
   if (!customElements.get(tag)) customElements.define(tag, DevtoolsAnywhereElement);

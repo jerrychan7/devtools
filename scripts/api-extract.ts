@@ -5,10 +5,14 @@
 // after tsc: `node ../../scripts/api-extract.ts [config ...]` (default: api-extractor.json).
 // dist/types/ is removed afterwards: nothing outside the rolled-up files is published.
 //
+// API Extractor leaves `declare global` blocks out of the rolled-up file: they are copied into it
+// from the emitted declarations, as they are (the names they use must be exported by the entry).
+//
 // In CI (CI=true), or with `--check`, a report that no longer matches the API fails the build
 // instead of being updated. A package without a doc comment for itself (@packageDocumentation in
 // its entry point) fails it too: API Extractor only notes that in the report.
-import { readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import path from 'node:path';
 import { Extractor, ExtractorConfig } from '@microsoft/api-extractor';
 
 const args = process.argv.slice(2);
@@ -23,6 +27,12 @@ for (const config of configs.length ? configs : ['api-extractor.json']) {
     console.error(`api-extract: ${config}: ${result.errorCount} error(s), ${result.warningCount} warning(s)`);
     failed = true;
   }
+  const globals = readdirSync('dist/types', { recursive: true, encoding: 'utf8' })
+    .filter(file => file.endsWith('.d.ts'))
+    .flatMap(
+      file => readFileSync(path.join('dist/types', file), 'utf8').match(/^declare global \{$[\s\S]*?^\}$/gm) ?? []
+    );
+  if (globals.length) appendFileSync(prepared.untrimmedFilePath, `\n${globals.join('\n')}\n`);
   if (!readFileSync(prepared.untrimmedFilePath, 'utf8').includes('@packageDocumentation')) {
     console.error(`api-extract: ${config}: no @packageDocumentation comment in ${prepared.mainEntryPointFilePath}`);
     failed = true;

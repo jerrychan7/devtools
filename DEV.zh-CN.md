@@ -127,7 +127,7 @@ experiments/      验证记录
 | 前端 ↔ `<devtools-anywhere>`：请求、停靠位置、hash 参数、我们自己脚本的文件名 | `packages/devtools-anywhere/src/embedder.ts` | 元素、构建脚本；`anywhere_app` 通过前端构建时复制的副本使用 |
 | 壳模式下页面与 Service Worker 之间的消息 | `packages/devtools-anywhere/src/shell-messages.ts`，以及 agent 的 `probe/messages.ts` | `element.ts`、`probe.ts`、`sw.ts`、探针 |
 | `window.DevtoolsAnywhere`，bundle 暴露的 API（含 `RemoteOptions`） | `packages/devtools-anywhere/src/api.ts` | `iife.ts`、`probe.ts`、`tests/globals.d.ts` |
-| 探针脚本的 `data-*` 属性 | `packages/devtools-anywhere/src/probe-script.ts`（`ProbeScriptAttributes`，以 `@internal` 导出） | `probe.ts`、Vite 插件、remote-server |
+| 探针脚本的 `data-*` 属性 | `packages/devtools-anywhere/src/probe-script.ts`（`ProbeScriptAttributes`，以 `@public` 导出） | `probe.ts`、Vite 插件、remote-server |
 
 `pnpm lint` 和 pre-commit 钩子会检查带我们前缀（`DevtoolsAnywhere.`、`devtools-anywhere:`、`devtools-anywhere-`、`__devtoolsAnywhere`）的字面量只出现在一个源码文件里（`scripts/check-contracts.ts`；不检查注释和测试）。受类型检查约束的名字（比如 `keyof ProbeScriptAttributes`）可以在使用处直接写出。oxlint 还禁止 `devtools-anywhere/src` 的其余代码引用 CDP agent 的 `core/` 或 `domains/`：一律经由 `cdp-agent/index.ts` 和 `cdp-agent/probe/`。
 
@@ -198,7 +198,7 @@ pnpm test        # 前端需已构建，真实前端测试才会运行
 
 pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfmt 格式化并把结果加入这次提交，再用 oxlint 检查，有错误就中止提交；还会运行 `scripts/check-contracts.ts`（见「约定放在哪里」），以及两道针对本次新增或改动内容的规模守卫：`scripts/check-file-size.ts` 对超过 1100 行的源码文件（`.ts`、`.js` 及其变体）发出警告，超过 1500 行拒绝提交；`scripts/check-dir-size.ts` 对本次有新增文件的目录，直属文件超过 20 个时警告，超过 30 个拒绝提交。出现警告后，下一次提交就应拆分该文件，或把目录按关注点分进子目录。两者都跳过 devtools-frontend 检出的上游文件（`packages/devtools-frontend/src`、`patches`）和 `experiments/`。`pnpm lint` 会对所有已跟踪文件运行这两道守卫（`--all`），绕过钩子的提交也能在那里查出来。`git commit --no-verify` 可以跳过一次钩子。lint 规则：oxlint 的 correctness 规则，禁止 `any`，禁止非空断言（`!`）。代码风格：2 空格缩进、加分号、单引号、行宽 120。`packages/devtools-frontend/src` 沿用 Chromium 的风格，不做 lint 和格式化。
 
-构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`）。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。CI 中（`CI=true`）报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
+构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`；API Extractor 会丢掉 `declare global` 块，脚本会把它们补进合并后的文件）。`devtools-anywhere` 没有运行时入口：它的 `dist/index.d.ts` 只有类型，脚本都构建成 IIFE。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。CI 中（`CI=true`）报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
 行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本）。
 

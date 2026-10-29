@@ -5,19 +5,7 @@
 ```ts
 
 // @public
-export function defineDevtoolsAnywhere(tag?: string): void;
-
-// @public
-export class DevtoolsAnywhereElement extends HTMLElement {
-    constructor();
-    attributeChangedCallback(): void;
-    connectedCallback(): void;
-    disconnectedCallback(): void;
-    static observedAttributes: string[];
-}
-
-// @public
-export interface DevtoolsAnywhereElement {
+export interface DevtoolsAnywhereElement extends HTMLElement {
     addEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;
     addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
     removeEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;

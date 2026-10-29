@@ -11,12 +11,10 @@
   "sideEffects": [
     "./dist/*.iife.js"
   ],
-  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.ts"
     },
     "./devtools-anywhere.iife.js": "./dist/devtools-anywhere.iife.js",
     "./probe.iife.js": "./dist/probe.iife.js",

@@ -105,7 +105,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | Umbrella package: the `<devtools-anywhere>` element, `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js`, `devtools-anywhere-sw.js` and `snapdom.js` (the screencast's renderer, loaded on demand) |
+| `devtools-anywhere` | Umbrella package: `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js` (the `<devtools-anywhere>` element, which the probe loads), `devtools-anywhere-sw.js`, `snapdom.js` (the screencast's renderer, loaded on demand), and TypeScript types for the element, its events and the script and toggler attributes. There is no module to import: the scripts are the runtime |
 | `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets with English and Chinese UI, self-hostable or served from a CDN |
 | `@devtools-anywhere/devtools-frontend-locales` | Optional: the other 80 UI languages, at the same paths as in the frontend package. Serve both from one directory (the Vite plugin does this when it is installed); a missing language falls back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
@@ -156,7 +156,7 @@ Any element can open and close the panel: give it `data-devtools-anywhere-toggle
 <button data-devtools-anywhere-toggle>DevTools</button>
 ```
 
-Togglers work once the element is registered with `defineDevtoolsAnywhere()` (the script builds do it), and not inside a shadow root. In shell mode, the togglers of the page inside the shell control the shell's panel, whatever their value. They do nothing in a page of another origin than the shell, such as a cross-origin iframe.
+Togglers work once the probe has loaded `devtools-anywhere.iife.js`, which registers the element, and not inside a shadow root. In shell mode, the togglers of the page inside the shell control the shell's panel, whatever their value. They do nothing in a page of another origin than the shell, such as a cross-origin iframe.
 
 ### Remote debugging
 

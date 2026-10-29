@@ -105,7 +105,7 @@
 
 | 包 | 内容 |
 |---|---|
-| `devtools-anywhere` | 总包：`<devtools-anywhere>` 组件、`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`、`devtools-anywhere-sw.js` 和 `snapdom.js`（投屏的绘制器，按需加载） |
+| `devtools-anywhere` | 总包：`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`（`<devtools-anywhere>` 组件，由探针加载）、`devtools-anywhere-sw.js`、`snapdom.js`（投屏的绘制器，按需加载），以及组件、事件、探针脚本和切换器属性的 TypeScript 类型。没有可以 import 的模块，运行时只有这些脚本 |
 | `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
 | `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
@@ -177,7 +177,7 @@ npx devtools-anywhere-remote --port 8080
 <button data-devtools-anywhere-toggle>DevTools</button>
 ```
 
-切换器在通过 `defineDevtoolsAnywhere()` 注册元素后才生效（脚本版会自动注册），放在 shadow root 里不起作用。外壳模式下，外壳里那个页面的切换器一律控制外壳的面板，忽略属性值。与外壳不同源的页面（如跨源 iframe）里的切换器不起作用。
+切换器在探针加载 `devtools-anywhere.iife.js`（由它注册组件）后才生效，放在 shadow root 里不起作用。外壳模式下，外壳里那个页面的切换器一律控制外壳的面板，忽略属性值。与外壳不同源的页面（如跨源 iframe）里的切换器不起作用。
 
 ## 开发
 
