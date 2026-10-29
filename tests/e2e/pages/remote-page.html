@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <!-- The remote server's port is only known at run time: `?remote=<its URL>`, `&idInQuery` for
-         its id-in-query form, and `&panel` for DevTools in the page too. -->
+         its id-in-query form, and `&panel` for DevTools in the page too (left to its default
+         shell mode, which remote debugging keeps it out of). -->
     <script>
       const query = new URLSearchParams(location.search);
       document.write(
@@ -14,7 +15,7 @@
           (query.has('panel')
             ? ' data-devtools-frontend-url="' +
               location.origin +
-              '/tests/e2e/frontends/fake-frontend.html" data-default-shell-mode="off" data-open-immediately'
+              '/tests/e2e/frontends/fake-frontend.html" data-open-immediately'
             : '') +
           '><\/script>'
       );

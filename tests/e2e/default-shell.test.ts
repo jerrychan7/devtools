@@ -3,7 +3,7 @@
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { clickF12, launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
@@ -55,6 +55,21 @@ test('the first load enters shell mode at once, with DevTools hidden', async () 
   assert.equal(documents, 2);
 });
 
+test('DevTools opened in the shell stays open when the top-level page reloads, as in Chrome', async () => {
+  await page.goto(url);
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  await clickF12(page);
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  });
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  const state = await shellState();
+  assert.equal(state.inShell, true);
+  assert.equal(state.open, true);
+});
+
 test('the address bar follows the page shown, through history and reloads', async () => {
   await page.goto(url);
   await page.waitForFunction(() => {
@@ -85,6 +100,30 @@ test('the address bar follows the page shown, through history and reloads', asyn
     return frame instanceof HTMLIFrameElement && frame.contentWindow?.location.search === '?pushed';
   });
   assert.equal((await shellState()).inShell, true);
+});
+
+test("the tab's title follows the page shown, through loads and same-document navigations", async () => {
+  await page.goto(url);
+  await page.waitForFunction(() => {
+    const frame = document.getElementById('devtools-anywhere-page');
+    return frame instanceof HTMLIFrameElement && frame.contentDocument?.readyState === 'complete';
+  });
+  await page.waitForFunction(() => document.title === 'default shell');
+  // A same-document navigation after the page changed its title.
+  await page.evaluate(() => {
+    const frame = document.getElementById('devtools-anywhere-page');
+    if (!(frame instanceof HTMLIFrameElement) || !frame.contentWindow) throw new Error('no page frame');
+    frame.contentWindow.document.title = 'renamed';
+    frame.contentWindow.history.pushState(null, '', '?renamed');
+  });
+  await page.waitForFunction(() => document.title === 'renamed');
+  // Another page, with a title of its own.
+  await page.evaluate(() => {
+    const frame = document.getElementById('devtools-anywhere-page');
+    if (!(frame instanceof HTMLIFrameElement) || !frame.contentWindow) throw new Error('no page frame');
+    frame.contentWindow.location.href = '/tests/e2e/pages/shell-page.html';
+  });
+  await page.waitForFunction(() => document.title === 'shell page' && location.pathname.endsWith('/shell-page.html'));
 });
 
 test('a page that refuses to be framed is shown on its own, for the rest of the session', async () => {
@@ -126,7 +165,47 @@ test("the user's choice wins over data-default-shell-mode", async () => {
   try {
     await page.reload();
     await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+    assert.equal((await shellState()).inShell, true);
   } finally {
     await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
   }
+});
+
+test('turned off by the user, shell mode is not entered by default', async () => {
+  // Set before the page loads: the probe reads it on the first load.
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
+  await page.evaluate(() => localStorage.setItem('devtools-anywhere:shell-mode', 'off'));
+  try {
+    await page.goto(url);
+    await page.waitForFunction(() => window.__pageScriptRan === true && document.querySelector('devtools-anywhere'));
+    assert.equal((await shellState()).inShell, false);
+    await page.reload();
+    await page.waitForFunction(() => window.__pageScriptRan === true && document.querySelector('devtools-anywhere'));
+    assert.equal((await shellState()).inShell, false);
+  } finally {
+    await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
+  }
+});
+
+test('a frontend on another origin keeps the page out of shell mode; DevTools still opens', async () => {
+  // The same server under another host name: another origin.
+  const other = url
+    .replace('//localhost:', '//127.0.0.1:')
+    .replace('pages/default-shell.html', 'frontends/fake-frontend.html');
+  await page.setRequestInterception(true);
+  page.on('request', async r => {
+    if (r.url() !== url) return void r.continue();
+    const response = await fetch(r.url());
+    const body = (await response.text()).replace('/tests/e2e/frontends/fake-frontend.html', other);
+    await r.respond({ status: 200, headers: { 'content-type': 'text/html' }, body });
+  });
+  await page.goto(url);
+  await page.waitForFunction(() => window.__pageScriptRan === true && document.querySelector('devtools-anywhere'));
+  assert.equal((await shellState()).inShell, false);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell')), null);
+  await clickF12(page);
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  });
 });

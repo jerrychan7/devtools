@@ -66,6 +66,41 @@ test("each session keeps bodies within its own buffer sizes, not the other's", a
   await call(1, 'Network.disable');
 });
 
+test("a session's body limit raises the probe's while it lasts, and its evictions end with it", async () => {
+  const probeBodyLimit = () => page.evaluate(() => window.__devtoolsAnywhereProbe__?.limits.body);
+  await call(0, 'Network.enable', { maxTotalBufferSize: 3000, maxResourceBufferSize: 2500 });
+  await call(1, 'Network.enable', {});
+  const big = await fetchId('/api/echo?n=limit-big&pad=' + 'x'.repeat(3000));
+  assert.equal(await bodyLength(0, big), 'Request content was evicted from inspector cache');
+  // Above Chrome's default of 20 MB: the probe keeps bodies that large for this session.
+  await call(0, 'Network.enable', { maxResourceBufferSize: 30_000_000 });
+  assert.equal(await probeBodyLimit(), 30_000_000);
+  // A new session: back to the default, and nothing the previous one evicted is evicted for it.
+  await page.evaluate(() => window.__sessions?.[0]?.reset());
+  assert.equal(await probeBodyLimit(), 20_000_000);
+  await call(0, 'Network.enable', {});
+  assert.equal(typeof (await bodyLength(0, big)), 'number');
+  await call(0, 'Network.disable');
+  await call(1, 'Network.disable');
+});
+
+test("past every session's total, the probe lets the oldest bodies go", async () => {
+  const probeBody = (requestId: string) =>
+    page.evaluate(id => window.__devtoolsAnywhereProbe__?.requests.find(r => r.requestId === id)?.body, requestId);
+  for (const index of [0, 1]) await call(index, 'Network.enable', { maxTotalBufferSize: 3000 });
+  const first = await fetchId('/api/echo?n=total-first&pad=' + 'x'.repeat(2000));
+  const second = await fetchId('/api/echo?n=total-second&pad=' + 'x'.repeat(2000));
+  assert.equal(await probeBody(first), undefined, 'let go');
+  assert.notEqual(await probeBody(second), undefined);
+  for (const index of [0, 1]) {
+    assert.equal(await bodyLength(index, first), 'Request content was evicted from inspector cache');
+    assert.equal(typeof (await bodyLength(index, second)), 'number');
+    // Back to the defaults, for the tests that follow.
+    await call(index, 'Network.enable', {});
+    await call(index, 'Network.disable');
+  }
+});
+
 const color = () =>
   page.evaluate(() => {
     const el = document.getElementById('forced');
@@ -166,21 +201,26 @@ test("in inspect mode, a hovered node is one session's only, and the page does n
     await call(index, 'DOM.getDocument');
     await call(index, 'Overlay.setInspectMode', { mode: 'searchForNode', highlightConfig: {} });
   }
-  const hover = async (x: number) => {
+  /**
+   * Moves the mouse to `x` and waits until `expected` has counted the move. The page's own
+   * listeners run while the move is dispatched, so their counts are final by then too.
+   */
+  const hover = async (x: number, expected: 'first' | 'second' | 'page') => {
+    const before = await page.evaluate(key => window.__hoverEvents?.[key] ?? 0, expected);
     await page.mouse.move(x, 50, { steps: 3 });
-    await new Promise(r => setTimeout(r, 100));
+    await page.waitForFunction((key, before) => (window.__hoverEvents?.[key] ?? 0) > before, {}, expected, before);
     const counts = await page.evaluate(() => window.__hoverEvents);
     assert.ok(counts);
     return { ...counts };
   };
-  const first = await hover(50);
+  const first = await hover(50, 'first');
   assert.ok(first.first > 0);
   assert.deepEqual({ second: first.second, page: first.page }, { second: 0, page: 0 });
   // The first session leaves inspect mode: the other takes over.
   await call(0, 'Overlay.setInspectMode', { mode: 'none', highlightConfig: {} });
-  const second = await hover(250);
+  const second = await hover(250, 'second');
   assert.ok(second.second > 0);
   assert.deepEqual({ first: second.first, page: second.page }, { first: first.first, page: 0 });
   await call(1, 'Overlay.setInspectMode', { mode: 'none', highlightConfig: {} });
-  assert.ok((await hover(50)).page > 0, 'the page sees moves again');
+  assert.ok((await hover(50, 'page')).page > 0, 'the page sees moves again');
 });

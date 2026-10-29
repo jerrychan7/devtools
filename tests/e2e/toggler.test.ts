@@ -49,8 +49,17 @@ async function load() {
   await page.waitForFunction(() => document.querySelector('devtools-anywhere')?.isConnected);
 }
 
-/** Closes DevTools with its own × button. */
-const close = () => frontendRequest(page, { type: 'close' });
+/**
+ * Closes DevTools with its own × button, and waits for the element to have handled it: the
+ * request is a message, handled after this returns.
+ */
+async function close() {
+  await frontendRequest(page, { type: 'close' });
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+    return !panel || getComputedStyle(panel).display === 'none';
+  });
+}
 
 test('togglers start with aria-expanded of their element', async () => {
   await load();
@@ -94,7 +103,7 @@ test('a toggler added later works, and follows the element', async () => {
     expanded: { first: 'true', second: 'true', missing: null, late: 'true' },
   });
   await close();
-  assert.equal((await state()).expanded['late'], 'false');
+  await page.waitForFunction(() => document.getElementById('late')?.getAttribute('aria-expanded') === 'false');
 });
 
 test('a label toggler toggles once, though its control is clicked too', async () => {
@@ -127,8 +136,23 @@ test('the togglers follow the element when it is attached again', async () => {
 test('a toggler without its element only warns, once', async () => {
   await load();
   warnings.length = 0;
+  const seen = (text: string) =>
+    new Promise<void>(resolve => {
+      const check = () => {
+        if (!warnings.some(w => w.includes(text))) return;
+        page.off('console', check);
+        resolve();
+      };
+      page.on('console', check);
+      check();
+    });
   await click('#missing');
+  await seen('"nowhere"');
   await click('#missing');
+  // Console events arrive in order: once this one is in, a second warning would be too.
+  const mark = seen('toggler mark');
+  await page.evaluate(() => console.warn('toggler mark'));
+  await mark;
   assert.equal((await state()).open, false);
   assert.equal(warnings.filter(w => w.includes('"nowhere"')).length, 1);
 });
@@ -165,6 +189,7 @@ async function loadShell() {
   await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
   await pageReady();
   await close();
+  await framed().waitForFunction(() => document.getElementById('first')?.getAttribute('aria-expanded') === 'false');
 }
 
 test("in the shell, the page's togglers toggle the shell's element and follow it", async () => {
@@ -174,8 +199,10 @@ test("in the shell, the page's togglers toggle the shell's element and follow it
   await click('#missing', framed());
   assert.equal((await state()).open, true);
   assert.deepEqual((await state(framed())).expanded, { first: 'true', second: 'true', missing: 'true' });
-  // Closed from the shell (DevTools' × button), the page's togglers follow.
+  // Closed from the shell (DevTools' × button), the page's togglers follow, through an event
+  // from the shell's window.
   await close();
+  await framed().waitForFunction(() => document.getElementById('first')?.getAttribute('aria-expanded') === 'false');
   assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: 'false' });
 });
 

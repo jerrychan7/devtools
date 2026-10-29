@@ -1,6 +1,7 @@
 // Remote debugging: a page connects to @devtools-anywhere/remote-server, and DevTools (a stand-in
 // client here, and the real frontend when it is built) inspects it through the server.
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
@@ -103,6 +104,40 @@ test('the page is listed, and its own connection is not one of its requests', as
   await new Promise(r => setTimeout(r, 300));
   assert.ok(!client.messages.some(m => m.method === 'Network.webSocketCreated'));
   client.socket.close();
+});
+
+test('devtoolsFrontendPath names the entry page, served with its directory', async () => {
+  const own = await startRemoteServer({
+    port: 0,
+    host: '127.0.0.1',
+    token: false,
+    devtoolsFrontendPath: fileURLToPath(new URL('frontends/fake-frontend.html', import.meta.url)),
+  });
+  const other = await env.browser.newPage();
+  try {
+    const at = new URL(own.url).origin;
+    await other.goto(`${env.baseUrl}/tests/e2e/pages/remote-page.html?remote=${encodeURIComponent(at + '/')}`);
+    const listed = await waitFor(async () => ((await (await fetch(`${at}/json/list`)).json()) as Listed[])[0]);
+    assert.ok(listed.devtoolsFrontendUrl.startsWith('/front_end/fake-frontend.html?ws='), listed.devtoolsFrontendUrl);
+    const res = await fetch(at + listed.devtoolsFrontendUrl);
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /<title>fake frontend<\/title>/);
+  } finally {
+    await other.close();
+    await own.close();
+  }
+});
+
+test('a devtoolsFrontendPath that is not a file is refused', async () => {
+  // Its parent would be served without the token.
+  await assert.rejects(
+    startRemoteServer({
+      port: 0,
+      host: '127.0.0.1',
+      devtoolsFrontendPath: fileURLToPath(new URL('frontends/frontend-dir', import.meta.url)),
+    }),
+    /not a file/
+  );
 });
 
 test('a client sees output from before the page connected', async () => {
@@ -566,6 +601,25 @@ test('a page with its own DevTools panel is inspected remotely too, each in its 
         )
       )
     );
+    // Shell mode is on by default, but not with remote debugging: the page stays at the top.
+    assert.deepEqual(
+      await both.evaluate(() => ({
+        shell: !!document.querySelector('devtools-anywhere')?.hasAttribute('shell'),
+        page: !!document.getElementById('devtools-anywhere-page'),
+      })),
+      { shell: false, page: false }
+    );
+    // Sessions of their own: the client turning Runtime off leaves the panel's on.
+    await client.call('Runtime.disable');
+    await both.evaluate(() => console.log('panel only'));
+    await waitFor(() =>
+      frontend.evaluate(() =>
+        (window.received ?? []).some(
+          m => m.method === 'Runtime.consoleAPICalled' && JSON.stringify(m.params).includes('panel only')
+        )
+      )
+    );
+    assert.equal(client.logged('panel only'), false);
     client.socket.close();
   } finally {
     await both.close();
