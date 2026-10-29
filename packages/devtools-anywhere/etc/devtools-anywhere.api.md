@@ -20,6 +20,11 @@ export class CdpSession {
 }
 
 // @public
+export type DevtoolsAnywhereAttributes = {
+    'devtools-frontend-url'?: string;
+};
+
+// @public
 export interface DevtoolsAnywhereElement extends HTMLElement {
     addEventListener<K extends keyof DevtoolsAnywhereElementEventMap>(type: K, listener: (this: DevtoolsAnywhereElement, event: DevtoolsAnywhereElementEventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;
     addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;

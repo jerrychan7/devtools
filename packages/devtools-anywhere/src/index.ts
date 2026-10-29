@@ -8,6 +8,7 @@
  */
 
 export type {
+  DevtoolsAnywhereAttributes,
   DevtoolsAnywhereElement,
   DevtoolsAnywhereElementEventMap,
   DevtoolsAnywherePart,

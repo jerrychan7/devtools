@@ -50,6 +50,16 @@ export interface DevtoolsAnywhereElement extends HTMLElement {
 }
 
 /**
+ * The attributes of `<devtools-anywhere>`. Others are ignored.
+ *
+ * @public
+ */
+export type DevtoolsAnywhereAttributes = {
+  /** The URL of the DevTools frontend's entry page; without it, the probe's `data-devtools-frontend-url`. */
+  'devtools-frontend-url'?: string;
+};
+
+/**
  * The attribute that makes any element a toggler: clicked, it opens and closes the probe's
  * `<devtools-anywhere>` (empty), or asks an element the page placed (its id) with
  * `devtools-toggle-request`. Its `aria-expanded` follows whether DevTools is open.

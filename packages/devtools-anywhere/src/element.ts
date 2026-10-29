@@ -16,7 +16,7 @@ import {
 import { connectFrontend, relayShell } from './connection';
 import { SHELL_HANDSHAKE } from './shell-messages';
 import type { GlobalElementConfig } from './api';
-import type { TogglerAttributes } from './public-types';
+import type { DevtoolsAnywhereAttributes, TogglerAttributes } from './public-types';
 import {
   DOCK_SIDES,
   PROBE_SCRIPT,
@@ -236,7 +236,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  */
 export class DevtoolsAnywhereElement extends HTMLElement {
   /** The attributes whose changes update the element. */
-  static observedAttributes = ['devtools-frontend-url'];
+  static observedAttributes: (keyof DevtoolsAnywhereAttributes)[] = ['devtools-frontend-url'];
 
   /** The CDP session for this page. Created when the element is first connected. @internal */
   session: CdpSession | null = null;
