@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>devtools-anywhere remote demo</title>
+    <!-- The probe of the remote server (pnpm remote), connecting this page to it. -->
+    <script src="http://localhost:8790/probe.iife.js" data-remote></script>
+  </head>
+  <body>
+    <h1>devtools-anywhere remote demo</h1>
+    <p>
+      Inspect this page from the target list at <a href="http://localhost:8790/">http://localhost:8790/</a>. Output from
+      before DevTools opens is replayed when it does.
+    </p>
+    <button id="log">Log a message</button>
+    <button id="request">Send a request</button>
+    <script>
+      console.log('[remote demo] loaded', { time: Date.now() });
+      document.getElementById('log').onclick = () => console.log('[remote demo] click', Math.random());
+      document.getElementById('request').onclick = () =>
+        fetch('/api/echo?from=remote-demo')
+          .then(r => r.json())
+          .then(json => console.log('[remote demo] response', json));
+    </script>
+  </body>
+</html>

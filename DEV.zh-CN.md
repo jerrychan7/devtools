@@ -68,6 +68,8 @@ pnpm playground   # http://localhost:8788/playground/
 
 playground 的服务器以仓库根目录为根，所以仓库里任何页面都能打开，比如 `/tests/e2e/real-frontend.html`。所有请求都支持 `?delay=<毫秒>`，`/api/echo` 会把请求原样以 JSON 返回，`/ws/echo` 是一个把每条消息原样发回的 WebSocket。
 
+调试远程模式时，再运行 `pnpm remote`（在 http://localhost:8790/ 启动远程服务器，只监听本机、不要 token），然后打开 `/playground/remote.html`：它会出现在服务器的目标列表里，从那里打开 DevTools 调试它。
+
 ### 目录结构
 
 ```
