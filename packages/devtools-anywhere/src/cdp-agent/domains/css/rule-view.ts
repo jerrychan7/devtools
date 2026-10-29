@@ -10,10 +10,13 @@ import { type CSSStyle, buildStyle } from './style';
 
 /** Rules of the page's sheets in the shape the CSS domain reports them in. */
 export class RuleView {
-  constructor(
-    private readonly sheets: SheetRegistry,
-    private readonly nodes: NodeRegistry
-  ) {}
+  private readonly sheets: SheetRegistry;
+  private readonly nodes: NodeRegistry;
+
+  constructor(sheets: SheetRegistry, nodes: NodeRegistry) {
+    this.sheets = sheets;
+    this.nodes = nodes;
+  }
 
   ruleStyle(sheet: CSSStyleSheet, rule: StyleRule): CSSStyle {
     const line = this.sheets.ruleId(sheet, rule);

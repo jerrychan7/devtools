@@ -39,12 +39,17 @@ export class Cascade {
    */
   private request: Map<TreeScope, Candidate[]> | null = null;
 
-  constructor(
-    private readonly sheets: SheetRegistry,
-    private readonly forced: ForcedPseudoClasses,
-    private readonly nodes: NodeRegistry,
-    private readonly rules: RuleView
-  ) {}
+  private readonly sheets: SheetRegistry;
+  private readonly forced: ForcedPseudoClasses;
+  private readonly nodes: NodeRegistry;
+  private readonly rules: RuleView;
+
+  constructor(sheets: SheetRegistry, forced: ForcedPseudoClasses, nodes: NodeRegistry, rules: RuleView) {
+    this.sheets = sheets;
+    this.forced = forced;
+    this.nodes = nodes;
+    this.rules = rules;
+  }
 
   /** Runs `answer` with the candidates collected once for it. */
   forRequest<T>(answer: () => T): T {
