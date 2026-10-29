@@ -62,6 +62,11 @@ class SharedForcedPseudoClasses {
   private mediaLists = new Map<string, MediaQueryList>();
   /** Media queries the last rebuild looked at: the others are let go. */
   private usedMedia = new Set<string>();
+  /** `forced` and `active()` as of the last change of `owners`: a rebuild reads them for every rule. */
+  private union: Map<Element, Set<string>> | null = null;
+  private activeClasses: Set<string> | null = null;
+  /** Whether a rebuild is queued (see schedule). */
+  private scheduled = false;
 
   /** The sheets as the last session forcing something reads them. */
   private provider(): SheetProvider | undefined {
@@ -81,6 +86,7 @@ class SharedForcedPseudoClasses {
 
   /** The forced elements: each with the pseudo-classes any session forced on it. */
   private get forced(): Map<Element, Set<string>> {
+    if (this.union) return this.union;
     const all = new Map<Element, Set<string>>();
     for (const elements of this.owners.values()) {
       for (const [el, classes] of elements) {
@@ -89,7 +95,13 @@ class SharedForcedPseudoClasses {
         classes.forEach(c => union.add(c));
       }
     }
-    return all;
+    return (this.union = all);
+  }
+
+  /** After `owners` changed: `forced` and `active()` are recomputed when next read. */
+  private changed() {
+    this.union = null;
+    this.activeClasses = null;
   }
 
   /** Puts the marker attribute in line with what is forced on `el`. */
@@ -104,6 +116,7 @@ class SharedForcedPseudoClasses {
     const own = this.owners.get(owner);
     if (!own) return void this.providers.delete(owner);
     for (const el of elements ?? [...own.keys()]) own.delete(el);
+    this.changed();
     if (own.size) return;
     this.owners.delete(owner);
     this.providers.delete(owner);
@@ -122,9 +135,10 @@ class SharedForcedPseudoClasses {
 
   /** Pseudo-classes forced on at least one element. */
   private active(): Set<string> {
+    if (this.activeClasses) return this.activeClasses;
     const all = new Set<string>();
     for (const classes of this.forced.values()) classes.forEach(c => all.add(c));
-    return all;
+    return (this.activeClasses = all);
   }
 
   /**
@@ -148,6 +162,7 @@ class SharedForcedPseudoClasses {
       let own = this.owners.get(owner);
       if (!own) this.owners.set(owner, (own = new Map()));
       own.set(el, new Set(known));
+      this.changed();
     } else this.release(owner, [el]);
     this.mark(el);
     this.rebuild();
@@ -189,7 +204,20 @@ class SharedForcedPseudoClasses {
       this.forget(el);
       changed = true;
     }
-    if (changed) this.rebuild();
+    if (changed) this.schedule();
+  }
+
+  /**
+   * Rebuilds once the current microtask is over, however many sessions ask: the mutation
+   * observers of all sessions are called for the same change before queued microtasks run.
+   */
+  schedule() {
+    if (this.scheduled) return;
+    this.scheduled = true;
+    queueMicrotask(() => {
+      this.scheduled = false;
+      quietly(() => this.rebuild());
+    });
   }
 
   /** Recreates the companion sheets, e.g. after the page's style sheets changed. */
@@ -583,6 +611,11 @@ export class ForcedPseudoClasses {
 
   rebuild() {
     page().rebuild();
+  }
+
+  /** Rebuilds after the current microtask, once for all the sessions that saw the same change. */
+  schedule() {
+    page().schedule();
   }
 
   reattach() {

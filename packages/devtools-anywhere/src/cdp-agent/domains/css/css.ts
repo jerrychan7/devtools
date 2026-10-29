@@ -108,7 +108,8 @@ export function registerCss(ctx: Context) {
     for (const sheet of known)
       if (!current.has(sheet)) session.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) });
     known = current;
-    if (forced.isActive) forced.rebuild();
+    // Every session's observer reports the same change: the shared companions are rebuilt once.
+    if (forced.isActive) forced.schedule();
     else forced.reattach();
     return loadCopies();
   }
