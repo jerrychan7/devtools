@@ -122,6 +122,15 @@ export function registerCss(ctx: Context) {
   const loadCopies = () =>
     sheets.loadCopies(sheet => session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) }));
 
+  const element = (nodeId: number) => resolveElement(ctx, { nodeId });
+
+  /** An element or a pseudo-element, as its host and pseudo type. */
+  const target = (nodeId: number): { el: Element; pseudo: PseudoType | null } => {
+    const node = nodes.get(nodeId);
+    if (node instanceof PseudoElement) return { el: node.host, pseudo: node.pseudoType };
+    return { el: element(nodeId), pseudo: null };
+  };
+
   /** Runs `apply` and records it for DOM.undo, `revert` taking it back. */
   function perform(apply: () => void, revert: () => void) {
     apply();
@@ -141,15 +150,6 @@ export function registerCss(ctx: Context) {
   function assertEditable(sheet: CSSStyleSheet) {
     if (sheets.isCopy(sheet)) throw new CdpError('This style sheet comes from another origin and cannot be edited');
   }
-
-  const element = (nodeId: number) => resolveElement(ctx, { nodeId });
-
-  /** An element or a pseudo-element, as its host and pseudo type. */
-  const target = (nodeId: number): { el: Element; pseudo: PseudoType | null } => {
-    const node = nodes.get(nodeId);
-    if (node instanceof PseudoElement) return { el: node.host, pseudo: node.pseudoType };
-    return { el: element(nodeId), pseudo: null };
-  };
 
   function applyEdit(edit: Protocol.CSS.StyleDeclarationEdit): CSSStyle {
     if (edit.styleSheetId.startsWith(INLINE_PREFIX)) {
