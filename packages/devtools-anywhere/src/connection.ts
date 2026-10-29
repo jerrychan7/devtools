@@ -20,8 +20,11 @@ const PING = JSON.stringify({ method: PING_METHOD });
 const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
 
 interface Link {
-  /** Forgets that the peer has spoken; outgoing messages are queued again. */
-  reset(): void;
+  /**
+   * Forgets that the peer has spoken; outgoing messages are queued again, and incoming ones wait
+   * for `after`, if given.
+   */
+  reset(after?: Promise<void>): void;
   disconnect(): void;
 }
 
@@ -31,8 +34,9 @@ interface Link {
  * Only messages whose source is the peer window and whose origin is `origin` are accepted,
  * and outgoing messages are addressed to that origin only. Outgoing messages are queued
  * until the peer sends its first message: before that, its window may still be loading.
+ * Incoming messages wait for `after`, if given.
  */
-function link(session: CdpSession, peer: () => Window | null | undefined, origin: string): Link {
+function link(session: CdpSession, peer: () => Window | null | undefined, origin: string, after?: Promise<void>): Link {
   let ready = false;
   const queue: string[] = [];
   const post = (message: string) => peer()?.postMessage(message, origin);
@@ -48,15 +52,21 @@ function link(session: CdpSession, peer: () => Window | null | undefined, origin
       ready = true;
       queue.splice(0).forEach(post);
     }
-    session.dispatch(event.data).catch(() => {
-      // Malformed message: there is no id to answer to.
-    });
+    const dispatch = (message: string) =>
+      session.dispatch(message).catch(() => {
+        // Malformed message: there is no id to answer to.
+      });
+    // In order, after the previous frontend's session has ended.
+    const message: string = event.data;
+    if (after) void after.then(() => dispatch(message));
+    else void dispatch(message);
   };
   window.addEventListener('message', onMessage);
   return {
-    reset() {
+    reset(next) {
       ready = false;
       queue.length = 0;
+      after = next;
     },
     disconnect() {
       offServer();
@@ -74,6 +84,9 @@ export async function endSession(session: CdpSession): Promise<void> {
   await Promise.all(calls.map(method => session.call(method).catch(() => {})));
 }
 
+/** For each session, the end of its last frontend's session: the next frontend's messages wait for it. */
+const ending = new WeakMap<CdpSession, Promise<void>>();
+
 /**
  * Connects a CDP session to a DevTools frontend running in `frame`. When the frame reloads
  * (a new frontend instance), the domains are disabled so that the new instance's `enable`
@@ -81,12 +94,15 @@ export async function endSession(session: CdpSession): Promise<void> {
  * the frontend did to the page.
  */
 export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, frontendOrigin: string): () => void {
-  const connection = link(session, () => frame.contentWindow, frontendOrigin);
+  // The previous frontend's session ends (and resets) before this one's first message.
+  const connection = link(session, () => frame.contentWindow, frontendOrigin, ending.get(session));
   let loads = 0;
   const onLoad = () => {
     if (loads++ === 0) return;
-    connection.reset();
-    void endSession(session);
+    // A new session, as on disconnect: the new instance's messages wait for its end.
+    const ended = endSession(session).then(() => session.reset());
+    ending.set(session, ended);
+    connection.reset(ended);
   };
   frame.addEventListener('load', onLoad);
   return () => {
@@ -94,7 +110,10 @@ export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, f
     frame.removeEventListener('load', onLoad);
     // Nothing the frontend asked for outlives it: inspect mode, highlights, forced states, the
     // screencast. What the probe captured stays, for the next frontend.
-    void endSession(session).then(() => session.reset());
+    ending.set(
+      session,
+      endSession(session).then(() => session.reset())
+    );
   };
 }
 

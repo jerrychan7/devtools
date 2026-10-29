@@ -134,3 +134,68 @@ test('replays again after the frontend reloads', async () => {
   const messages = await waitFor(m => logs(m).includes('logged before connecting') && logs(m).includes('live'));
   assert.equal(logs(messages).filter(v => v === 'live').length, 1, 'no duplicates after reload');
 });
+
+/** Posts a command from the frontend's own realm, so the message's source is its window. */
+async function send(message: object) {
+  await page.evaluate(json => {
+    const frontend = window.__frame?.contentWindow;
+    if (!frontend) throw new Error('no frontend frame');
+    const script = frontend.document.createElement('script');
+    script.textContent = `parent.postMessage(${JSON.stringify(json)}, '*')`;
+    frontend.document.body.appendChild(script);
+  }, JSON.stringify(message));
+}
+
+test("a reloaded frontend is a new session: the previous instance's objects are gone", async () => {
+  await send({ id: 300, method: 'Runtime.evaluate', params: { expression: '({ a: 1 })' } });
+  const evaluated = (await waitFor(m => m.some(message => message.id === 300))).find(m => m.id === 300);
+  const objectId = (evaluated?.result as Protocol.Runtime.EvaluateResponse | undefined)?.result.objectId;
+  assert.ok(objectId);
+  await page.evaluate(() => {
+    const frontend = window.__frame?.contentWindow;
+    if (!frontend) throw new Error('no frontend frame');
+    delete frontend.received;
+    frontend.location.reload();
+  });
+  await waitFor(m => m.some(message => message.id === 1 && message.result));
+  await send({ id: 301, method: 'Runtime.getProperties', params: { objectId, ownProperties: true } });
+  const answer = (await waitFor(m => m.some(message => message.id === 301))).find(m => m.id === 301);
+  assert.ok(answer && 'error' in answer, JSON.stringify(answer));
+});
+
+test("a new frontend's first messages wait until the previous one's session has ended", async () => {
+  const result = await page.evaluate(
+    () =>
+      new Promise<unknown>(resolve => {
+        const session = window.__session;
+        // A slow Runtime.disable: the previous session's reset comes late.
+        const call = session.call.bind(session);
+        session.call = (method, params) =>
+          method === 'Runtime.disable'
+            ? new Promise(r => setTimeout(r, 300)).then(() => call(method, params))
+            : call(method, params);
+        const first = document.createElement('iframe');
+        document.body.appendChild(first);
+        const disconnect = window.DevtoolsAnywhere.connectFrontend(session, first, location.origin);
+        disconnect();
+        session.call = call;
+        const frame = document.createElement('iframe');
+        document.body.appendChild(frame);
+        window.DevtoolsAnywhere.connectFrontend(session, frame, location.origin);
+        const frontend = frame.contentWindow;
+        if (!frontend) throw new Error('no frontend frame');
+        // The new frontend gets an object, then its properties: its id must still be valid.
+        const script = frontend.document.createElement('script');
+        script.textContent = `
+          addEventListener('message', e => {
+            const m = JSON.parse(e.data)
+            if (m.id === 201) parent.postMessage(JSON.stringify({ id: 202, method: 'Runtime.getProperties', params: { objectId: m.result.result.objectId, ownProperties: true } }), '*')
+            if (m.id === 202) parent.__secondFrontend(m)
+          })
+          parent.postMessage(JSON.stringify({ id: 201, method: 'Runtime.evaluate', params: { expression: '({ a: 1 })' } }), '*')`;
+        Reflect.set(window, '__secondFrontend', resolve);
+        frontend.document.body.appendChild(script);
+      })
+  );
+  assert.ok(typeof result === 'object' && result !== null && 'result' in result, JSON.stringify(result));
+});

@@ -6,15 +6,18 @@
     <link rel="manifest" href="/playground/manifest.json" />
     <title>devtools-anywhere playground</title>
     <!-- The probe must be the first synchronous script. -->
-    <script src="/packages/devtools-anywhere/dist/probe.iife.js"></script>
+    <script
+      src="/packages/devtools-anywhere/dist/probe.iife.js"
+      data-devtools-frontend-url="/packages/devtools-frontend/dist/anywhere_app.html"
+    ></script>
     <script src="/experiments/early-capture/scenario-early.js"></script>
     <script src="/experiments/early-capture/scenario-throw.js"></script>
   </head>
   <body>
     <h1>devtools-anywhere playground</h1>
     <p>
-      Early output is captured by the probe; <code>&lt;devtools-anywhere&gt;</code> loads 1s after <code>load</code>.
-      Tap the F12 button to open DevTools.
+      Early output is captured by the probe, which mounts its own <code>&lt;devtools-anywhere&gt;</code> after
+      <code>load</code>. Tap the F12 button to open DevTools; more output is logged 4s after <code>load</code>.
     </p>
     <script>
       console.log('[body] end of body');
@@ -53,19 +56,9 @@
       window.addEventListener('load', function () {
         console.log('[body] load');
         setTimeout(function () {
-          var s = document.createElement('script');
-          s.src = '/packages/devtools-anywhere/dist/devtools-anywhere.iife.js';
-          s.onload = function () {
-            var devtools = document.createElement('devtools-anywhere');
-            devtools.setAttribute('devtools-frontend-url', '/packages/devtools-frontend/dist/anywhere_app.html');
-            document.body.appendChild(devtools);
-            setTimeout(function () {
-              console.log('[late] after attach', { late: true });
-              fetch('/api/echo?n=fetch-late');
-            }, 3000);
-          };
-          document.head.appendChild(s);
-        }, 1000);
+          console.log('[late] after load', { late: true });
+          fetch('/api/echo?n=fetch-late');
+        }, 4000);
       });
     </script>
   </body>
