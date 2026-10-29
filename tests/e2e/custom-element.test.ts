@@ -160,3 +160,26 @@ test("in the shell's page, it works as on its own", async () => {
   });
   assert.equal(requests, 1);
 });
+
+test("::part(iframe) styles the iframe of an element the page placed, not that of the probe's", async () => {
+  // Out of the shell the previous test entered.
+  await page.evaluate(() => sessionStorage.clear());
+  await page.goto(url());
+  await frontendOf('#placed');
+  await page.waitForFunction(() => document.querySelector('html > devtools-anywhere'));
+  const borders = await page.evaluate(() => {
+    document.head.insertAdjacentHTML(
+      'beforeend',
+      '<style>devtools-anywhere::part(iframe) { border: 3px solid rgb(255, 0, 0); }</style>'
+    );
+    const border = (el: Element | null) => {
+      const frame = el?.shadowRoot?.querySelector('iframe');
+      return frame ? getComputedStyle(frame).borderTopWidth : null;
+    };
+    return {
+      placed: border(document.getElementById('placed')),
+      global: border(document.querySelector('html > devtools-anywhere')),
+    };
+  });
+  assert.deepEqual(borders, { placed: '3px', global: '0px' });
+});

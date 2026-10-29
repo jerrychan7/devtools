@@ -18,7 +18,7 @@ export interface DevtoolsAnywhereElementEventMap extends HTMLElementEventMap {
 }
 
 // @public
-export type DevtoolsAnywherePart = 'toggler';
+export type DevtoolsAnywherePart = 'toggler' | 'iframe';
 
 // @public
 export interface DevtoolsAnywhereTagNameMap {

@@ -501,6 +501,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // whatever it puts inside.
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
+    // Only an element the page placed lets it style DevTools' iframe; known once connected, as a
+    // global element is marked after it is created.
+    this.frame.part.toggle('iframe', isCustom(this));
     if (this.custom) return this.connectCustom();
     // Only the first global element connected works, even once it is gone.
     if (globalElements.has(this) && !this.firstGlobal) {

@@ -62,11 +62,12 @@ export type TogglerAttributes = {
 
 /**
  * The parts of `<devtools-anywhere>` the page can style with `::part()`: `toggler`, the F12
- * button (`devtools-anywhere::part(toggler)`).
+ * button (`devtools-anywhere::part(toggler)`), and `iframe`, DevTools' iframe in an element the
+ * page placed itself (`devtools-anywhere::part(iframe)`); the probe's element has no `iframe` part.
  *
  * @public
  */
-export type DevtoolsAnywherePart = 'toggler';
+export type DevtoolsAnywherePart = 'toggler' | 'iframe';
 
 /**
  * The element's tag, typed: what `HTMLElementTagNameMap` gets from this package, so that
