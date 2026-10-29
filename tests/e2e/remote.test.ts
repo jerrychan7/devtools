@@ -254,7 +254,8 @@ test('with singlePath, pages and DevTools connect at the base path itself, for h
   server.on('upgrade', (req, socket, head) => {
     const pathname = new URL(req.url ?? '/', 'http://x').pathname;
     upgradedPaths.push(pathname);
-    if (pathname !== '/bridge/' || !handler.handleUpgrade(req, socket, head)) socket.destroy();
+    const exact = pathname === '/bridge/' || pathname === '/bridge';
+    if (!exact || !handler.handleUpgrade(req, socket, head)) socket.destroy();
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -276,6 +277,12 @@ test('with singlePath, pages and DevTools connect at the base path itself, for h
     await waitFor(() => client.logged('remote early'));
     client.socket.close();
     assert.deepEqual([...new Set(upgradedPaths)], ['/bridge/']);
+    // A host that registered the base path without its trailing slash routes there too.
+    const bare = await Client.connect(`ws://${host}/bridge?client=${listed.id}&token=${TOKEN}`);
+    await bare.call('Runtime.enable');
+    await waitFor(() => bare.logged('remote early'));
+    bare.socket.close();
+    assert.ok(upgradedPaths.includes('/bridge'));
     // A query naming both, or neither, is not one of ours.
     for (const query of [`?target=a&client=a&token=${TOKEN}`, `?token=${TOKEN}`]) {
       const other = new WebSocket(`ws://${host}/bridge/${query}`);
@@ -495,6 +502,18 @@ test('the URL printed for an IPv6 host is bracketed', async () => {
 
 test('the printed script tag names the public URL', () => {
   assert.equal(remote.scriptTag, `<script src="${remote.publicUrl}probe.iife.js" data-remote></script>`);
+});
+
+test('with singlePath, the printed script tag says so', async () => {
+  const server = await startRemoteServer({ port: 0, host: '127.0.0.1', token: false, singlePath: true });
+  try {
+    assert.equal(
+      server.scriptTag,
+      `<script src="${server.publicUrl}probe.iife.js" data-remote data-single-path></script>`
+    );
+  } finally {
+    await server.close();
+  }
 });
 
 test(
