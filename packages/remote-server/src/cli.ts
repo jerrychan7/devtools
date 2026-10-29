@@ -2,7 +2,7 @@
 //
 //   devtools-anywhere-remote [--port 8080] [--host 0.0.0.0] [--base-path /] [--token <t> | --no-token]
 //                            [--cert cert.pem --key key.pem] [--public-url <url>]
-//                            [--devtools-frontend-path <file> | --devtools-frontend-url <url>]
+//                            [--devtools-frontend-path <file> | --devtools-frontend-url <url>] [--id-in-query]
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { startRemoteServer, type RemoteServerOptions } from './index';
@@ -19,6 +19,7 @@ const { values } = parseArgs({
     'public-url': { type: 'string' },
     'devtools-frontend-path': { type: 'string' },
     'devtools-frontend-url': { type: 'string' },
+    'id-in-query': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -36,7 +37,9 @@ if (values.help) {
       --public-url <url>   The server's URL as pages reach it (default: this machine's LAN address)
       --devtools-frontend-path <file>  entry page of a DevTools frontend build to serve
                                        (anywhere_app.html); its directory is served
-      --devtools-frontend-url <url>    anywhere_app.html hosted elsewhere (a CDN), to open instead`);
+      --devtools-frontend-url <url>    anywhere_app.html hosted elsewhere (a CDN), to open instead
+      --id-in-query        Pages and DevTools connect to the base path itself, the target in the
+                           query, for hosts that route WebSocket upgrades by exact path`);
   process.exit(0);
 }
 if (!!values.cert !== !!values.key) {
@@ -54,6 +57,7 @@ if (values.cert && values.key) options.https = { cert: readFileSync(values.cert)
 if (values['public-url'] !== undefined) options.publicUrl = values['public-url'];
 if (values['devtools-frontend-path'] !== undefined) options.devtoolsFrontendPath = values['devtools-frontend-path'];
 if (values['devtools-frontend-url'] !== undefined) options.devtoolsFrontendUrl = values['devtools-frontend-url'];
+if (values['id-in-query']) options.idInQuery = true;
 
 const remote = await startRemoteServer(options);
 console.log(`Inspect pages at ${remote.url}`);
