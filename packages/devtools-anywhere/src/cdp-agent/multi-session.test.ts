@@ -102,3 +102,44 @@ test('a pseudo-class two sessions force stays forced until both take it back', a
   // The page sees its own adopted sheets only, whichever session went first.
   assert.equal(await page.evaluate(() => Object.hasOwn(document, 'adoptedStyleSheets')), false);
 });
+
+test('new sessions do not stack listeners or patches on the page', async () => {
+  await call(0, 'DOMStorage.enable');
+  const result = await page.evaluate(async () => {
+    const probe = window.__devtoolsAnywhereProbe__;
+    if (!probe) throw new Error('no probe');
+    // Counts the probe's request listeners from now on.
+    let listening = 0;
+    const onRequest = probe.onRequest;
+    probe.onRequest = listener => {
+      listening++;
+      const off = onRequest(listener);
+      return () => {
+        listening--;
+        off();
+      };
+    };
+    const setItem = Storage.prototype.setItem;
+    let added = 0;
+    try {
+      for (let i = 0; i < 5; i++) {
+        const session = window.DevtoolsAnywhere.createCdpSession();
+        session.onMessage(m => {
+          if (m.includes('domStorageItemAdded')) added++;
+        });
+        await session.call('DOMStorage.enable');
+        await session.call('Network.enable');
+        await session.call('DOMStorage.disable');
+        await session.call('Network.disable');
+        session.reset();
+      }
+    } finally {
+      probe.onRequest = onRequest;
+    }
+    localStorage.setItem('multi-session', '1');
+    localStorage.removeItem('multi-session');
+    return { listening, samePatch: Storage.prototype.setItem === setItem, added };
+  });
+  assert.deepEqual(result, { listening: 0, samePatch: true, added: 0 });
+  await call(0, 'DOMStorage.disable');
+});

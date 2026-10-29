@@ -148,68 +148,77 @@ function toBase64(buffer: ArrayBuffer) {
   return btoa(binary);
 }
 
+/** A change of a Storage, as a `storage` event tells it: `key` null when cleared, `newValue` null when removed. */
+interface StorageChange {
+  storageArea: Storage;
+  key: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+/** The sessions with DOMStorage enabled. */
+const storageListeners = new Set<(change: StorageChange) => void>();
+let storageHooked = false;
+
+/**
+ * Reports changes made through the Storage API, and by other tabs, to the sessions with the
+ * domain enabled. Installed once for all sessions. Property access (`localStorage.foo = 'x'`)
+ * cannot be observed and is not reported.
+ */
+function hookStorage() {
+  if (storageHooked) return;
+  storageHooked = true;
+  const notify = (change: StorageChange) => storageListeners.forEach(fn => fn(change));
+  const proto = Storage.prototype;
+  const { setItem, removeItem, clear } = proto;
+  proto.setItem = function (this: Storage, key: string, value: string) {
+    const oldValue = this.getItem(key);
+    setItem.call(this, key, value);
+    notify({ storageArea: this, key, oldValue, newValue: String(value) });
+  };
+  proto.removeItem = function (this: Storage, key: string) {
+    const oldValue = this.getItem(key);
+    removeItem.call(this, key);
+    if (oldValue !== null) notify({ storageArea: this, key, oldValue, newValue: null });
+  };
+  proto.clear = function (this: Storage) {
+    clear.call(this);
+    notify({ storageArea: this, key: null, oldValue: null, newValue: null });
+  };
+  // Changes other tabs of the origin make to localStorage.
+  window.addEventListener('storage', ({ storageArea, key, oldValue, newValue }) => {
+    if (storageArea) notify({ storageArea, key, oldValue, newValue });
+  });
+}
+
 export function registerStorage(ctx: Context) {
   const { session, objects } = ctx;
 
   // ---- DOMStorage ----
 
-  let domStorageEnabled = false;
-  let hooked = false;
   const storageIdOf = (storage: Storage): Protocol.DOMStorage.StorageId => ({
     securityOrigin: location.origin,
     storageKey: storageKey(),
     isLocalStorage: storage === localStorage,
   });
-
-  /**
-   * Reports changes made through the Storage API, and by other tabs, while the domain is
-   * enabled. Property access (`localStorage.foo = 'x'`) cannot be observed and is not reported.
-   */
-  function hookStorage() {
-    if (hooked) return;
-    hooked = true;
-    const proto = Storage.prototype;
-    const { setItem, removeItem, clear } = proto;
-    proto.setItem = function (this: Storage, key: string, value: string) {
-      const oldValue = this.getItem(key);
-      setItem.call(this, key, value);
-      if (!domStorageEnabled) return;
-      const storageId = storageIdOf(this);
-      if (oldValue === null)
-        session.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue: String(value) });
-      else session.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue: String(value) });
-    };
-    proto.removeItem = function (this: Storage, key: string) {
-      const existed = this.getItem(key) !== null;
-      removeItem.call(this, key);
-      if (domStorageEnabled && existed)
-        session.emit('DOMStorage.domStorageItemRemoved', { storageId: storageIdOf(this), key });
-    };
-    proto.clear = function (this: Storage) {
-      clear.call(this);
-      if (domStorageEnabled) session.emit('DOMStorage.domStorageItemsCleared', { storageId: storageIdOf(this) });
-    };
-    // Changes other tabs of the origin make to localStorage.
-    window.addEventListener('storage', event => {
-      const { storageArea, key, oldValue, newValue } = event;
-      if (!domStorageEnabled || !storageArea) return;
-      const storageId = storageIdOf(storageArea);
-      if (key === null) session.emit('DOMStorage.domStorageItemsCleared', { storageId });
-      else if (newValue === null) session.emit('DOMStorage.domStorageItemRemoved', { storageId, key });
-      else if (oldValue === null) session.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue });
-      else session.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue });
-    });
-  }
+  /** Reports a change while the domain is enabled. */
+  const onChange = ({ storageArea, key, oldValue, newValue }: StorageChange) => {
+    const storageId = storageIdOf(storageArea);
+    if (key === null) session.emit('DOMStorage.domStorageItemsCleared', { storageId });
+    else if (newValue === null) session.emit('DOMStorage.domStorageItemRemoved', { storageId, key });
+    else if (oldValue === null) session.emit('DOMStorage.domStorageItemAdded', { storageId, key, newValue });
+    else session.emit('DOMStorage.domStorageItemUpdated', { storageId, key, oldValue, newValue });
+  };
 
   const storageOf = (id: Protocol.DOMStorage.StorageId) => (id.isLocalStorage ? localStorage : sessionStorage);
 
   session.register('DOMStorage', {
     enable() {
-      domStorageEnabled = true;
       hookStorage();
+      storageListeners.add(onChange);
     },
     disable() {
-      domStorageEnabled = false;
+      storageListeners.delete(onChange);
     },
     getDOMStorageItems(
       params: Protocol.DOMStorage.GetDOMStorageItemsRequest
