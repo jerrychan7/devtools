@@ -123,6 +123,7 @@ export function installProbe(): Probe {
   observeResources(add, update, requests, shell?.sw);
 
   if (shell && window === top) {
+    // When it refuses (a loop), the page loads on its own: probe.ts sees no config left.
     writeShellDocument(shell);
   } else if (shell && isShellPage()) {
     // Load the bundle that connects this page to the shell; capture continues meanwhile.

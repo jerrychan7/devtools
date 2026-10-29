@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>default shell</title>
+    <script src="/packages/devtools-anywhere/dist/probe.iife.js" data-frontend="/tests/e2e/fake-frontend.html"></script>
+    <script>
+      // ?bust: a page that navigates the window it is framed in away, as frame-busting scripts do.
+      if (location.search.includes('bust') && top !== self) top.location.href = location.href;
+      window.__pageScriptRan = true;
+    </script>
+  </head>
+  <body>
+    <p>default shell</p>
+  </body>
+</html>

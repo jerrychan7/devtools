@@ -28,7 +28,7 @@ before(async () => {
     root: path.join(here, 'vite-app'),
     logLevel: 'silent',
     server: { port: 0, strictPort: false },
-    plugins: [devtoolsAnywhere({ frontendDir: here, frontendEntry: 'fake-frontend.html', open: true })],
+    plugins: [devtoolsAnywhere({ frontendDir: here, frontendEntry: 'fake-frontend.html', open: true, shell: false })],
   });
   await server.listen();
   browser = await puppeteer.launch({
@@ -51,6 +51,14 @@ test('the probe is the first script to run', async () => {
     return script.getAttribute('src');
   });
   assert.equal(first, '/@devtools-anywhere/probe.iife.js');
+});
+
+test('shell: false keeps the page out of shell mode', async () => {
+  const shell = await page.evaluate(() =>
+    document.head.querySelector('script[src="/@devtools-anywhere/probe.iife.js"]')?.getAttribute('data-shell')
+  );
+  assert.equal(shell, 'off');
+  assert.equal(await page.evaluate(() => document.querySelector('devtools-anywhere[shell]')), null);
 });
 
 test('DevTools mounts and receives output from before any app code ran', async () => {

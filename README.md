@@ -65,7 +65,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
 
 #### 1. Probe
 
-A synchronous script of about 5.8 KB (min+gzip, including shell mode, auto-mounting and remote debugging) that must be the first script executed in `<head>`.
+A synchronous script of about 6.2 KB (min+gzip, including shell mode, auto-mounting and remote debugging) that must be the first script executed in `<head>`.
 
 - Immediately hooks `console`, `window.onerror`, `unhandledrejection`, `fetch`, `XHR` and `WebSocket`, and writes events with timestamps into a buffer. WebSocket frames are kept as given; binary payloads are only converted to base64 by the CDP agent. Until a CDP session mounts, each list (console messages, requests, WebSockets, frames per WebSocket) keeps its last 10,000 entries, a bound for pages that never load one; the session then sets its own: it keeps the last 1000 console messages like V8, and every request and WebSocket like Chrome, dropping only the oldest response bodies past the buffer sizes given to `Network.enable` (Chrome's defaults when none are).
 - Requests that cannot be hooked (the document, style sheets, scripts, images, fonts, …) are recorded from Resource Timing; a buffered `PerformanceObserver` also delivers those from before the probe ran. They have URL, type, timing, size and (where the browser exposes it) status and MIME type, but no headers; their bodies are loaded again from the HTTP cache on demand. In shell mode with the Service Worker, it adds the request and response headers of same-origin ones. Hooks stay first because they work from the very start, keep call stacks, and need no deployment; a Service Worker only controls pages after it is installed, conflicts with a site's own, and would have to proxy requests to see responses.
@@ -79,15 +79,15 @@ This approach has been validated: see [experiments/early-capture/RESULTS.md](exp
 
 No standalone `devtools.html` is hosted, and there is no navigation to a blob URL, since blob URLs break on reload and cannot be shared. Instead:
 
-1. The lock button in DevTools' toolbar, "Keep DevTools open across reloads" (`element.enterShell()`), stores the frontend and bundle URLs in `sessionStorage` and reloads the page.
+1. With the zero-config probe (`data-frontend`, or the Vite plugin), the top-level page enters shell mode by default on its first load: the probe stores the frontend and bundle URLs in `sessionStorage` itself, before the page's scripts run, so the page is not reloaded. DevTools starts hidden unless `data-open` is set. Otherwise, the lock button in DevTools' toolbar, "Keep DevTools open across reloads" (`element.enterShell()`), stores them and reloads the page.
 2. The probe, being the first script, sees the config in the top-level window. It writes an unclosed `<plaintext>` so the rest of the page becomes inert text (none of its scripts run), then replaces the document with the shell via `document.open()` / `document.write()`. The shell contains the page iframe (pointing to `location.href`) and `<devtools-anywhere shell>`. (Chrome ignores `document.open()` after `window.stop()`, hence `<plaintext>`.)
 3. Inside the iframe, the probe captures as usual and loads the bundle, which connects the page's CDP session to the shell. The shell relays messages between the page and the frontend.
-4. When the page reloads or navigates, the new page says hello; the shell tells the frontend the page navigated and re-sends every `enable` command the frontend has sent, so the new page replays its own earliest output. The address bar and title follow the page.
-5. The lock button again, or the toolbar's × (`element.exitShell()`), clears the config and reloads the page on its own.
+4. When the page reloads or navigates, the new page says hello; the shell tells the frontend the page navigated and re-sends every `enable` command the frontend has sent, so the new page replays its own earliest output. The address bar and title follow the page, through loads, history traversals and same-document navigations (`pushState` where the Navigation API exists), so that a reload or a copied link opens the page shown.
+5. The toolbar's × hides DevTools and stays in shell mode. The lock button again (`element.exitShell()`) clears the config and reloads the page on its own; the choice is remembered in `localStorage`, and wins over the page's `data-shell` from then on.
 
 The stored URLs are only trusted when they have the same origin as the probe script; otherwise the config is cleared and the page loads normally. Shell mode therefore needs the probe, the bundle and the frontend served from the page's origin.
 
-Shell mode is **optional**: inside an iframe, `viewport`, `100vh`, `position: fixed`, `window.top`, `X-Frame-Options` and others may behave differently from a top-level page. The default mode embeds DevTools directly in the page.
+Inside an iframe, `viewport`, `100vh`, `position: fixed`, `window.top` and others may behave differently from a top-level page; the page's HTML is requested twice (by the top-level window, then by the iframe), and a page returned for a form POST is requested again with GET. Turn shell mode off with `data-shell="off"` (the Vite plugin's `shell: false`), and DevTools is embedded directly in the page. A page that refuses to be framed (`X-Frame-Options`, CSP `frame-ancestors`), or that keeps navigating the shell away, is shown on its own for the rest of the session.
 
 #### 3. Injection
 
@@ -129,7 +129,7 @@ The packages are not published yet; the paths below refer to the builds in this 
 </head>
 ```
 
-After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts `<devtools-anywhere>`. Optional attributes: `data-open` opens DevTools right away; `data-sw` enables the Service Worker in shell mode.
+After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts `<devtools-anywhere>`. Optional attributes: `data-open` opens DevTools right away; `data-shell="off"` stays out of shell mode, which the top-level page enters by default; `data-sw` enables the Service Worker in shell mode.
 
 ### Vite
 
@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `open`, `serviceWorker`, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
+Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `frontendDir` (another frontend build), `frontendEntry` (default `anywhere_app.html`), `frontendUrl`, `open`, `shell` (default `true`; `false` stays out of shell mode), `serviceWorker`, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element).
 
 ### The element
 

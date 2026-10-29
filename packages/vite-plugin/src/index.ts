@@ -27,6 +27,12 @@ export interface DevtoolsAnywhereOptions {
   frontendUrl?: string;
   /** Open DevTools as soon as it is mounted. Default: false. */
   open?: boolean;
+  /**
+   * Shell mode: the page runs in an iframe next to DevTools, which stays open across reloads.
+   * Entered by default; false to leave it off, unless the user turns it on in DevTools.
+   * Default: true.
+   */
+  shell?: boolean;
   /** Use the Service Worker in shell mode to inject the probe into iframe pages. Default: false. */
   serviceWorker?: boolean;
   /**
@@ -135,6 +141,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         if (options.remote) attrs['data-remote'] = options.remote;
         else if (frontend) attrs['data-frontend'] = frontend;
         if (options.open) attrs['data-open'] = true;
+        if (options.shell === false) attrs['data-shell'] = 'off';
         if (options.serviceWorker) attrs['data-sw'] = true;
         return [{ tag: 'script', attrs, injectTo: 'head-prepend' }];
       },

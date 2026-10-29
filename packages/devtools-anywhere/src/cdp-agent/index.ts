@@ -23,12 +23,13 @@ export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {
   SHELL_KEY,
+  SHELL_MODE_KEY,
   SHELL_PAGE_ID,
   isShellPage,
-  isTrustedShellConfig,
   readShellConfig,
+  refuseShell,
   setShellScriptUrl,
-  type ShellConfig,
+  storeShellConfig,
 } from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
 export type { SnapdomLoader } from './domains/page/screencast';

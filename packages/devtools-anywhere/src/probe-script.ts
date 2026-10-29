@@ -11,6 +11,12 @@ export type ProbeScriptAttributes = {
   'data-bundle'?: string;
   /** Opens DevTools right away. */
   'data-open'?: true;
+  /**
+   * `off` to stay out of shell mode, which the top-level page enters by default (the page runs in
+   * an iframe next to DevTools, which stays open across reloads). The user's choice in DevTools
+   * wins over it.
+   */
+  'data-shell'?: 'on' | 'off';
   /** Passed on as the element's `sw` attribute (shell mode's Service Worker). */
   'data-sw'?: string | true;
   /** Connects to a remote debugging server: this URL, by default the one the probe is served from. */

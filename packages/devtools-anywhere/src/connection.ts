@@ -136,19 +136,6 @@ class ShellRelay extends RelayCore {
     return { id: FRAME_ID, url, secure };
   }
 
-  /** Mirrors the page's URL and title in the address bar and tab. */
-  private syncLocation() {
-    try {
-      const win = this.page.contentWindow;
-      const doc = this.page.contentDocument;
-      if (!win || !doc) return;
-      if (win.location.href !== location.href) history.replaceState(null, '', win.location.href);
-      document.title = doc.title;
-    } catch {
-      // Cross-origin navigation: leave the shell as it is.
-    }
-  }
-
   private onPagehide = () => this.pagehide();
 
   readonly onMessage = (event: MessageEvent) => {
@@ -167,7 +154,6 @@ class ShellRelay extends RelayCore {
         const sent = field('loaderId');
         // A page without one (an older probe) is a new instance every time, as it always was.
         const loaderId = typeof sent === 'string' ? sent : `unknown-${++this.unknownLoaders}`;
-        this.syncLocation();
         this.page.contentWindow?.addEventListener('pagehide', this.onPagehide);
         return this.hello(loaderId);
       }

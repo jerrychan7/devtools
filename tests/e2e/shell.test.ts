@@ -97,13 +97,23 @@ test('navigation inside the page updates the address bar', async () => {
   assert.ok(earlyLogs(state).length >= 3);
 });
 
-test("closing (DevTools' own close button) leaves shell mode", async () => {
+test("closing (DevTools' own close button) hides DevTools; stopping keeping it open leaves shell mode", async () => {
   // What the frontend sends when its toolbar's close button is clicked.
   const devtools = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));
   assert.ok(devtools, 'the DevTools frame');
   await devtools.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*'));
+  await page.waitForFunction(
+    () =>
+      document.querySelector('devtools-anywhere')?.hasAttribute('shell') &&
+      document.querySelector('devtools-anywhere')?.open === false
+  );
+  // Still in the shell, whose address bar follows the page shown.
+  assert.match((await waitFor(s => s.inShell)).url, /\?second$/);
+  // Its info bar's "Stop keeping open": the user turns shell mode off, which is remembered.
+  await devtools.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'keep-open', keep: false } }, '*'));
   const state = await waitFor(s => !s.inShell && s.shellRanPageScript);
   assert.match(state.url, /\?second$/);
+  assert.equal(await page.evaluate(() => localStorage.getItem('devtools-anywhere:shell-mode')), 'off');
 });
 
 test('a shell config pointing to another origin is removed and ignored', async () => {

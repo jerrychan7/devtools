@@ -56,6 +56,7 @@ export type ProbeScriptAttributes = {
     'data-frontend'?: string;
     'data-bundle'?: string;
     'data-open'?: true;
+    'data-shell'?: 'on' | 'off';
     'data-sw'?: string | true;
     'data-remote'?: string | true;
     'data-single-path'?: true;

@@ -4,10 +4,24 @@
 // Entering shell mode stores a ShellConfig in sessionStorage and reloads. The probe, being
 // the first script, then turns the top-level document into the shell in place (the URL in
 // the address bar stays the same), and inside the page iframe it loads the bundle that
-// connects the page's CDP session to the shell.
+// connects the page's CDP session to the shell. The zero-config probe enters it by default,
+// storing the config itself on the first load, unless shell mode is turned off (see
+// SHELL_MODE_KEY, SHELL_REFUSED_KEY).
 
 /** @internal */
 export const SHELL_KEY = 'devtools-anywhere:shell';
+/**
+ * localStorage: `off` once the user turned shell mode off in DevTools, `on` once they turned it
+ * on; either wins over the page's `data-shell`. @internal
+ */
+export const SHELL_MODE_KEY = 'devtools-anywhere:shell-mode';
+/**
+ * sessionStorage: set when the page cannot be shown in the shell (it refuses to be framed, or
+ * keeps navigating the shell away), so that shell mode is not entered again in this tab. @internal
+ */
+export const SHELL_REFUSED_KEY = 'devtools-anywhere:shell-refused';
+/** sessionStorage: when the shell was last written, to catch a page that navigates it away in a loop. */
+const SHELL_ENTRIES_KEY = 'devtools-anywhere:shell-entries';
 /** id of the page iframe in the shell document. @internal */
 export const SHELL_PAGE_ID = 'devtools-anywhere-page';
 
@@ -19,6 +33,8 @@ export interface ShellConfig {
   bundle: string;
   /** Absolute URL of devtools-anywhere-sw.js, to inject the probe into iframe pages. */
   sw?: string;
+  /** False to start with DevTools hidden (shell mode entered by default); shown otherwise. */
+  open?: boolean;
 }
 
 let trustedOrigin = '';
@@ -59,6 +75,26 @@ export function isTrustedShellConfig(config: ShellConfig): boolean {
   });
 }
 
+/**
+ * Stores the shell config for the next load of the top-level page: DevTools' `frontend`, the
+ * bundle, and `sw` as the element's attribute (`''`: next to the bundle). False when the URLs
+ * are not all on the trusted origin, which the probe would refuse, or storage throws.
+ *
+ * @internal
+ */
+export function storeShellConfig(frontend: string, bundle: string, sw: string | null, open?: boolean): boolean {
+  const config: ShellConfig = { frontend: new URL(frontend, location.href).href, bundle };
+  if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundle).href;
+  if (open !== undefined) config.open = open;
+  if (!isTrustedShellConfig(config)) return false;
+  try {
+    sessionStorage.setItem(SHELL_KEY, JSON.stringify(config));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The stored shell config; an invalid or untrusted one is removed and ignored. @internal */
 export function readShellConfig(): ShellConfig | null {
   try {
@@ -75,8 +111,13 @@ export function readShellConfig(): ShellConfig | null {
 
 function isShellConfig(value: unknown): value is ShellConfig {
   if (typeof value !== 'object' || value === null) return false;
-  const { frontend, bundle, sw } = value as Record<string, unknown>;
-  return typeof frontend === 'string' && typeof bundle === 'string' && (sw === undefined || typeof sw === 'string');
+  const { frontend, bundle, sw, open } = value as Record<string, unknown>;
+  return (
+    typeof frontend === 'string' &&
+    typeof bundle === 'string' &&
+    (sw === undefined || typeof sw === 'string') &&
+    (open === undefined || typeof open === 'boolean')
+  );
 }
 
 /** True when this window is the page iframe inside a shell. @internal */
@@ -91,14 +132,46 @@ export function isShellPage(): boolean {
 
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-/** Replaces the current top-level document with the shell. */
-export function writeShellDocument(config: ShellConfig) {
+/**
+ * Leaves shell mode for the rest of the session: the page cannot be shown in the shell. Its
+ * config is removed, so the page loads on its own from now on. @internal
+ */
+export function refuseShell() {
+  try {
+    sessionStorage.removeItem(SHELL_KEY);
+    sessionStorage.setItem(SHELL_REFUSED_KEY, '1');
+  } catch {
+    // Without sessionStorage there is no shell mode either.
+  }
+}
+
+/**
+ * Replaces the current top-level document with the shell. A page that navigates the shell
+ * away (`top.location = …`) brings the probe back here at once: the fifth time within two
+ * seconds, shell mode is refused instead, and false returned.
+ */
+export function writeShellDocument(config: ShellConfig): boolean {
+  const now = Date.now();
+  let entries: number[] = [];
+  try {
+    const stored: unknown = JSON.parse(sessionStorage.getItem(SHELL_ENTRIES_KEY) || '[]');
+    if (Array.isArray(stored)) entries = stored.filter((t): t is number => typeof t === 'number' && now - t < 2000);
+    entries.push(now);
+    sessionStorage.setItem(SHELL_ENTRIES_KEY, JSON.stringify(entries));
+  } catch {
+    // Checked when the config was read.
+  }
+  if (entries.length >= 5) {
+    refuseShell();
+    return false;
+  }
   // While the page is still parsing, an unclosed <plaintext> turns the rest of the page
   // into inert text, so none of its scripts run and none of its resources load. (Chrome
   // ignores document.open() after window.stop().) document.open() is also ignored while a
   // parser-inserted script runs, so the document is replaced right after this script.
   if (document.readyState === 'loading') document.write('<plaintext style="display:none">');
   setTimeout(() => replaceDocument(config));
+  return true;
 }
 
 function replaceDocument(config: ShellConfig) {
@@ -109,6 +182,6 @@ function replaceDocument(config: ShellConfig) {
 #${SHELL_PAGE_ID}{flex:1;min-height:0;width:100%;border:0;display:block}</style></head>
 <body><iframe id="${SHELL_PAGE_ID}" src="${escapeAttr(location.href)}"></iframe>
 <script src="${escapeAttr(config.bundle)}"></script>
-<devtools-anywhere shell open frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
+<devtools-anywhere shell${config.open === false ? '' : ' open'} frontend="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
   document.close();
 }

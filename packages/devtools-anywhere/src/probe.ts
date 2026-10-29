@@ -7,6 +7,12 @@
 // the page has loaded and mounts <devtools-anywhere>. `data-open` opens DevTools right away;
 // `data-sw` is passed on as the element's `sw` attribute (see shell mode).
 //
+// With `data-frontend`, the top-level page enters shell mode by default, on its first load: the
+// probe stores the shell config itself before the page's scripts run, so the page is not
+// loaded twice over. It does not when `data-shell="off"`, when the user turned shell mode off
+// in DevTools (or on again, whatever `data-shell` says), when the page cannot be framed
+// (SHELL_REFUSED_KEY), or when the frontend, bundle or Service Worker is on another origin.
+//
 // With `data-remote` instead, it connects the page to a remote debugging server
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
 // where DevTools on another machine inspects it. No <devtools-anywhere> is mounted then.
@@ -17,7 +23,14 @@
 // ended without exitShell): recognized by its script URL, which the shell gives `probe` (ending
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
 // another tab still uses it. The page's own workers are left alone.
-import { installProbe, readShellConfig, setShellScriptUrl } from './cdp-agent/probe';
+import {
+  SHELL_MODE_KEY,
+  SHELL_REFUSED_KEY,
+  installProbe,
+  readShellConfig,
+  setShellScriptUrl,
+  storeShellConfig,
+} from './cdp-agent/probe';
 import type { DevtoolsAnywhereApi } from './api';
 import { BUNDLE_SCRIPT, PROBE_SCRIPT } from './embedder';
 import type { ProbeScriptAttributes } from './probe-script';
@@ -26,6 +39,30 @@ import { SHELL_QUERY } from './shell-messages';
 const script = document.currentScript as HTMLScriptElement | null;
 // Shell configs must come from this script's origin.
 if (script?.src) setShellScriptUrl(script.src);
+
+/** One of the script's attributes (probe-script.ts); `null` when it is absent. */
+const attribute = (name: keyof ProbeScriptAttributes) => script?.getAttribute(name) ?? null;
+const frontend = attribute('data-frontend');
+const remote = attribute('data-remote');
+// A probe inlined, without a URL, has no bundle next to it.
+const bundle = script?.src ? new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href : null;
+const open = attribute('data-open') !== null;
+
+/** Whether to enter shell mode by default; storage that throws counts as no. */
+const shellByDefault = () => {
+  try {
+    if (sessionStorage.getItem(SHELL_REFUSED_KEY)) return false;
+    const chosen = localStorage.getItem(SHELL_MODE_KEY);
+    return chosen ? chosen === 'on' : attribute('data-shell') !== 'off';
+  } catch {
+    return false;
+  }
+};
+// installProbe() reads the config next and writes the shell.
+if (bundle && frontend && remote === null && window === top && !readShellConfig() && shellByDefault()) {
+  storeShellConfig(frontend, bundle, attribute('data-sw'), open);
+}
+
 const probe = installProbe();
 // The probe's own request is DevTools', not the page's: left out of the Network panel.
 if (script?.src) probe.ownUrls.add(script.src);
@@ -70,14 +107,8 @@ if (!readShellConfig() && navigator.serviceWorker) {
 const isApi = (api: unknown): api is Pick<DevtoolsAnywhereApi, 'connectRemote'> =>
   typeof api === 'object' && api !== null && 'connectRemote' in api && typeof api.connectRemote === 'function';
 
-/** One of the script's attributes (probe-script.ts); `null` when it is absent. */
-const attribute = (name: keyof ProbeScriptAttributes) => script?.getAttribute(name) ?? null;
-const frontend = attribute('data-frontend');
-const remote = attribute('data-remote');
 // In the shell's top window the probe has replaced the document with the shell already.
-if (script && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
-  const bundle = new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href;
-  const open = attribute('data-open') !== null;
+if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
   probe.ownUrls.add(bundle);
 
   const mount = () => {

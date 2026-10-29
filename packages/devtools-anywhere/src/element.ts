@@ -4,12 +4,13 @@ import {
   SHELL_PAGE_ID,
   createCdpSession,
   isShellPage,
-  isTrustedShellConfig,
   markOwn,
   OWN_ATTRIBUTE,
   readShellConfig,
+  refuseShell,
+  SHELL_MODE_KEY,
+  storeShellConfig,
   type CdpSession,
-  type ShellConfig,
   type SnapdomLoader,
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
@@ -199,7 +200,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 
 /* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
 :host([shell]) { display: flex; flex: none; }
-:host([shell]) .panel { position: static; display: flex; flex: 1 1 auto; }
+:host([shell]) .panel { position: static; flex: 1 1 auto; }
 :host([shell][dock=undocked]) .panel { position: fixed; }
 :host([data-shell-page]) { display: none !important; }
 `;
@@ -262,7 +263,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.frame = part<HTMLIFrameElement>('iframe');
     this.launcher = part<HTMLButtonElement>('.launcher');
     this.launcher.addEventListener('click', () => this.show());
-    part('.close').addEventListener('click', () => (this.hasAttribute('shell') ? void this.exitShell() : this.hide()));
+    part('.close').addEventListener('click', () => this.hide());
     this.setupResizer(part<HTMLElement>('.bar'));
     this.setupCorner(part<HTMLElement>('.corner'));
     // The undocked panel is resized by the browser (CSS resize): remember its size once it
@@ -294,6 +295,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       store(DOCK_KEY, request.side);
       this.dock = request.side;
     } else if (request.type === 'keep-open') {
+      // The user's choice: the probe enters shell mode by default, unless they turned it off.
+      store(SHELL_MODE_KEY, request.keep ? 'on' : 'off');
       if (request.keep) this.enterShell();
       else void this.exitShell();
     } else if (request.type === 'theme') {
@@ -307,8 +310,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
         for (const property of properties) this.panel.style.setProperty(property, value);
       }
     } else if (request.type === 'close') {
-      if (this.hasAttribute('shell')) void this.exitShell();
-      else this.hide();
+      this.hide();
     }
   };
 
@@ -340,15 +342,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   enterShell() {
     const frontend = this.getAttribute('frontend');
     if (!bundleUrl || !frontend) return;
-    const config: ShellConfig = { frontend: new URL(frontend, location.href).href, bundle: bundleUrl };
-    const sw = this.getAttribute('sw');
-    if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundleUrl).href;
     // The probe ignores (and removes) a config whose URLs are not on its own origin.
-    if (!isTrustedShellConfig(config)) {
+    if (!storeShellConfig(frontend, bundleUrl, this.getAttribute('sw'))) {
       console.warn('devtools-anywhere: shell mode needs the frontend, bundle and sw on one origin');
       return;
     }
-    sessionStorage.setItem(SHELL_KEY, JSON.stringify(config));
     location.reload();
   }
 
@@ -374,6 +372,56 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private onShellPageshow = (event: PageTransitionEvent) => {
     if (event.persisted) navigator.serviceWorker?.controller?.postMessage({ type: SHELL_HANDSHAKE });
   };
+
+  /**
+   * In the shell: watches the page iframe. When its first page is out of reach, it refused to
+   * be framed (X-Frame-Options, CSP frame-ancestors) and an error page is shown instead: shell
+   * mode is refused for the session and the page reloads on its own. Otherwise the address bar
+   * and the tab's title follow the page shown, through loads, history traversals and same-document navigations, so
+   * that a reload (or a copied link) opens that page rather than the first one. Later pages out
+   * of reach are another origin's: the address bar stays at the last one of ours.
+   */
+  private watchShellPage() {
+    const page = document.getElementById(SHELL_PAGE_ID);
+    if (!(page instanceof HTMLIFrameElement)) return;
+    let first = true;
+    const follow = () => {
+      let href = '';
+      try {
+        href = page.contentWindow?.location.href ?? '';
+      } catch {
+        // Another origin, or an error page.
+      }
+      if (first && (!href || href === 'about:blank')) {
+        refuseShell();
+        location.reload();
+        return;
+      }
+      first = false;
+      if (!href || href === 'about:blank') return;
+      if (href !== location.href) history.replaceState(history.state, '', href);
+      // The tab shows the page's title too.
+      const title = page.contentDocument?.title;
+      if (title !== undefined) document.title = title;
+    };
+    const watch = () => {
+      follow();
+      const win = page.contentWindow;
+      if (!win) return;
+      try {
+        win.addEventListener('popstate', follow);
+        win.addEventListener('hashchange', follow);
+        // pushState and replaceState fire no event but this one, where the Navigation API exists.
+        if ('navigation' in win) win.navigation.addEventListener('currententrychange', follow);
+      } catch {
+        // Another origin.
+      }
+    };
+    page.addEventListener('load', watch);
+    // Loaded before this element ran: an error page is out of reach already.
+    if (page.contentDocument?.readyState === 'complete' && page.contentWindow?.location.href !== 'about:blank') watch();
+    else if (!page.contentDocument) follow();
+  }
 
   /** In the shell: registers the Service Worker that injects the probe into iframe pages. */
   private async registerShellWorker() {
@@ -415,6 +463,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       return;
     }
     if (this.hasAttribute('shell')) {
+      this.watchShellPage();
       this.registerShellWorker();
     } else {
       this.session ??= createPageSession();

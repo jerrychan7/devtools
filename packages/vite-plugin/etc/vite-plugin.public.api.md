@@ -18,6 +18,7 @@ export interface DevtoolsAnywhereOptions {
     open?: boolean;
     remote?: string;
     serviceWorker?: boolean;
+    shell?: boolean;
 }
 
 ```
