@@ -243,13 +243,12 @@ export function registerOverlay(ctx: Context) {
     const listening = new AbortController();
     const options = { capture: true, signal: listening.signal };
     window.addEventListener('pointermove', onMove, options);
-    window.addEventListener('mousemove', swallow, options);
-    window.addEventListener('mouseover', swallow, options);
-    window.addEventListener('mouseout', swallow, options);
-    window.addEventListener('pointerdown', swallow, options);
-    window.addEventListener('mousedown', swallow, options);
-    window.addEventListener('pointerup', swallow, options);
-    window.addEventListener('mouseup', swallow, options);
+    // Chrome consumes the whole input event, so the page sees nothing derived from it either:
+    // no enter/leave/over/out, nor dblclick, contextmenu or auxclick from the eaten presses.
+    for (const type of 'mousemove mouseover mouseout mouseenter mouseleave pointerover pointerout pointerenter pointerleave pointerdown mousedown pointerup mouseup dblclick contextmenu auxclick'.split(
+      ' '
+    ))
+      window.addEventListener(type, swallow, options);
     window.addEventListener('click', onClick, options);
     // The page gets no touch input either, like in Chrome's inspect mode.
     const touchOptions = { ...options, passive: false };

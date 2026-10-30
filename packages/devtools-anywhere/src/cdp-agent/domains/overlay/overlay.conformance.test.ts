@@ -126,8 +126,31 @@ test('inspect mode requests the hovered node and swallows touches', async () => 
       })
     );
   assert.deepEqual(await touch(), [true, true, true]);
+  // Nothing derived from the eaten input reaches the page either.
+  const derived = () =>
+    t.page.evaluate(() =>
+      [
+        'pointerover',
+        'pointerout',
+        'pointerenter',
+        'pointerleave',
+        'mouseenter',
+        'mouseleave',
+        'dblclick',
+        'contextmenu',
+        'auxclick',
+      ].map(type => {
+        const app = document.getElementById('app');
+        let seen = false;
+        app?.addEventListener(type, () => (seen = true), { once: true });
+        app?.dispatchEvent(new MouseEvent(type, { cancelable: true }));
+        return seen;
+      })
+    );
+  assert.deepEqual(await derived(), Array(9).fill(false));
   await t.ours.send('Overlay.setInspectMode', { mode: 'none' });
   assert.deepEqual(await touch(), [false, false, false]);
+  assert.deepEqual(await derived(), Array(9).fill(true));
 });
 
 test('highlightNode follows a rotated element and labels its layout size', async () => {
