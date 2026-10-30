@@ -601,7 +601,8 @@ test('a page with its own DevTools panel is inspected remotely too, each in its 
         )
       )
     );
-    // Shell mode is on by default, but not with remote debugging: the page stays at the top.
+    // Shell mode is on by default, but not with a frontend on another origin than the probe: the page
+    // stays at the top.
     assert.deepEqual(
       await both.evaluate(() => ({
         shell: !!document.querySelector('devtools-anywhere')?.hasAttribute('data-shell'),
@@ -623,5 +624,41 @@ test('a page with its own DevTools panel is inspected remotely too, each in its 
     client.socket.close();
   } finally {
     await both.close();
+  }
+});
+
+test('a page in shell mode connects from the frame it is shown in, not the top window', async () => {
+  const shell = await env.browser.newPage();
+  try {
+    await shell.goto(
+      `${env.baseUrl}/tests/e2e/pages/remote-page.html?local&panel&remote=${encodeURIComponent(origin() + '/')}`
+    );
+    await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
+    const listed = await waitFor(async () => (await targets()).find(t => t.url.includes('?local')));
+    const client = await Client.connect(listed.webSocketDebuggerUrl);
+    const { result } = await client.call('Runtime.evaluate', {
+      expression: '[document.title, window === top, frameElement && frameElement.id]',
+      returnByValue: true,
+    });
+    assert.deepEqual(result, {
+      result: { type: 'object', value: ['remote page', false, 'devtools-anywhere-page'] },
+    });
+    // The page in the shell has no panel of its own (its global element defers to the shell's); the
+    // shell has one.
+    const page = await waitFor(async () => {
+      const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
+      return (await frame?.evaluate(() => !!Reflect.get(window, 'DevtoolsAnywhere'))) ? frame : null;
+    });
+    await page.waitForFunction(() => document.querySelector('html > devtools-anywhere'));
+    assert.equal(
+      await page.evaluate(() => document.querySelectorAll('devtools-anywhere:not([data-shell-page])').length),
+      0
+    );
+    assert.equal(await shell.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 1);
+    // One connection, the page's.
+    assert.equal((await targets()).filter(t => t.url.includes('?local')).length, 1);
+    client.socket.close();
+  } finally {
+    await shell.close();
   }
 });

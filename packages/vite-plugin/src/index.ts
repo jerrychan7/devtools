@@ -44,7 +44,8 @@ export interface DevtoolsAnywhereOptions {
   /**
    * URL of a remote debugging server (`@devtools-anywhere/remote-server`), such as
    * `http://192.168.1.2:8080/`: pages connect to it, to be inspected from another machine. They
-   * still mount DevTools with the frontend, each debugging the page in a session of its own.
+   * still mount DevTools with the frontend, each debugging the page in a session of its own; in
+   * shell mode, the page in the shell connects.
    */
   remote?: string;
   /**

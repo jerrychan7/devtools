@@ -19,7 +19,8 @@
 // With `data-remote`, it connects the page to a remote debugging server
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
 // where DevTools on another machine inspects it. With `data-devtools-frontend-url` too, the page
-// also gets its own panel: the two are CDP sessions of their own over the one probe.
+// also gets its own panel (shell mode included): the two are CDP sessions of their own over the
+// one probe. In shell mode the page in the shell connects, not the shell's top window.
 // `data-id-in-query` connects to that URL itself, the target in the query, for a server whose
 // host routes WebSocket upgrades by exact path (remote-server's `idInQuery`).
 //
@@ -32,6 +33,7 @@ import {
   SHELL_MODE_KEY,
   SHELL_REFUSED_KEY,
   installProbe,
+  isShellPage,
   readShellConfig,
   setShellScriptUrl,
   storeShellConfig,
@@ -68,7 +70,7 @@ const shellByDefault = () => {
   }
 };
 // A shell entered before takes the page's flags as they are now; locked out of shell mode, it is left.
-const entered = bundle && frontend && remote === null && window === top ? readShellConfig() : null;
+const entered = bundle && frontend && window === top ? readShellConfig() : null;
 if (entered && locked && shellOff) {
   try {
     sessionStorage.removeItem(SHELL_KEY);
@@ -77,7 +79,7 @@ if (entered && locked && shellOff) {
   storeShellConfig(entered.frontend, entered.bundle, entered.sw ?? null, { ...entered, locked, noToggler });
 }
 // installProbe() reads the config next and writes the shell.
-if (bundle && frontend && remote === null && window === top && !readShellConfig() && shellByDefault()) {
+if (bundle && frontend && window === top && !readShellConfig() && shellByDefault()) {
   storeShellConfig(frontend, bundle, attribute('data-sw'), { open, locked, noToggler });
 }
 
@@ -131,32 +133,38 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
 ): api is Pick<DevtoolsAnywhereApi, K> =>
   typeof api === 'object' && api !== null && typeof Reflect.get(api, name) === 'function';
 
-// In the shell's top window the probe has replaced the document with the shell already.
+// In the shell's top window the probe has replaced the document with the shell already. The page in
+// the shell has the bundle from installProbe() already; its global element only names the frontend
+// for the elements the page places (the shell shows DevTools), and the remote connection is its own.
+const shellPage = isShellPage();
 if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
   probe.ownUrls.add(bundle);
 
+  const start = () => {
+    const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
+    if (remote !== null) {
+      if (!hasApi(api, 'connectRemote')) return;
+      api.connectRemote(new URL(remote || '.', script.src).href, {
+        idInQuery: attribute('data-id-in-query') !== null,
+      });
+    }
+    if (!frontend || !hasApi(api, 'createGlobalElement')) return;
+    // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
+    const element = api.createGlobalElement({
+      frontend: new URL(frontend, location.href).href,
+      open,
+      locked,
+      noToggler,
+      sw: attribute('data-sw'),
+    });
+    if (element) document.documentElement.appendChild(element);
+  };
   const mount = () => {
+    // The bundle installProbe() added has run by the load event, which its script delays.
+    if (shellPage) return start();
     const loader = document.createElement('script');
     loader.src = bundle;
-    loader.onload = () => {
-      const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
-      if (remote !== null) {
-        if (!hasApi(api, 'connectRemote')) return;
-        api.connectRemote(new URL(remote || '.', script.src).href, {
-          idInQuery: attribute('data-id-in-query') !== null,
-        });
-      }
-      if (!frontend || !hasApi(api, 'createGlobalElement')) return;
-      // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
-      const element = api.createGlobalElement({
-        frontend: new URL(frontend, location.href).href,
-        open,
-        locked,
-        noToggler,
-        sw: attribute('data-sw'),
-      });
-      if (element) document.documentElement.appendChild(element);
-    };
+    loader.onload = start;
     document.head.appendChild(loader);
   };
   // Load the larger bundle only after the page itself has loaded.

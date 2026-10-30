@@ -4,13 +4,15 @@
     <meta charset="utf-8" />
     <!-- The remote server's port is only known at run time: `?remote=<its URL>`, `&idInQuery` for
          its id-in-query form, and `&panel` for DevTools in the page too (left to its default
-         shell mode, which remote debugging keeps it out of). -->
+         shell mode, which a probe from the server's origin cannot enter: its frontend is on
+         another). `&local` loads the probe from this page's origin, with `data-remote` naming the
+         server, so `&panel` enters shell mode. -->
     <script>
       const query = new URLSearchParams(location.search);
       document.write(
-        '<script src="' +
-          query.get('remote') +
-          'probe.iife.js" data-remote' +
+        (query.has('local')
+          ? '<script src="/packages/devtools-anywhere/dist/probe.iife.js" data-remote="' + query.get('remote') + '"'
+          : '<script src="' + query.get('remote') + 'probe.iife.js" data-remote') +
           (query.has('idInQuery') ? ' data-id-in-query' : '') +
           (query.has('panel')
             ? ' data-devtools-frontend-url="' +
