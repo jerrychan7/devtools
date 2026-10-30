@@ -214,7 +214,6 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 :host([data-shell]) { display: flex; flex: none; }
 :host([data-shell]) .panel { position: static; flex: 1 1 auto; }
 :host([data-shell]) .panel[data-dock=undocked] { position: fixed; }
-:host([data-shell-page]) { display: none !important; }
 `;
 
 /**
@@ -318,7 +317,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (request.type === 'dock') {
       store(DOCK_KEY, request.side);
       this.dock = request.side;
-      if (!this.hasAttribute('data-shell-page')) this.update();
+      this.update();
     } else if (request.type === 'keep-open') {
       // The page decides, not the user.
       if (this.config.locked) return;
@@ -385,12 +384,18 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       this.frame.contentWindow?.postMessage({ [REQUEST_KEY]: notice }, this.frontendOrigin);
     }
     this.syncOpen();
-    if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
+    if (this.isConnected && !inactiveGlobals.has(this)) this.update();
   }
 
-  /** The frontend's URL: the attribute, else the probe's. */
+  /** The frontend's URL: the attribute, else the probe's, else in the shell's page iframe the shell's. */
   private get frontendUrl() {
-    return this.getAttribute('devtools-frontend-url') || this.config.frontend || probeFrontend;
+    return (
+      this.getAttribute('devtools-frontend-url') ||
+      this.config.frontend ||
+      probeFrontend ||
+      (isShellPage() && readShellConfig()?.frontend) ||
+      ''
+    );
   }
 
   /**
@@ -553,11 +558,6 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const stored = readStored(DOCK_KEY);
     if (isDockSide(stored)) this.dock = stored;
     window.addEventListener('message', this.onFrontendRequest);
-    if (isShellPage()) {
-      // Inside the shell's page iframe the shell shows DevTools; the IIFE connects the page.
-      this.setAttribute('data-shell-page', '');
-      return;
-    }
     if (isShellElement(this)) {
       // Only for its styles: what makes it the shell's is its document.
       this.setAttribute('data-shell', '');
@@ -588,7 +588,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       if (this.isConnected) this.loadFrontend();
       return;
     }
-    if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
+    if (this.isConnected && !inactiveGlobals.has(this)) this.update();
   }
 
   /**

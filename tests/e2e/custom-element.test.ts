@@ -229,3 +229,27 @@ test("::part(iframe) styles the iframe of an element the page placed, not that o
   });
   assert.deepEqual(borders, { placed: '3px', global: '0px' });
 });
+
+test("in the shell, a page the Service Worker gives the probe loads it with the shell's URL", async () => {
+  const shell = await env?.browser.newPage();
+  assert.ok(shell);
+  try {
+    await shell.goto(
+      `${env?.baseUrl}/tests/e2e/pages/remote-page.html?local&noRemote&panel&serviceWorker&placed-injected`
+    );
+    await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]')?.isConnected);
+    await shell.waitForFunction(() => !!navigator.serviceWorker.controller);
+    const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
+    assert.ok(frame);
+    await frame.evaluate(() => {
+      location.href = '/tests/e2e/pages/no-probe-placed.html';
+    });
+    const framed = await shell.waitForFrame(f => f.url().includes('no-probe-placed.html'));
+    await framed.waitForFunction(() => !!Reflect.get(window, 'DevtoolsAnywhere'));
+    const frontend = await frontendOf('#placed', framed);
+    await framed.evaluate(() => console.log('injected and placed'));
+    await waitLogged(frontend, 'injected and placed');
+  } finally {
+    await shell.close();
+  }
+});

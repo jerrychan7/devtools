@@ -647,14 +647,13 @@ async function evaluateIn(tag: string, expression: string): Promise<unknown[]> {
 }
 const evaluated = (value: unknown) => ({ result: { type: typeof value, value } });
 
-/** The page iframe of a shell, once the bundle has run in it and mounted its global element. */
+/** The page iframe of a shell, once the bundle has run in it. */
 async function shellPageFrame(shell: Page): Promise<Frame> {
   await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]')?.isConnected);
   const frame = await waitFor(async () => {
     const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
     return (await frame?.evaluate(() => !!Reflect.get(window, 'DevtoolsAnywhere'))) ? frame : null;
   });
-  await frame.waitForFunction(() => document.querySelector('html > devtools-anywhere'));
   return frame;
 }
 
@@ -663,12 +662,8 @@ test('a page in shell mode connects from the frame it is shown in, not the top w
   try {
     await shell.goto(localPage('panel&shell-frame'));
     const page = await shellPageFrame(shell);
-    // The page in the shell has no panel of its own (its global element defers to the shell's); the
-    // shell has one.
-    assert.equal(
-      await page.evaluate(() => document.querySelectorAll('devtools-anywhere:not([data-shell-page])').length),
-      0
-    );
+    // The page in the shell has no element of its own (the shell shows DevTools); the shell has one.
+    assert.equal(await page.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 0);
     assert.equal(await shell.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 1);
     await waitFor(async () => (await targets()).some(t => t.url.includes('shell-frame')));
     // One connection, the page's: from the iframe, not the top window.

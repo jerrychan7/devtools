@@ -152,8 +152,8 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
   typeof api === 'object' && api !== null && typeof Reflect.get(api, name) === 'function';
 
 // In the shell's top window the probe has replaced the document with the shell already. The page in
-// the shell has the bundle from installProbe() already; its global element only names the frontend
-// for the elements the page places (the shell shows DevTools), and the remote connection is its own.
+// the shell has the bundle from installProbe() already and only connects to the remote server: the shell
+// shows DevTools, and the elements the page places take the shell's frontend (see element.ts).
 if (script && bundle && (frontend || remoteUrl) && !(readShellConfig() && window === top)) {
   probe.ownUrls.add(bundle);
 
@@ -163,7 +163,7 @@ if (script && bundle && (frontend || remoteUrl) && !(readShellConfig() && window
       if (!hasApi(api, 'connectRemote')) return;
       api.connectRemote(remoteUrl, { idInQuery });
     }
-    if (!frontend || !hasApi(api, 'createGlobalElement')) return;
+    if (shellPage || !frontend || !hasApi(api, 'createGlobalElement')) return;
     // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.
     const element = api.createGlobalElement({
       frontend: new URL(frontend, location.href).href,
