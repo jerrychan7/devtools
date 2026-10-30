@@ -55,7 +55,7 @@ index 8027b30891..a0804c44c6 100644
      }
      if (event.metaKey || event.ctrlKey) {
 diff --git a/front_end/panels/sources/SourcesPanel.ts b/front_end/panels/sources/SourcesPanel.ts
-index 68191fd692..dccc0a0ff9 100644
+index 68191fd692..861d6f3b08 100644
 --- a/front_end/panels/sources/SourcesPanel.ts
 +++ b/front_end/panels/sources/SourcesPanel.ts
 @@ -158,6 +158,15 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -74,7 +74,16 @@ index 68191fd692..dccc0a0ff9 100644
  export class SourcesPanel extends UI.Panel.Panel implements
      UI.ContextMenu.Provider<Workspace.UISourceCode.UISourceCode|Workspace.UISourceCode.UILocation|
                              SDK.RemoteObject.RemoteObject|SDK.NetworkRequest.NetworkRequest|UISourceCodeFrame>,
-@@ -1146,14 +1155,22 @@ export class SourcesPanel extends UI.Panel.Panel implements
+@@ -338,7 +347,7 @@ export class SourcesPanel extends UI.Panel.Panel implements
+   }
+ 
+   private showThreadsIfNeeded(): void {
+-    if (ThreadsSidebarPane.shouldBeShown() && !this.threadsSidebarPane) {
++    if (ThreadsSidebarPane.shouldBeShown() && !this.threadsSidebarPane && canPause()) {
+       this.threadsSidebarPane = UI.ViewManager.ViewManager.instance().view('sources.threads');
+       if (this.sidebarPaneStack && this.threadsSidebarPane) {
+         this.sidebarPaneStack.appendView(
+@@ -1146,14 +1155,23 @@ export class SourcesPanel extends UI.Panel.Panel implements
  
      // Create vertical box with stack.
      const vbox = new UI.Widget.VBox();
@@ -92,6 +101,7 @@ index 68191fd692..dccc0a0ff9 100644
      this.sidebarPaneStack.widget().show(vbox.element);
 +    if (!canPause()) {
 +      void this.sidebarPaneStack.showView(this.watchSidebarPane);
++      this.extensionSidebarPanesContainer = this.sidebarPaneStack;
 +      this.sidebarPaneView = vbox;
 +      this.splitWidget.setSidebarWidget(this.sidebarPaneView);
 +      return;
