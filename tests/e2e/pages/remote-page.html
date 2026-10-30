@@ -6,7 +6,7 @@
          its id-in-query form, and `&panel` for DevTools in the page too (left to its default
          shell mode, which a probe from the server's origin cannot enter: its frontend is on
          another). `&local` loads the probe from this page's origin, with `data-remote` naming the
-         server, so `&panel` enters shell mode. -->
+         server, so `&panel` enters shell mode; `&shellOff` keeps it out of shell mode, locked. -->
     <script>
       const query = new URLSearchParams(location.search);
       document.write(
@@ -19,6 +19,7 @@
               location.origin +
               '/tests/e2e/frontends/fake-frontend.html" data-open-immediately'
             : '') +
+          (query.has('shellOff') ? ' data-shell-mode-locked data-default-shell-mode="off"' : '') +
           '><\/script>'
       );
     </script>

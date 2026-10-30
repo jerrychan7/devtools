@@ -627,38 +627,95 @@ test('a page with its own DevTools panel is inspected remotely too, each in its 
   }
 });
 
+/** The remote-page.html URL with the probe from this origin, `query` added (a tag of the test's own). */
+const localPage = (query: string) =>
+  `${env.baseUrl}/tests/e2e/pages/remote-page.html?local&${query}&remote=${encodeURIComponent(origin() + '/')}`;
+
+/** What `expression` evaluates to in each target whose URL has `tag`. */
+async function evaluateIn(tag: string, expression: string): Promise<unknown[]> {
+  const listed = (await targets()).filter(t => t.url.includes(tag));
+  return Promise.all(
+    listed.map(async t => {
+      const client = await Client.connect(t.webSocketDebuggerUrl);
+      try {
+        return (await client.call('Runtime.evaluate', { expression, returnByValue: true })).result;
+      } finally {
+        client.socket.close();
+      }
+    })
+  );
+}
+const evaluated = (value: unknown) => ({ result: { type: typeof value, value } });
+
+/** The page iframe of a shell, once the bundle has run in it and mounted its global element. */
+async function shellPageFrame(shell: Page): Promise<Frame> {
+  await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]')?.isConnected);
+  const frame = await waitFor(async () => {
+    const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
+    return (await frame?.evaluate(() => !!Reflect.get(window, 'DevtoolsAnywhere'))) ? frame : null;
+  });
+  await frame.waitForFunction(() => document.querySelector('html > devtools-anywhere'));
+  return frame;
+}
+
 test('a page in shell mode connects from the frame it is shown in, not the top window', async () => {
   const shell = await env.browser.newPage();
   try {
-    await shell.goto(
-      `${env.baseUrl}/tests/e2e/pages/remote-page.html?local&panel&remote=${encodeURIComponent(origin() + '/')}`
-    );
-    await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
-    const listed = await waitFor(async () => (await targets()).find(t => t.url.includes('?local')));
-    const client = await Client.connect(listed.webSocketDebuggerUrl);
-    const { result } = await client.call('Runtime.evaluate', {
-      expression: '[document.title, window === top, frameElement && frameElement.id]',
-      returnByValue: true,
-    });
-    assert.deepEqual(result, {
-      result: { type: 'object', value: ['remote page', false, 'devtools-anywhere-page'] },
-    });
+    await shell.goto(localPage('panel&shell-frame'));
+    const page = await shellPageFrame(shell);
     // The page in the shell has no panel of its own (its global element defers to the shell's); the
     // shell has one.
-    const page = await waitFor(async () => {
-      const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
-      return (await frame?.evaluate(() => !!Reflect.get(window, 'DevtoolsAnywhere'))) ? frame : null;
-    });
-    await page.waitForFunction(() => document.querySelector('html > devtools-anywhere'));
     assert.equal(
       await page.evaluate(() => document.querySelectorAll('devtools-anywhere:not([data-shell-page])').length),
       0
     );
     assert.equal(await shell.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 1);
-    // One connection, the page's.
-    assert.equal((await targets()).filter(t => t.url.includes('?local')).length, 1);
-    client.socket.close();
+    await waitFor(async () => (await targets()).some(t => t.url.includes('shell-frame')));
+    // One connection, the page's: from the iframe, not the top window.
+    assert.deepEqual(
+      await evaluateIn('shell-frame', '[document.title, window === top, frameElement && frameElement.id]'),
+      [evaluated(['remote page', false, 'devtools-anywhere-page'])]
+    );
   } finally {
     await shell.close();
+  }
+});
+
+test('a page reloaded in the shell is still one target, the new page', async () => {
+  const shell = await env.browser.newPage();
+  try {
+    await shell.goto(localPage('panel&shell-reload'));
+    const page = await shellPageFrame(shell);
+    await waitFor(async () => (await targets()).some(t => t.url.includes('shell-reload')));
+    await page.evaluate(() => {
+      location.href += '&again';
+    });
+    await shellPageFrame(shell);
+    await waitFor(async () => {
+      const listed = (await targets()).filter(t => t.url.includes('shell-reload'));
+      return listed.length === 1 && listed[0]?.url.includes('&again');
+    });
+    assert.deepEqual(
+      await evaluateIn(
+        'shell-reload',
+        '[window === top, location.search.includes("again"), !!document.getElementById("remote-marker")]'
+      ),
+      [evaluated([false, true, true])]
+    );
+  } finally {
+    await shell.close();
+  }
+});
+
+test('a page locked out of shell mode connects from its top window', async () => {
+  const other = await env.browser.newPage();
+  try {
+    await other.goto(localPage('panel&shellOff&shell-off'));
+    await other.waitForFunction(() => document.querySelector('html > devtools-anywhere')?.isConnected);
+    assert.equal(await other.evaluate(() => !!document.getElementById('devtools-anywhere-page')), false);
+    await waitFor(async () => (await targets()).some(t => t.url.includes('shell-off')));
+    assert.deepEqual(await evaluateIn('shell-off', 'window === top'), [evaluated(true)]);
+  } finally {
+    await other.close();
   }
 });
