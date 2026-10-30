@@ -4,21 +4,6 @@
 
 ```ts
 
-// @internal
-export class CdpSession {
-    call(method: string, params?: object): Promise<unknown>;
-    dispatch(message: string | {
-        id: number | string;
-        method: string;
-        params?: object;
-    }): Promise<void>;
-    emit(method: string, params: object): void;
-    onMessage(listener: (message: string) => void): () => void;
-    onReset(fn: () => void): void;
-    register(domain: string, handlers: Record<string, Handler>): void;
-    reset(): void;
-}
-
 // @public
 export type DevtoolsAnywhereAttributes = {
     'devtools-frontend-url'?: string;
@@ -44,9 +29,6 @@ export type DevtoolsAnywherePart = 'toggler' | 'iframe';
 export interface DevtoolsAnywhereTagNameMap {
     'devtools-anywhere': DevtoolsAnywhereElement;
 }
-
-// @internal
-export type Handler = (params: never) => unknown;
 
 // @public
 export type ProbeScriptAttributes = {
