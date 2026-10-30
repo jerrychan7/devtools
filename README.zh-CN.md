@@ -44,6 +44,7 @@
   - 投屏上的输入以 DOM 事件重放，这些事件不是可信事件（`isTrusted` 为 false）：聚焦、点击、滚动和文本编辑都会执行，但检查 `isTrusted` 的页面会忽略它们。
   - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
   - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。
+- 页面让某个元素全屏（Fullscreen API）期间，devtools 和它的 F12 按钮都无法使用：浏览器不让全屏元素以外的任何内容接收输入，shell 模式下也一样。退出全屏（Esc）后即可恢复。
 - 前端要部署在和页面不同的源上。如果同源，devtools 自己的设置会写进页面的 `localStorage`，并出现在 Application 面板里。
 - 被调试页面一侧只用标准 Web API，可以运行在任何现代浏览器中。devtools 界面由 Google 针对 Chrome 开发和测试，Firefox 和 Safari 尚未验证；新版前端可能需要额外的兼容补丁。
 

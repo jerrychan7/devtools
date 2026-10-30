@@ -44,6 +44,7 @@ This project depends on neither Chii nor chobitsu. Their source is read as a ref
   - Input from the screencast is replayed as DOM events, which are not trusted (`isTrusted` is false): focus, clicks, scrolling and text editing are carried out, but pages that check `isTrusted` ignore them.
   - Cross-origin style sheets are read through a fetched copy, which needs CORS headers; their rules are read-only.
   - Forced pseudo-classes (`:hover`, `:focus`, … from the Styles pane) are emulated with companion style sheets that keep the cascade order; sheets from `@import` and `adoptedStyleSheets` are not covered.
+- While the page has an element fullscreen (the Fullscreen API), DevTools and its F12 button cannot be used: the browser lets nothing outside the fullscreen element take input, in shell mode too. Leave fullscreen (Esc) to use them again.
 - Host the frontend on a different origin from the page. On the same origin, DevTools' own settings share the page's `localStorage` and show up in the Application panel.
 - The page side uses only standard web APIs and works in any modern browser. The DevTools UI is developed and tested by Google for Chrome; Firefox and Safari are not verified yet, and newer frontend versions may need extra compatibility patches.
 
