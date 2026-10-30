@@ -89,6 +89,14 @@ test('docked to a side, the panel keeps its full height', async () => {
 
 test('the toggler is above the page too while DevTools is hidden', async () => {
   await frontendRequest(page, { type: 'close' });
+  // The request is a message the element handles later: wait for the swap into the top layer.
+  await page.waitForFunction(() => {
+    const root = document.querySelector('devtools-anywhere')?.shadowRoot;
+    return (
+      !!root?.querySelector('.toggler')?.matches(':popover-open') &&
+      !root.querySelector('.panel')?.matches(':popover-open')
+    );
+  });
   const toggler = await probe('.toggler');
   assert.equal(toggler.inTopLayer, true);
   assert.equal(toggler.hitsElement, true);

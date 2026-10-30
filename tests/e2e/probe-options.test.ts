@@ -71,15 +71,26 @@ async function openDevtools() {
   );
 }
 
-/** Posts a request to the element from its frontend, as DevTools' lock button does. */
+/**
+ * Posts a request to the element from its frontend, as DevTools' lock button does, and waits for
+ * the element to have handled it: a second message, posted after it, has reached the page.
+ */
 const keepOpen = async (keep: boolean) => {
   // The global element's frontend, not that of the page's own element.
   const iframe = await page.$('devtools-anywhere[shell], html > devtools-anywhere');
   const frontend = await (await iframe?.$('pierce/iframe'))?.contentFrame();
   assert.ok(frontend, 'the frontend frame');
-  await frontend.evaluate(keep => parent.postMessage({ devtoolsAnywhere: { type: 'keep-open', keep } }, '*'), keep);
-  // Time for a reload into or out of the shell to start, if it were to.
-  await new Promise(r => setTimeout(r, 500));
+  // Wrapped, so that the handle comes back before the message does.
+  const handled = await page.evaluateHandle(() => ({
+    done: new Promise<void>(resolve =>
+      addEventListener('message', e => e.data === 'probe-options:handled' && resolve())
+    ),
+  }));
+  await frontend.evaluate(keep => {
+    parent.postMessage({ devtoolsAnywhere: { type: 'keep-open', keep } }, '*');
+    parent.postMessage('probe-options:handled', '*');
+  }, keep);
+  await handled.evaluate(h => h.done);
 };
 
 test("locked off, the user's stored choice and DevTools' requests are ignored", async () => {
@@ -93,13 +104,9 @@ test("locked off, the user's stored choice and DevTools' requests are ignored", 
     // Kept, though ignored.
     assert.equal(state.stored, 'on');
     assert.match(state.frontend, /fake-frontend\.html\?shellModeLocked=?#/);
-    await page.evaluate(() => {
-      window.__pageScriptRan = true;
-    });
-    // Heeded, this would store 'off' and reload.
+    // Heeded, this would store 'off' (the page is not in the shell, there is nothing to leave).
     await keepOpen(false);
     assert.equal((await globalState()).stored, 'on');
-    assert.equal(await page.evaluate(() => window.__pageScriptRan), true, 'no reload');
   } finally {
     await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
   }
@@ -129,13 +136,9 @@ test('locked on, the shell is entered whatever the user chose, and stays locked,
     assert.equal(state.locked, true);
     assert.equal(state.stored, 'off');
     assert.match(state.frontend, /\?shellModeLocked=?#/);
-    // Heeded, this would store 'on' and reload.
-    await page.evaluate(() => {
-      window.__pageScriptRan = true;
-    });
+    // Heeded, this would store 'on' before anything else: kept 'off', the request was ignored.
     await keepOpen(true);
     assert.equal((await globalState()).stored, 'off');
-    assert.equal(await page.evaluate(() => window.__pageScriptRan), true, 'no reload');
   } finally {
     await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
   }

@@ -126,8 +126,14 @@ test("its DevTools' requests to dock or keep the page in shell mode are ignored"
     parent.postMessage({ devtoolsAnywhere: { type: 'dock', side: 'right' } }, '*');
     parent.postMessage({ devtoolsAnywhere: { type: 'keep-open', keep: true } }, '*');
     parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*');
+    // Taken, after the three above: once its colors show, they have been handled.
+    const theme = { type: 'theme', toolbar: 'rgb(1, 2, 3)', divider: 'red', icon: 'red' };
+    parent.postMessage({ devtoolsAnywhere: theme }, '*');
   });
-  await new Promise(r => setTimeout(r, 500));
+  await page.waitForFunction(() => {
+    const panel = document.getElementById('placed')?.shadowRoot?.querySelector<HTMLElement>('.panel');
+    return panel?.style.getPropertyValue('--bar-background') === 'rgb(1, 2, 3)';
+  });
   const state = await page.evaluate(() => ({
     ran: window.__pageScriptRan,
     shell: sessionStorage.getItem('devtools-anywhere:shell'),
