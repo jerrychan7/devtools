@@ -185,7 +185,7 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`，并把对应的 Chrome 版本写进各包的 `chrome` 字段。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`；这时 `chrome` 字段要手动填）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
 
 ## 3. 开发完成
 
@@ -226,6 +226,8 @@ gh pr create --fill
 
 各个包还没有发布过，下面是预定的流程。所有包使用同一个版本号，一起发布。发布需要 [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) 组织的成员权限。
 
+版本号按 semver 表示库本身的变化，从 `0.1.0` 开始：修 bug 升 patch；前端升级到新的 Chrome 里程碑升 minor（界面会变）；1.0 之前 minor 也可以有破坏性变更。承诺的范围是 README 写明的用法（`@public`）。Chrome 版本不放进版本号：写成 `+chrome156` 会被 npm 丢掉，写成 `-chrome156` 会被当成预发布版。它记在每个发布包 `package.json` 的 `chrome` 字段里（由 `update` 写入），每次发布的说明也在开头写明（「基于 Chrome 156」）。每次发布还会打上 dist-tag `chrome-<里程碑>`，`npm i devtools-anywhere@chrome-156` 就能装到基于该版 Chrome 的最后一个版本。
+
 1. 构建钉住版本的前端（它的 `dist/` 不进 git，`pnpm build` 也不会构建它）：
    ```bash
    pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
@@ -237,4 +239,8 @@ gh pr create --fill
    pnpm -r publish --access public --registry https://registry.npmjs.org
    ```
    如果默认 registry 是镜像，必须显式传 `--registry`。
-5. 打 tag 并推送：`git tag vx.y.z && git push origin main vx.y.z`。
+5. 给每个发布的包打上它的 Chrome 里程碑：
+   ```bash
+   npm dist-tag add <包名>@x.y.z chrome-<里程碑> --registry https://registry.npmjs.org
+   ```
+6. 打 tag 并推送：`git tag vx.y.z && git push origin main vx.y.z`。

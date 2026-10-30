@@ -48,9 +48,9 @@ if (!hasCheckout()) {
 // current stable release ships, on its milestone's branch (`chromium/<branch>`, the third part of
 // Chrome's version), not upstream's main. Chromium Dash knows which commit that is; its JSON
 // endpoint has no documentation nor promise, so its answer is checked. Without it, write the
-// commit into REVISION by hand and build.
+// commit into REVISION by hand and build, and Chrome's version into the packages' `chrome` field.
 const STABLE_RELEASE = 'https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1';
-async function stableRevision(): Promise<string> {
+async function stableRelease(): Promise<{ devtools: string; chrome: string }> {
   const failed = `No devtools commit in ${STABLE_RELEASE}: write the stable one into REVISION by hand.`;
   let releases: unknown;
   try {
@@ -62,14 +62,32 @@ async function stableRevision(): Promise<string> {
   const release: unknown = Array.isArray(releases) ? releases[0] : undefined;
   const hashes: unknown = release instanceof Object ? Reflect.get(release, 'hashes') : undefined;
   const devtools: unknown = hashes instanceof Object ? Reflect.get(hashes, 'devtools') : undefined;
+  const chrome: unknown = release instanceof Object ? Reflect.get(release, 'version') : undefined;
   if (typeof devtools !== 'string' || !/^[0-9a-f]{40}$/.test(devtools)) throw new Error(failed);
-  console.log(
-    `Stable Chrome ${String(release instanceof Object && Reflect.get(release, 'version'))}: devtools ${devtools}`
-  );
-  return devtools;
+  if (typeof chrome !== 'string' || !/^\d+(\.\d+){3}$/.test(chrome)) throw new Error(failed);
+  console.log(`Stable Chrome ${chrome}: devtools ${devtools}`);
+  return { devtools, chrome };
+}
+
+/**
+ * Records the Chrome version the frontend comes from in every published package's package.json, as
+ * `chrome` (last, where the formatter keeps it): npm versions say how the library changed, this
+ * which Chrome it shows.
+ */
+function pinChromeVersion(chrome: string) {
+  const packages = path.join(pkg, '..');
+  for (const dir of fs.readdirSync(packages)) {
+    const file = path.join(packages, dir, 'package.json');
+    if (!fs.existsSync(file)) continue;
+    const json: Record<string, unknown> = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (json['private']) continue;
+    delete json['chrome'];
+    fs.writeFileSync(file, JSON.stringify({ ...json, chrome }, null, 2) + '\n');
+  }
 }
 
 let revision = fs.readFileSync(revisionFile, 'utf8').trim();
+let chrome: string | null = null;
 if (noSync) {
   // What is built is the checkout as it stands, e.g. the stable commit left by a failed --latest.
   const head = read('git', ['rev-parse', 'HEAD']);
@@ -77,7 +95,7 @@ if (noSync) {
     console.warn(`The checkout is at ${head}, not REVISION ${revision}: add --latest to pin it.`);
   revision = head;
 } else {
-  if (args.has('--latest')) revision = await stableRevision();
+  if (args.has('--latest')) ({ devtools: revision, chrome } = await stableRelease());
   // The commit is on a branch of its own, not on main: it is fetched by its hash.
   run('git', ['fetch', 'origin', revision]);
   run('git', ['checkout', '--force', '--detach', revision]);
@@ -217,7 +235,11 @@ fs.writeFileSync(path.join(release, 'REVISION'), revision + '\n');
 // dist/ rather than in it: it is not part of the package.
 const thirdParty = await bundle(release, dist);
 fs.writeFileSync(path.join(pkg, 'dist-third-party.ignore.json'), JSON.stringify(thirdParty, null, 2) + '\n');
-if (args.has('--latest')) fs.writeFileSync(revisionFile, revision + '\n');
+if (args.has('--latest')) {
+  fs.writeFileSync(revisionFile, revision + '\n');
+  if (chrome) pinChromeVersion(chrome);
+  else console.warn("Pinned the checkout's HEAD: set the packages' `chrome` field to its Chrome version by hand.");
+}
 console.log(
   `Built devtools-frontend ${revision} → ${path.relative(repo, dist)} (${kept.length} of ${files.length} files, ` +
     `bundled into ${fs.readdirSync(path.join(dist, 'bundle')).length})`

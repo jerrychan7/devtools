@@ -10,5 +10,6 @@
   "type": "module",
   "exports": {
     "./*": "./dist/*"
-  }
+  },
+  "chrome": "156.0.8078.80"
 }

@@ -185,7 +185,7 @@ The frontend follows stable Chrome, which is what most users have: once per mile
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-It builds the devtools-frontend commit the current stable Chrome ships (on its milestone's branch, `chromium/<branch>`, not on upstream's `main`; Chromium Dash's `fetch_releases` says which) and pins it in `REVISION` on success. Should Chromium Dash not answer, write that commit into `REVISION` by hand and run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
+It builds the devtools-frontend commit the current stable Chrome ships (on its milestone's branch, `chromium/<branch>`, not on upstream's `main`; Chromium Dash's `fetch_releases` says which) and pins it in `REVISION`, and its Chrome version in the packages' `chrome` field, on success. Should Chromium Dash not answer, write that commit into `REVISION` by hand and run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it; set `chrome` by hand then). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
 
 ## 3. Finishing a change
 
@@ -226,6 +226,8 @@ Describe in the PR what was verified, in particular what was checked by hand in 
 
 The packages have not been published yet; this is the intended procedure. All packages share one version number and are released together. Publishing needs a member of the [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) organization.
 
+Versions are semver for the library itself, starting at `0.1.0`: a fix is a patch, and moving the frontend to a new Chrome milestone is a minor (its UI changes); before 1.0 a minor may also break. What is promised is what the README documents (`@public`). The Chrome version is not in the version number, where npm would drop it (`+chrome156`) or take it for a prerelease (`-chrome156`): each published package's `package.json` has it as `chrome`, which `update` writes, and each release says it first (`Based on Chrome 156`). Each release also gets the dist-tag `chrome-<milestone>`, so that `npm i devtools-anywhere@chrome-156` installs the last release on that Chrome.
+
 1. Build the frontend at the pinned revision (its `dist/` is not committed, and `pnpm build` does not build it):
    ```bash
    pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
@@ -237,4 +239,8 @@ The packages have not been published yet; this is the intended procedure. All pa
    pnpm -r publish --access public --registry https://registry.npmjs.org
    ```
    Pass `--registry` explicitly if your default registry is a mirror.
-5. Tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
+5. Tag the packages with their Chrome milestone, for each published package:
+   ```bash
+   npm dist-tag add <package>@x.y.z chrome-<milestone> --registry https://registry.npmjs.org
+   ```
+6. Tag and push: `git tag vx.y.z && git push origin main vx.y.z`.

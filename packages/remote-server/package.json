@@ -43,5 +43,6 @@
     "@devtools-anywhere/devtools-frontend-locales": {
       "optional": true
     }
-  }
+  },
+  "chrome": "156.0.8078.80"
 }

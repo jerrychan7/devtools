@@ -34,5 +34,6 @@
     "devtools-protocol": "^0.0.1721318",
     "esbuild": "^0.25.0",
     "typescript": "^7.0.2"
-  }
+  },
+  "chrome": "156.0.8078.80"
 }
