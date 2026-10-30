@@ -141,8 +141,9 @@ const STYLE = `
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647;
   display: none; flex-direction: column; box-sizing: border-box;
   background: #fff; border-top: 1px solid var(--bar-border, #cacdd1);
-  /* Clear of the home indicator and, docked to a side, of the notch. */
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* Clear of the screen's cutouts and rounded corners (a page with viewport-fit=cover has them):
+     the home indicator below, and the notch on the sides in landscape. */
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 .panel[data-open] { display: flex; }
 /* The bar takes the DevTools toolbar's colors, which the frontend reports (theme request). */
@@ -171,14 +172,15 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 .dragging iframe { pointer-events: none; }
 
 /* Docked to a side: full height, with the bar as a vertical strip on the inner edge. */
-.panel[data-dock=right], .panel[data-dock=left] { top: 0; border-top: 0; }
+.panel[data-dock=right], .panel[data-dock=left] {
+  top: 0; border-top: 0; padding-top: env(safe-area-inset-top, 0px);
+}
+/* No inset on the inner edge, which is in the middle of the screen. */
 .panel[data-dock=right] {
-  left: auto; flex-direction: row; border-left: 1px solid var(--bar-border, #cacdd1);
-  padding-right: env(safe-area-inset-right, 0px);
+  left: auto; flex-direction: row; border-left: 1px solid var(--bar-border, #cacdd1); padding-left: 0;
 }
 .panel[data-dock=left] {
-  right: auto; flex-direction: row-reverse; border-right: 1px solid var(--bar-border, #cacdd1);
-  padding-left: env(safe-area-inset-left, 0px);
+  right: auto; flex-direction: row-reverse; border-right: 1px solid var(--bar-border, #cacdd1); padding-right: 0;
 }
 [data-dock=right] .bar, [data-dock=left] .bar { width: 16px; height: auto; cursor: col-resize; }
 [data-dock=right] .bar::before, [data-dock=left] .bar::before {
@@ -189,7 +191,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 /* Undocked: a window over the page, moved by its bar and resized from its corner. */
 .panel[data-dock=undocked] {
   right: auto; bottom: auto; border: 1px solid var(--bar-border, #cacdd1); border-radius: 6px; overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both; padding-bottom: 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both; padding: 0;
 }
 [data-dock=undocked] .bar { cursor: move; }
 
