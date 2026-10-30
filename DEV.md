@@ -12,7 +12,7 @@ How to set up a development environment, work on the packages with live rebuilds
 |---|---|---|
 | Node.js | 22.18+ | The build scripts are TypeScript run directly by Node (type stripping). `.nvmrc` pins the version: `nvm use` |
 | pnpm | as in `packageManager` | `corepack enable` installs the right version |
-| Google Chrome | recent | Used by the tests (Puppeteer). Set `CHROME_PATH` if it is not at the default macOS location |
+| Google Chrome | recent | Used by the tests (Puppeteer). The tests look for it at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; elsewhere (Linux, Windows, another location), set `CHROME_PATH` to its executable |
 | Git | any | |
 
 `engine-strict` is on: `pnpm install` refuses to run on an older Node.
@@ -37,6 +37,7 @@ The frontend is built from the official [devtools-frontend](https://github.com/C
 ```bash
 # depot_tools: Chromium's fetch/gclient/gn/autoninja
 git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools.ignore
+# On the PATH for fetch and gclient below; the build finds it on its own
 export PATH="$PWD/depot_tools.ignore:$PATH"
 
 # Source checkout (directories ending in .ignore are git-ignored)
@@ -49,7 +50,7 @@ cd ..
 pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
 ```
 
-The result goes to `packages/devtools-frontend/dist/` (English and Chinese) and `packages/devtools-frontend-locales/dist/` (the other languages). Other locations can be used with `DEVTOOLS_FRONTEND_SRC` (the `devtools-frontend` checkout) and `DEPOT_TOOLS`.
+The result goes to `packages/devtools-frontend/dist/` (English and Chinese) and `packages/devtools-frontend-locales/dist/` (the other languages). Other locations can be used with `DEVTOOLS_FRONTEND_SRC` (the `devtools-frontend` directory `fetch` creates, by default `devtools-frontend.ignore/devtools-frontend`) and `DEPOT_TOOLS`.
 
 If `gclient sync` fails with a lock error on first use (`Error locking …/gsutil`), run it again.
 
@@ -75,6 +76,7 @@ For remote debugging, also run `pnpm remote` (a remote server at http://localhos
 ```
 packages/
   devtools-frontend/  pinned devtools-frontend version, patches and build scripts
+  devtools-frontend-locales/  the frontend's languages other than English and Chinese, built with it
   devtools-anywhere/  umbrella package: <devtools-anywhere>, iframe, connection layer, shell mode
     src/cdp-agent/    in-page CDP agent; imports nothing outside this directory (tsconfig.cdp-agent.json),
                       the rest of the package uses it through index.ts and probe/
@@ -163,7 +165,7 @@ A test sits next to what it tests, as `<name>.test.ts`; only tests that span pac
 
 ```bash
 cd packages/devtools-frontend
-node scripts/build.ts --no-sync     # rebuild after changing src/ (incremental, keeps the checkout as is)
+node scripts/build.ts --no-sync     # rebuild after changing src/ (incremental, keeps the checkout as is: builds its HEAD, whatever REVISION says)
 node scripts/build.ts --no-sync --reset   # also discard edits in the checkout that no patch holds
 node scripts/build.ts --no-sync --copy-only   # only redo the copy to dist/ (after changing the copy logic)
 ```
@@ -196,9 +198,9 @@ pnpm typecheck
 pnpm test        # with the frontend built, so the real-frontend tests run
 ```
 
-The pre-commit hook (husky + lint-staged) runs on the staged files only: it formats them with oxfmt and adds the result to the commit, then lints them with oxlint and stops the commit on any error; it also runs `scripts/check-contracts.ts` (see "Where contracts live"), and two size guards on what the commit adds or changes: `scripts/check-file-size.ts` warns on a source file (`.ts`, `.js` and their variants) past 1100 lines and rejects the commit past 1500; `scripts/check-dir-size.ts` warns on a directory the commit adds files to that holds more than 20 files directly and rejects it past 30. After a warning, make the next commit the one that splits the file or sorts the directory into subdirectories by concern. Both skip the upstream files of the devtools-frontend checkout (`packages/devtools-frontend/src`, `patches`) and `experiments/`. `pnpm lint` runs both on every tracked file (`--all`), so a commit that skipped the hook is caught there. `git commit --no-verify` skips the hook once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
+The pre-commit hook (husky + lint-staged) runs on the staged files only: it formats them with oxfmt and adds the result to the commit, then lints them with oxlint and stops the commit on any error; it also runs `scripts/check-contracts.ts` (see "Where contracts live"), and two size guards on what the commit adds or changes: `scripts/check-file-size.ts` warns on a source file (`.ts`, `.js` and their variants) past 1100 lines and rejects the commit past 1500; `scripts/check-dir-size.ts` warns on a directory the commit adds files to that holds more than 20 files directly and rejects it past 30. After a warning, make the next commit the one that splits the file or sorts the directory into subdirectories by concern. Both skip what is built inside the devtools-frontend checkout and follows Chromium's style (`packages/devtools-frontend/src`, `patches`) and `experiments/`. `pnpm lint` runs both on every tracked file (`--all`), so a commit that skipped the hook is caught there. `git commit --no-verify` skips the hook once. Lint rules: oxlint's correctness rules, no `any`, no non-null assertions (`!`). Style: 2-space indentation, semicolons, single quotes, 120 columns. `packages/devtools-frontend/src` follows Chromium's style instead and is not linted or formatted.
 
-The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`; it copies `declare global` blocks into the rolled-up file, which API Extractor leaves out). `devtools-anywhere` has no runtime entry: its `dist/index.d.ts` is types only, and its scripts are built as IIFEs. Commit a changed report with the change that caused it: it is how a change to the public API shows in review. In CI (`CI=true`) a report that no longer matches fails the build. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
+The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`; it copies `declare global` blocks into the rolled-up file, which API Extractor leaves out). `devtools-anywhere` has no runtime entry: its `dist/index.d.ts` is types only, and its scripts are built as IIFEs. Commit a changed report with the change that caused it: it is how a change to the public API shows in review. With `CI=true` (for a CI, which the repository does not have yet) a report that no longer matches fails the build. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
 
 Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change.
 
