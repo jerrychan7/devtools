@@ -164,8 +164,54 @@ test('the shell shows its own F12 button while the page iframe has a page withou
 test('with data-no-toggler, neither the shell nor the page iframe has an F12 button', async () => {
   await open('locked-on.html');
   const frame = await pageFrame('locked-on.html');
-  // Its togglers work: the bundle has run in the page, which had its chance to mount the button.
-  await frame.waitForFunction(() => document.getElementById('toggle')?.getAttribute('aria-expanded'));
+  // Its togglers work: the bundle has run in the page, which mounts the button then, or once the
+  // page is parsed (DOMContentLoaded) if it is still loading.
+  await frame.waitForFunction(
+    () => document.getElementById('toggle')?.getAttribute('aria-expanded') && document.readyState !== 'loading'
+  );
   assert.equal(await togglerIn(frame), null);
   assert.equal((await togglerIn(page))?.shown, false);
+});
+
+/** Whether the shell shows its own F12 button. */
+const shellTogglerShown = (shown: boolean) =>
+  page.waitForFunction(
+    shown => {
+      const toggler = document.querySelector('devtools-anywhere[data-shell]')?.shadowRoot?.querySelector('.toggler');
+      return !!toggler && (getComputedStyle(toggler).display !== 'none') === shown;
+    },
+    {},
+    shown
+  );
+
+test("the shell shows its own F12 button while the page's is removed, and hides it once it is back", async () => {
+  await open('default-shell.html');
+  const frame = await pageFrame('default-shell.html');
+  await frame.waitForFunction(() => document.querySelector('devtools-anywhere'));
+  await shellTogglerShown(false);
+  // As document.open() or replaceChildren() would.
+  await frame.evaluate(() => {
+    const element = document.querySelector('devtools-anywhere');
+    if (element) Reflect.set(window, 'removedToggler', element);
+    element?.remove();
+  });
+  await shellTogglerShown(true);
+  await frame.evaluate(() => {
+    const element: unknown = Reflect.get(window, 'removedToggler');
+    if (element instanceof Element) document.documentElement.appendChild(element);
+  });
+  await shellTogglerShown(false);
+  await frame.waitForFunction(() => {
+    const toggler = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
+    return !!toggler && getComputedStyle(toggler).display !== 'none';
+  });
+});
+
+test('the shell shows its own F12 button once the page iframe is removed', async () => {
+  await open('default-shell.html');
+  const frame = await pageFrame('default-shell.html');
+  await frame.waitForFunction(() => document.querySelector('devtools-anywhere'));
+  await shellTogglerShown(false);
+  await page.evaluate(() => document.getElementById('devtools-anywhere-page')?.remove());
+  await shellTogglerShown(true);
 });

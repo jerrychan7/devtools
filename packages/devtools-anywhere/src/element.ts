@@ -263,6 +263,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private pageToggler = false;
   /** For the F12 button in the shell's page (mountShellToggler): the shell's element, once found. */
   private shell: Element | null = null;
+  /**
+   * For the F12 button in the shell's page: shows it to the shell's element (attach) or stops
+   * (detach), as the page shows or hides it, or removes it (document.open, replaceChildren).
+   */
+  private shellLink: { attach(): void; detach(): void } | null = null;
 
   constructor() {
     super();
@@ -358,32 +363,45 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    * the shell's element is closed; it toggles that element. The shell hides its own button meanwhile.
    */
   private connectShellToggler() {
-    if (this.openState !== null) return;
-    this.openState = false;
-    const shellDocument = window.frameElement?.ownerDocument;
-    const sync = () => {
-      const open = this.shell ? controlElement(this.shell, false) : undefined;
-      this.toggler.hidden = open !== false;
-      if (TOP_LAYER) setPopoverOpen(this.toggler, !this.toggler.hidden);
-    };
-    const announce = (shown: boolean) =>
-      this.shell?.dispatchEvent(new CustomEvent(CONTROL_EVENT, { detail: { toggler: shown } }));
-    const listen = () => {
-      this.shell = shellElement();
-      this.shell?.addEventListener(STATE_EVENT, sync);
-      announce(true);
-      sync();
-    };
-    // The shell parses its element after its bundle, which may load after this page has run.
-    if (shellDocument?.readyState === 'loading') shellDocument.addEventListener('DOMContentLoaded', listen);
-    else listen();
-    // Leaving, the shell shows its own button again until the next page shows one.
-    window.addEventListener('pagehide', () => {
-      shellDocument?.removeEventListener('DOMContentLoaded', listen);
-      this.shell?.removeEventListener(STATE_EVENT, sync);
-      announce(false);
-    });
-    window.addEventListener('pageshow', event => event.persisted && listen());
+    if (!this.shellLink) {
+      this.openState = false;
+      const shellDocument = window.frameElement?.ownerDocument;
+      const sync = () => {
+        const open = this.shell ? controlElement(this.shell, false) : undefined;
+        this.toggler.hidden = open !== false;
+        if (TOP_LAYER) setPopoverOpen(this.toggler, !this.toggler.hidden);
+      };
+      const announce = (shown: boolean) =>
+        this.shell?.dispatchEvent(new CustomEvent(CONTROL_EVENT, { detail: { toggler: shown } }));
+      const listen = () => {
+        this.shell = shellElement();
+        this.shell?.addEventListener(STATE_EVENT, sync);
+        announce(true);
+        sync();
+      };
+      let linked = false;
+      const link = {
+        attach: () => {
+          if (linked) return;
+          linked = true;
+          // The shell parses its element after its bundle, which may load after this page has run.
+          if (shellDocument?.readyState === 'loading') shellDocument.addEventListener('DOMContentLoaded', listen);
+          else listen();
+        },
+        detach: () => {
+          if (!linked) return;
+          linked = false;
+          shellDocument?.removeEventListener('DOMContentLoaded', listen);
+          this.shell?.removeEventListener(STATE_EVENT, sync);
+          announce(false);
+        },
+      };
+      this.shellLink = link;
+      // Leaving, the shell shows its own button again until the next page shows one.
+      window.addEventListener('pagehide', link.detach);
+      window.addEventListener('pageshow', event => event.persisted && this.isConnected && link.attach());
+    }
+    this.shellLink.attach();
   }
 
   /**
@@ -620,6 +638,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Disconnects the frontend and stops listening to it. */
   disconnectedCallback() {
+    // Removed by the page: the shell shows its own button again until it is back.
+    if (shellTogglers.has(this)) this.shellLink?.detach();
     customElementsLoading.delete(this);
     // A detached iframe is unloaded; it reconnects and reloads when attached again.
     this.disconnect?.();
