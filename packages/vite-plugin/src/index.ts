@@ -39,7 +39,13 @@ export interface DevtoolsAnywhereOptions {
   shellModeLocked?: boolean;
   /** Hides the element's toggler button (`data-no-toggler`). Default: false. */
   noToggler?: boolean;
-  /** Use the Service Worker in shell mode to inject the probe into iframe pages. Default: false. */
+  /**
+   * Use the Service Worker in shell mode (`data-sw`): it injects the probe into same-origin pages
+   * loaded in the page iframe that do not include it, and adds the request and response headers of
+   * same-origin requests (documents, stylesheets, scripts, images and so on). It needs a secure
+   * context (HTTPS or localhost) and a site without a Service Worker of its own; the plugin sends
+   * the `Service-Worker-Allowed` header itself. Default: false.
+   */
   serviceWorker?: boolean;
   /**
    * URL of a remote debugging server (`@devtools-anywhere/remote-server`), such as
