@@ -147,12 +147,28 @@ test('locked on, the shell is entered whatever the user chose, and stays locked,
   }
 });
 
+/** Whether the page in the shell shows the F12 button (the shell element's, see mountShellToggler). */
+async function pageTogglerShown() {
+  const frame = page
+    .mainFrame()
+    .childFrames()
+    .find(f => f.url().includes('/pages/'));
+  assert.ok(frame);
+  // Its togglers work once the bundle has run in the page, which mounts the button.
+  await frame.waitForFunction(() => document.getElementById('toggle')?.getAttribute('aria-expanded'));
+  return frame.evaluate(() => {
+    const toggler = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
+    return !!toggler && getComputedStyle(toggler).display !== 'none';
+  });
+}
+
 test('a shell entered before the page was locked takes the lock', async () => {
   await open('default-shell.html');
-  assert.equal((await globalState()).togglerShown, true);
+  assert.equal(await pageTogglerShown(), true);
   await openDevtools();
   assert.equal((await globalState()).locked, false);
   await open('locked-on.html');
+  assert.equal(await pageTogglerShown(), false);
   assert.equal((await globalState()).togglerShown, false);
   await openDevtools();
   const state = await globalState();

@@ -58,7 +58,16 @@ test('the first load enters shell mode at once, with DevTools hidden', async () 
 test('DevTools opened in the shell stays open when the top-level page reloads, as in Chrome', async () => {
   await page.goto(url);
   await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
-  await clickF12(page);
+  // The F12 button is in the page iframe, once the bundle has run there.
+  const frameHandle = await page.waitForFunction(() => {
+    const frame = document.getElementById('devtools-anywhere-page');
+    return frame instanceof HTMLIFrameElement && frame.contentWindow && 'DevtoolsAnywhere' in frame.contentWindow
+      ? frame
+      : null;
+  });
+  const frame = await frameHandle.asElement()?.contentFrame();
+  assert.ok(frame);
+  await clickF12(frame);
   await page.waitForFunction(() => {
     const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
     return !!panel && getComputedStyle(panel).display !== 'none';

@@ -1,5 +1,5 @@
 // Launches headless Chrome with the repository's static server, for the tests that drive pages.
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import puppeteer, { type Browser, type Frame, type Page } from 'puppeteer-core';
 import { startServer } from '../../playground/server.ts';
 
 const CHROME = process.env['CHROME_PATH'] || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -54,8 +54,8 @@ export const devtoolsShown = (page: Page) =>
     return !!panel && getComputedStyle(panel).display !== 'none';
   });
 
-/** Clicks the F12 button, as the user does to open DevTools. */
-export async function clickF12(page: Page): Promise<void> {
+/** Clicks the F12 button, as the user does to open DevTools; in shell mode, in the page iframe's `frame`. */
+export async function clickF12(page: Page | Frame): Promise<void> {
   const handle = await page.waitForFunction(() => {
     const button = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
     return button instanceof HTMLElement && getComputedStyle(button).display !== 'none' ? button : null;

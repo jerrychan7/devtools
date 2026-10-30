@@ -1,9 +1,16 @@
 // Entry of devtools-anywhere.iife.js: installs the probe (if probe.iife.js did not run
 // earlier), registers <devtools-anywhere>, and exposes the API as `window.DevtoolsAnywhere`.
-// Inside the page iframe of shell mode, it connects the page's CDP session to the shell.
+// Inside the page iframe of shell mode, it connects the page's CDP session to the shell and shows
+// the shell element's F12 button in the page.
 import { createCdpSession, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
 import { connectFrontend, connectToShell } from './connection';
-import { createGlobalElement, createPageSession, defineDevtoolsAnywhere, setBundleUrl } from './element';
+import {
+  createGlobalElement,
+  createPageSession,
+  defineDevtoolsAnywhere,
+  mountShellToggler,
+  setBundleUrl,
+} from './element';
 import type { DevtoolsAnywhereApi } from './api';
 import { SNAPDOM_SCRIPT } from './embedder';
 import { connectRemote } from './remote';
@@ -22,7 +29,11 @@ if (!('DevtoolsAnywhere' in window)) {
     probe.ownUrls.add(new URL(SNAPDOM_SCRIPT, script.src).href);
   }
   defineDevtoolsAnywhere();
-  if (isShellPage()) connectToShell(createPageSession());
+  if (isShellPage()) {
+    connectToShell(createPageSession());
+    // The shell element's F12 button, where the page's styles reach it.
+    mountShellToggler();
+  }
   const api: DevtoolsAnywhereApi = {
     connectFrontend,
     connectRemote: (serverUrl, options) => connectRemote(createPageSession, serverUrl, options),

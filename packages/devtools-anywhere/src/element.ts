@@ -259,6 +259,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private openState: boolean | null = null;
   /** The first global element connected: the only one that works. */
   private firstGlobal = false;
+  /** In the shell: whether the page in the page iframe shows the F12 button (see mountShellToggler). */
+  private pageToggler = false;
+  /** For the F12 button in the shell's page (mountShellToggler): the shell's element, once found. */
+  private shell: Element | null = null;
 
   constructor() {
     super();
@@ -281,7 +285,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
     this.toggler = part<HTMLButtonElement>('.toggler');
-    this.toggler.addEventListener('click', () => this.setOpen(!this.isOpen));
+    this.toggler.addEventListener('click', () => {
+      // The F12 button in the shell's page toggles the shell's element.
+      if (!shellTogglers.has(this)) this.setOpen(!this.isOpen);
+      else if (this.shell) controlElement(this.shell, true);
+    });
     part('.close').addEventListener('click', () => this.setOpen(false));
     this.addEventListener(CONTROL_EVENT, this.onControl);
     this.setupResizer(part<HTMLElement>('.bar'));
@@ -342,7 +350,40 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Whether the page placed this element itself: neither the probe's nor the shell's. */
   private get custom() {
-    return !globalElements.has(this) && !isShellElement(this);
+    return isCustom(this);
+  }
+
+  /**
+   * The F12 button in the shell's page (mountShellToggler): shown, in the page's top layer, while
+   * the shell's element is closed; it toggles that element. The shell hides its own button meanwhile.
+   */
+  private connectShellToggler() {
+    if (this.openState !== null) return;
+    this.openState = false;
+    const shellDocument = window.frameElement?.ownerDocument;
+    const sync = () => {
+      const open = this.shell ? controlElement(this.shell, false) : undefined;
+      this.toggler.hidden = open !== false;
+      if (TOP_LAYER) setPopoverOpen(this.toggler, !this.toggler.hidden);
+    };
+    const announce = (shown: boolean) =>
+      this.shell?.dispatchEvent(new CustomEvent(CONTROL_EVENT, { detail: { toggler: shown } }));
+    const listen = () => {
+      this.shell = shellElement();
+      this.shell?.addEventListener(STATE_EVENT, sync);
+      announce(true);
+      sync();
+    };
+    // The shell parses its element after its bundle, which may load after this page has run.
+    if (shellDocument?.readyState === 'loading') shellDocument.addEventListener('DOMContentLoaded', listen);
+    else listen();
+    // Leaving, the shell shows its own button again until the next page shows one.
+    window.addEventListener('pagehide', () => {
+      shellDocument?.removeEventListener('DOMContentLoaded', listen);
+      this.shell?.removeEventListener(STATE_EVENT, sync);
+      announce(false);
+    });
+    window.addEventListener('pageshow', event => event.persisted && listen());
   }
 
   /**
@@ -368,6 +409,13 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // From another window, the event is not of this window's CustomEvent.
     const detail: unknown = Reflect.get(event, 'detail');
     if (typeof detail !== 'object' || !detail || inactiveGlobals.has(this)) return;
+    // The page in the page iframe shows the F12 button, or no longer does.
+    const toggler: unknown = Reflect.get(detail, 'toggler');
+    if (typeof toggler === 'boolean' && isShellElement(this)) {
+      this.pageToggler = toggler;
+      if (this.isConnected) this.update();
+      return;
+    }
     if (Reflect.get(detail, 'toggle') === true) this.setOpen(!this.isOpen);
     Reflect.set(detail, 'open', this.isOpen);
   };
@@ -523,6 +571,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // Only an element the page placed lets it style DevTools' iframe; known once connected, as a
     // global element is marked after it is created.
     this.frame.part.toggle('iframe', isCustom(this));
+    if (shellTogglers.has(this)) return this.connectShellToggler();
     if (this.custom) return this.connectCustom();
     // Only the first global element connected works, even once it is gone.
     if (globalElements.has(this) && !this.firstGlobal) {
@@ -551,7 +600,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
         this.isOpen = !!given.open;
       }
     }
-    this.toggler.hidden = this.isOpen || !!this.config.noToggler;
+    this.toggler.hidden = this.isOpen || !!this.config.noToggler || this.pageToggler;
     // Changed while detached, or now the first element for the togglers without a value.
     this.syncOpen();
     refreshTogglers(this.ownerDocument);
@@ -584,6 +633,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Loads the new frontend if DevTools is open. */
   attributeChangedCallback() {
+    if (shellTogglers.has(this)) return;
     if (this.custom) {
       if (this.isConnected) this.loadFrontend();
       return;
@@ -606,7 +656,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 
   private update() {
-    this.toggler.hidden = this.isOpen || !!this.config.noToggler;
+    this.toggler.hidden = this.isOpen || !!this.config.noToggler || this.pageToggler;
     this.panel.toggleAttribute('data-open', this.isOpen);
     this.layout();
     // The toggler is a popover: shown as one, in the shell too. The shell document is ours:
@@ -803,11 +853,34 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
   }
 }
 
+/** The F12 buttons of the shell's element, in the shell's page (mountShellToggler). */
+const shellTogglers = new WeakSet<Element>();
+
+/**
+ * In the shell's page iframe: mounts the shell element's F12 button in the page, under <html> like
+ * the global element, so that the page's `::part(toggler)` styles reach it. The shell config
+ * decides, not the page's probe: none with `noToggler`. @internal
+ */
+export function mountShellToggler() {
+  if (readShellConfig()?.noToggler) return;
+  let element: DevtoolsAnywhereElement;
+  try {
+    element = new DevtoolsAnywhereElement();
+  } catch {
+    // The page registered devtools-anywhere itself: the shell keeps its own button.
+    return;
+  }
+  shellTogglers.add(element);
+  const mount = () => document.documentElement.appendChild(element);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
+  else mount();
+}
+
 /** What a toggler fires on an element placed by the page, which has no open state. */
 const TOGGLE_REQUEST_EVENT = 'devtools-toggle-request';
 /** Whether `el` is an element placed by the page (of this window). */
 const isCustom = (el: Element) =>
-  el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !isShellElement(el);
+  el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !shellTogglers.has(el) && !isShellElement(el);
 /**
  * Whether `el` is the shell's element: one in the shell document the probe wrote (not created
  * for the probe), maybe of another window. Its document is marked as the shell's when the probe writes the
@@ -848,10 +921,7 @@ function togglerTarget(toggler: Element, warn: boolean): Element | null {
     // shell's element, of the shell window's class: it is toggled through an event.
     const named = id ? doc.getElementById(id) : null;
     if (named && customElementsLoading.has(named)) return named;
-    if (!id) {
-      const shellDocument = window.frameElement?.ownerDocument;
-      return (shellDocument && [...shellDocument.querySelectorAll(togglerTag)].find(isShellElement)) ?? null;
-    }
+    if (!id) return shellElement();
   } else {
     // Without a value, the global element (or the shell's); global elements after the first do
     // nothing: they are not targets.
@@ -867,6 +937,12 @@ function togglerTarget(toggler: Element, warn: boolean): Element | null {
     console.warn(`devtools-anywhere: no <${togglerTag}>${id ? ` with id "${id}"` : ''} for ${TOGGLE_ATTRIBUTE}`);
   }
   return null;
+}
+
+/** In the shell's page iframe: the shell's element, of the shell window's class. */
+function shellElement(): Element | null {
+  const shellDocument = window.frameElement?.ownerDocument;
+  return (shellDocument && [...shellDocument.querySelectorAll(togglerTag)].find(isShellElement)) ?? null;
 }
 
 /**

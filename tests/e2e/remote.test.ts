@@ -662,8 +662,14 @@ test('a page in shell mode connects from the frame it is shown in, not the top w
   try {
     await shell.goto(localPage('panel&shell-frame'));
     const page = await shellPageFrame(shell);
-    // The page in the shell has no element of its own (the shell shows DevTools); the shell has one.
-    assert.equal(await page.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 0);
+    // The page in the shell has only the shell element's F12 button, which loads no frontend (the shell
+    // shows DevTools); the shell has one element.
+    assert.deepEqual(
+      await page.evaluate(() =>
+        [...document.querySelectorAll('devtools-anywhere')].map(el => el.shadowRoot?.querySelector('iframe')?.src)
+      ),
+      ['']
+    );
     assert.equal(await shell.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 1);
     await waitFor(async () => (await targets()).some(t => t.url.includes('shell-frame')));
     // One connection, the page's: from the iframe, not the top window.
