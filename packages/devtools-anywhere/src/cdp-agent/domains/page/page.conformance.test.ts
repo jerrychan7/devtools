@@ -122,8 +122,12 @@ test('the screencast ignores acknowledgements of an earlier session, and stops',
 
     await s.call('Page.screencastFrameAck', { sessionId: second.sessionId });
     await s.call('Page.stopScreencast');
+    // The acknowledgement may have let one more frame out before the stop: count from there.
     await s.quiet();
-    assert.equal((await s.frames()).length, 2, 'no frame after stopScreencast');
+    const stopped = (await s.frames()).length;
+    assert.ok(stopped <= 3, `at most one frame after the last acknowledgement, got ${stopped}`);
+    await s.quiet();
+    assert.equal((await s.frames()).length, stopped, 'no frame after stopScreencast');
   } finally {
     await s.call('Page.stopScreencast');
   }
