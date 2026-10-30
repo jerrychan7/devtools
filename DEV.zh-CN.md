@@ -202,7 +202,7 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`；API Extractor 会丢掉 `declare global` 块，脚本会把它们补进合并后的文件）。`devtools-anywhere` 没有运行时入口：它的 `dist/index.d.ts` 只有类型，脚本都构建成 IIFE。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。设置 `CI=true` 时（供 CI 使用，仓库目前还没有 CI），报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
-行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本）。
+行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本），并在 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 的 `Unreleased` 下各给用户写一行说明（前端升级到新的 Chrome 里程碑时，还要改它的 `Based on Chrome` 那一行）。
 
 新增或升级会进入产物的依赖、移植其它项目的代码（包括把 DevTools 前端换到新的 `REVISION`）时，运行 `pnpm licenses:update` 重新生成根目录和各包的 `THIRD_PARTY_LICENSES.md`（新增的库先加进 `scripts/third-party-licenses.ts` 的清单）。
 
@@ -233,7 +233,7 @@ gh pr create --fill
    pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
    ```
 2. 运行 `pnpm typecheck` 和 `pnpm test`。
-3. 把所有 `packages/*/package.json` 的 `version` 改成同一个版本并提交（`build: release x.y.z`）。
+3. 把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。
 4. 发布到公共 registry（pnpm 会把 `workspace:*` 替换成实际版本）：
    ```bash
    pnpm -r publish --access public --registry https://registry.npmjs.org
@@ -244,3 +244,7 @@ gh pr create --fill
    npm dist-tag add <包名>@x.y.z chrome-<里程碑> --registry https://registry.npmjs.org
    ```
 6. 打 tag 并推送：`git tag vx.y.z && git push origin main vx.y.z`。
+7. 发布 GitHub Release，说明用 `CHANGELOG.md` 中该版本的那一节，后面接上 `CHANGELOG.zh-CN.md` 的对应一节：
+   ```bash
+   gh release create vx.y.z --title vx.y.z --notes-file <把那一节存成的文件>
+   ```

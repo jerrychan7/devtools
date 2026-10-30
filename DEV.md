@@ -202,7 +202,7 @@ The pre-commit hook (husky + lint-staged) runs on the staged files only: it form
 
 The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`; it copies `declare global` blocks into the rolled-up file, which API Extractor leaves out). `devtools-anywhere` has no runtime entry: its `dist/index.d.ts` is types only, and its scripts are built as IIFEs. Commit a changed report with the change that caused it: it is how a change to the public API shows in review. With `CI=true` (for a CI, which the repository does not have yet) a report that no longer matches fails the build. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
 
-Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change.
+Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change, and add a line for users under `Unreleased` in both `CHANGELOG.md` and `CHANGELOG.zh-CN.md` (moving the frontend to a new Chrome milestone also changes its `Based on Chrome` line).
 
 When a dependency that ends up in a build output is added or upgraded, or code is ported from another project (including moving the DevTools frontend to a new `REVISION`), run `pnpm licenses:update` to regenerate `THIRD_PARTY_LICENSES.md` at the root and in the packages (for a new library, add it to the list in `scripts/third-party-licenses.ts` first). It needs the frontend built: the build writes the `front_end/third_party` libraries that end up in `dist/` to `packages/devtools-frontend/dist-third-party.ignore.json` (next to `dist/`, not published), which the script checks its list against; `build:frontend --copy-only` regenerates it from the last build.
 
@@ -233,7 +233,7 @@ Versions are semver for the library itself, starting at `0.1.0`: a fix is a patc
    pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
    ```
 2. Run `pnpm typecheck` and `pnpm test`.
-3. Set the same `version` in every `packages/*/package.json` and commit (`build: release x.y.z`).
+3. Set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`).
 4. Publish to the public registry (pnpm replaces `workspace:*` with the real version):
    ```bash
    pnpm -r publish --access public --registry https://registry.npmjs.org
@@ -244,3 +244,7 @@ Versions are semver for the library itself, starting at `0.1.0`: a fix is a patc
    npm dist-tag add <package>@x.y.z chrome-<milestone> --registry https://registry.npmjs.org
    ```
 6. Tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
+7. Publish the GitHub release with the same notes as the version's section in `CHANGELOG.md`, followed by that of `CHANGELOG.zh-CN.md`:
+   ```bash
+   gh release create vx.y.z --title vx.y.z --notes-file <the section, saved to a file>
+   ```
