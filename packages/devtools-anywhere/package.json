@@ -18,12 +18,12 @@
     },
     "./devtools-anywhere.iife.js": "./dist/devtools-anywhere.iife.js",
     "./probe.iife.js": "./dist/probe.iife.js",
-    "./devtools-anywhere-sw.js": "./dist/devtools-anywhere-sw.js",
+    "./devtools-anywhere-service-worker.js": "./dist/devtools-anywhere-service-worker.js",
     "./snapdom.js": "./dist/snapdom.js"
   },
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/api-extract.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sw.json && tsc -p tsconfig.cdp-agent.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.service-worker.json && tsc -p tsconfig.cdp-agent.json",
     "dev": "node build.ts --watch"
   },
   "dependencies": {

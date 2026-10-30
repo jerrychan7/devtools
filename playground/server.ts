@@ -160,8 +160,8 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
       res.writeHead(200, {
         'content-type': types[path.extname(target)] || 'application/octet-stream',
         'cache-control': 'no-store',
-        // Lets devtools-anywhere-sw.js control the whole site from its dist directory.
-        ...(target.endsWith('-sw.js') ? { 'service-worker-allowed': '/' } : {}),
+        // Lets devtools-anywhere-service-worker.js control the whole site from its dist directory.
+        ...(target.endsWith('-service-worker.js') ? { 'service-worker-allowed': '/' } : {}),
         // Style sheets are readable from other origins (the tests load them cross-origin).
         ...(target.endsWith('.css') ? { 'access-control-allow-origin': '*' } : {}),
       });

@@ -123,7 +123,7 @@ export function installProbe(): Probe {
   hookFetch(track, update, probe);
   hookXhr(track, update, listen, probe);
   const shell = readShellConfig();
-  observeResources(add, update, requests, shell?.sw);
+  observeResources(add, update, requests, shell?.serviceWorker);
 
   if (shell && window === top) {
     // When it refuses (a loop), the page loads on its own: probe.ts sees no config left.
@@ -180,7 +180,7 @@ function observeResources(
   add: (rec: ProbeRequest) => void,
   update: Update,
   requests: ProbeRequest[],
-  swUrl: string | undefined
+  serviceWorkerUrl: string | undefined
 ) {
   if (typeof PerformanceObserver === 'undefined') return;
   // In shell mode with the Service Worker, it reports what Resource Timing does not expose
@@ -191,11 +191,11 @@ function observeResources(
   const details = new Map<string, Partial<ProbeRequest>[]>();
   const awaiting = new WeakSet<ProbeRequest>();
   let isOurs = (_source: unknown) => false;
-  const sw = navigator.serviceWorker;
-  if (sw && swUrl) {
+  const container = navigator.serviceWorker;
+  if (container && serviceWorkerUrl) {
     // Only reports from our own worker (its URL differs in the query only), and only the
     // fields it sends: the page's own worker must not rewrite the records.
-    const ours = new URL(swUrl, location.href);
+    const ours = new URL(serviceWorkerUrl, location.href);
     isOurs = (source: unknown) => {
       if (!(source instanceof ServiceWorker)) return false;
       const url = new URL(source.scriptURL);
@@ -207,7 +207,7 @@ function observeResources(
       for (const [k, v] of Object.entries(value)) if (typeof v === 'string') out[k] = v;
       return out;
     };
-    sw.addEventListener('message', event => {
+    container.addEventListener('message', event => {
       const data: unknown = event.data;
       if (!data || typeof data !== 'object' || !isOurs(event.source)) return;
       const { type, url, requestHeaders, status, statusText, responseHeaders } = data as Record<string, unknown>;
@@ -336,7 +336,7 @@ function hookWebSocket(probe: Probe, notify: (rec: SocketRecord) => void) {
 
 // ---- debugger ----
 
-/** Called instead of each `debugger` statement by the shell's Service Worker (sw.ts DEBUGGER_CALL). */
+/** Called instead of each `debugger` statement by the shell's Service Worker (service-worker.ts DEBUGGER_CALL). */
 const DEBUGGER_HOOK = '_$dbg';
 
 /** Statements cannot be paused at: the shell's Service Worker makes each `debugger` log a warning. */

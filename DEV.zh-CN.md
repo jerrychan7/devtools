@@ -115,7 +115,7 @@ experiments/      验证记录
   - 只处理 `destination === 'iframe'` 的导航请求，其他请求一律放行。
   - 关闭 f12 时调用 `unregister()`。
   - 用 `TransformStream` 流式插入探针，避免破坏 SSR 的流式输出。
-  - 注意作用域：SW 脚本需要放在站点根路径，或者由服务器返回 `Service-Worker-Allowed` 头。
+  - 注意作用域：Service Worker 脚本需要放在站点根路径，或者由服务器返回 `Service-Worker-Allowed` 头。
 
 ### 约定放在哪里
 
@@ -125,7 +125,7 @@ experiments/      验证记录
 |---|---|---|
 | 中继消息（hello、pagehide、detach、ping）、hello 的参数、页面被顶替时的关闭码 | `packages/relay-core/src/protocol.ts` | `remote.ts`、`connection.ts`、remote-server 的 `relay.ts` |
 | 前端 ↔ `<devtools-anywhere>`：请求、停靠位置、hash 参数、我们自己脚本的文件名 | `packages/devtools-anywhere/src/embedder.ts` | 元素、构建脚本；`anywhere_app` 通过前端构建时复制的副本使用 |
-| 壳模式下页面与 Service Worker 之间的消息 | `packages/devtools-anywhere/src/shell-messages.ts`，以及 agent 的 `probe/messages.ts` | `element.ts`、`probe.ts`、`sw.ts`、探针 |
+| 壳模式下页面与 Service Worker 之间的消息 | `packages/devtools-anywhere/src/shell-messages.ts`，以及 agent 的 `probe/messages.ts` | `element.ts`、`probe.ts`、`service-worker.ts`、探针 |
 | `window.DevtoolsAnywhere`，bundle 暴露的 API（含 `RemoteOptions`） | `packages/devtools-anywhere/src/api.ts` | `iife.ts`、`probe.ts`、`tests/globals.d.ts` |
 | 探针脚本的 `data-*` 属性 | `packages/devtools-anywhere/src/probe-script.ts`（`ProbeScriptAttributes`，以 `@public` 导出） | `probe.ts`、Vite 插件、remote-server |
 
@@ -207,7 +207,7 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 ### 提交
 
 - 每个提交只做一步。
-- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`sw`、`readme`。
+- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
 
 ### 提 PR
 

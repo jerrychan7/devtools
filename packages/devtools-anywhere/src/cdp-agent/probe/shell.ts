@@ -31,8 +31,8 @@ export interface ShellConfig {
   frontend: string;
   /** Absolute URL of devtools-anywhere.iife.js. */
   bundle: string;
-  /** Absolute URL of devtools-anywhere-sw.js, to inject the probe into iframe pages. */
-  sw?: string;
+  /** Absolute URL of devtools-anywhere-service-worker.js, to inject the probe into iframe pages. */
+  serviceWorker?: string;
   /** False to start with DevTools hidden (shell mode entered by default); shown otherwise. */
   open?: boolean;
   /** The probe's `data-shell-mode-locked`: DevTools offers no way out of shell mode. */
@@ -71,7 +71,7 @@ export function setShellScriptUrl(url: string) {
  */
 export function isTrustedShellConfig(config: ShellConfig): boolean {
   const origin = trustedOrigin || location.origin;
-  return [config.frontend, config.bundle, config.sw].every(url => {
+  return [config.frontend, config.bundle, config.serviceWorker].every(url => {
     if (url === undefined) return true;
     try {
       const parsed = new URL(url);
@@ -84,17 +84,26 @@ export function isTrustedShellConfig(config: ShellConfig): boolean {
 
 /**
  * Stores the shell config for the next load of the top-level page: DevTools' `frontend`, the
- * bundle, `sw` as the element's attribute (`''`: next to the bundle), and the element's flags.
+ * bundle, `serviceWorker` as the element's attribute (`''`: next to the bundle), and the element's flags.
  * False when the URLs do not parse or are not all on the trusted origin, which the probe would
  * refuse, or storage throws.
  *
  * @internal
  */
-export function storeShellConfig(frontend: string, bundle: string, sw: string | null, flags: ShellFlags): boolean {
+export function storeShellConfig(
+  frontend: string,
+  bundle: string,
+  serviceWorker: string | null,
+  flags: ShellFlags
+): boolean {
   try {
     // URLs that do not parse are refused too.
     const config: ShellConfig = { ...flags, frontend: new URL(frontend, location.href).href, bundle };
-    if (sw !== null) config.sw = new URL(sw || 'devtools-anywhere-sw.js', sw ? location.href : bundle).href;
+    if (serviceWorker !== null)
+      config.serviceWorker = new URL(
+        serviceWorker || 'devtools-anywhere-service-worker.js',
+        serviceWorker ? location.href : bundle
+      ).href;
     if (!isTrustedShellConfig(config)) return false;
     sessionStorage.setItem(SHELL_KEY, JSON.stringify(config));
     return true;
@@ -130,11 +139,11 @@ export function storeShellOpen(open: boolean) {
 
 function isShellConfig(value: unknown): value is ShellConfig {
   if (typeof value !== 'object' || value === null) return false;
-  const { frontend, bundle, sw, open, locked, noToggler } = value as Record<string, unknown>;
+  const { frontend, bundle, serviceWorker, open, locked, noToggler } = value as Record<string, unknown>;
   return (
     typeof frontend === 'string' &&
     typeof bundle === 'string' &&
-    (sw === undefined || typeof sw === 'string') &&
+    (serviceWorker === undefined || typeof serviceWorker === 'string') &&
     [open, locked, noToggler].every(flag => flag === undefined || typeof flag === 'boolean')
   );
 }

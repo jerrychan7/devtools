@@ -126,7 +126,7 @@ test('the Service Worker adds headers to requests known from Resource Timing', a
       const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
       if (!pageWindow) throw new Error('no page frame');
       const probe = pageWindow.__devtoolsAnywhereProbe__;
-      return probe?.requests.find(r => r.url.includes('cross.css?n=sw'));
+      return probe?.requests.find(r => r.url.includes('cross.css?n=service-worker'));
     });
   await waitFor(async () => (await find())?.responseHeaders?.['content-type']);
   const rec = await find();
@@ -381,7 +381,7 @@ test('the Service Worker passes requests through once the shell is gone without 
   await other.close();
   // Shell mode ends behind the shell's back: the worker stays registered.
   await page.evaluate(() => sessionStorage.clear());
-  await page.goto(env?.baseUrl + '/tests/e2e/pages/sw-iframe.html');
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/service-worker-iframe.html');
   await waitFor(() =>
     page.evaluate(() => {
       const framed = document.querySelector<HTMLIFrameElement>('#framed')?.contentDocument;

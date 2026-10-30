@@ -29,7 +29,7 @@ export type ProbeScriptAttributes = {
    * those pages: `Service-Worker-Allowed: /` on the script, or the script at the site root. Off by
    * default, and only for a site without a Service Worker of its own.
    */
-  'data-sw'?: string | true;
+  'data-service-worker'?: string | true;
   /** Connects to a remote debugging server: this URL, by default the one the probe is served from. */
   'data-remote'?: string | true;
   /** Connects to the remote server's URL itself, the target in the query. */

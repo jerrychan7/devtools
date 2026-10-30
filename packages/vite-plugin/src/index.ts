@@ -40,7 +40,7 @@ export interface DevtoolsAnywhereOptions {
   /** Hides the element's toggler button (`data-no-toggler`). Default: false. */
   noToggler?: boolean;
   /**
-   * Use the Service Worker in shell mode (`data-sw`): it injects the probe into same-origin pages
+   * Use the Service Worker in shell mode (`data-service-worker`): it injects the probe into same-origin pages
    * loaded in the page iframe that do not include it, and adds the request and response headers of
    * same-origin requests (documents, stylesheets, scripts, images and so on). It needs a secure
    * context (HTTPS or localhost) and a site without a Service Worker of its own; the plugin sends
@@ -152,7 +152,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         if (!file) return next();
         res.setHeader('content-type', TYPES[path.extname(file)] ?? 'application/octet-stream');
         // Lets the Service Worker control the whole site from under BASE.
-        if (file.endsWith('-sw.js')) res.setHeader('service-worker-allowed', '/');
+        if (file.endsWith('-service-worker.js')) res.setHeader('service-worker-allowed', '/');
         // The file can vanish between the check and the read (e.g. a rebuild of dist);
         // an unhandled stream error would crash the dev server.
         createReadStream(file)
@@ -175,7 +175,7 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         if (options.defaultShellMode) attrs['data-default-shell-mode'] = options.defaultShellMode;
         if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;
         if (options.noToggler) attrs['data-no-toggler'] = true;
-        if (options.serviceWorker) attrs['data-sw'] = true;
+        if (options.serviceWorker) attrs['data-service-worker'] = true;
         return [{ tag: 'script', attrs, injectTo: 'head-prepend' }];
       },
     },

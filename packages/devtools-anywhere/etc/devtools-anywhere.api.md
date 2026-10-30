@@ -38,7 +38,7 @@ export type ProbeScriptAttributes = {
     'data-default-shell-mode'?: 'on' | 'off';
     'data-shell-mode-locked'?: true;
     'data-no-toggler'?: true;
-    'data-sw'?: string | true;
+    'data-service-worker'?: string | true;
     'data-remote'?: string | true;
     'data-id-in-query'?: true;
 };

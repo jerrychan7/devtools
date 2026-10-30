@@ -402,8 +402,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (!bundleUrl || !frontend) return;
     // The probe ignores (and removes) a config whose URLs are not on its own origin.
     const flags = { locked: !!this.config.locked, noToggler: !!this.config.noToggler };
-    if (!storeShellConfig(frontend, bundleUrl, this.config.sw ?? null, flags)) {
-      console.warn('devtools-anywhere: shell mode needs the frontend, bundle and sw on one origin');
+    if (!storeShellConfig(frontend, bundleUrl, this.config.serviceWorker ?? null, flags)) {
+      console.warn('devtools-anywhere: shell mode needs the frontend, bundle and Service Worker on one origin');
       return;
     }
     location.reload();
@@ -414,8 +414,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const config = readShellConfig();
     sessionStorage.removeItem(SHELL_KEY);
     try {
-      if (config?.sw) {
-        const registration = await navigator.serviceWorker?.getRegistration(config.sw).catch(() => undefined);
+      if (config?.serviceWorker) {
+        const registration = await navigator.serviceWorker
+          ?.getRegistration(config.serviceWorker)
+          .catch(() => undefined);
         await registration?.unregister();
       }
     } finally {
@@ -485,12 +487,12 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   /** In the shell: registers the Service Worker that injects the probe into iframe pages. */
   private async registerShellWorker() {
     const config = readShellConfig();
-    if (!config?.sw || !navigator.serviceWorker) return;
+    if (!config?.serviceWorker || !navigator.serviceWorker) return;
     window.addEventListener('pageshow', this.onShellPageshow);
     // A worker already active controls this shell: tell it right away, before the page frame
     // navigates, instead of after register() and ready.
     navigator.serviceWorker.controller?.postMessage({ type: SHELL_HANDSHAKE });
-    const url = new URL(config.sw);
+    const url = new URL(config.serviceWorker);
     url.searchParams.set('probe', new URL(PROBE_SCRIPT, config.bundle).href);
     // Marks the worker as the shell's (see probe.ts), which unregisters a leftover one.
     url.searchParams.set('shell', '');
@@ -532,7 +534,12 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (this.openState === null) {
       const shell = isShellElement(this) ? readShellConfig() : null;
       const given = shell
-        ? { open: shell.open !== false, locked: !!shell.locked, noToggler: !!shell.noToggler, sw: shell.sw ?? null }
+        ? {
+            open: shell.open !== false,
+            locked: !!shell.locked,
+            noToggler: !!shell.noToggler,
+            serviceWorker: shell.serviceWorker ?? null,
+          }
         : globalConfigs.get(this);
       if (given) {
         this.config = given;

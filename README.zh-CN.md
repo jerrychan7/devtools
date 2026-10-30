@@ -95,7 +95,7 @@
 |---|---|
 | 页面手动引入 `<script>`（必须放在 `<head>` 第一个） | 任意页面 |
 | `@devtools-anywhere/vite-plugin`：只在开发模式（`vite serve`）下注入 | 使用 Vite 的项目（之后可能补充 webpack 插件） |
-| `devtools-anywhere-sw.js`：外壳模式下，给页面 iframe 中加载的、没有引入探针的同源页面注入探针 | 安全上下文（HTTPS 或 localhost）、作用域覆盖这些页面（`Service-Worker-Allowed: /`），并且站点没有自己的 SW |
+| `devtools-anywhere-service-worker.js`：外壳模式下，给页面 iframe 中加载的、没有引入探针的同源页面注入探针 | 安全上下文（HTTPS 或 localhost）、作用域覆盖这些页面（`Service-Worker-Allowed: /`），并且站点没有自己的 Service Worker |
 
 所有方式共用同一份探针。
 
@@ -105,7 +105,7 @@
 
 | 包 | 内容 |
 |---|---|
-| `devtools-anywhere` | 总包：`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`（`<devtools-anywhere>` 组件，由探针加载）、`devtools-anywhere-sw.js`、`snapdom.js`（投屏的绘制器，按需加载），以及组件、事件、探针脚本和切换器属性的 TypeScript 类型。没有可以 import 的模块，运行时只有这些脚本 |
+| `devtools-anywhere` | 总包：`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`（`<devtools-anywhere>` 组件，由探针加载）、`devtools-anywhere-service-worker.js`、`snapdom.js`（投屏的绘制器，按需加载），以及组件、事件、探针脚本和切换器属性的 TypeScript 类型。没有可以 import 的模块，运行时只有这些脚本 |
 | `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
 | `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
@@ -129,7 +129,7 @@
 </head>
 ```
 
-页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并在 `<html>` 下、与 `<body>` 同级挂载它自己的 `<devtools-anywhere>`，不管页面里有没有 `<devtools-anywhere>`；每个页面只有一个这样的全局元素，再出现的只在控制台警告。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-sw` 在外壳模式下启用 Service Worker，它给页面 iframe 中没有引入探针的同源页面注入探针，并为同源的文档、样式表、脚本、图片等请求补上请求头和响应头；默认关闭，使用条件见[注入方式](#3-注入方式)。
+页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并在 `<html>` 下、与 `<body>` 同级挂载它自己的 `<devtools-anywhere>`，不管页面里有没有 `<devtools-anywhere>`；每个页面只有一个这样的全局元素，再出现的只在控制台警告。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-service-worker` 在外壳模式下启用 Service Worker，它给页面 iframe 中没有引入探针的同源页面注入探针，并为同源的文档、样式表、脚本、图片等请求补上请求头和响应头；默认关闭，使用条件见[注入方式](#3-注入方式)。
 
 ### Vite
 

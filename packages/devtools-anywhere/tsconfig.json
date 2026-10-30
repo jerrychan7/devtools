@@ -5,5 +5,5 @@
     "declarationDir": "dist/types"
   },
   "include": ["src"],
-  "exclude": ["src/sw.ts", "src/**/*.test.ts"]
+  "exclude": ["src/service-worker.ts", "src/**/*.test.ts"]
 }

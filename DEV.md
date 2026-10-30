@@ -115,7 +115,7 @@ experiments/      validation records
   - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.
   - Call `unregister()` when f12 is disabled.
   - Insert the probe with a `TransformStream` so SSR streaming is not broken.
-  - Mind the scope: the SW script must sit at the site root, or the server must send a `Service-Worker-Allowed` header.
+  - Mind the scope: the Service Worker script must sit at the site root, or the server must send a `Service-Worker-Allowed` header.
 
 ### Where contracts live
 
@@ -125,7 +125,7 @@ What two pieces of code must agree on is written once, where it is owned, and im
 |---|---|---|
 | Relay messages (hello, pagehide, detach, ping), hello's params, the replaced-page close code | `packages/relay-core/src/protocol.ts` | `remote.ts`, `connection.ts`, remote-server's `relay.ts` |
 | Frontend ↔ `<devtools-anywhere>`: requests, dock sides, hash parameters, our scripts' file names | `packages/devtools-anywhere/src/embedder.ts` | the element, the build; `anywhere_app` through a copy made by the frontend build |
-| Shell mode's messages between the page and its Service Worker | `packages/devtools-anywhere/src/shell-messages.ts`, and the agent's `probe/messages.ts` | `element.ts`, `probe.ts`, `sw.ts`, the probe |
+| Shell mode's messages between the page and its Service Worker | `packages/devtools-anywhere/src/shell-messages.ts`, and the agent's `probe/messages.ts` | `element.ts`, `probe.ts`, `service-worker.ts`, the probe |
 | `window.DevtoolsAnywhere`, the API the bundle exposes (`RemoteOptions` included) | `packages/devtools-anywhere/src/api.ts` | `iife.ts`, `probe.ts`, `tests/globals.d.ts` |
 | The probe script's `data-*` attributes | `packages/devtools-anywhere/src/probe-script.ts` (`ProbeScriptAttributes`, exported as `@public`) | `probe.ts`, the Vite plugin, remote-server |
 
@@ -207,7 +207,7 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 ### Commits
 
 - One logical step per commit.
-- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `docs`, `test`, `build`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `sw`, `readme`.
+- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `docs`, `test`, `build`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `service-worker`, `readme`.
 
 ### Pull requests
 

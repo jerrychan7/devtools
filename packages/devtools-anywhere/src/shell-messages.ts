@@ -1,5 +1,5 @@
-// Messages of shell mode between the page and its Service Worker (devtools-anywhere-sw.js), which
-// sw.ts, element.ts and probe.ts all use. Constants only: sw.ts is built for a worker.
+// Messages of shell mode between the page and its Service Worker (devtools-anywhere-service-worker.js), which
+// service-worker.ts, element.ts and probe.ts all use. Constants only: service-worker.ts is built for a worker.
 
 /** Posted by the shell to the worker: the client it comes from is a shell. */
 export const SHELL_HANDSHAKE = 'devtools-anywhere:shell-handshake';

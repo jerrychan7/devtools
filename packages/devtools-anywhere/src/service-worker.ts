@@ -1,4 +1,4 @@
-// devtools-anywhere-sw.js: optional Service Worker for shell mode.
+// devtools-anywhere-service-worker.js: optional Service Worker for shell mode.
 //
 // While shell mode is on, it injects the probe at the top of <head> of every same-origin
 // page loaded into an iframe, so pages that do not include the probe themselves are still
@@ -37,7 +37,7 @@
 // A Service Worker needs a secure context (HTTPS or localhost), and its scope must cover
 // the pages: serve this file from the site root or with `Service-Worker-Allowed: /`.
 
-// Type-checked with the WebWorker library (tsconfig.sw.json), separately from the DOM code.
+// Type-checked with the WebWorker library (tsconfig.service-worker.json), separately from the DOM code.
 declare const self: ServiceWorkerGlobalScope;
 // The lexer alone: the agent's entry points would bring DOM code into the worker.
 // oxlint-disable-next-line no-restricted-imports
@@ -54,7 +54,7 @@ const SNIFF_OVERLAP = 1024;
 const FRONTEND =
   /<meta\b[^>]*\bname\s*=\s*["']?devtools-anywhere-frontend\b|entrypoints\/anywhere_app\/anywhere_app\.js/i;
 const DESTINATIONS = new Set(['style', 'script', 'image', 'font']);
-const SHELL_CACHE = 'devtools-anywhere-sw-shells';
+const SHELL_CACHE = 'devtools-anywhere-service-worker-shells';
 /**
  * `debugger` (8 characters) becomes a call of the probe's hook (keep the name in sync with the
  * probe), a statement of its own whatever follows on the next line. When the next token is a `;`

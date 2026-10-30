@@ -5,7 +5,7 @@
 // As the first script in <head>, it captures from the very start. With `data-devtools-frontend-url`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
 // the page has loaded and mounts its own <devtools-anywhere> under <html>, whatever the page has.
-// `data-open-immediately` opens DevTools right away; `data-sw` and `data-no-toggler` are passed on
+// `data-open-immediately` opens DevTools right away; `data-service-worker` and `data-no-toggler` are passed on
 // to the element with the others (createGlobalElement; see shell mode).
 //
 // With `data-devtools-frontend-url`, the top-level page enters shell mode by default, on its first load: the
@@ -76,18 +76,18 @@ if (entered && locked && shellOff) {
     sessionStorage.removeItem(SHELL_KEY);
   } catch {}
 } else if (entered) {
-  storeShellConfig(entered.frontend, entered.bundle, entered.sw ?? null, { ...entered, locked, noToggler });
+  storeShellConfig(entered.frontend, entered.bundle, entered.serviceWorker ?? null, { ...entered, locked, noToggler });
 }
 // installProbe() reads the config next and writes the shell.
 if (bundle && frontend && window === top && !readShellConfig() && shellByDefault()) {
-  storeShellConfig(frontend, bundle, attribute('data-sw'), { open, locked, noToggler });
+  storeShellConfig(frontend, bundle, attribute('data-service-worker'), { open, locked, noToggler });
 }
 
 const probe = installProbe();
 // The probe's own request is DevTools', not the page's: left out of the Network panel.
 if (script?.src) probe.ownUrls.add(script.src);
 
-/** True for a devtools-anywhere-sw.js script URL as the shell registers it. */
+/** True for a devtools-anywhere-service-worker.js script URL as the shell registers it. */
 const isShellWorker = (scriptUrl: string | undefined) => {
   if (!scriptUrl) return false;
   const params = new URL(scriptUrl).searchParams;
@@ -155,7 +155,7 @@ if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && 
       open,
       locked,
       noToggler,
-      sw: attribute('data-sw'),
+      serviceWorker: attribute('data-service-worker'),
     });
     if (element) document.documentElement.appendChild(element);
   };

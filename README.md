@@ -95,7 +95,7 @@ Inside an iframe, `viewport`, `100vh`, `position: fixed`, `window.top` and other
 |---|---|
 | Add a `<script>` manually (must be the first one in `<head>`) | Any page |
 | `@devtools-anywhere/vite-plugin`: injects in development only (`vite serve`) | Projects using Vite (a webpack plugin may follow) |
-| `devtools-anywhere-sw.js`: in shell mode, injects the probe into same-origin pages loaded in the page iframe that do not include it | Secure context (HTTPS or localhost), a scope covering the pages (`Service-Worker-Allowed: /`), and no Service Worker of the site's own |
+| `devtools-anywhere-service-worker.js`: in shell mode, injects the probe into same-origin pages loaded in the page iframe that do not include it | Secure context (HTTPS or localhost), a scope covering the pages (`Service-Worker-Allowed: /`), and no Service Worker of the site's own |
 
 All methods share the same probe.
 
@@ -105,7 +105,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | Umbrella package: `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js` (the `<devtools-anywhere>` element, which the probe loads), `devtools-anywhere-sw.js`, `snapdom.js` (the screencast's renderer, loaded on demand), and TypeScript types for the element, its events and the script and toggler attributes. There is no module to import: the scripts are the runtime |
+| `devtools-anywhere` | Umbrella package: `probe.iife.js` (probe plus auto-mounting), `devtools-anywhere.iife.js` (the `<devtools-anywhere>` element, which the probe loads), `devtools-anywhere-service-worker.js`, `snapdom.js` (the screencast's renderer, loaded on demand), and TypeScript types for the element, its events and the script and toggler attributes. There is no module to import: the scripts are the runtime |
 | `@devtools-anywhere/devtools-frontend` | Prebuilt frontend static assets with English and Chinese UI, self-hostable or served from a CDN |
 | `@devtools-anywhere/devtools-frontend-locales` | Optional: the other 80 UI languages, at the same paths as in the frontend package. Serve both from one directory (the Vite plugin does this when it is installed); a missing language falls back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
@@ -129,7 +129,7 @@ The packages are not published yet; the paths below refer to the builds in this 
 </head>
 ```
 
-After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts its own `<devtools-anywhere>` under `<html>`, next to `<body>`, whatever `<devtools-anywhere>` elements the page has; there is one such global element per page, and another one only logs a warning. Optional attributes: `data-open-immediately` opens DevTools right away; `data-default-shell-mode="off"` stays out of shell mode, which the top-level page enters by default (`on`); `data-shell-mode-locked` keeps shell mode as `data-default-shell-mode` says, ignoring the user's choice (which stays stored) and hiding DevTools' switch, though a page that refuses to be framed is still shown on its own; `data-no-toggler` hides the F12 button, also in shell mode; `data-sw` enables the Service Worker in shell mode, which injects the probe into same-origin pages in the page iframe that do not include it and adds the headers of same-origin requests (documents, stylesheets, scripts, images and so on); it is off by default, see its [requirements](#3-injection).
+After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts its own `<devtools-anywhere>` under `<html>`, next to `<body>`, whatever `<devtools-anywhere>` elements the page has; there is one such global element per page, and another one only logs a warning. Optional attributes: `data-open-immediately` opens DevTools right away; `data-default-shell-mode="off"` stays out of shell mode, which the top-level page enters by default (`on`); `data-shell-mode-locked` keeps shell mode as `data-default-shell-mode` says, ignoring the user's choice (which stays stored) and hiding DevTools' switch, though a page that refuses to be framed is still shown on its own; `data-no-toggler` hides the F12 button, also in shell mode; `data-service-worker` enables the Service Worker in shell mode, which injects the probe into same-origin pages in the page iframe that do not include it and adds the headers of same-origin requests (documents, stylesheets, scripts, images and so on); it is off by default, see its [requirements](#3-injection).
 
 ### Vite
 

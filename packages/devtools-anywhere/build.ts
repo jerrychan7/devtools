@@ -20,7 +20,7 @@ const builds: BuildOptions[] = [
     entryPoints: {
       [entry(BUNDLE_SCRIPT)]: 'src/iife.ts',
       [entry(PROBE_SCRIPT)]: 'src/probe.ts',
-      'devtools-anywhere-sw': 'src/sw.ts',
+      'devtools-anywhere-service-worker': 'src/service-worker.ts',
     },
     format: 'iife',
     minify: true,
