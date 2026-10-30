@@ -2,7 +2,7 @@
 // nothing itself, so requests behave as if it were not there.
 self.addEventListener('install', function (event) {
   event.waitUntil(
-    caches.open('playground-sw-v1').then(function (cache) {
+    caches.open('playground-service-worker-v1').then(function (cache) {
       return cache.addAll(['/playground/', '/playground/manifest.json']);
     })
   );

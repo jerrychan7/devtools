@@ -39,8 +39,10 @@
   }
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/playground/sw.js', { scope: '/playground/' }).catch(function (error) {
-      console.warn('[seed] service worker', error);
-    });
+    navigator.serviceWorker
+      .register('/playground/service-worker.js', { scope: '/playground/' })
+      .catch(function (error) {
+        console.warn('[seed] service worker', error);
+      });
   }
 })();
