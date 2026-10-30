@@ -87,7 +87,7 @@ test('the options become the probe script attributes', async () => {
     const el = document.querySelector('devtools-anywhere');
     const src = el?.shadowRoot?.querySelector('iframe')?.getAttribute('src') ?? '';
     return {
-      shell: !!el?.hasAttribute('shell'),
+      shell: !!el?.hasAttribute('data-shell'),
       locked: new URL(src, location.href).searchParams.has('shellModeLocked'),
     };
   });
@@ -161,6 +161,12 @@ test('idInQuery goes with remote as data-id-in-query', async () => {
   const remote = 'http://127.0.0.1:8080/';
   assert.match(await injected({ remote, idInQuery: true }), / data-remote="[^"]+" data-id-in-query[ >]/);
   assert.doesNotMatch(await injected({ remote }), /data-id-in-query/);
+});
+
+test('remote goes with the frontend: the page keeps its own DevTools', async () => {
+  const tag = await injected({ remote: 'http://127.0.0.1:8080/', devtoolsFrontendUrl: 'http://127.0.0.1:9/app.html' });
+  assert.match(tag, / data-remote="http:\/\/127\.0\.0\.1:8080\/"/);
+  assert.match(tag, / data-devtools-frontend-url="http:\/\/127\.0\.0\.1:9\/app\.html"/);
 });
 
 test('a devtoolsFrontendPath that is not a file serves no frontend', async () => {

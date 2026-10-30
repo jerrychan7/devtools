@@ -43,8 +43,8 @@ export interface DevtoolsAnywhereOptions {
   serviceWorker?: boolean;
   /**
    * URL of a remote debugging server (`@devtools-anywhere/remote-server`), such as
-   * `http://192.168.1.2:8080/`: pages connect to it, to be inspected from another machine,
-   * instead of mounting DevTools in the page.
+   * `http://192.168.1.2:8080/`: pages connect to it, to be inspected from another machine. They
+   * still mount DevTools with the frontend, each debugging the page in a session of its own.
    */
   remote?: string;
   /**
@@ -158,10 +158,12 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
       order: 'pre',
       handler() {
         const attrs: { src: string } & ProbeScriptAttributes = { src: `${BASE}probe.iife.js` };
+        // With both, the page has its own DevTools panel too, next to the remote one.
         if (options.remote) {
           attrs['data-remote'] = options.remote;
           if (options.idInQuery) attrs['data-id-in-query'] = true;
-        } else if (frontend) attrs['data-devtools-frontend-url'] = frontend;
+        }
+        if (frontend) attrs['data-devtools-frontend-url'] = frontend;
         if (options.openImmediately) attrs['data-open-immediately'] = true;
         if (options.defaultShellMode) attrs['data-default-shell-mode'] = options.defaultShellMode;
         if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;

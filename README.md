@@ -142,7 +142,7 @@ export default {
 }
 ```
 
-Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `devtoolsFrontendPath` (the entry page of another frontend build on disk, such as `…/anywhere_app.html`; its directory is served), `devtoolsFrontendUrl` (a frontend hosted elsewhere, served in place of it), `openImmediately`, `defaultShellMode` (`'on'` or `'off'`), `shellModeLocked`, `noToggler` (hides the F12 button), `serviceWorker`, which match the probe's attributes, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, in place of the element), with `idInQuery` (`data-id-in-query`, for a server with `idInQuery`).
+Only `vite serve` is affected: the probe is injected as the first script of every page, and the bundle, the Service Worker and the frontend are served under `/@devtools-anywhere/`. The frontend comes from `@devtools-anywhere/devtools-frontend`. Options: `devtoolsFrontendPath` (the entry page of another frontend build on disk, such as `…/anywhere_app.html`; its directory is served), `devtoolsFrontendUrl` (a frontend hosted elsewhere, served in place of it), `openImmediately`, `defaultShellMode` (`'on'` or `'off'`), `shellModeLocked`, `noToggler` (hides the F12 button), `serviceWorker`, which match the probe's attributes, `remote` (the URL of a [remote debugging](#remote-debugging) server to connect pages to, alongside the element), with `idInQuery` (`data-id-in-query`, for a server with `idInQuery`).
 
 ### The element
 
