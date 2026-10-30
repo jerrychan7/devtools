@@ -6,26 +6,26 @@ This package contains the third-party code below, with its copyright notices and
 
 | Component | Version | License | Copyright | Included in |
 | --- | --- | --- | --- | --- |
-| [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | dbaca449720468dd5323411246d159d5e38c3767 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
+| [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | 8c62f844ad8e0664ff41a633bfc17c472f1c5fd6 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
 | [acorn (DevTools front_end/third_party/acorn)](https://github.com/acornjs/acorn) | 8.10.0 | MIT | acorn contributors (see its AUTHORS) | devtools-frontend |
-| [chromium (DevTools front_end/third_party/chromium)](https://chromium.googlesource.com/devtools/devtools-frontend/+/dbaca449720468dd5323411246d159d5e38c3767/front_end/third_party/chromium/) | N/A | BSD-3-Clause | The Chromium Authors | devtools-frontend |
+| [chromium (DevTools front_end/third_party/chromium)](https://chromium.googlesource.com/devtools/devtools-frontend/+/8c62f844ad8e0664ff41a633bfc17c472f1c5fd6/front_end/third_party/chromium/) | N/A | BSD-3-Clause | The Chromium Authors | devtools-frontend |
 | [codemirror.next (DevTools front_end/third_party/codemirror.next)](https://github.com/codemirror/CodeMirror.next/) | 0.19.0 | MIT | Marijn Haverbeke and others | devtools-frontend |
 | [csp_evaluator (DevTools front_end/third_party/csp_evaluator)](https://www.npmjs.com/package/csp_evaluator) | 1.1.1 | Apache-2.0 | not stated in the license text | devtools-frontend |
 | [diff (DevTools front_end/third_party/diff)](https://github.com/google/diff-match-patch/tree/master/javascript) | 5.60.0 | Apache-2.0 | Google Inc. (diff-match-patch) | devtools-frontend |
 | [i18n (DevTools front_end/third_party/i18n)](https://github.com/GoogleChrome/lighthouse) | 15dad3944c2754a9e147fef9ef99934169e2ca08 | Apache-2.0 | Google LLC (Lighthouse) | devtools-frontend |
 | [intl-messageformat (DevTools front_end/third_party/intl-messageformat)](https://github.com/formatjs/formatjs) | 9.8.0 | BSD-3-Clause | Oath Inc. (includes tslib, 0BSD, Microsoft Corporation) | devtools-frontend |
 | [json5 (DevTools front_end/third_party/json5)](https://github.com/json5/json5) | 2.2.3 | MIT | Aseem Kishore and others | devtools-frontend |
-| [legacy-javascript (DevTools front_end/third_party/legacy-javascript)](https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript) | 0.0.3 | Apache-2.0 | Google LLC (Lighthouse) | devtools-frontend |
+| [legacy-javascript (DevTools front_end/third_party/legacy-javascript)](https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript) | 0.0.1 | Apache-2.0 | Google LLC (Lighthouse) | devtools-frontend |
 | [lit (DevTools front_end/third_party/lit)](https://github.com/lit/lit) | 2.4.1 | BSD-3-Clause | Google LLC | devtools-frontend |
 | [marked (DevTools front_end/third_party/marked)](https://github.com/markedjs/marked) | 18.0.4 | BSD-3-Clause, MIT | Christopher Jeffrey / MarkedJS | devtools-frontend |
-| [source-map-scopes-codec (DevTools front_end/third_party/source-map-scopes-codec)](https://github.com/ChromeDevTools/source-map-scopes-codec) | 2.0.0 | BSD-3-Clause | The Chromium Authors | devtools-frontend |
+| [source-map-scopes-codec (DevTools front_end/third_party/source-map-scopes-codec)](https://github.com/ChromeDevTools/source-map-scopes-codec) | 0.7.0 | BSD-3-Clause | The Chromium Authors | devtools-frontend |
 | [third-party-web (DevTools front_end/third_party/third-party-web)](https://github.com/patrickhulce/third-party-web) | 0.26.2 | MIT | Patrick Hulce | devtools-frontend |
 | [wasmparser (DevTools front_end/third_party/wasmparser)](https://github.com/wasdk/wasmparser) | 5.4.0 | Apache-2.0 | not stated in the license text | devtools-frontend |
-| [web-vitals (DevTools front_end/third_party/web-vitals)](https://github.com/GoogleChrome/web-vitals) | 6.2.3 | Apache-2.0 | Google LLC | devtools-frontend |
+| [web-vitals (DevTools front_end/third_party/web-vitals)](https://github.com/GoogleChrome/web-vitals) | 6.2.2 | Apache-2.0 | Google LLC | devtools-frontend |
 
 ### Chrome DevTools frontend
 
-- Version: dbaca449720468dd5323411246d159d5e38c3767
+- Version: 8c62f844ad8e0664ff41a633bfc17c472f1c5fd6
 - License: BSD-3-Clause
 - Copyright: The Chromium Authors
 - Source: https://chromium.googlesource.com/devtools/devtools-frontend
@@ -100,7 +100,7 @@ THE SOFTWARE.
 - Version: N/A
 - License: BSD-3-Clause
 - Copyright: The Chromium Authors
-- Source: https://chromium.googlesource.com/devtools/devtools-frontend/+/dbaca449720468dd5323411246d159d5e38c3767/front_end/third_party/chromium/
+- Source: https://chromium.googlesource.com/devtools/devtools-frontend/+/8c62f844ad8e0664ff41a633bfc17c472f1c5fd6/front_end/third_party/chromium/
 - Included in: devtools-frontend
 - Notes: Bundled into dist/bundle/ (from third_party/chromium/).
 
@@ -891,7 +891,7 @@ SOFTWARE.
 
 ### legacy-javascript (DevTools front_end/third_party/legacy-javascript)
 
-- Version: 0.0.3
+- Version: 0.0.1
 - License: Apache-2.0
 - Copyright: Google LLC (Lighthouse)
 - Source: https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript
@@ -1196,7 +1196,7 @@ out of the use of this software, even if advised of the possibility of such dama
 
 ### source-map-scopes-codec (DevTools front_end/third_party/source-map-scopes-codec)
 
-- Version: 2.0.0
+- Version: 0.7.0
 - License: BSD-3-Clause
 - Copyright: The Chromium Authors
 - Source: https://github.com/ChromeDevTools/source-map-scopes-codec
@@ -1455,7 +1455,7 @@ SOFTWARE.
 
 ### web-vitals (DevTools front_end/third_party/web-vitals)
 
-- Version: 6.2.3
+- Version: 6.2.2
 - License: Apache-2.0
 - Copyright: Google LLC
 - Source: https://github.com/GoogleChrome/web-vitals
