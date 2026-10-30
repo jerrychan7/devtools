@@ -51,12 +51,18 @@ if (!hasCheckout()) {
 // commit into REVISION by hand and build.
 const STABLE_RELEASE = 'https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1';
 async function stableRevision(): Promise<string> {
-  const releases: unknown = await (await fetch(STABLE_RELEASE)).json();
+  const failed = `No devtools commit in ${STABLE_RELEASE}: write the stable one into REVISION by hand.`;
+  let releases: unknown;
+  try {
+    const response = await fetch(STABLE_RELEASE);
+    releases = response.ok ? await response.json() : undefined;
+  } catch (e) {
+    throw new Error(failed, { cause: e });
+  }
   const release: unknown = Array.isArray(releases) ? releases[0] : undefined;
   const hashes: unknown = release instanceof Object ? Reflect.get(release, 'hashes') : undefined;
   const devtools: unknown = hashes instanceof Object ? Reflect.get(hashes, 'devtools') : undefined;
-  if (typeof devtools !== 'string' || !/^[0-9a-f]{40}$/.test(devtools))
-    throw new Error(`No devtools commit in ${STABLE_RELEASE}: write the stable one into REVISION by hand.`);
+  if (typeof devtools !== 'string' || !/^[0-9a-f]{40}$/.test(devtools)) throw new Error(failed);
   console.log(
     `Stable Chrome ${String(release instanceof Object && Reflect.get(release, 'version'))}: devtools ${devtools}`
   );
