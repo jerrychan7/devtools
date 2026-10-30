@@ -21,8 +21,8 @@
 // where DevTools on another machine inspects it. With `data-devtools-frontend-url` too, the page
 // also gets its own panel (shell mode included): the two are CDP sessions of their own over the
 // one probe. In shell mode the page in the shell connects, not the shell's top window; the shell
-// config keeps the server (and `data-id-in-query`), for the pages in the page iframe whose probe
-// has no `data-remote`, as the Service Worker injects it.
+// config keeps the server (and `data-id-in-query`): the shell's probe decides for every page in the
+// page iframe, whatever their own probe says, injected by the Service Worker or not.
 // `data-id-in-query` connects to that URL itself, the target in the query, for a server whose
 // host routes WebSocket upgrades by exact path (remote-server's `idInQuery`).
 //
@@ -60,11 +60,11 @@ const locked = attribute('data-shell-mode-locked') !== null;
 const noToggler = attribute('data-no-toggler') !== null;
 const shellOff = attribute('data-default-shell-mode') === 'off';
 const shellPage = isShellPage();
-// In the shell's page iframe, a probe without `data-remote` connects to the shell's server.
-const shellRemote = shellPage && remote === null ? readShellConfig() : null;
+// In the shell's page iframe, the shell's probe decides: its server, or none.
+const shellRemote = shellPage ? readShellConfig() : null;
 const remoteUrl = shellRemote
   ? shellRemote.remote
-  : script?.src && remote !== null
+  : !shellPage && script?.src && remote !== null
     ? new URL(remote || '.', script.src).href
     : null;
 const idInQuery = shellRemote ? !!shellRemote.idInQuery : attribute('data-id-in-query') !== null;
