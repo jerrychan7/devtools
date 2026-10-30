@@ -6,8 +6,8 @@
 // Environment: see checkout.ts.
 //
 // Flags:
-//   --latest     build the tip of origin/main instead of REVISION, and pin it on success
-//                (with --no-sync: pin the checkout's HEAD)
+//   --latest     build the devtools-frontend of the current stable Chrome instead of REVISION, and
+//                pin it on success (with --no-sync: pin the checkout's HEAD)
 //   --no-sync    skip `git checkout` + `gclient sync` (iterate on a prepared checkout): builds
 //                and labels the checkout's HEAD, whatever REVISION says
 //   --reset      discard edits to upstream files in the checkout that the patches do not
@@ -44,16 +44,36 @@ if (!hasCheckout()) {
   process.exit(1);
 }
 
+// Upstream versions: the frontend follows stable Chrome, as most users' Chrome is: the commit the
+// current stable release ships, on its milestone's branch (`chromium/<branch>`, the third part of
+// Chrome's version), not upstream's main. Chromium Dash knows which commit that is; its JSON
+// endpoint has no documentation nor promise, so its answer is checked. Without it, write the
+// commit into REVISION by hand and build.
+const STABLE_RELEASE = 'https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1';
+async function stableRevision(): Promise<string> {
+  const releases: unknown = await (await fetch(STABLE_RELEASE)).json();
+  const release: unknown = Array.isArray(releases) ? releases[0] : undefined;
+  const hashes: unknown = release instanceof Object ? Reflect.get(release, 'hashes') : undefined;
+  const devtools: unknown = hashes instanceof Object ? Reflect.get(hashes, 'devtools') : undefined;
+  if (typeof devtools !== 'string' || !/^[0-9a-f]{40}$/.test(devtools))
+    throw new Error(`No devtools commit in ${STABLE_RELEASE}: write the stable one into REVISION by hand.`);
+  console.log(
+    `Stable Chrome ${String(release instanceof Object && Reflect.get(release, 'version'))}: devtools ${devtools}`
+  );
+  return devtools;
+}
+
 let revision = fs.readFileSync(revisionFile, 'utf8').trim();
 if (noSync) {
-  // What is built is the checkout as it stands, e.g. upstream's tip left by a failed --latest.
+  // What is built is the checkout as it stands, e.g. the stable commit left by a failed --latest.
   const head = read('git', ['rev-parse', 'HEAD']);
   if (head !== revision && !args.has('--latest'))
     console.warn(`The checkout is at ${head}, not REVISION ${revision}: add --latest to pin it.`);
   revision = head;
 } else {
-  run('git', ['fetch', 'origin', 'main']);
-  if (args.has('--latest')) revision = read('git', ['rev-parse', 'origin/main']);
+  if (args.has('--latest')) revision = await stableRevision();
+  // The commit is on a branch of its own, not on main: it is fetched by its hash.
+  run('git', ['fetch', 'origin', revision]);
   run('git', ['checkout', '--force', '--detach', revision]);
   run('git', ['clean', '-fd', 'front_end']);
   run('gclient', ['sync', '--force', '--delete_unversioned_trees'], { cwd: path.dirname(src) });

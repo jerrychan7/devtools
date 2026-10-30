@@ -177,13 +177,13 @@ cd devtools-frontend.ignore/devtools-frontend
 git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
-To move to the latest upstream:
+The frontend follows stable Chrome, which is what most users have: once per milestone, a week or two after a new stable release, move to it with
 
 ```bash
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-It builds the tip of upstream `main` and pins it in `REVISION` on success. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
+It builds the devtools-frontend commit the current stable Chrome ships (on its milestone's branch, `chromium/<branch>`, not on upstream's `main`; Chromium Dash's `fetch_releases` says which) and pins it in `REVISION` on success. Should Chromium Dash not answer, write that commit into `REVISION` by hand and run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
 
 ## 3. Finishing a change
 

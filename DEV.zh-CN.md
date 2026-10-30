@@ -177,13 +177,13 @@ cd devtools-frontend.ignore/devtools-frontend
 git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
-升级到上游最新版：
+前端跟随稳定版 Chrome，也就是大多数用户手上的版本：每个里程碑一次，在新稳定版发布一两周后，用下面的命令升级：
 
 ```bash
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-它会构建上游 `main` 的最新提交，成功后写入 `REVISION`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
 
 ## 3. 开发完成
 
