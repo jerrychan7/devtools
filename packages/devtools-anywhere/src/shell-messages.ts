@@ -10,4 +10,4 @@ export const SHELL_QUERY = 'devtools-anywhere:shell-open';
  * the shell with the remote debugging server its probe names (`remote`, null for none) and
  * `idInQuery`: the shell's probe decides whether pages in the shell connect, and where.
  */
-export const SHELL_REMOTE = 'devtools-anywhere:shell-remote';
+export const SHELL_REMOTE = 'devtools-anywhere:remote';

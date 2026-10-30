@@ -63,11 +63,12 @@ const locked = attribute('data-shell-mode-locked') !== null;
 const noToggler = attribute('data-no-toggler') !== null;
 const shellOff = attribute('data-default-shell-mode') === 'off';
 const shellPage = isShellPage();
-/** The server `data-remote` names; for the pages in the shell, in the shell's top window. */
-const ownRemote = script?.src && remote !== null ? new URL(remote || '.', script.src).href : null;
+/**
+ * The server `data-remote` names; for the pages in the shell, in the shell's top window. In the shell's
+ * page iframe, the shell's probe decides instead (SHELL_REMOTE): its server, or none.
+ */
+const remoteUrl = script?.src && remote !== null ? new URL(remote || '.', script.src).href : null;
 const idInQuery = attribute('data-id-in-query') !== null;
-// In the shell's page iframe, the shell's probe decides (SHELL_REMOTE): its server, or none.
-const remoteUrl = shellPage ? null : ownRemote;
 
 /** Whether to enter shell mode by default; storage that throws counts as no. */
 const shellByDefault = () => {
@@ -101,23 +102,25 @@ if (bundle && frontend && window === top && !readShellConfig() && shellByDefault
 const probe = installProbe();
 // The probe's own request is DevTools', not the page's: left out of the Network panel.
 if (script?.src) probe.ownUrls.add(script.src);
+/** Whether this is the shell's top window, its document replaced with the shell by installProbe(). */
+const shellTop = window === top && readShellConfig() !== null;
 
 /** Whether `event` is a SHELL_REMOTE message from `source`, of this origin, not made up by a script. */
 const isRemoteMessage = (event: MessageEvent, source: MessageEventSource | null): event is MessageEvent<object> =>
   event.isTrusted &&
   event.source === source &&
   event.origin === location.origin &&
-  typeof event.data === 'object' &&
-  event.data !== null &&
+  // Data posted to this window is cloned in its realm: any object is an Object here.
+  event.data instanceof Object &&
   Reflect.get(event.data, 'type') === SHELL_REMOTE;
 // The shell's top window tells the pages in its page iframe its server. Its listeners are erased when
 // installProbe() replaces the document with the shell, in a task of its own: this one comes after.
-if (readShellConfig() && window === top) {
+if (shellTop) {
   setTimeout(() =>
     addEventListener('message', event => {
       const page = document.getElementById(SHELL_PAGE_ID);
       if (!(page instanceof HTMLIFrameElement) || !isRemoteMessage(event, page.contentWindow)) return;
-      page.contentWindow?.postMessage({ type: SHELL_REMOTE, remote: ownRemote, idInQuery }, location.origin);
+      page.contentWindow?.postMessage({ type: SHELL_REMOTE, remote: remoteUrl, idInQuery }, location.origin);
     })
   );
 }
@@ -171,7 +174,7 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
 // In the shell's top window the probe has replaced the document with the shell already. The page in
 // the shell has the bundle from installProbe() already and only connects to the remote server: the shell
 // shows DevTools, and the elements the page places take the shell's frontend (see element.ts).
-if (script && bundle && (frontend || remoteUrl || shellPage) && !(readShellConfig() && window === top)) {
+if (script && bundle && (frontend || remoteUrl || shellPage) && !shellTop) {
   probe.ownUrls.add(bundle);
 
   const start = () => {
