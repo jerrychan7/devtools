@@ -28,7 +28,9 @@ beforeEach(async () => {
 const open = async (name: string) => {
   await page.goto(`${env?.baseUrl}/tests/e2e/pages/${name}`);
   await page.waitForFunction(() =>
-    document.querySelector('devtools-anywhere[shell], html > devtools-anywhere')?.shadowRoot?.querySelector('iframe')
+    document
+      .querySelector('devtools-anywhere[data-shell], html > devtools-anywhere')
+      ?.shadowRoot?.querySelector('iframe')
   );
 };
 
@@ -38,13 +40,13 @@ const open = async (name: string) => {
  */
 const globalState = () =>
   page.evaluate(() => {
-    const el = document.querySelector('devtools-anywhere[shell], html > devtools-anywhere');
+    const el = document.querySelector('devtools-anywhere[data-shell], html > devtools-anywhere');
     if (!el) throw new Error('no global <devtools-anywhere>');
     const panel = el.shadowRoot?.querySelector('.panel');
     const toggler = el.shadowRoot?.querySelector('.toggler');
     const frontend = el.shadowRoot?.querySelector('iframe')?.src ?? '';
     return {
-      shell: el.hasAttribute('shell'),
+      shell: el.hasAttribute('data-shell'),
       inHtml: el.parentElement === document.documentElement,
       shown: !!panel && getComputedStyle(panel).display !== 'none',
       togglerShown: !!toggler && getComputedStyle(toggler).display !== 'none',
@@ -65,8 +67,9 @@ async function openDevtools() {
   await frame.evaluate(() => document.getElementById('toggle')?.click());
   await page.waitForFunction(() =>
     /fake-frontend/.test(
-      document.querySelector('devtools-anywhere[shell], html > devtools-anywhere')?.shadowRoot?.querySelector('iframe')
-        ?.src ?? ''
+      document
+        .querySelector('devtools-anywhere[data-shell], html > devtools-anywhere')
+        ?.shadowRoot?.querySelector('iframe')?.src ?? ''
     )
   );
 }
@@ -77,7 +80,7 @@ async function openDevtools() {
  */
 const keepOpen = async (keep: boolean) => {
   // The global element's frontend, not that of the page's own element.
-  const iframe = await page.$('devtools-anywhere[shell], html > devtools-anywhere');
+  const iframe = await page.$('devtools-anywhere[data-shell], html > devtools-anywhere');
   const frontend = await (await iframe?.$('pierce/iframe'))?.contentFrame();
   assert.ok(frontend, 'the frontend frame');
   // Wrapped, so that the handle comes back before the message does.

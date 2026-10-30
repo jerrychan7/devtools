@@ -8,9 +8,12 @@
   <body>
     <script>
       // Stands in for the DevTools frontend: enables Runtime, Page and DOM (which a reload is
-      // reported to) and records what it receives.
+      // reported to) and records what it receives: CDP messages, and the embedder's notices.
       window.received = [];
-      addEventListener('message', e => received.push(JSON.parse(e.data)));
+      window.notices = [];
+      addEventListener('message', e =>
+        typeof e.data === 'string' ? received.push(JSON.parse(e.data)) : notices.push(e.data)
+      );
       parent.postMessage(JSON.stringify({ id: 1, method: 'Runtime.enable' }), '*');
       parent.postMessage(JSON.stringify({ id: 2, method: 'Page.enable' }), '*');
       parent.postMessage(JSON.stringify({ id: 3, method: 'DOM.enable' }), '*');

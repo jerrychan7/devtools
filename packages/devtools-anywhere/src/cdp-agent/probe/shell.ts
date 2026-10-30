@@ -149,6 +149,14 @@ export function isShellPage(): boolean {
   }
 }
 
+/**
+ * Set on the document the probe turns into the shell (the same Document object): the page never
+ * runs there, and an attribute it writes in its own document does not make a shell.
+ */
+const SHELL_DOCUMENT = Symbol.for('devtools-anywhere:shell');
+/** True when `doc` is the shell document the probe wrote. @internal */
+export const isShellDocument = (doc: Document): boolean => Reflect.get(doc, SHELL_DOCUMENT) === true;
+
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 /**
@@ -194,6 +202,7 @@ export function writeShellDocument(config: ShellConfig): boolean {
 }
 
 function replaceDocument(config: ShellConfig) {
+  Reflect.set(document, SHELL_DOCUMENT, true);
   document.open();
   document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -201,6 +210,6 @@ function replaceDocument(config: ShellConfig) {
 #${SHELL_PAGE_ID}{flex:1;min-height:0;width:100%;border:0;display:block}</style></head>
 <body><iframe id="${SHELL_PAGE_ID}" src="${escapeAttr(location.href)}"></iframe>
 <script src="${escapeAttr(config.bundle)}"></script>
-<devtools-anywhere shell devtools-frontend-url="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
+<devtools-anywhere devtools-frontend-url="${escapeAttr(config.frontend)}"></devtools-anywhere></body></html>`);
   document.close();
 }

@@ -46,6 +46,8 @@ declare global {
     __inputEvents?: string[];
     /** Messages the fake frontend received. */
     received?: ReceivedMessage[];
+    /** The embedder's notices (objects) the fake frontend received. */
+    notices?: unknown[];
     /** The real frontend's postMessage targets, the page's original postMessage, and the messages the frontend dispatched. */
     __targets?: string[];
     __postMessage?: typeof window.postMessage;

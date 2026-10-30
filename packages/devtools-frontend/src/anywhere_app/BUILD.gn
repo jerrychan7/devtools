@@ -19,6 +19,7 @@ devtools_entrypoint("entrypoint") {
     "../../core/host:bundle",
     "../../core/i18n:bundle",
     "../../core/root:bundle",
+    "../../core/sdk:bundle",
     "../../entrypoints/inspector_main:meta",
     "../../panels/application:meta",
     "../../panels/common:meta",

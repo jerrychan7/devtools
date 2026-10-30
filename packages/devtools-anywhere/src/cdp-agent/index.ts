@@ -25,6 +25,7 @@ export {
   SHELL_KEY,
   SHELL_MODE_KEY,
   SHELL_PAGE_ID,
+  isShellDocument,
   isShellPage,
   readShellConfig,
   refuseShell,

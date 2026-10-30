@@ -807,6 +807,52 @@ test('right-clicking a node in the Elements panel opens the soft context menu', 
   await waitFor(async () => !(await menuShown()));
 });
 
+test('hidden, DevTools leaves inspect mode and the page gets its clicks back', { skip }, async () => {
+  /** Whether the toolbar's inspect button is on, after clicking it when `toggle`. */
+  const inspecting = (toggle: boolean) =>
+    frontend.evaluate(async toggle => {
+      // The built frontend has no type declarations; only this much of it is used.
+      const {
+        ActionRegistry,
+      }: {
+        ActionRegistry: {
+          ActionRegistry: {
+            instance(): { getAction(id: string): { toggled(): boolean; execute(): Promise<boolean> } };
+          };
+        };
+      } = await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['ui/legacy/legacy.js']();
+      const action = ActionRegistry.ActionRegistry.instance().getAction('elements.toggle-element-search');
+      if (toggle) await action.execute();
+      return action.toggled();
+    }, toggle);
+  const control = (part: string) =>
+    page.evaluate(part => {
+      const el = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector(part);
+      if (!(el instanceof HTMLElement)) throw new Error(`no ${part}`);
+      el.click();
+    }, part);
+  assert.equal(await inspecting(true), true);
+  await control('.close');
+  await waitFor(async () => !(await inspecting(false)));
+  await page.evaluate(() => {
+    Reflect.set(window, '__markerClicks', 0);
+    document.getElementById('real-frontend-marker')?.addEventListener('click', () => {
+      Reflect.set(window, '__markerClicks', Number(Reflect.get(window, '__markerClicks')) + 1);
+    });
+  });
+  await page.click('#real-frontend-marker');
+  assert.equal(await page.evaluate(() => Reflect.get(window, '__markerClicks')), 1, 'not taken by inspect mode');
+  await control('.toggler');
+  await waitFor(() =>
+    page.evaluate(() => {
+      const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      return !!panel && getComputedStyle(panel).display !== 'none';
+    })
+  );
+});
+
 // Last: it reloads the page into shell mode and back.
 test('the toolbar keeps DevTools open across reloads, and reloads the page', { skip }, async () => {
   /** A button of the frontend whose label starts with `label`, and the frontend currently shown. */

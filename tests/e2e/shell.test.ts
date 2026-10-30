@@ -19,7 +19,7 @@ after(() => env?.close());
 const shellState = () =>
   page.evaluate(() => {
     const frame = document.getElementById('devtools-anywhere-page');
-    const devtools = document.querySelector('devtools-anywhere[shell]');
+    const devtools = document.querySelector('devtools-anywhere[data-shell]');
     const frontendFrame = devtools?.shadowRoot?.querySelector('iframe');
     if (devtools && !frontendFrame?.contentWindow) throw new Error('no frontend frame');
     const frontend = frontendFrame?.contentWindow;
@@ -100,10 +100,12 @@ test("closing (DevTools' own close button) hides DevTools; stopping keeping it o
   assert.ok(devtools, 'the DevTools frame');
   await devtools.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*'));
   await page.waitForFunction(() => {
-    const panel = document.querySelector('devtools-anywhere[shell]')?.shadowRoot?.querySelector('.panel');
+    const panel = document.querySelector('devtools-anywhere[data-shell]')?.shadowRoot?.querySelector('.panel');
     return !!panel && getComputedStyle(panel).display === 'none';
   });
   assert.equal(await devtoolsShown(page), false);
+  await devtools.waitForFunction(() => (window.notices ?? []).length > 0);
+  assert.deepEqual(await devtools.evaluate(() => window.notices), [{ devtoolsAnywhere: { type: 'hidden' } }]);
   // Still in the shell, whose address bar follows the page shown.
   assert.match((await waitFor(s => s.inShell)).url, /\?second$/);
   // Its info bar's "Stop keeping open": the user turns shell mode off, which is remembered.

@@ -27,7 +27,7 @@ const shellState = () =>
   page.evaluate(() => {
     const frame = document.getElementById('devtools-anywhere-page');
     return {
-      inShell: !!document.querySelector('devtools-anywhere[shell]') && frame instanceof HTMLIFrameElement,
+      inShell: !!document.querySelector('devtools-anywhere[data-shell]') && frame instanceof HTMLIFrameElement,
       pageUrl: frame instanceof HTMLIFrameElement ? (frame.contentWindow?.location.href ?? '') : location.href,
       topUrl: location.href,
       open: (() => {
@@ -43,7 +43,7 @@ test('the first load enters shell mode at once, with DevTools hidden', async () 
     if (r.url().startsWith(url)) documents++;
   });
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
   const state = await shellState();
   assert.equal(state.inShell, true);
   assert.equal(state.open, false);
@@ -57,14 +57,14 @@ test('the first load enters shell mode at once, with DevTools hidden', async () 
 
 test('DevTools opened in the shell stays open when the top-level page reloads, as in Chrome', async () => {
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
   await clickF12(page);
   await page.waitForFunction(() => {
     const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
     return !!panel && getComputedStyle(panel).display !== 'none';
   });
   await page.reload();
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
   const state = await shellState();
   assert.equal(state.inShell, true);
   assert.equal(state.open, true);
@@ -164,7 +164,7 @@ test("the user's choice wins over data-default-shell-mode", async () => {
   await page.evaluate(() => localStorage.setItem('devtools-anywhere:shell-mode', 'on'));
   try {
     await page.reload();
-    await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+    await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
     assert.equal((await shellState()).inShell, true);
   } finally {
     await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));

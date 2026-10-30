@@ -133,6 +133,17 @@ test('the togglers follow the element when it is attached again', async () => {
   assert.deepEqual(await state(), { open: true, expanded: { first: 'true', second: 'true', missing: null } });
 });
 
+test('hidden, DevTools is told, to leave inspect mode', async () => {
+  await load();
+  await click('#first');
+  const frontend = await page.waitForFrame(f => f.parentFrame() === page.mainFrame() && /frontend/.test(f.url()));
+  await frontend.waitForFunction(() => (window.received ?? []).length > 0);
+  assert.deepEqual(await frontend.evaluate(() => window.notices), []);
+  await click('#first');
+  await frontend.waitForFunction(() => (window.notices ?? []).length > 0);
+  assert.deepEqual(await frontend.evaluate(() => window.notices), [{ devtoolsAnywhere: { type: 'hidden' } }]);
+});
+
 test('a toggler without its element only warns, once', async () => {
   await load();
   warnings.length = 0;
@@ -186,7 +197,7 @@ async function loadShell() {
   await reloaded;
   // Not remembered for the next tests.
   await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
   await pageReady();
   await close();
   await framed().waitForFunction(() => document.getElementById('first')?.getAttribute('aria-expanded') === 'false');
@@ -194,16 +205,28 @@ async function loadShell() {
 
 test("in the shell, the page's togglers toggle the shell's element and follow it", async () => {
   await loadShell();
-  assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: 'false' });
-  // The value is ignored there: even the missing id controls the shell.
+  assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: null });
+  // A missing id controls nothing there either: it only warns.
+  warnings.length = 0;
+  const warned = new Promise<void>(resolve => {
+    const check = () => {
+      if (!warnings.some(w => w.includes('"nowhere"'))) return;
+      page.off('console', check);
+      resolve();
+    };
+    page.on('console', check);
+  });
   await click('#missing', framed());
+  await warned;
+  assert.equal((await state()).open, false);
+  await click('#first', framed());
   assert.equal((await state()).open, true);
-  assert.deepEqual((await state(framed())).expanded, { first: 'true', second: 'true', missing: 'true' });
+  assert.deepEqual((await state(framed())).expanded, { first: 'true', second: 'true', missing: null });
   // Closed from the shell (DevTools' × button), the page's togglers follow, through an event
   // from the shell's window.
   await close();
   await framed().waitForFunction(() => document.getElementById('first')?.getAttribute('aria-expanded') === 'false');
-  assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: 'false' });
+  assert.deepEqual((await state(framed())).expanded, { first: 'false', second: 'false', missing: null });
 });
 
 test("the page's listener on the shell's element goes with the page", async () => {

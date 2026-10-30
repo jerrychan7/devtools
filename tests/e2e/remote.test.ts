@@ -604,7 +604,7 @@ test('a page with its own DevTools panel is inspected remotely too, each in its 
     // Shell mode is on by default, but not with remote debugging: the page stays at the top.
     assert.deepEqual(
       await both.evaluate(() => ({
-        shell: !!document.querySelector('devtools-anywhere')?.hasAttribute('shell'),
+        shell: !!document.querySelector('devtools-anywhere')?.hasAttribute('data-shell'),
         page: !!document.getElementById('devtools-anywhere-page'),
       })),
       { shell: false, page: false }

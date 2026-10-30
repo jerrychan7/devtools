@@ -143,6 +143,46 @@ test("its DevTools' requests to dock or keep the page in shell mode are ignored"
   assert.deepEqual(state, { ran: true, shell: null, stored: null, height: 300 });
 });
 
+test('closed by its DevTools or a toggler, its frontend is not told it is hidden', async () => {
+  await page.goto(url());
+  const frontend = await frontendOf('#placed');
+  await page.evaluate(() => document.getElementById('request')?.click());
+  await frontend.evaluate(() => {
+    parent.postMessage({ devtoolsAnywhere: { type: 'close' } }, '*');
+    // Taken, after the close above: once its colors show, both have been handled.
+    const theme = { type: 'theme', toolbar: 'rgb(4, 5, 6)', divider: 'red', icon: 'red' };
+    parent.postMessage({ devtoolsAnywhere: theme }, '*');
+  });
+  await page.waitForFunction(() => {
+    const panel = document.getElementById('placed')?.shadowRoot?.querySelector<HTMLElement>('.panel');
+    return panel?.style.getPropertyValue('--bar-background') === 'rgb(4, 5, 6)';
+  });
+  assert.deepEqual(await frontend.evaluate(() => window.notices), []);
+});
+
+test("a `shell` attribute does not make it the shell's element", async () => {
+  await page.goto(url());
+  await page.evaluate(() => {
+    const el = document.createElement('devtools-anywhere');
+    el.id = 'forged';
+    el.setAttribute('shell', '');
+    el.style.height = '200px';
+    document.body.append(el);
+  });
+  const frontend = await frontendOf('#forged');
+  assert.match(frontend.url(), /#.*keep=0/, 'no way into shell mode');
+  assert.match(frontend.url(), /#.*shell=0/);
+  const state = await page.evaluate(() => {
+    const el = document.getElementById('forged');
+    return {
+      shell: el?.hasAttribute('data-shell'),
+      custom: el?.shadowRoot?.querySelector('.panel')?.hasAttribute('data-custom'),
+      display: el && getComputedStyle(el).display,
+    };
+  });
+  assert.deepEqual(state, { shell: false, custom: true, display: 'block' });
+});
+
 test("in the shell's page, it works as on its own", async () => {
   await page.goto(url());
   // The user opens the global DevTools and turns shell mode on with its lock button.
@@ -153,7 +193,7 @@ test("in the shell's page, it works as on its own", async () => {
   await global.evaluate(() => parent.postMessage({ devtoolsAnywhere: { type: 'keep-open', keep: true } }, '*'));
   await reloaded;
   await page.evaluate(() => localStorage.removeItem('devtools-anywhere:shell-mode'));
-  await page.waitForFunction(() => document.querySelector('devtools-anywhere[shell]'));
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
   const framed = await page.waitForFrame(f => f.url().includes('custom-element.html') && f !== page.mainFrame());
   const frontend = await frontendOf('#placed', framed);
   await framed.evaluate(() => console.log('in the shell'));

@@ -3,6 +3,7 @@ import {
   SHELL_KEY,
   SHELL_PAGE_ID,
   createCdpSession,
+  isShellDocument,
   isShellPage,
   markOwn,
   OWN_ATTRIBUTE,
@@ -20,11 +21,13 @@ import type { GlobalElementConfig } from './api';
 import type { DevtoolsAnywhereAttributes, TogglerAttributes } from './public-types';
 import {
   DOCK_SIDES,
+  HIDDEN_NOTICE,
   PROBE_SCRIPT,
   SNAPDOM_SCRIPT,
   REQUEST_KEY,
   type DockSide,
   type EmbedderRequest,
+  type FrontendNotice,
   type FrontendHash,
 } from './embedder';
 
@@ -208,9 +211,9 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 }
 [data-custom] .bar, .toggler[data-custom] { display: none; }
 
-:host([shell]) { display: flex; flex: none; }
-:host([shell]) .panel { position: static; flex: 1 1 auto; }
-:host([shell]) .panel[data-dock=undocked] { position: fixed; }
+:host([data-shell]) { display: flex; flex: none; }
+:host([data-shell]) .panel { position: static; flex: 1 1 auto; }
+:host([data-shell]) .panel[data-dock=undocked] { position: fixed; }
 :host([data-shell-page]) { display: none !important; }
 `;
 
@@ -227,7 +230,7 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
  * fires `devtools-toggle-request` on it.
  *
  * The togglers work once the element is registered with defineDevtoolsAnywhere(); in the shell's
- * page iframe, they control the shell's `<devtools-anywhere>`, whatever their value.
+ * page iframe, those without a value control the shell's `<devtools-anywhere>`.
  *
  * The dock side (DevTools' main menu, "Dock side") and the sizes (dragging the bar) are the
  * user's: remembered in localStorage, sizes as percentages of the viewport (`dvh`/`dvw`).
@@ -340,7 +343,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Whether the page placed this element itself: neither the probe's nor the shell's. */
   private get custom() {
-    return !globalElements.has(this) && !this.hasAttribute('shell');
+    return !globalElements.has(this) && !isShellElement(this);
   }
 
   /**
@@ -375,7 +378,12 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (open === this.isOpen) return;
     this.isOpen = open;
     // In the shell, DevTools stays shown (or hidden) across reloads of the top-level page.
-    if (this.hasAttribute('shell')) storeShellOpen(open);
+    if (isShellElement(this)) storeShellOpen(open);
+    // Hidden, the frontend stays loaded: it leaves inspect mode, as Chrome's does when closed.
+    if (!open && !this.custom && this.frontendOrigin) {
+      const notice: FrontendNotice = { type: HIDDEN_NOTICE };
+      this.frame.contentWindow?.postMessage({ [REQUEST_KEY]: notice }, this.frontendOrigin);
+    }
     this.syncOpen();
     if (this.isConnected && !inactiveGlobals.has(this) && !this.hasAttribute('data-shell-page')) this.update();
   }
@@ -522,7 +530,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     }
     // The options, once: the probe's, or in the shell the shell config's, kept for its reloads.
     if (this.openState === null) {
-      const shell = this.hasAttribute('shell') ? readShellConfig() : null;
+      const shell = isShellElement(this) ? readShellConfig() : null;
       const given = shell
         ? { open: shell.open !== false, locked: !!shell.locked, noToggler: !!shell.noToggler, sw: shell.sw ?? null }
         : globalConfigs.get(this);
@@ -543,7 +551,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       this.setAttribute('data-shell-page', '');
       return;
     }
-    if (this.hasAttribute('shell')) {
+    if (isShellElement(this)) {
+      // Only for its styles: what makes it the shell's is its document.
+      this.setAttribute('data-shell', '');
       this.watchShellPage();
       this.registerShellWorker();
     } else {
@@ -595,7 +605,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // The toggler is a popover: shown as one, in the shell too. The shell document is ours:
     // nothing there covers the panel, which takes its place in the layout.
     if (TOP_LAYER) {
-      if (!this.hasAttribute('shell')) setPopoverOpen(this.panel, this.isOpen);
+      if (!isShellElement(this)) setPopoverOpen(this.panel, this.isOpen);
       setPopoverOpen(this.toggler, !this.isOpen && !this.toggler.hidden);
     }
     // Load the frontend only once DevTools is opened; the probe keeps capturing meanwhile.
@@ -621,7 +631,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       style.width = stored ? `${stored}${VW}` : `50${VW}`;
     }
     // The shell document is ours: the page iframe comes first, then this element.
-    if (this.hasAttribute('shell')) {
+    if (isShellElement(this)) {
       document.body.style.flexDirection = dock === 'right' ? 'row' : dock === 'left' ? 'row-reverse' : 'column';
     }
   }
@@ -662,7 +672,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     const frontend = this.frontendUrl;
     const pageElement = document.getElementById(SHELL_PAGE_ID);
     const page = pageElement instanceof HTMLIFrameElement ? pageElement : null;
-    if (!frontend || (!this.session && !(this.hasAttribute('shell') && page))) return;
+    if (!frontend || (!this.session && !(isShellElement(this) && page))) return;
     const url = new URL(frontend, location.href);
     // The frontend's own switch for shell mode is hidden.
     if (this.config.locked || this.custom) url.searchParams.set('shellModeLocked', '');
@@ -675,7 +685,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (this.session) this.disconnect = connectFrontend(this.session, this.frame, url.origin);
     else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
     // Whether shell mode is available (it needs the bundle URL) and whether it is on.
-    const shell = this.hasAttribute('shell');
+    const shell = isShellElement(this);
     const hash = new URLSearchParams({
       embedded: location.origin,
       dock: this.dock,
@@ -790,15 +800,25 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
 const TOGGLE_REQUEST_EVENT = 'devtools-toggle-request';
 /** Whether `el` is an element placed by the page (of this window). */
 const isCustom = (el: Element) =>
-  el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !el.hasAttribute('shell');
+  el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !isShellElement(el);
+/**
+ * Whether `el` is the shell's element: one in the shell document the probe wrote (not created
+ * for the probe), maybe of another window. Its document is marked as the shell's when the probe writes the
+ * shell; a `shell` attribute no longer makes an element the shell's.
+ */
+const isShellElement = (el: Element) => !globalElements.has(el) && isShellDocument(el.ownerDocument);
 
 /**
- * Fired on the global element when it opens or closes, for the togglers of the shell's page: not
- * part of the API, which has only their aria-expanded.
+ * Fired on the global element when it opens or closes, for the togglers of the shell's page: an
+ * internal convention, not part of the API, which has only their aria-expanded. A page of the
+ * same origin can fire it too: it is not meant to be trusted.
  */
 const STATE_EVENT = 'devtools-anywhere-state';
 
-/** The event a toggler controls its element with (see controlElement). */
+/**
+ * The event a toggler controls its element with (see controlElement): an internal convention, not
+ * part of the API. A page of the same origin can fire it too: it is not meant to be trusted.
+ */
 const CONTROL_EVENT = 'devtools-anywhere-control';
 
 /** Elements with this attribute open and close DevTools when clicked (see togglerTarget). */
@@ -809,24 +829,31 @@ let togglerTag = '';
 const warned = new Set<string>();
 
 /**
- * The element a toggler controls: in the shell's page iframe, the shell's element; else the
- * element whose id is the attribute's value, or the first element when it has none.
+ * The element a toggler controls: the element whose id is the attribute's value, or without one
+ * the first global element, or in the shell's page iframe the shell's element.
  */
 function togglerTarget(toggler: Element, warn: boolean): Element | null {
-  // An element the page placed in the shell's page: the toggler names it.
-  const named = toggler.ownerDocument.getElementById(toggler.getAttribute(TOGGLE_ATTRIBUTE) || '');
-  if (isShellPage() && named && customElementsLoading.has(named)) return named;
-  // The shell's element is of the shell window's class: it is toggled through an event.
-  if (isShellPage()) return window.frameElement?.ownerDocument.querySelector('devtools-anywhere[shell]') ?? null;
   const id = toggler.getAttribute(TOGGLE_ATTRIBUTE) ?? '';
   const doc = toggler.ownerDocument;
-  // Without a value, the global element (or the shell's); global elements after the first do
-  // nothing: they are not targets.
-  const target = id
-    ? doc.getElementById(id)
-    : [...doc.querySelectorAll(togglerTag)].find(
-        el => (globalElements.has(el) || el.hasAttribute('shell')) && !inactiveGlobals.has(el)
-      );
+  let target: Element | null | undefined = null;
+  if (isShellPage()) {
+    // An element the page placed in the shell's page: the toggler names it. Without a value, the
+    // shell's element, of the shell window's class: it is toggled through an event.
+    const named = id ? doc.getElementById(id) : null;
+    if (named && customElementsLoading.has(named)) return named;
+    if (!id) {
+      const shellDocument = window.frameElement?.ownerDocument;
+      return (shellDocument && [...shellDocument.querySelectorAll(togglerTag)].find(isShellElement)) ?? null;
+    }
+  } else {
+    // Without a value, the global element (or the shell's); global elements after the first do
+    // nothing: they are not targets.
+    target = id
+      ? doc.getElementById(id)
+      : [...doc.querySelectorAll(togglerTag)].find(
+          el => (globalElements.has(el) || isShellElement(el)) && !inactiveGlobals.has(el)
+        );
+  }
   if (target instanceof DevtoolsAnywhereElement && !inactiveGlobals.has(target)) return target;
   if (warn && !warned.has(id)) {
     warned.add(id);

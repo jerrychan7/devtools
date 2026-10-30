@@ -22,6 +22,17 @@ export type EmbedderRequest =
   | { type: 'theme'; toolbar: string; divider: string; icon: string };
 
 /**
+ * Tells the frontend, posted to it under {@link REQUEST_KEY} (`{ type: HIDDEN_NOTICE }`), that the
+ * embedder hid the panel: like Chrome when DevTools closes, it leaves inspect mode and hides
+ * highlights, which would otherwise keep taking the page over.
+ */
+export const HIDDEN_NOTICE = 'hidden';
+/** What the embedder posts to the frontend: {@link HIDDEN_NOTICE}. */
+export interface FrontendNotice {
+  type: typeof HIDDEN_NOTICE;
+}
+
+/**
  * The key a request is posted under (`{ [REQUEST_KEY]: request }`): requests are objects, so
  * they never mix with CDP messages, which are strings.
  */

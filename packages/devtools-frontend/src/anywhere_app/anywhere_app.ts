@@ -28,6 +28,7 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
+import * as SDK from '../../core/sdk/sdk.js';
 import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
@@ -35,6 +36,7 @@ import {
   type DockSide,
   type EmbedderRequest,
   type FrontendHash,
+  HIDDEN_NOTICE,
   OWN_SCRIPTS,
   type RemoteFrontendHash,
   REQUEST_KEY,
@@ -305,9 +307,28 @@ UI.Toolbar.registerToolbarItem({
   order: 97.5,
   location: UI.Toolbar.ToolbarItemLocation.MAIN_TOOLBAR_RIGHT,
 });
+// The embedder hid the panel (embedder.ts): like Chrome's DevTools once closed, leave inspect mode
+// (the toolbar button follows) and hide the highlights, which would keep taking the page over.
+const onHidden = (): void => {
+  const registry = UI.ActionRegistry.ActionRegistry.instance();
+  const search = registry.hasAction('elements.toggle-element-search') ?
+      registry.getAction('elements.toggle-element-search') :
+      null;
+  if (search?.toggled()) {
+    void search.execute();
+  }
+  SDK.OverlayModel.OverlayModel.hideDOMNodeHighlight(SDK.TargetManager.TargetManager.instance());
+};
 window.addEventListener('message', event => {
-  if (remote || event.source !== window.parent || typeof event.data !== 'string' ||
-      (embedder !== '*' && event.origin !== embedder)) {
+  if (remote || event.source !== window.parent || (embedder !== '*' && event.origin !== embedder)) {
+    return;
+  }
+  if (typeof event.data !== 'string') {
+    const data: unknown = event.data;
+    const notice: unknown = typeof data === 'object' && data !== null ? Reflect.get(data, REQUEST_KEY) : null;
+    if (typeof notice === 'object' && notice !== null && Reflect.get(notice, 'type') === HIDDEN_NOTICE) {
+      onHidden();
+    }
     return;
   }
   host.events.dispatchEventToListeners(Host.InspectorFrontendHostAPI.Events.DispatchMessage, event.data);

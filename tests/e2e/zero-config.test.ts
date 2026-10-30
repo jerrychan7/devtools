@@ -19,7 +19,7 @@ after(() => env?.close());
 /** Messages the fake frontend received, in or outside shell mode. */
 const received = () =>
   page.evaluate(() => {
-    const el = document.querySelector('devtools-anywhere[shell]') || document.querySelector('devtools-anywhere');
+    const el = document.querySelector('devtools-anywhere[data-shell]') || document.querySelector('devtools-anywhere');
     if (!el) return [];
     const frontend = el.shadowRoot?.querySelector('iframe')?.contentWindow;
     if (!frontend) throw new Error('no frontend frame');
@@ -110,7 +110,7 @@ async function keepOpen(keep: boolean) {
 
 test('in shell mode the Service Worker injects the probe into pages without it', async () => {
   await keepOpen(true);
-  await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere[shell]')));
+  await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere[data-shell]')));
   await waitFor(() => page.evaluate(() => !!navigator.serviceWorker.controller));
   await page.evaluate(() => {
     const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
@@ -261,7 +261,7 @@ test('the Service Worker makes debugger statements log a warning', async () => {
 test('the Service Worker leaves the same-origin DevTools frontend alone', async () => {
   // The worker controls the shell by now, so it sees the frontend frame's navigation.
   await page.evaluate(() => {
-    const frontend = document.querySelector('devtools-anywhere[shell]')?.shadowRoot?.querySelector('iframe');
+    const frontend = document.querySelector('devtools-anywhere[data-shell]')?.shadowRoot?.querySelector('iframe');
     if (!frontend?.contentWindow) throw new Error('no frontend frame');
     // Marks the old document, to wait for the new one.
     Reflect.set(frontend.contentWindow, 'stale', true);
@@ -270,14 +270,14 @@ test('the Service Worker leaves the same-origin DevTools frontend alone', async 
   await waitFor(() =>
     page.evaluate(() => {
       const doc = document
-        .querySelector('devtools-anywhere[shell]')
+        .querySelector('devtools-anywhere[data-shell]')
         ?.shadowRoot?.querySelector('iframe')?.contentDocument;
       const win = doc?.defaultView;
       return !!win && !Reflect.get(win, 'stale') && doc.readyState === 'complete' && !!win.received;
     })
   );
   const scripts = await page.evaluate(() => {
-    const devtools = document.querySelector('devtools-anywhere[shell]');
+    const devtools = document.querySelector('devtools-anywhere[data-shell]');
     const frontendDocument = devtools?.shadowRoot?.querySelector('iframe')?.contentDocument;
     if (!frontendDocument) throw new Error('no frontend frame');
     return [...frontendDocument.querySelectorAll('script')].map(s => s.src);
@@ -294,7 +294,7 @@ for (const path of [
   test(`the Service Worker leaves the frontend alone at ${path}`, async () => {
     // Recognized by its content, whatever URL it is opened at (a directory or its index.html).
     await page.evaluate(href => {
-      const frontend = document.querySelector('devtools-anywhere[shell]')?.shadowRoot?.querySelector('iframe');
+      const frontend = document.querySelector('devtools-anywhere[data-shell]')?.shadowRoot?.querySelector('iframe');
       if (!frontend?.contentWindow) throw new Error('no frontend frame');
       Reflect.set(frontend.contentWindow, 'stale', true);
       frontend.contentWindow.location.href = href;
@@ -302,7 +302,7 @@ for (const path of [
     await waitFor(() =>
       page.evaluate(() => {
         const doc = document
-          .querySelector('devtools-anywhere[shell]')
+          .querySelector('devtools-anywhere[data-shell]')
           ?.shadowRoot?.querySelector('iframe')?.contentDocument;
         const win = doc?.defaultView;
         return !!win && !Reflect.get(win, 'stale') && doc.readyState === 'complete' && !!win.received;
@@ -310,7 +310,7 @@ for (const path of [
     );
     const scripts = await page.evaluate(() => {
       const frontendDocument = document
-        .querySelector('devtools-anywhere[shell]')
+        .querySelector('devtools-anywhere[data-shell]')
         ?.shadowRoot?.querySelector('iframe')?.contentDocument;
       if (!frontendDocument) throw new Error('no frontend frame');
       return {
@@ -337,7 +337,7 @@ test('the Service Worker injects right after the shell reloads', async () => {
     () =>
       page.evaluate(() => {
         const pageWindow = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
-        if (Reflect.get(window, 'stale') || !pageWindow || !document.querySelector('devtools-anywhere[shell]'))
+        if (Reflect.get(window, 'stale') || !pageWindow || !document.querySelector('devtools-anywhere[data-shell]'))
           return false;
         pageWindow.location.href = '/tests/e2e/pages/no-probe.html';
         return true;
@@ -369,7 +369,7 @@ test('the Service Worker passes requests through once the shell is gone without 
   await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere')?.isConnected));
   await waitFor(() => devtoolsShown(page));
   await keepOpen(true);
-  await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere[shell]')));
+  await waitFor(() => page.evaluate(() => !!document.querySelector('devtools-anywhere[data-shell]')));
   await waitFor(() => page.evaluate(() => !!navigator.serviceWorker.controller));
   // Another tab outside shell mode keeps the worker while this shell uses it.
   const other = await page.browser().newPage();
