@@ -707,6 +707,24 @@ test('a page reloaded in the shell is still one target, the new page', async () 
   }
 });
 
+test("a page the Service Worker gives the probe in the shell connects to the shell's server", async () => {
+  const shell = await env.browser.newPage();
+  try {
+    await shell.goto(localPage('panel&serviceWorker&shell-worker'));
+    const page = await shellPageFrame(shell);
+    await shell.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await page.evaluate(() => {
+      location.href = '/tests/e2e/pages/no-probe.html?shell-worker-injected';
+    });
+    await waitFor(async () => (await targets()).some(t => t.url.includes('shell-worker-injected')));
+    assert.deepEqual(await evaluateIn('shell-worker-injected', '[document.title, window === top]'), [
+      evaluated(['no probe', false]),
+    ]);
+  } finally {
+    await shell.close();
+  }
+});
+
 test('a page locked out of shell mode connects from its top window', async () => {
   const other = await env.browser.newPage();
   try {

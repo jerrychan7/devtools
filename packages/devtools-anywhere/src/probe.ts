@@ -20,7 +20,9 @@
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
 // where DevTools on another machine inspects it. With `data-devtools-frontend-url` too, the page
 // also gets its own panel (shell mode included): the two are CDP sessions of their own over the
-// one probe. In shell mode the page in the shell connects, not the shell's top window.
+// one probe. In shell mode the page in the shell connects, not the shell's top window; the shell
+// config keeps the server (and `data-id-in-query`), for the pages in the page iframe whose probe
+// has no `data-remote`, as the Service Worker injects it.
 // `data-id-in-query` connects to that URL itself, the target in the query, for a server whose
 // host routes WebSocket upgrades by exact path (remote-server's `idInQuery`).
 //
@@ -57,6 +59,17 @@ const open = attribute('data-open-immediately') !== null;
 const locked = attribute('data-shell-mode-locked') !== null;
 const noToggler = attribute('data-no-toggler') !== null;
 const shellOff = attribute('data-default-shell-mode') === 'off';
+const shellPage = isShellPage();
+// In the shell's page iframe, a probe without `data-remote` connects to the shell's server.
+const shellRemote = shellPage && remote === null ? readShellConfig() : null;
+const remoteUrl = shellRemote
+  ? shellRemote.remote
+  : script?.src && remote !== null
+    ? new URL(remote || '.', script.src).href
+    : null;
+const idInQuery = shellRemote ? !!shellRemote.idInQuery : attribute('data-id-in-query') !== null;
+/** The remote server, kept in the shell config. */
+const remoteFlags = { remote: remoteUrl ?? undefined, idInQuery };
 
 /** Whether to enter shell mode by default; storage that throws counts as no. */
 const shellByDefault = () => {
@@ -76,11 +89,16 @@ if (entered && locked && shellOff) {
     sessionStorage.removeItem(SHELL_KEY);
   } catch {}
 } else if (entered) {
-  storeShellConfig(entered.frontend, entered.bundle, entered.serviceWorker ?? null, { ...entered, locked, noToggler });
+  storeShellConfig(entered.frontend, entered.bundle, entered.serviceWorker ?? null, {
+    ...entered,
+    locked,
+    noToggler,
+    ...remoteFlags,
+  });
 }
 // installProbe() reads the config next and writes the shell.
 if (bundle && frontend && window === top && !readShellConfig() && shellByDefault()) {
-  storeShellConfig(frontend, bundle, attribute('data-service-worker'), { open, locked, noToggler });
+  storeShellConfig(frontend, bundle, attribute('data-service-worker'), { open, locked, noToggler, ...remoteFlags });
 }
 
 const probe = installProbe();
@@ -136,17 +154,14 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
 // In the shell's top window the probe has replaced the document with the shell already. The page in
 // the shell has the bundle from installProbe() already; its global element only names the frontend
 // for the elements the page places (the shell shows DevTools), and the remote connection is its own.
-const shellPage = isShellPage();
-if (script && bundle && (frontend || remote !== null) && !(readShellConfig() && window === top)) {
+if (script && bundle && (frontend || remoteUrl) && !(readShellConfig() && window === top)) {
   probe.ownUrls.add(bundle);
 
   const start = () => {
     const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
-    if (remote !== null) {
+    if (remoteUrl) {
       if (!hasApi(api, 'connectRemote')) return;
-      api.connectRemote(new URL(remote || '.', script.src).href, {
-        idInQuery: attribute('data-id-in-query') !== null,
-      });
+      api.connectRemote(remoteUrl, { idInQuery });
     }
     if (!frontend || !hasApi(api, 'createGlobalElement')) return;
     // The page's own <devtools-anywhere> elements are not this one: it sits beside <body>.

@@ -39,10 +39,17 @@ export interface ShellConfig {
   locked?: boolean;
   /** The probe's `data-no-toggler`: no toggler button. */
   noToggler?: boolean;
+  /**
+   * Absolute URL of the remote debugging server the probe's `data-remote` names, for pages in the
+   * page iframe whose probe has none (the Service Worker's).
+   */
+  remote?: string | undefined;
+  /** The probe's `data-id-in-query`, with `remote`. */
+  idInQuery?: boolean;
 }
 
 /** What the shell's element takes from the page besides its URLs. @internal */
-export type ShellFlags = Pick<ShellConfig, 'open' | 'locked' | 'noToggler'>;
+export type ShellFlags = Pick<ShellConfig, 'open' | 'locked' | 'noToggler' | 'remote' | 'idInQuery'>;
 
 let trustedOrigin = '';
 
@@ -65,17 +72,20 @@ export function setShellScriptUrl(url: string) {
  * True when every URL of the config is http(s) on the trusted origin. sessionStorage can be
  * written by any script of the page, so a config pointing elsewhere is not trusted. Only the
  * origin is checked: the frontend, bundle and probe may sit in different directories (e.g. the
- * Vite plugin's base vs. a zero-config `data-devtools-frontend-url`).
+ * Vite plugin's base vs. a zero-config `data-devtools-frontend-url`). The remote server may be
+ * anywhere, as with `data-remote`, but its URL must be http(s) or ws(s).
  *
  * @internal
  */
 export function isTrustedShellConfig(config: ShellConfig): boolean {
   const origin = trustedOrigin || location.origin;
-  return [config.frontend, config.bundle, config.serviceWorker].every(url => {
+  return [config.frontend, config.bundle, config.serviceWorker, config.remote].every((url, i) => {
     if (url === undefined) return true;
     try {
       const parsed = new URL(url);
-      return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin === origin;
+      return i > 2
+        ? /^(http|ws)s?:$/.test(parsed.protocol)
+        : /^https?:$/.test(parsed.protocol) && parsed.origin === origin;
     } catch {
       return false;
     }
@@ -139,12 +149,15 @@ export function storeShellOpen(open: boolean) {
 
 function isShellConfig(value: unknown): value is ShellConfig {
   if (typeof value !== 'object' || value === null) return false;
-  const { frontend, bundle, serviceWorker, open, locked, noToggler } = value as Record<string, unknown>;
+  const { frontend, bundle, serviceWorker, remote, open, locked, noToggler, idInQuery } = value as Record<
+    string,
+    unknown
+  >;
   return (
     typeof frontend === 'string' &&
     typeof bundle === 'string' &&
-    (serviceWorker === undefined || typeof serviceWorker === 'string') &&
-    [open, locked, noToggler].every(flag => flag === undefined || typeof flag === 'boolean')
+    [serviceWorker, remote].every(url => url === undefined || typeof url === 'string') &&
+    [open, locked, noToggler, idInQuery].every(flag => flag === undefined || typeof flag === 'boolean')
   );
 }
 
