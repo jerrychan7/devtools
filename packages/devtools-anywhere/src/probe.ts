@@ -20,9 +20,11 @@
 // (@devtools-anywhere/remote-server) at that URL, by default the one this file is served from,
 // where DevTools on another machine inspects it. With `data-devtools-frontend-url` too, the page
 // also gets its own panel (shell mode included): the two are CDP sessions of their own over the
-// one probe. In shell mode the page in the shell connects, not the shell's top window; the shell
-// config keeps the server (and `data-id-in-query`): the shell's probe decides for every page in the
-// page iframe, whatever their own probe says, injected by the Service Worker or not.
+// one probe. In shell mode the page in the shell connects, not the shell's top window. The shell's
+// probe decides for every page in the page iframe, whatever their own probe says, injected by the
+// Service Worker or not: it keeps its server (and `data-id-in-query`) in memory, not in
+// sessionStorage where any script of the page could change it, and answers each page that asks
+// (SHELL_REMOTE) once loaded.
 // `data-id-in-query` connects to that URL itself, the target in the query, for a server whose
 // host routes WebSocket upgrades by exact path (remote-server's `idInQuery`).
 //
@@ -33,6 +35,7 @@
 import {
   SHELL_KEY,
   SHELL_MODE_KEY,
+  SHELL_PAGE_ID,
   SHELL_REFUSED_KEY,
   installProbe,
   isShellPage,
@@ -43,7 +46,7 @@ import {
 import type { DevtoolsAnywhereApi } from './api';
 import { BUNDLE_SCRIPT, PROBE_SCRIPT } from './embedder';
 import type { ProbeScriptAttributes } from './probe-script';
-import { SHELL_QUERY } from './shell-messages';
+import { SHELL_QUERY, SHELL_REMOTE } from './shell-messages';
 
 const script = document.currentScript as HTMLScriptElement | null;
 // Shell configs must come from this script's origin.
@@ -60,16 +63,11 @@ const locked = attribute('data-shell-mode-locked') !== null;
 const noToggler = attribute('data-no-toggler') !== null;
 const shellOff = attribute('data-default-shell-mode') === 'off';
 const shellPage = isShellPage();
-// In the shell's page iframe, the shell's probe decides: its server, or none.
-const shellRemote = shellPage ? readShellConfig() : null;
-const remoteUrl = shellRemote
-  ? shellRemote.remote
-  : !shellPage && script?.src && remote !== null
-    ? new URL(remote || '.', script.src).href
-    : null;
-const idInQuery = shellRemote ? !!shellRemote.idInQuery : attribute('data-id-in-query') !== null;
-/** The remote server, kept in the shell config. */
-const remoteFlags = { remote: remoteUrl ?? undefined, idInQuery };
+/** The server `data-remote` names; for the pages in the shell, in the shell's top window. */
+const ownRemote = script?.src && remote !== null ? new URL(remote || '.', script.src).href : null;
+const idInQuery = attribute('data-id-in-query') !== null;
+// In the shell's page iframe, the shell's probe decides (SHELL_REMOTE): its server, or none.
+const remoteUrl = shellPage ? null : ownRemote;
 
 /** Whether to enter shell mode by default; storage that throws counts as no. */
 const shellByDefault = () => {
@@ -93,17 +91,36 @@ if (entered && locked && shellOff) {
     ...entered,
     locked,
     noToggler,
-    ...remoteFlags,
   });
 }
 // installProbe() reads the config next and writes the shell.
 if (bundle && frontend && window === top && !readShellConfig() && shellByDefault()) {
-  storeShellConfig(frontend, bundle, attribute('data-service-worker'), { open, locked, noToggler, ...remoteFlags });
+  storeShellConfig(frontend, bundle, attribute('data-service-worker'), { open, locked, noToggler });
 }
 
 const probe = installProbe();
 // The probe's own request is DevTools', not the page's: left out of the Network panel.
 if (script?.src) probe.ownUrls.add(script.src);
+
+/** Whether `event` is a SHELL_REMOTE message from `source`, of this origin, not made up by a script. */
+const isRemoteMessage = (event: MessageEvent, source: MessageEventSource | null): event is MessageEvent<object> =>
+  event.isTrusted &&
+  event.source === source &&
+  event.origin === location.origin &&
+  typeof event.data === 'object' &&
+  event.data !== null &&
+  Reflect.get(event.data, 'type') === SHELL_REMOTE;
+// The shell's top window tells the pages in its page iframe its server. Its listeners are erased when
+// installProbe() replaces the document with the shell, in a task of its own: this one comes after.
+if (readShellConfig() && window === top) {
+  setTimeout(() =>
+    addEventListener('message', event => {
+      const page = document.getElementById(SHELL_PAGE_ID);
+      if (!(page instanceof HTMLIFrameElement) || !isRemoteMessage(event, page.contentWindow)) return;
+      page.contentWindow?.postMessage({ type: SHELL_REMOTE, remote: ownRemote, idInQuery }, location.origin);
+    })
+  );
+}
 
 /** True for a devtools-anywhere-service-worker.js script URL as the shell registers it. */
 const isShellWorker = (scriptUrl: string | undefined) => {
@@ -154,12 +171,23 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
 // In the shell's top window the probe has replaced the document with the shell already. The page in
 // the shell has the bundle from installProbe() already and only connects to the remote server: the shell
 // shows DevTools, and the elements the page places take the shell's frontend (see element.ts).
-if (script && bundle && (frontend || remoteUrl) && !(readShellConfig() && window === top)) {
+if (script && bundle && (frontend || remoteUrl || shellPage) && !(readShellConfig() && window === top)) {
   probe.ownUrls.add(bundle);
 
   const start = () => {
     const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
-    if (remoteUrl) {
+    if (shellPage) {
+      // The shell's answer, once: its server, or none.
+      const onAnswer = (event: MessageEvent) => {
+        if (!isRemoteMessage(event, parent)) return;
+        removeEventListener('message', onAnswer);
+        const server: unknown = Reflect.get(event.data, 'remote');
+        if (typeof server === 'string' && hasApi(api, 'connectRemote'))
+          api.connectRemote(server, { idInQuery: Reflect.get(event.data, 'idInQuery') === true });
+      };
+      addEventListener('message', onAnswer);
+      parent.postMessage({ type: SHELL_REMOTE }, location.origin);
+    } else if (remoteUrl) {
       if (!hasApi(api, 'connectRemote')) return;
       api.connectRemote(remoteUrl, { idInQuery });
     }

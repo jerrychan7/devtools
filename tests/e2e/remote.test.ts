@@ -779,6 +779,29 @@ test("in a shell whose probe has no server, a page's own data-remote does not co
   }
 });
 
+test("a page that writes a server into the stored shell config does not connect the shell's pages to it", async () => {
+  const shell = await env.browser.newPage();
+  try {
+    await shell.goto(localPage('panel&noRemote&shell-forged'));
+    const page = await shellPageFrame(shell);
+    // Any script of the page can write sessionStorage: the shell's probe keeps its server elsewhere.
+    await page.evaluate(server => {
+      const key = 'devtools-anywhere:shell';
+      const config: unknown = JSON.parse(sessionStorage.getItem(key) ?? '{}');
+      sessionStorage.setItem(key, JSON.stringify({ ...Object(config), remote: server, idInQuery: false }));
+      location.href += '&next';
+    }, origin() + '/');
+    await shellPageFrame(shell, '&next');
+    await controlConnected('control-after-forged');
+    assert.deepEqual(
+      (await targets()).filter(t => t.url.includes('shell-forged')),
+      []
+    );
+  } finally {
+    await shell.close();
+  }
+});
+
 test('a page locked out of shell mode connects from its top window', async () => {
   const other = await env.browser.newPage();
   try {
