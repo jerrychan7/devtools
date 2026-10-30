@@ -239,7 +239,17 @@ test("in the shell, a page the Service Worker gives the probe loads it with the 
     );
     await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]')?.isConnected);
     await shell.waitForFunction(() => !!navigator.serviceWorker.controller);
-    const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
+    // The page iframe, once the bundle has run in its first page.
+    const handle = await shell.waitForFunction(() => {
+      const frame = document.getElementById('devtools-anywhere-page');
+      if (!(frame instanceof HTMLIFrameElement)) return null;
+      try {
+        return Reflect.get(frame.contentWindow ?? {}, 'DevtoolsAnywhere') ? frame : null;
+      } catch {
+        return null;
+      }
+    });
+    const frame = await handle.asElement()?.contentFrame();
     assert.ok(frame);
     await frame.evaluate(() => {
       location.href = '/tests/e2e/pages/no-probe-placed.html';
@@ -250,6 +260,12 @@ test("in the shell, a page the Service Worker gives the probe loads it with the 
     await framed.evaluate(() => console.log('injected and placed'));
     await waitLogged(frontend, 'injected and placed');
   } finally {
+    // The worker would stay registered for the origin, and inject into later tests' pages.
+    await shell
+      .evaluate(async () => {
+        for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
+      })
+      .catch(() => {});
     await shell.close();
   }
 });

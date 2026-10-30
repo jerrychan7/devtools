@@ -154,8 +154,11 @@ async function pageTogglerShown() {
     .childFrames()
     .find(f => f.url().includes('/pages/'));
   assert.ok(frame);
-  // Its togglers work once the bundle has run in the page, which mounts the button.
-  await frame.waitForFunction(() => document.getElementById('toggle')?.getAttribute('aria-expanded'));
+  // Its togglers work once the bundle has run in the page, which mounts the button then, or once
+  // the page is parsed (DOMContentLoaded) if it is still loading.
+  await frame.waitForFunction(
+    () => document.getElementById('toggle')?.getAttribute('aria-expanded') && document.readyState !== 'loading'
+  );
   return frame.evaluate(() => {
     const toggler = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
     return !!toggler && getComputedStyle(toggler).display !== 'none';

@@ -647,14 +647,36 @@ async function evaluateIn(tag: string, expression: string): Promise<unknown[]> {
 }
 const evaluated = (value: unknown) => ({ result: { type: typeof value, value } });
 
-/** The page iframe of a shell, once the bundle has run in it. */
-async function shellPageFrame(shell: Page): Promise<Frame> {
+/**
+ * The page iframe of a shell, once the bundle has run in it; with `tag`, once it shows a page whose
+ * URL has it, loaded: its probe has decided whether to connect (on the load event).
+ */
+async function shellPageFrame(shell: Page, tag?: string): Promise<Frame> {
   await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]')?.isConnected);
   const frame = await waitFor(async () => {
     const frame = await (await shell.$('#devtools-anywhere-page'))?.contentFrame();
-    return (await frame?.evaluate(() => !!Reflect.get(window, 'DevtoolsAnywhere'))) ? frame : null;
+    const ready = await frame
+      ?.evaluate(
+        tag =>
+          !!Reflect.get(window, 'DevtoolsAnywhere') &&
+          (tag === undefined || (location.href.includes(tag) && document.readyState === 'complete')),
+        tag
+      )
+      .catch(() => false);
+    return ready ? frame : null;
   });
   return frame;
+}
+
+/** Waits for a page outside the shell connecting to the server after now: by then, earlier ones would have. */
+async function controlConnected(tag: string) {
+  const control = await env.browser.newPage();
+  try {
+    await control.goto(localPage(`shellOff&${tag}`));
+    await waitFor(async () => (await targets()).some(t => t.url.includes(tag)));
+  } finally {
+    await control.close();
+  }
 }
 
 test('a page in shell mode connects from the frame it is shown in, not the top window', async () => {
@@ -672,11 +694,14 @@ test('a page in shell mode connects from the frame it is shown in, not the top w
     );
     assert.equal(await shell.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 1);
     await waitFor(async () => (await targets()).some(t => t.url.includes('shell-frame')));
+    // Had the top window connected too, it would be listed by the time a later page is.
+    await controlConnected('control-after-frame');
     // One connection, the page's: from the iframe, not the top window.
     assert.deepEqual(
       await evaluateIn('shell-frame', '[document.title, window === top, frameElement && frameElement.id]'),
       [evaluated(['remote page', false, 'devtools-anywhere-page'])]
     );
+    assert.equal((await targets()).filter(t => t.url.includes('shell-frame&')).length, 1);
   } finally {
     await shell.close();
   }
@@ -722,13 +747,18 @@ test("a page the Service Worker gives the probe in the shell connects to the she
       evaluated(['no probe', false]),
     ]);
   } finally {
+    // The worker would stay registered for the origin, and inject into later tests' pages.
+    await shell
+      .evaluate(async () => {
+        for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
+      })
+      .catch(() => {});
     await shell.close();
   }
 });
 
 test("in a shell whose probe has no server, a page's own data-remote does not connect", async () => {
   const shell = await env.browser.newPage();
-  const control = await env.browser.newPage();
   try {
     await shell.goto(localPage('panel&noRemote&shell-none'));
     const page = await shellPageFrame(shell);
@@ -736,16 +766,15 @@ test("in a shell whose probe has no server, a page's own data-remote does not co
     await page.evaluate(() => {
       location.href = location.href.replace('&noRemote', '') + '&own';
     });
-    await shellPageFrame(shell);
+    // Loaded: its probe has decided not to connect.
+    await shellPageFrame(shell, '&own');
     // A page connecting after it does reach the server: had the page connected, it would be listed.
-    await control.goto(localPage('shellOff&shell-none-control'));
-    await waitFor(async () => (await targets()).some(t => t.url.includes('shell-none-control')));
+    await controlConnected('shell-none-control');
     assert.deepEqual(
       (await targets()).filter(t => t.url.includes('shell-none&')),
       []
     );
   } finally {
-    await control.close();
     await shell.close();
   }
 });
