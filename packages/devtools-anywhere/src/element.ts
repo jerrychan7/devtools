@@ -206,13 +206,13 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
   .corner { width: 32px; height: 32px; }
 }
 
-/* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
 /* An element placed by the page: a box in the page's flow, sized by its CSS, always loaded. */
 .panel[data-custom] {
   position: static; display: flex; width: 100%; height: 100%; border: 0; padding: 0;
 }
 [data-custom] .bar, .toggler[data-custom] { display: none; }
 
+/* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
 :host([data-shell]) { display: flex; flex: none; }
 :host([data-shell]) .panel { position: static; flex: 1 1 auto; }
 :host([data-shell]) .panel[data-dock=undocked] { position: fixed; }

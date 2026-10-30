@@ -9,12 +9,19 @@ import type { Env } from '../support/browser.ts';
 let env: Env | undefined;
 let page: Page;
 
+/** A new page whose screen has safe areas, at `path`. */
+async function openWithSafeAreas(path: string): Promise<Page> {
+  const opened = await env?.browser.newPage();
+  if (!opened) throw new Error('no browser');
+  const cdp = await opened.createCDPSession();
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 30, left: 10, bottom: 20, right: 40 } });
+  await opened.goto(env?.baseUrl + path);
+  return opened;
+}
+
 before(async () => {
   env = await launch();
-  page = await env.browser.newPage();
-  const cdp = await page.createCDPSession();
-  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 30, left: 10, bottom: 20, right: 40 } });
-  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
+  page = await openWithSafeAreas('/tests/e2e/pages/zero-config.html');
 });
 after(() => env?.close());
 
@@ -47,6 +54,34 @@ test('docked to a side, it keeps clear of the top, the bottom and its own edge',
 
 test('undocked, the window has no padding', async () => {
   await chooseDockSide(page, 'undocked');
-  assert.deepEqual(await padding('undocked'), ['0px', '0px', '0px', '0px']);
-  await chooseDockSide(page, 'bottom');
+  try {
+    assert.deepEqual(await padding('undocked'), ['0px', '0px', '0px', '0px']);
+  } finally {
+    await chooseDockSide(page, 'bottom');
+  }
+});
+
+test("in the shell, the panel keeps clear of the screen's edges as on its own", async () => {
+  const shell = await openWithSafeAreas('/tests/e2e/pages/remote-page.html?local&noRemote&panel');
+  try {
+    await shell.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
+    assert.deepEqual(await padding('bottom', shell), ['0px', '40px', '20px', '10px']);
+  } finally {
+    await shell.close();
+  }
+});
+
+test('an element the page placed, a box in its flow, has no padding', async () => {
+  const placed = await openWithSafeAreas('/tests/e2e/pages/custom-element.html');
+  try {
+    const value = await placed
+      .waitForFunction(() => {
+        const panel = document.getElementById('placed')?.shadowRoot?.querySelector('.panel');
+        return panel?.hasAttribute('data-custom') ? getComputedStyle(panel).padding : null;
+      })
+      .then(handle => handle.jsonValue());
+    assert.equal(value, '0px');
+  } finally {
+    await placed.close();
+  }
 });
