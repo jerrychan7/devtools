@@ -19,8 +19,7 @@
   },
   "files": [
     "THIRD_PARTY_LICENSES.md",
-    "dist",
-    "REVISION"
+    "dist"
   ],
   "type": "module",
   "exports": {
