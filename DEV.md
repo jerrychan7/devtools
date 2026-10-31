@@ -219,27 +219,15 @@ Describe in the PR what was verified, in particular what was checked by hand in 
 
 ### Releasing to npm
 
-The packages have not been published yet; this is the intended procedure. All packages share one version number and are released together. Publishing needs a member of the [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) organization.
+All packages share one version number and are released together, by `.github/workflows/release.yml` when a tag `vx.y.z` is pushed. npm trusts that workflow (trusted publishing, set on each package on npmjs.com for this repository, `release.yml` and the `npm` environment), so it publishes without a stored token and with provenance; renaming the file or the environment breaks that. Approving the publish takes a reviewer of the repository's `npm` environment, and the dist-tags a member of the [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) organization.
 
 Versions are semver for the library itself, starting at `0.1.0`: a fix is a patch, and moving the frontend to a new Chrome milestone is a minor (its UI changes); before 1.0 a minor may also break. What is promised is what the README documents (`@public`). The Chrome version is not in the version number, where npm would drop it (`+chrome156`) or take it for a prerelease (`-chrome156`): each published package's `package.json` has it as `chrome`, which `update` writes, and each release says it first (`Based on Chrome 156`). Each release also gets the dist-tag `chrome-<milestone>`, so that `npm i devtools-anywhere@chrome-156` installs the last release on that Chrome.
 
-1. Build the frontend at the pinned revision (its `dist/` is not committed, and `pnpm build` does not build it):
-   ```bash
-   pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
-   ```
-2. Run `pnpm typecheck` and `pnpm test`.
-3. Set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`).
-4. Publish to the public registry (pnpm replaces `workspace:*` with the real version):
-   ```bash
-   pnpm -r publish --access public --registry https://registry.npmjs.org
-   ```
-   Pass `--registry` explicitly if your default registry is a mirror.
-5. Tag the packages with their Chrome milestone, for each published package:
+1. Set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`). `node scripts/release.ts check x.y.z` checks both.
+2. Tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
+3. The workflow checks the version, builds the frontend, runs the checks and tests as CI does and packs the packages (pnpm replaces `workspace:*` with the real version). Then approve its `publish` job in the Actions tab: it publishes the packages to npm, and the GitHub release with that version's section of `CHANGELOG.md` followed by that of `CHANGELOG.zh-CN.md`.
+4. Tag the packages with their Chrome milestone, for each published package (trusted publishing only covers publishing):
    ```bash
    npm dist-tag add <package>@x.y.z chrome-<milestone> --registry https://registry.npmjs.org
    ```
-6. Tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
-7. Publish the GitHub release with the same notes as the version's section in `CHANGELOG.md`, followed by that of `CHANGELOG.zh-CN.md`:
-   ```bash
-   gh release create vx.y.z --title vx.y.z --notes-file <the section, saved to a file>
-   ```
+   Pass `--registry` explicitly if your default registry is a mirror.

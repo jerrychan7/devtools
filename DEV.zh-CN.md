@@ -219,27 +219,15 @@ gh pr create --fill
 
 ### 发布到 npm
 
-各个包还没有发布过，下面是预定的流程。所有包使用同一个版本号，一起发布。发布需要 [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) 组织的成员权限。
+所有包使用同一个版本号，一起发布：推送 tag `vx.y.z` 后由 `.github/workflows/release.yml` 发布。npm 信任这个 workflow（可信发布，在 npmjs.com 上为每个包配置了本仓库、`release.yml` 和 `npm` 环境），所以发布时不需要保存令牌，并且带出处证明（provenance）；改了文件名或环境名就会失效。批准发布需要仓库 `npm` 环境的审批人，打 dist-tag 需要 [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) 组织的成员。
 
 版本号按 semver 表示库本身的变化，从 `0.1.0` 开始：修 bug 升 patch；前端升级到新的 Chrome 里程碑升 minor（界面会变）；1.0 之前 minor 也可以有破坏性变更。承诺的范围是 README 写明的用法（`@public`）。Chrome 版本不放进版本号：写成 `+chrome156` 会被 npm 丢掉，写成 `-chrome156` 会被当成预发布版。它记在每个发布包 `package.json` 的 `chrome` 字段里（由 `update` 写入），每次发布的说明也在开头写明（「基于 Chrome 156」）。每次发布还会打上 dist-tag `chrome-<里程碑>`，`npm i devtools-anywhere@chrome-156` 就能装到基于该版 Chrome 的最后一个版本。
 
-1. 构建钉住版本的前端（它的 `dist/` 不进 git，`pnpm build` 也不会构建它）：
-   ```bash
-   pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
-   ```
-2. 运行 `pnpm typecheck` 和 `pnpm test`。
-3. 把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。
-4. 发布到公共 registry（pnpm 会把 `workspace:*` 替换成实际版本）：
-   ```bash
-   pnpm -r publish --access public --registry https://registry.npmjs.org
-   ```
-   如果默认 registry 是镜像，必须显式传 `--registry`。
-5. 给每个发布的包打上它的 Chrome 里程碑：
+1. 把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。
+2. 打 tag 并推送：`git tag vx.y.z && git push origin main vx.y.z`。
+3. workflow 会检查版本号、构建前端、像 CI 一样跑检查和测试，并打包（pnpm 会把 `workspace:*` 替换成实际版本）。然后在 Actions 页面批准它的 `publish` 任务：它把各包发布到 npm，并发布 GitHub Release，说明是 `CHANGELOG.md` 中该版本的那一节，后面接上 `CHANGELOG.zh-CN.md` 的对应一节。
+4. 给每个发布的包打上它的 Chrome 里程碑（可信发布只管发布这一步）：
    ```bash
    npm dist-tag add <包名>@x.y.z chrome-<里程碑> --registry https://registry.npmjs.org
    ```
-6. 打 tag 并推送：`git tag vx.y.z && git push origin main vx.y.z`。
-7. 发布 GitHub Release，说明用 `CHANGELOG.md` 中该版本的那一节，后面接上 `CHANGELOG.zh-CN.md` 的对应一节：
-   ```bash
-   gh release create vx.y.z --title vx.y.z --notes-file <把那一节存成的文件>
-   ```
+   如果默认 registry 是镜像，必须显式传 `--registry`。

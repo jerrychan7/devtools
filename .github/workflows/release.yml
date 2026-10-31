@@ -1,0 +1,154 @@
+# Publishes a release when a tag vX.Y.Z is pushed (DEV.md, "Releasing to npm"): the build job
+# checks that every published package and both changelogs are at that version, builds and tests as
+# CI does, and packs the packages; then, once a reviewer of the "npm" environment approves, the
+# publish job publishes those tarballs to npm and the GitHub release.
+#
+# npm trusts this workflow (trusted publishing, configured per package on npmjs.com for this
+# repository, this file and the "npm" environment): it publishes with a short-lived OIDC token
+# instead of a stored one, and with provenance. Renaming this file or the environment breaks that.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the version
+        id: version
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo 'packages<<EOF'
+            node scripts/release.ts check "$version"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: |
+          pnpm fmt:check
+          pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The caches CI saves on main (see ci.yml); a release only reads them.
+      - name: Restore depot_tools
+        uses: actions/cache/restore@v4
+        with:
+          path: depot_tools.ignore
+          key: depot-tools-${{ runner.os }}-v1
+
+      - name: Fetch depot_tools
+        run: |
+          [ -d depot_tools.ignore ] ||
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools.ignore
+
+      - name: Restore the devtools-frontend checkout
+        uses: actions/cache/restore@v4
+        with:
+          path: devtools-frontend.ignore
+          key: devtools-frontend-${{ runner.os }}-${{ hashFiles('packages/devtools-frontend/REVISION') }}
+          restore-keys: devtools-frontend-${{ runner.os }}-
+
+      - name: Build the DevTools frontend
+        run: pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
+
+      - name: Chrome version
+        id: chrome
+        run: echo "version=$(node -p "require('./packages/devtools-frontend/package.json').chrome")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Chrome for Testing
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/chrome-for-testing
+          key: chrome-for-testing-${{ runner.os }}-${{ steps.chrome.outputs.version }}
+
+      - name: Install Chrome for Testing
+        run: |
+          chrome=$(pnpm dlx @puppeteer/browsers@2 install "chrome@${{ steps.chrome.outputs.version }}" --path ~/.cache/chrome-for-testing | tail -n1 | cut -d' ' -f2-)
+          test -x "$chrome"
+          echo "CHROME_PATH=$chrome" >> "$GITHUB_ENV"
+
+      - name: Let Chrome's sandbox run
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Test
+        run: node --test --test-concurrency=2 "tests/**/*.test.ts" "packages/*/src/**/*.test.ts" "playground/**/*.test.ts"
+
+      - name: Pack
+        # pnpm pack writes the real version in place of workspace:*; npm publishes the tarballs.
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          while read -r dir; do
+            (cd "$dir" && pnpm pack --pack-destination "$RUNNER_TEMP/packs")
+          done <<< "${{ steps.version.outputs.packages }}"
+          node scripts/release.ts notes "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/packs/notes.md"
+          ls -l "$RUNNER_TEMP/packs"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/packs
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: npm
+    permissions:
+      contents: write # the GitHub release
+      id-token: write # npm's trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: packs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm
+        # Trusted publishing needs npm 11.5.1 or later; Node 22 comes with npm 10.
+        run: npm install -g npm@11
+
+      - name: Publish to npm
+        run: |
+          for pack in packs/*.tgz; do
+            npm publish "$pack" --access public --provenance
+          done
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+            --notes-file packs/notes.md --verify-tag
