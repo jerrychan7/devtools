@@ -16,7 +16,7 @@ export const repo = path.resolve(pkg, '../..');
 export const src = path.resolve(
   process.env['DEVTOOLS_FRONTEND_SRC'] ?? path.join(repo, 'devtools-frontend.ignore/devtools-frontend')
 );
-const depotTools = path.resolve(process.env['DEPOT_TOOLS'] ?? path.join(repo, 'depot_tools.ignore'));
+export const depotTools = path.resolve(process.env['DEPOT_TOOLS'] ?? path.join(repo, 'depot_tools.ignore'));
 // A git hook runs with variables that point git at this repository (a commit with paths passes
 // its own index in GIT_INDEX_FILE): left in, git in the checkout would read and write ours.
 const OUR_REPOSITORY = [

@@ -22,7 +22,7 @@ import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bundle } from './bundle.ts';
-import { changed, env, hasCheckout, patches, pkg, read, repo, src, unexpectedEdits } from './checkout.ts';
+import { changed, depotTools, env, hasCheckout, patches, pkg, read, repo, src, unexpectedEdits } from './checkout.ts';
 
 const out = path.join(src, 'out/Anywhere');
 const dist = path.join(pkg, 'dist');
@@ -60,6 +60,21 @@ if (unknown.length > 0) {
 const noSync = args.has('--no-sync') || args.has('--copy-only');
 const run = (cmd: string, argv: string[], opts: ExecFileSyncOptions = {}) =>
   execFileSync(cmd, argv, { cwd: src, env, stdio: 'inherit', ...opts });
+
+if (!fs.existsSync(path.join(depotTools, 'gclient'))) {
+  console.error(`No depot_tools at ${depotTools}: clone it there (see DEV.md) or set DEPOT_TOOLS.`);
+  process.exit(1);
+}
+// A new depot_tools fetches its own Python and tools on first use, which DEPOT_TOOLS_UPDATE=0
+// (see checkout.ts) skips along with its self-update: gn would then find no Python. Only those
+// two steps of its ensure_bootstrap are run: the rest (gsutil, pylint) the build does not use, and
+// fetching gsutil can hang.
+if (!fs.existsSync(path.join(depotTools, 'python3_bin_reldir.txt'))) {
+  run('bash', ['-c', 'source bootstrap_python3 && bootstrap_python3 && source cipd_bin_setup.sh && cipd_bin_setup'], {
+    cwd: depotTools,
+    env: { ...env, DEPOT_TOOLS_DIR: depotTools },
+  });
+}
 
 if (!hasCheckout()) {
   if (noSync) {
