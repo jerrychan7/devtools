@@ -33,6 +33,19 @@ const localesDist = path.join(pkg, '../devtools-frontend-locales/dist');
 const BUNDLED_LOCALES = ['en-US', 'zh'];
 const revisionFile = path.join(pkg, 'REVISION');
 
+const UPSTREAM = 'https://chromium.googlesource.com/devtools/devtools-frontend.git';
+// gclient's configuration, rewritten on every sync. The hooks turned off fetch what only upstream's
+// own tests and tooling use: emscripten (0.8 GB, for the C++ debugging extension and the e2e tests'
+// wasm), the permissions of the Chrome its tests run in, and VS Code settings. That Chrome itself
+// (0.5 GB) is still downloaded: gclient offers no way to skip a dependency stored in GCS.
+const GCLIENT = `solutions = [{
+  "name": "${path.basename(src)}",
+  "url": "${UPSTREAM}",
+  "deps_file": "DEPS",
+  "custom_hooks": [{"name": "emscripten"}, {"name": "fix_cft_permissions"}, {"name": "VS Code settings"}],
+}]
+`;
+
 const args = new Set(process.argv.slice(2));
 /** --copy-only reuses the last build, so syncing (or moving to --latest) would mislabel it. */
 const noSync = args.has('--no-sync') || args.has('--copy-only');
@@ -40,8 +53,14 @@ const run = (cmd: string, argv: string[], opts: ExecFileSyncOptions = {}) =>
   execFileSync(cmd, argv, { cwd: src, env, stdio: 'inherit', ...opts });
 
 if (!hasCheckout()) {
-  console.error(`No devtools-frontend checkout at ${src}. Run \`fetch devtools-frontend\` (depot_tools) first.`);
-  process.exit(1);
+  if (noSync) {
+    console.error(`No devtools-frontend checkout at ${src}: run without --no-sync or --copy-only first.`);
+    process.exit(1);
+  }
+  // A new checkout is an empty repository: the sync below fetches the one commit it builds.
+  fs.mkdirSync(src, { recursive: true });
+  run('git', ['init', '--quiet']);
+  run('git', ['remote', 'add', 'origin', UPSTREAM]);
 }
 
 // Upstream versions: the frontend follows stable Chrome, as most users' Chrome is: the commit the
@@ -96,11 +115,28 @@ if (noSync) {
   revision = head;
 } else {
   if (args.has('--latest')) ({ devtools: revision, chrome } = await stableRelease());
-  // The commit is on a branch of its own, not on main: it is fetched by its hash.
-  run('git', ['fetch', 'origin', revision]);
+  // The commit is on a branch of its own, not on main: it is fetched by its hash, without history
+  // (the build needs none, and it is most of the download).
+  run('git', ['fetch', '--depth=1', 'origin', revision]);
   run('git', ['checkout', '--force', '--detach', revision]);
   run('git', ['clean', '-fd', 'front_end']);
-  run('gclient', ['sync', '--force', '--delete_unversioned_trees'], { cwd: path.dirname(src) });
+  fs.writeFileSync(path.join(path.dirname(src), '.gclient'), GCLIENT);
+  const solution = path.basename(src);
+  run(
+    'gclient',
+    [
+      'sync',
+      '--force',
+      '--delete_unversioned_trees',
+      '--no-history',
+      '--shallow',
+      '--revision',
+      `${solution}@${revision}`,
+    ],
+    {
+      cwd: path.dirname(src),
+    }
+  );
 }
 
 // Patches: small edits to upstream files, kept as reviewable diffs. The checkout must end up
@@ -143,7 +179,8 @@ fs.copyFileSync(
 
 if (!args.has('--copy-only')) {
   run('gn', ['gen', out, '--args=is_debug=false']);
-  run('autoninja', ['-C', out]);
+  // Only what the release files need: building everything would build upstream's tests too.
+  run('autoninja', ['-C', out, 'generate_devtools_grd']);
 }
 
 // The release files (the ones Chrome ships, listed in devtools_resources.grd) serve every

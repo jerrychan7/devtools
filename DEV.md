@@ -32,25 +32,20 @@ Tests that need the DevTools frontend are skipped until it is built (next step).
 
 ### Build the DevTools frontend (once)
 
-The frontend is built from the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) sources with Chromium's tooling. It needs about 6 GB of disk (4.7 GB checkout, 0.8 GB depot_tools) and a fast connection the first time.
+The frontend is built from the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) sources with Chromium's tooling. It needs about 3 GB of disk (2 GB checkout without history, 0.3 GB build output, 0.8 GB depot_tools) and a fast connection the first time.
 
 ```bash
-# depot_tools: Chromium's fetch/gclient/gn/autoninja
+# depot_tools: Chromium's gclient/gn/autoninja (directories ending in .ignore are git-ignored);
+# the build finds it on its own
 git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools.ignore
-# On the PATH for fetch and gclient below; the build finds it on its own
-export PATH="$PWD/depot_tools.ignore:$PATH"
 
-# Source checkout (directories ending in .ignore are git-ignored)
-mkdir devtools-frontend.ignore && cd devtools-frontend.ignore
-fetch --nohooks devtools-frontend
-gclient sync
-cd ..
-
-# Build the revision pinned in packages/devtools-frontend/REVISION
+# Check out and build the revision pinned in packages/devtools-frontend/REVISION
 pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
 ```
 
-The result goes to `packages/devtools-frontend/dist/` (English and Chinese) and `packages/devtools-frontend-locales/dist/` (the other languages). Other locations can be used with `DEVTOOLS_FRONTEND_SRC` (the `devtools-frontend` directory `fetch` creates, by default `devtools-frontend.ignore/devtools-frontend`) and `DEPOT_TOOLS`.
+The first build creates the checkout in `devtools-frontend.ignore/`, with `.gclient` next to it (rewritten on every sync): only the pinned commit, without history, and without what only upstream's own tests use.
+
+The result goes to `packages/devtools-frontend/dist/` (English and Chinese) and `packages/devtools-frontend-locales/dist/` (the other languages). Other locations can be used with `DEVTOOLS_FRONTEND_SRC` (the checkout, by default `devtools-frontend.ignore/devtools-frontend`) and `DEPOT_TOOLS`.
 
 If `gclient sync` fails with a lock error on first use (`Error locking …/gsutil`), run it again.
 

@@ -32,25 +32,20 @@ pnpm test        # 构建所有包，然后在真实 Chrome 上跑全部测试
 
 ### 构建 DevTools 前端（只需一次）
 
-前端用 Chromium 的工具链从官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) 源码构建。大约需要 6 GB 磁盘（源码检出 4.7 GB，depot_tools 0.8 GB），第一次需要较快的网络。
+前端用 Chromium 的工具链从官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) 源码构建。大约需要 3 GB 磁盘（不带历史的源码检出 2 GB，构建输出 0.3 GB，depot_tools 0.8 GB），第一次需要较快的网络。
 
 ```bash
-# depot_tools：Chromium 的 fetch/gclient/gn/autoninja
+# depot_tools：Chromium 的 gclient/gn/autoninja（以 .ignore 结尾的目录不会进 git）；
+# 构建脚本会自己找到它
 git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools.ignore
-# 供下面的 fetch 和 gclient 使用；构建脚本会自己找到它
-export PATH="$PWD/depot_tools.ignore:$PATH"
 
-# 检出源码（以 .ignore 结尾的目录不会进 git）
-mkdir devtools-frontend.ignore && cd devtools-frontend.ignore
-fetch --nohooks devtools-frontend
-gclient sync
-cd ..
-
-# 构建 packages/devtools-frontend/REVISION 里钉住的版本
+# 检出并构建 packages/devtools-frontend/REVISION 里钉住的版本
 pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
 ```
 
-产物在 `packages/devtools-frontend/dist/`（英文和中文）和 `packages/devtools-frontend-locales/dist/`（其他语言）。如果想放在别处，用 `DEVTOOLS_FRONTEND_SRC`（指向 `fetch` 生成的 `devtools-frontend` 目录，默认是 `devtools-frontend.ignore/devtools-frontend`）和 `DEPOT_TOOLS` 指定。
+第一次构建会在 `devtools-frontend.ignore/` 里创建源码检出，旁边是 `.gclient`（每次同步都会重写）：只拉钉住的那个提交，不带历史，也不拉只有上游自己测试才用的依赖。
+
+产物在 `packages/devtools-frontend/dist/`（英文和中文）和 `packages/devtools-frontend-locales/dist/`（其他语言）。如果想放在别处，用 `DEVTOOLS_FRONTEND_SRC`（指向源码检出，默认是 `devtools-frontend.ignore/devtools-frontend`）和 `DEPOT_TOOLS` 指定。
 
 第一次运行 `gclient sync` 如果报加锁错误（`Error locking …/gsutil`），重跑一次即可。
 

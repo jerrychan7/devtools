@@ -2,7 +2,7 @@
 // plus every patch in ../patches. Shared by build.ts and check-checkout.ts (the pre-commit gate).
 //
 // Environment:
-//   DEVTOOLS_FRONTEND_SRC  checkout of devtools-frontend (`fetch devtools-frontend`)
+//   DEVTOOLS_FRONTEND_SRC  checkout of devtools-frontend (build.ts creates it, and .gclient next to it)
 //                          default: <repo>/devtools-frontend.ignore/devtools-frontend
 //   DEPOT_TOOLS            depot_tools directory, default: <repo>/depot_tools.ignore
 
