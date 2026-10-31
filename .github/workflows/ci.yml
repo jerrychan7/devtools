@@ -64,7 +64,7 @@ jobs:
       - name: Install Chrome for Testing
         run: |
           version=$(node -p "require('./packages/devtools-frontend/package.json').chrome")
-          chrome=$(npx --yes --package=@puppeteer/browsers@2 -- browsers install "chrome@$version" --path "$RUNNER_TEMP/browsers" | tail -n1 | cut -d' ' -f2-)
+          chrome=$(pnpm dlx @puppeteer/browsers@2 install "chrome@$version" --path "$RUNNER_TEMP/browsers" | tail -n1 | cut -d' ' -f2-)
           test -x "$chrome"
           "$chrome" --version
           du -sh "$RUNNER_TEMP/browsers"
