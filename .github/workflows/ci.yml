@@ -15,12 +15,16 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a pull request makes the older run moot; every commit on main keeps its run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      # No git hooks on a runner: nothing is committed there.
+      HUSKY: '0'
     steps:
       - uses: actions/checkout@v4
 
@@ -55,16 +59,21 @@ jobs:
           df -h /
           du -sh depot_tools.ignore devtools-frontend.ignore devtools-frontend.ignore/devtools-frontend/.git \
             devtools-frontend.ignore/devtools-frontend/out packages/devtools-frontend/dist \
-            packages/devtools-frontend-locales/dist ~/.cache 2>/dev/null || true
+            packages/devtools-frontend-locales/dist "$(pnpm store path)" 2>/dev/null || true
 
       - name: Install Chrome for Testing
         run: |
           version=$(node -p "require('./packages/devtools-frontend/package.json').chrome")
           chrome=$(npx --yes --package=@puppeteer/browsers@2 -- browsers install "chrome@$version" --path "$RUNNER_TEMP/browsers" | tail -n1 | cut -d' ' -f2-)
+          test -x "$chrome"
           "$chrome" --version
+          du -sh "$RUNNER_TEMP/browsers"
           echo "CHROME_PATH=$chrome" >> "$GITHUB_ENV"
-          # Ubuntu 24.04 keeps unprivileged user namespaces from Chrome's sandbox
-          echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: Let Chrome's sandbox run
+        # Ubuntu 24.04 keeps unprivileged user namespaces, which the sandbox needs, from Chrome for Testing
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Test
-        run: pnpm test
+        # Each test file drives its own Chrome: two at a time, as locally, rather than pnpm test's four
+        run: node --test --test-concurrency=2 "tests/**/*.test.ts" "packages/*/src/**/*.test.ts" "playground/**/*.test.ts"
