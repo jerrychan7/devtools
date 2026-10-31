@@ -38,15 +38,24 @@ const UPSTREAM = 'https://chromium.googlesource.com/devtools/devtools-frontend.g
 // own tests and tooling use: emscripten (0.8 GB, for the C++ debugging extension and the e2e tests'
 // wasm), the permissions of the Chrome its tests run in, and VS Code settings. That Chrome itself
 // (0.5 GB) is still downloaded: gclient offers no way to skip a dependency stored in GCS.
+// A hook is turned off by its name in upstream's DEPS: one renamed there would quietly run again,
+// so the sync checks that DEPS still has each.
+const SKIPPED_HOOKS = ['emscripten', 'fix_cft_permissions', 'VS Code settings'];
 const GCLIENT = `solutions = [{
   "name": "${path.basename(src)}",
   "url": "${UPSTREAM}",
   "deps_file": "DEPS",
-  "custom_hooks": [{"name": "emscripten"}, {"name": "fix_cft_permissions"}, {"name": "VS Code settings"}],
+  "custom_hooks": [${SKIPPED_HOOKS.map(name => `{"name": "${name}"}`).join(', ')}],
 }]
 `;
 
+const FLAGS = ['--latest', '--no-sync', '--reset', '--copy-only'];
 const args = new Set(process.argv.slice(2));
+const unknown = [...args].filter(arg => !FLAGS.includes(arg));
+if (unknown.length > 0) {
+  console.error(`Unknown option ${unknown.join(', ')}: the options are ${FLAGS.join(', ')}.`);
+  process.exit(1);
+}
 /** --copy-only reuses the last build, so syncing (or moving to --latest) would mislabel it. */
 const noSync = args.has('--no-sync') || args.has('--copy-only');
 const run = (cmd: string, argv: string[], opts: ExecFileSyncOptions = {}) =>
@@ -60,7 +69,34 @@ if (!hasCheckout()) {
   // A new checkout is an empty repository: the sync below fetches the one commit it builds.
   fs.mkdirSync(src, { recursive: true });
   run('git', ['init', '--quiet']);
-  run('git', ['remote', 'add', 'origin', UPSTREAM]);
+}
+/** The checkout's commit, or null in a new one that has fetched none yet. */
+function head(): string | null {
+  try {
+    return read('git', ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stops the build if the checkout holds edits to upstream files that the patches do not account
+ * for (work on a patch, or an outdated one), unless --reset discards them. Returns the upstream
+ * files that are not as HEAD plus every patch, or null if the patches do not apply to HEAD.
+ */
+function checkEdits(): string[] | null {
+  const unexpected = unexpectedEdits();
+  // A file still as in HEAD only lacks its patch. One that differs from both holds edits not in
+  // a patch yet, or an outdated or removed patch: they could be work in progress, so ask first.
+  const edited = unexpected?.filter(file => changed().includes(file)) ?? [];
+  if (!args.has('--reset') && edited.length > 0) {
+    console.error(
+      `The checkout has edits the patches do not account for:\n  ${edited.join('\n  ')}\n` +
+        'Regenerate the patch from them (see DEV.md), or run with --reset to discard them.'
+    );
+    process.exit(1);
+  }
+  return unexpected;
 }
 
 // Upstream versions: the frontend follows stable Chrome, as most users' Chrome is: the commit the
@@ -73,10 +109,11 @@ async function stableRelease(): Promise<{ devtools: string; chrome: string }> {
   const failed = `No devtools commit in ${STABLE_RELEASE}: write the stable one into REVISION by hand.`;
   let releases: unknown;
   try {
-    const response = await fetch(STABLE_RELEASE);
-    releases = response.ok ? await response.json() : undefined;
+    const response = await fetch(STABLE_RELEASE, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    releases = await response.json();
   } catch (e) {
-    throw new Error(failed, { cause: e });
+    throw new Error(`${failed} (${e instanceof Error ? e.message : String(e)})`, { cause: e });
   }
   const release: unknown = Array.isArray(releases) ? releases[0] : undefined;
   const hashes: unknown = release instanceof Object ? Reflect.get(release, 'hashes') : undefined;
@@ -95,11 +132,17 @@ async function stableRelease(): Promise<{ devtools: string; chrome: string }> {
  */
 function pinChromeVersion(chrome: string) {
   const packages = path.join(pkg, '..');
-  for (const dir of fs.readdirSync(packages)) {
-    const file = path.join(packages, dir, 'package.json');
-    if (!fs.existsSync(file)) continue;
-    const json: Record<string, unknown> = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (json['private']) continue;
+  // Every file is read before any is written, so that one that does not parse leaves all as they were.
+  const pinned = fs
+    .readdirSync(packages)
+    .map(dir => path.join(packages, dir, 'package.json'))
+    .filter(file => fs.existsSync(file))
+    .map((file): { file: string; json: Record<string, unknown> } => ({
+      file,
+      json: JSON.parse(fs.readFileSync(file, 'utf8')),
+    }))
+    .filter(({ json }) => !json['private']);
+  for (const { file, json } of pinned) {
     delete json['chrome'];
     fs.writeFileSync(file, JSON.stringify({ ...json, chrome }, null, 2) + '\n');
   }
@@ -107,17 +150,28 @@ function pinChromeVersion(chrome: string) {
 
 let revision = fs.readFileSync(revisionFile, 'utf8').trim();
 let chrome: string | null = null;
+const checkedOut = head();
 if (noSync) {
   // What is built is the checkout as it stands, e.g. the stable commit left by a failed --latest.
-  const head = read('git', ['rev-parse', 'HEAD']);
-  if (head !== revision && !args.has('--latest'))
-    console.warn(`The checkout is at ${head}, not REVISION ${revision}: add --latest to pin it.`);
-  revision = head;
+  if (!checkedOut) {
+    console.error(`The checkout at ${src} has no commit yet: run without --no-sync or --copy-only first.`);
+    process.exit(1);
+  }
+  if (checkedOut !== revision && !args.has('--latest'))
+    console.warn(`The checkout is at ${checkedOut}, not REVISION ${revision}: add --latest to pin it.`);
+  revision = checkedOut;
 } else {
+  // The sync below overwrites upstream files: edits not in a patch yet stop it first.
+  if (checkedOut) checkEdits();
   if (args.has('--latest')) ({ devtools: revision, chrome } = await stableRelease());
+  // origin may be missing (a sync that failed right after `git init`) or point elsewhere.
+  const remotes = read('git', ['remote']).split('\n');
+  run('git', ['remote', remotes.includes('origin') ? 'set-url' : 'add', 'origin', UPSTREAM]);
   // The commit is on a branch of its own, not on main: it is fetched by its hash, without history
-  // (the build needs none, and it is most of the download).
-  run('git', ['fetch', '--depth=1', 'origin', revision]);
+  // (the build needs none, and it is most of the download). A checkout cloned with its history
+  // keeps it.
+  const shallow = !checkedOut || read('git', ['rev-parse', '--is-shallow-repository']) === 'true';
+  run('git', ['fetch', ...(shallow ? ['--depth=1'] : []), 'origin', revision]);
   run('git', ['checkout', '--force', '--detach', revision]);
   run('git', ['clean', '-fd', 'front_end']);
   fs.writeFileSync(path.join(path.dirname(src), '.gclient'), GCLIENT);
@@ -137,6 +191,11 @@ if (noSync) {
       cwd: path.dirname(src),
     }
   );
+  const deps = fs.readFileSync(path.join(src, 'DEPS'), 'utf8');
+  for (const name of SKIPPED_HOOKS) {
+    if (!deps.includes(`'${name}'`) && !deps.includes(`"${name}"`))
+      console.warn(`DEPS has no hook named ${name} any more: update SKIPPED_HOOKS in build.ts.`);
+  }
 }
 
 // Patches: small edits to upstream files, kept as reviewable diffs. The checkout must end up
@@ -144,19 +203,9 @@ if (noSync) {
 // was removed or changed must not linger. Edits made in the checkout to write a patch are not
 // thrown away silently, though: if the checkout holds changes the patches do not account for,
 // the build stops, unless --reset is given (check-checkout.ts stops a commit on the same edits).
-const unexpected = unexpectedEdits();
+const unexpected = checkEdits();
 if (unexpected === null) throw new Error('The patches do not apply to REVISION: regenerate them (see DEV.md).');
 if (unexpected.length > 0) {
-  // A file still as in HEAD only lacks its patch. One that differs from both holds edits not in
-  // a patch yet, or an outdated or removed patch: they could be work in progress, so ask first.
-  const edited = unexpected.filter(file => changed().includes(file));
-  if (!args.has('--reset') && edited.length > 0) {
-    console.error(
-      `The checkout has edits the patches do not account for:\n  ${edited.join('\n  ')}\n` +
-        'Regenerate the patch from them (see DEV.md), or run with --reset to discard them.'
-    );
-    process.exit(1);
-  }
   console.log('Reapplying the patches to REVISION');
   run('git', ['reset', '--quiet']);
   const dirty = changed();
@@ -273,9 +322,10 @@ fs.writeFileSync(path.join(release, 'REVISION'), revision + '\n');
 const thirdParty = await bundle(release, dist);
 fs.writeFileSync(path.join(pkg, 'dist-third-party.ignore.json'), JSON.stringify(thirdParty, null, 2) + '\n');
 if (args.has('--latest')) {
-  fs.writeFileSync(revisionFile, revision + '\n');
   if (chrome) pinChromeVersion(chrome);
-  else console.warn("Pinned the checkout's HEAD: set the packages' `chrome` field to its Chrome version by hand.");
+  fs.writeFileSync(revisionFile, revision + '\n');
+  if (!chrome)
+    console.warn("Pinned the checkout's HEAD: set the packages' `chrome` field to its Chrome version by hand.");
 }
 console.log(
   `Built devtools-frontend ${revision} → ${path.relative(repo, dist)} (${kept.length} of ${files.length} files, ` +
