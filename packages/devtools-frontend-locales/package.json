@@ -2,7 +2,22 @@
   "name": "@devtools-anywhere/devtools-frontend-locales",
   "version": "0.0.0",
   "description": "UI translations of @devtools-anywhere/devtools-frontend beyond English and Chinese",
+  "keywords": [
+    "chrome-devtools",
+    "devtools",
+    "i18n",
+    "locales"
+  ],
+  "homepage": "https://github.com/jerrychan7/devtools#readme",
+  "bugs": {
+    "url": "https://github.com/jerrychan7/devtools/issues"
+  },
   "license": "MIT AND BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jerrychan7/devtools.git",
+    "directory": "packages/devtools-frontend-locales"
+  },
   "files": [
     "THIRD_PARTY_LICENSES.md",
     "dist"

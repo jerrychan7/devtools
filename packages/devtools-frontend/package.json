@@ -2,7 +2,21 @@
   "name": "@devtools-anywhere/devtools-frontend",
   "version": "0.0.0",
   "description": "Chrome DevTools frontend built from the official sources for devtools-anywhere",
+  "keywords": [
+    "chrome-devtools",
+    "devtools",
+    "devtools-frontend"
+  ],
+  "homepage": "https://github.com/jerrychan7/devtools#readme",
+  "bugs": {
+    "url": "https://github.com/jerrychan7/devtools/issues"
+  },
   "license": "MIT AND BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jerrychan7/devtools.git",
+    "directory": "packages/devtools-frontend"
+  },
   "files": [
     "THIRD_PARTY_LICENSES.md",
     "dist",

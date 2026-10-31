@@ -2,7 +2,23 @@
   "name": "@devtools-anywhere/remote-server",
   "version": "0.0.0",
   "description": "Relay that lets Chrome DevTools on one machine inspect a page running on another device",
+  "keywords": [
+    "cdp",
+    "chrome-devtools",
+    "devtools",
+    "remote-debugging",
+    "websocket"
+  ],
+  "homepage": "https://github.com/jerrychan7/devtools#readme",
+  "bugs": {
+    "url": "https://github.com/jerrychan7/devtools/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jerrychan7/devtools.git",
+    "directory": "packages/remote-server"
+  },
   "bin": {
     "devtools-anywhere-remote": "./dist/cli.js"
   },
@@ -43,6 +59,9 @@
     "@devtools-anywhere/devtools-frontend-locales": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=22.18"
   },
   "chrome": "156.0.8078.80"
 }

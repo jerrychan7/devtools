@@ -2,7 +2,23 @@
   "name": "@devtools-anywhere/vite-plugin",
   "version": "0.0.0",
   "description": "Vite plugin that injects devtools-anywhere in development",
+  "keywords": [
+    "chrome-devtools",
+    "debugging",
+    "devtools",
+    "vite",
+    "vite-plugin"
+  ],
+  "homepage": "https://github.com/jerrychan7/devtools#readme",
+  "bugs": {
+    "url": "https://github.com/jerrychan7/devtools/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jerrychan7/devtools.git",
+    "directory": "packages/vite-plugin"
+  },
   "files": [
     "dist"
   ],
@@ -39,6 +55,9 @@
     "@devtools-anywhere/devtools-frontend-locales": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=22.18"
   },
   "chrome": "156.0.8078.80"
 }

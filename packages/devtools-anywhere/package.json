@@ -2,7 +2,24 @@
   "name": "devtools-anywhere",
   "version": "0.0.0",
   "description": "Real Chrome DevTools inside any web page, with early capture",
+  "keywords": [
+    "cdp",
+    "chrome-devtools",
+    "debugging",
+    "devtools",
+    "inspector",
+    "mobile"
+  ],
+  "homepage": "https://github.com/jerrychan7/devtools#readme",
+  "bugs": {
+    "url": "https://github.com/jerrychan7/devtools/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jerrychan7/devtools.git",
+    "directory": "packages/devtools-anywhere"
+  },
   "files": [
     "THIRD_PARTY_LICENSES.md",
     "dist"
