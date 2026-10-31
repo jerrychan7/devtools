@@ -130,6 +130,15 @@ The packages are not published yet; the paths below refer to the builds in this 
 </head>
 ```
 
+From a CDN, once the packages are published: jsDelivr and unpkg serve every npm package, so nothing needs hosting. Pin an exact version, the same for both packages. Only English and Chinese are available this way, since the other languages are in a separate package that has to be served from the frontend's directory.
+
+```html
+<!-- jsDelivr -->
+<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.1.0/dist/probe.iife.js" data-devtools-frontend-url="https://cdn.jsdelivr.net/npm/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"></script>
+<!-- unpkg -->
+<script src="https://unpkg.com/devtools-anywhere@0.1.0/dist/probe.iife.js" data-devtools-frontend-url="https://unpkg.com/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"></script>
+```
+
 After the page loads, the probe loads `devtools-anywhere.iife.js` from next to itself (or `data-bundle`) and mounts its own `<devtools-anywhere>` under `<html>`, next to `<body>`, whatever `<devtools-anywhere>` elements the page has; there is one such global element per page, and another one only logs a warning. Optional attributes: `data-open-immediately` opens DevTools right away; `data-default-shell-mode="off"` stays out of shell mode, which the top-level page enters by default (`on`); `data-shell-mode-locked` keeps shell mode as `data-default-shell-mode` says, ignoring the user's choice (which stays stored) and hiding DevTools' switch, though a page that refuses to be framed is still shown on its own; `data-no-toggler` hides the F12 button, also in shell mode; `data-service-worker` enables the Service Worker in shell mode, which injects the probe into same-origin pages in the page iframe that do not include it and adds the request and response headers of same-origin requests (documents, stylesheets, scripts, images and so on); it is off by default, see its [requirements](#3-injection).
 
 ### Vite

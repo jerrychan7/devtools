@@ -130,6 +130,15 @@
 </head>
 ```
 
+包发布后也可以直接用 CDN：jsDelivr 和 unpkg 会提供所有 npm 包，不用自己部署。请固定到确切的版本号，两个包用同一个版本。这种方式只有英文和中文界面，因为其他语言在单独的包里，必须和前端放在同一目录下提供。
+
+```html
+<!-- jsDelivr -->
+<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.1.0/dist/probe.iife.js" data-devtools-frontend-url="https://cdn.jsdelivr.net/npm/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"></script>
+<!-- unpkg -->
+<script src="https://unpkg.com/devtools-anywhere@0.1.0/dist/probe.iife.js" data-devtools-frontend-url="https://unpkg.com/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"></script>
+```
+
 页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并在 `<html>` 下、与 `<body>` 同级挂载它自己的 `<devtools-anywhere>`，不管页面里有没有 `<devtools-anywhere>`；每个页面只有一个这样的全局元素，再出现的只在控制台警告。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-service-worker` 在外壳模式下启用 Service Worker，它给页面 iframe 中没有引入探针的同源页面注入探针，并为同源的文档、样式表、脚本、图片等请求补上请求头和响应头；默认关闭，使用条件见[注入方式](#3-注入方式)。
 
 ### Vite
