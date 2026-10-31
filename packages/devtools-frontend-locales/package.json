@@ -1,6 +1,6 @@
 {
   "name": "@devtools-anywhere/devtools-frontend-locales",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "UI translations of @devtools-anywhere/devtools-frontend beyond English and Chinese",
   "keywords": [
     "chrome-devtools",

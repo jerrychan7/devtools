@@ -118,7 +118,7 @@ An umbrella package plus scoped packages under the [`@devtools-anywhere`](https:
 
 ## Usage (preview)
 
-The packages are not published yet; the paths below refer to the builds in this repository. `data-devtools-frontend-url` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build. Its `bundle/` files are named after their content and can be cached for good; serve `anywhere_app.html` itself with revalidation (`Cache-Control: no-cache`), so that an update reaches the browser.
+The packages are on npm (`npm i devtools-anywhere @devtools-anywhere/devtools-frontend`); the paths below refer to their `dist/` directories, which a build of this repository makes too. `data-devtools-frontend-url` points at `anywhere_app.html` of a `@devtools-anywhere/devtools-frontend` build. Its `bundle/` files are named after their content and can be cached for good; serve `anywhere_app.html` itself with revalidation (`Cache-Control: no-cache`), so that an update reaches the browser.
 
 ### One script tag
 
@@ -130,7 +130,7 @@ The packages are not published yet; the paths below refer to the builds in this 
 </head>
 ```
 
-From a CDN, once the packages are published: jsDelivr and unpkg serve every npm package, so nothing needs hosting. Pin an exact version, the same for both packages. Only English and Chinese are available this way, since the other languages are in a separate package that has to be served from the frontend's directory. Shell mode is not available either, as it needs the probe, the bundle and the frontend from the page's origin (see [shell mode](#2-shell-mode-in-place-rewrite)): `data-default-shell-mode="off"` embeds DevTools directly in the page.
+From a CDN: jsDelivr and unpkg serve every npm package, so nothing needs hosting. Pin an exact version, the same for both packages. Only English and Chinese are available this way, since the other languages are in a separate package that has to be served from the frontend's directory. Shell mode is not available either, as it needs the probe, the bundle and the frontend from the page's origin (see [shell mode](#2-shell-mode-in-place-rewrite)): `data-default-shell-mode="off"` embeds DevTools directly in the page.
 
 ```html
 <!-- jsDelivr -->

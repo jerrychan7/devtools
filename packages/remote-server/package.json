@@ -1,6 +1,6 @@
 {
   "name": "@devtools-anywhere/remote-server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Relay that lets Chrome DevTools on one machine inspect a page running on another device",
   "keywords": [
     "cdp",

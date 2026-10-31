@@ -118,7 +118,7 @@
 
 ## 用法（预览）
 
-各个包尚未发布，下面的路径指本仓库构建出的文件。`data-devtools-frontend-url` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。产物里 `bundle/` 下的文件以内容命名，可以永久缓存；`anywhere_app.html` 本身要带重新验证提供（`Cache-Control: no-cache`），更新才能到达浏览器。
+各个包已发布到 npm（`npm i devtools-anywhere @devtools-anywhere/devtools-frontend`），下面的路径指它们的 `dist/` 目录，本仓库构建出的文件也一样。`data-devtools-frontend-url` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。产物里 `bundle/` 下的文件以内容命名，可以永久缓存；`anywhere_app.html` 本身要带重新验证提供（`Cache-Control: no-cache`），更新才能到达浏览器。
 
 ### 一行 script
 
@@ -130,7 +130,7 @@
 </head>
 ```
 
-包发布后也可以直接用 CDN：jsDelivr 和 unpkg 会提供所有 npm 包，不用自己部署。请固定到确切的版本号，两个包用同一个版本。这种方式只有英文和中文界面，因为其他语言在单独的包里，必须和前端放在同一目录下提供。外壳模式也用不了，因为它要求探针、bundle 和前端都与页面同源（见[外壳模式](#2-外壳模式原地改写)）：用 `data-default-shell-mode="off"` 把 devtools 直接嵌在页面里。
+也可以直接用 CDN：jsDelivr 和 unpkg 会提供所有 npm 包，不用自己部署。请固定到确切的版本号，两个包用同一个版本。这种方式只有英文和中文界面，因为其他语言在单独的包里，必须和前端放在同一目录下提供。外壳模式也用不了，因为它要求探针、bundle 和前端都与页面同源（见[外壳模式](#2-外壳模式原地改写)）：用 `data-default-shell-mode="off"` 把 devtools 直接嵌在页面里。
 
 ```html
 <!-- jsDelivr -->

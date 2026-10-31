@@ -4,6 +4,8 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
+## 0.1.0
+
 Based on Chrome 156 (156.0.8078.80).
 
 First release.

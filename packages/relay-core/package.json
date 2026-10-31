@@ -1,6 +1,6 @@
 {
   "name": "@devtools-anywhere/relay-core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Internal: the relay logic shared by shell mode and the remote server, bundled into both",
   "license": "MIT",
