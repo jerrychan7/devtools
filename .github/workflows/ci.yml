@@ -1,0 +1,70 @@
+# Checks every push to main and every pull request: lint, types, the DevTools frontend built from
+# source at the pinned REVISION, and all tests against Chrome for Testing at the version the
+# frontend comes from (the packages' "chrome" field). No caches yet: the first runs measure how
+# long each step takes and how much it downloads and writes, the "Disk usage" steps included.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: |
+          pnpm fmt:check
+          pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Disk usage before the frontend
+        run: df -h /
+
+      - name: Fetch depot_tools
+        run: git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools.ignore
+
+      - name: Build the DevTools frontend
+        run: pnpm --filter @devtools-anywhere/devtools-frontend build:frontend
+
+      - name: Disk usage after the frontend
+        run: |
+          df -h /
+          du -sh depot_tools.ignore devtools-frontend.ignore devtools-frontend.ignore/devtools-frontend/.git \
+            devtools-frontend.ignore/devtools-frontend/out packages/devtools-frontend/dist \
+            packages/devtools-frontend-locales/dist ~/.cache 2>/dev/null || true
+
+      - name: Install Chrome for Testing
+        run: |
+          version=$(node -p "require('./packages/devtools-frontend/package.json').chrome")
+          chrome=$(npx --yes --package=@puppeteer/browsers@2 -- browsers install "chrome@$version" --path "$RUNNER_TEMP/browsers" | tail -n1 | cut -d' ' -f2-)
+          "$chrome" --version
+          echo "CHROME_PATH=$chrome" >> "$GITHUB_ENV"
+          # Ubuntu 24.04 keeps unprivileged user namespaces from Chrome's sandbox
+          echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: Test
+        run: pnpm test

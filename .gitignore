@@ -3,6 +3,8 @@
 /.*/
 # 例外：husky 的提交钩子要进仓库
 !/.husky/
+# 例外：GitHub Actions 的 workflow 要进仓库
+!/.github/
 
 # System Files
 .DS_Store
