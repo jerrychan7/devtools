@@ -142,7 +142,7 @@ jobs:
 
       - name: Publish to npm
         run: |
-          for pack in packs/*.tgz; do
+          for pack in ./packs/*.tgz; do
             npm publish "$pack" --access public --provenance
           done
 
