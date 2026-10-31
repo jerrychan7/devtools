@@ -55,7 +55,7 @@ index 8027b30891..a0804c44c6 100644
      }
      if (event.metaKey || event.ctrlKey) {
 diff --git a/front_end/panels/sources/SourcesPanel.ts b/front_end/panels/sources/SourcesPanel.ts
-index 68191fd692..861d6f3b08 100644
+index 68191fd692..0541fbe9a3 100644
 --- a/front_end/panels/sources/SourcesPanel.ts
 +++ b/front_end/panels/sources/SourcesPanel.ts
 @@ -158,6 +158,15 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -83,7 +83,7 @@ index 68191fd692..861d6f3b08 100644
        this.threadsSidebarPane = UI.ViewManager.ViewManager.instance().view('sources.threads');
        if (this.sidebarPaneStack && this.threadsSidebarPane) {
          this.sidebarPaneStack.appendView(
-@@ -1146,14 +1155,23 @@ export class SourcesPanel extends UI.Panel.Panel implements
+@@ -1146,14 +1155,27 @@ export class SourcesPanel extends UI.Panel.Panel implements
  
      // Create vertical box with stack.
      const vbox = new UI.Widget.VBox();
@@ -102,6 +102,10 @@ index 68191fd692..861d6f3b08 100644
 +    if (!canPause()) {
 +      void this.sidebarPaneStack.showView(this.watchSidebarPane);
 +      this.extensionSidebarPanesContainer = this.sidebarPaneStack;
++      // As below: the panes extensions added before the sidebar was laid out.
++      for (const pane of PanelCommon.ExtensionServer.ExtensionServer.instance().sidebarPanes()) {
++        this.addExtensionSidebarPane(pane);
++      }
 +      this.sidebarPaneView = vbox;
 +      this.splitWidget.setSidebarWidget(this.sidebarPaneView);
 +      return;
