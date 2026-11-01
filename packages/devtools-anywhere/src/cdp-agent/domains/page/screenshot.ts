@@ -1,13 +1,14 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
-import { encode, type Render } from './render';
+import { CaptureError, encode, type Render } from './render';
 
 /**
  * A canvas area small enough for any browser, older iOS Safari's limit (4096 × 4096).
  * snapDOM already scales an image past the usual canvas limits down to fit (32767 pixels a
  * side, 16384 on Safari, 16384 × 16384 in area); should drawing still fail, the screenshot is
- * halved and tried again, and once it is no larger than this the failure is reported.
+ * halved and tried again, and once it is no larger than this the failure is reported. A failure
+ * before drawing (CaptureError) is reported at once.
  */
 const SAFE_PIXELS = 4096 * 4096;
 
@@ -46,7 +47,8 @@ export function registerScreenshot({ session }: Context, render: Render | undefi
           if (data) return { data, approximate: true };
           if (safe) throw new CdpError('Unable to capture screenshot');
         } catch (e) {
-          if (safe) throw e;
+          // Only a failure to draw is worth trying again smaller.
+          if (safe || e instanceof CaptureError) throw e;
         }
       }
     },

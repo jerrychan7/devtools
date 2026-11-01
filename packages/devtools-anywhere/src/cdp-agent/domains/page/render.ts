@@ -37,24 +37,39 @@ function background() {
   return '#fff';
 }
 
+/**
+ * A failure before drawing: loading snapDOM or reading the page. Drawing at a smaller size would
+ * not help, unlike a failure to draw.
+ */
+export class CaptureError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
+
 /** A Render on snapDOM, loaded on first use. */
 export function createRender(load: SnapdomLoader): Render {
   let snapdom: Promise<Snapdom> | null = null;
   return async (clip, scale, dpr) => {
-    // A failed load is not kept, so that the next render loads snapDOM again.
-    const capture = await (snapdom ??= load().then(
-      m => m.snapdom,
-      (e: unknown) => {
-        snapdom = null;
-        throw e;
-      }
-    ));
-    const result = await capture(document.documentElement, {
-      clip,
-      exclude: [isOwn],
-      excludeMode: 'hide',
-      backgroundColor: background(),
-    });
+    let result;
+    try {
+      // A failed load is not kept, so that the next render loads snapDOM again.
+      const capture = await (snapdom ??= load().then(
+        m => m.snapdom,
+        (e: unknown) => {
+          snapdom = null;
+          throw e;
+        }
+      ));
+      result = await capture(document.documentElement, {
+        clip,
+        exclude: [isOwn],
+        excludeMode: 'hide',
+        backgroundColor: background(),
+      });
+    } catch (e) {
+      throw new CaptureError(e);
+    }
     return result.toCanvas({ scale, dpr });
   };
 }
