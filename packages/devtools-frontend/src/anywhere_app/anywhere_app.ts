@@ -194,20 +194,27 @@ function loadedToolbox(): Document|null {
   }
   return null;
 }
-function handOverToolbox(deadline: number): void {
+/** The latest request for the toolbox: an earlier one stops looking for it. */
+let toolboxRequest = 0;
+function handOverToolbox(request: number, deadline: number): void {
+  if (request !== toolboxRequest) {
+    return;
+  }
   const toolbox = loadedToolbox();
   if (toolbox) {
     useDefaultTheme(toolbox);
     Reflect.get(globalThis, 'Emulation')?.AdvancedApp?.instance().deviceModeEmulationFrameLoaded(toolbox);
   } else if (Date.now() < deadline) {
-    setTimeout(() => handOverToolbox(deadline), 100);
+    setTimeout(() => handOverToolbox(request, deadline), 100);
+  } else {
+    console.warn(`Device mode's page (${TOOLBOX_PAGE}) did not load in the shell`);
   }
 }
 const open = window.open.bind(window);
 window.open = (url?: string|URL, target?: string, features?: string) => {
   if (!remote && url !== undefined && isToolbox(String(url))) {
     notifyEmbedder({type: 'toolbox', url: new URL(url, location.href).href});
-    handOverToolbox(Date.now() + 10000);
+    handOverToolbox(++toolboxRequest, Date.now() + 60000);
     return null;
   }
   return open(url, target, features);

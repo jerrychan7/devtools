@@ -370,7 +370,12 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       this.shellLayout?.splitSize(request.size);
     } else if (request.type === 'toolbox') {
       // Only a page of the frontend's own origin.
-      const url = new URL(request.url, this.loadedUrl);
+      let url: URL;
+      try {
+        url = new URL(request.url, this.loadedUrl);
+      } catch {
+        return;
+      }
       if (url.origin === this.frontendOrigin) this.shellLayout?.showToolbox(url.href);
     }
   };
@@ -671,6 +676,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect?.();
     this.disconnect = null;
     this.loadedUrl = '';
+    this.shellLayout?.dispose();
+    this.shellLayout = null;
     window.removeEventListener('message', this.onFrontendRequest);
     window.removeEventListener('pageshow', this.onShellPageshow);
     // The togglers without a value may point to another element now.
@@ -787,8 +794,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect?.();
     this.frontendOrigin = url.origin;
     if (this.session) this.disconnect = connectFrontend(this.session, this.frame, url.origin);
-    else if (page)
+    else if (page) {
+      // Device mode was the previous frontend's: Chrome clears it with the frontend.
+      this.shellLayout?.setMetrics(null);
       this.disconnect = relayShell(page, this.frame, url.origin, metrics => this.shellLayout?.setMetrics(metrics));
+    }
     // Whether shell mode is available (it needs the bundle URL) and whether it is on.
     const shell = isShellElement(this);
     const hash = new URLSearchParams({

@@ -58,7 +58,16 @@ export class ShellLayout {
     this.handle.style.cssText = 'position:fixed;z-index:2;display:none;touch-action:none';
     document.body.append(this.handle);
     this.setupHandle();
-    addEventListener('resize', () => this.render());
+    addEventListener('resize', this.onResize);
+  }
+
+  private readonly onResize = () => this.render();
+
+  /** The element left the shell: stops listening and removes what this layout added. */
+  dispose() {
+    removeEventListener('resize', this.onResize);
+    this.handle.remove();
+    this.removeToolbox();
   }
 
   /** DevTools was shown or hidden, or docked elsewhere. */
