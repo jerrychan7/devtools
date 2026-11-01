@@ -63,7 +63,11 @@ export function registerPage({ session, probe }: Context) {
       return { url: link.href, errors: [], data: await res.text(), manifest: {} };
     },
 
-    /** Chrome reports CSS pixels in both sets of fields while the page is not zoomed. */
+    /**
+     * The css* fields are in CSS pixels; the deprecated ones are mostly in device pixels, as
+     * Chrome reports them: times the screen's scale factor, devicePixelRatio as page scripts
+     * see it.
+     */
     getLayoutMetrics(): Protocol.Page.GetLayoutMetricsResponse {
       const root = document.documentElement;
       const layout = { pageX: scrollX, pageY: scrollY, clientWidth: root.clientWidth, clientHeight: root.clientHeight };
@@ -79,10 +83,17 @@ export function registerPage({ session, probe }: Context) {
         zoom: 1,
       };
       const content = { x: 0, y: 0, width: root.scrollWidth, height: root.scrollHeight };
+      const dpr = devicePixelRatio;
       return {
-        layoutViewport: layout,
-        visualViewport: visual,
-        contentSize: content,
+        layoutViewport: {
+          pageX: layout.pageX * dpr,
+          pageY: layout.pageY * dpr,
+          clientWidth: layout.clientWidth * dpr,
+          clientHeight: layout.clientHeight * dpr,
+        },
+        // Chrome leaves the visual viewport's position in CSS pixels.
+        visualViewport: { ...visual, clientWidth: visual.clientWidth * dpr, clientHeight: visual.clientHeight * dpr },
+        contentSize: { ...content, width: content.width * dpr, height: content.height * dpr },
         cssLayoutViewport: layout,
         cssVisualViewport: visual,
         cssContentSize: content,
