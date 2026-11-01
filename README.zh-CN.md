@@ -41,7 +41,7 @@
   - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
   - 能显示 WebSocket 连接和帧，但没有握手阶段的请求头和响应头，页面拿不到它们。
   - 投屏（工具栏上的设备按钮，默认关闭）显示的是 [snapDOM](https://github.com/zumerlab/snapdom) 根据 DOM 重新绘制的视口，不是屏幕上的真实像素：canvas、视频和跨域图片可能缺失，每秒最多更新约两次。snapDOM（gzip 后约 90 KB）只在开始投屏或截图时加载。
-  - 截图（`Page.captureScreenshot`，供通过 CDP 操作页面的工具和 agent 使用）同样由 snapDOM 绘制，投屏缺失的内容截图里也会缺失。返回结果里会多一个 Chrome 没有的字段 `approximate: true` 来说明这一点。其余参数的行为和 Chrome 一致：`clip` 按页面坐标计算，图片按设备像素输出（`devicePixelRatio` 乘以 `clip.scale`），不带 `clip` 时设置 `captureBeyondViewport` 会截取整个页面。超过 4096 × 4096 像素（Safari 画布的上限）的图片会等比缩小。不支持编码 WebP 的浏览器（Safari）在请求 WebP 时返回 PNG。
+  - 截图（`Page.captureScreenshot`，供通过 CDP 操作页面的工具和 agent 使用）同样由 snapDOM 绘制，投屏缺失的内容截图里也会缺失。返回结果里会多一个 Chrome 没有的字段 `approximate: true` 来说明这一点。其余参数的行为和 Chrome 一致：`clip` 按页面坐标计算，图片按设备像素输出（`devicePixelRatio` 乘以 `clip.scale`），不带 `clip` 时设置 `captureBeyondViewport` 会截取整个页面。超出浏览器画布上限（单边 32767 像素，Safari 上 16384；面积 16384 × 16384）的图片会等比缩小，snapDOM 会在页面的控制台里给出警告。不支持编码 WebP 的浏览器（Safari）在请求 WebP 时返回 PNG。
   - 投屏上的输入以 DOM 事件重放，这些事件不是可信事件（`isTrusted` 为 false）：聚焦、点击、滚动和文本编辑都会执行，但检查 `isTrusted` 的页面会忽略它们。
   - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
   - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。

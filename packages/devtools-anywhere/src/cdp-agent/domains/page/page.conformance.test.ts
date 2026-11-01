@@ -251,13 +251,25 @@ test('captureScreenshot has device pixels, encodes as asked and says it is appro
   }
 });
 
-test('captureScreenshot scales a page too large for a canvas down', async () => {
+test('captureScreenshot keeps a long page at full size while the canvas can hold it', async () => {
   const { s, ours, look } = await screenshotPage();
   try {
     await s.page.evaluate(() => (document.body.style.height = '20000px'));
     const { width, height } = await look((await ours({ captureBeyondViewport: true })).data);
-    assert.ok(width * height <= 4096 * 4096, `${width} × ${height}`);
-    assert.ok(Math.abs(width / height - 2000 / 20000) < 0.01, `${width} × ${height}`);
+    assert.deepEqual([width, height], [2000, 20000]);
+  } finally {
+    await s.page.close();
+  }
+});
+
+test('captureScreenshot scales a page too large for a canvas down to fit', async () => {
+  const { s, ours, look } = await screenshotPage();
+  try {
+    // 200000 pixels high, past the longest side a canvas can have (32767 in Chrome).
+    await s.page.evaluate(() => (document.body.style.height = '200000px'));
+    const { width, height } = await look((await ours({ captureBeyondViewport: true })).data);
+    assert.ok(height <= 32767, `${width} × ${height}`);
+    assert.ok(Math.abs(width / height - 2000 / 200000) < 0.001, `${width} × ${height}`);
   } finally {
     await s.page.close();
   }

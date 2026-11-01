@@ -4,10 +4,12 @@ import { CdpError } from '../../core/session';
 import { encode, type Render } from './render';
 
 /**
- * The most pixels a screenshot has: Safari's limit on a canvas's area (4096 × 4096). A larger
- * screenshot, of a long page in full, is scaled down to it.
+ * A canvas area small enough for any browser, older iOS Safari's limit (4096 × 4096).
+ * snapDOM already scales an image past the usual canvas limits down to fit (32767 pixels a
+ * side, 16384 on Safari, 16384 × 16384 in area); should drawing still fail, the screenshot is
+ * halved and tried again, and once it is no larger than this the failure is reported.
  */
-const MAX_PIXELS = 4096 * 4096;
+const SAFE_PIXELS = 4096 * 4096;
 
 /**
  * Page.captureScreenshot's response, with `approximate`: the image is the page's DOM redrawn
@@ -36,9 +38,17 @@ export function registerScreenshot({ session }: Context, render: Render | undefi
       const height = area?.height ?? innerHeight;
       if (!(width > 0 && height > 0)) throw new CdpError('Cannot take screenshot with 0 width or height');
       const dpr = devicePixelRatio;
-      const scale = Math.min(clip?.scale ?? 1, Math.sqrt(MAX_PIXELS / (width * height)) / dpr);
-      const canvas = await render(area ?? 'viewport', scale, dpr);
-      return { data: encode(canvas, params.format ?? 'png', params.quality), approximate: true };
+      for (let scale = clip?.scale ?? 1; ; scale /= 2) {
+        const safe = width * height * (scale * dpr) ** 2 <= SAFE_PIXELS;
+        try {
+          // A canvas too large to draw encodes as an empty data URL (Chrome) or throws.
+          const data = encode(await render(area ?? 'viewport', scale, dpr), params.format ?? 'png', params.quality);
+          if (data) return { data, approximate: true };
+          if (safe) throw new CdpError('Unable to capture screenshot');
+        } catch (e) {
+          if (safe) throw e;
+        }
+      }
     },
   });
 }
