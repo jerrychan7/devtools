@@ -12,7 +12,8 @@ import { registerNetwork } from './domains/network/network';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
 import { registerRuntime } from './domains/runtime/runtime';
-import { registerScreencast, type SnapdomLoader } from './domains/page/screencast';
+import { createRender, type SnapdomLoader } from './domains/page/render';
+import { registerScreencast } from './domains/page/screencast';
 import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp/webmcp';
@@ -34,7 +35,7 @@ export {
   storeShellOpen,
 } from './probe/shell';
 export { FRAME_ID, LOADER_ID } from './core/context';
-export type { SnapdomLoader } from './domains/page/screencast';
+export type { SnapdomLoader } from './domains/page/render';
 
 /** @internal */
 export interface CdpSessionOptions {
@@ -88,7 +89,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerStorage(ctx);
   registerDomDebugger(ctx);
   registerDebugger(ctx);
-  registerScreencast(ctx, options.loadSnapdom);
+  registerScreencast(ctx, options.loadSnapdom && createRender(options.loadSnapdom));
   registerInput(ctx);
   registerWebMcp(ctx);
   return ctx.session;
