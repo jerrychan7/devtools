@@ -79,6 +79,8 @@ export class ShellLayout {
     this.grip.dispose();
     this.pageArea.remove();
     this.removeToolbox();
+    // Not left at the device's size, or scaled: the page fills the document again.
+    place(this.page, {});
   }
 
   /** DevTools was shown or hidden, or docked elsewhere. */

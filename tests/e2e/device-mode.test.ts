@@ -350,6 +350,26 @@ test('on a touch screen, a handle on the edge between the page and DevTools resi
   });
 });
 
+test("device mode's page is only one next to the frontend's", { skip }, async () => {
+  // Same origin as the frontend, but not its page: refused.
+  await (
+    await frontend()
+  ).evaluate(() =>
+    parent.postMessage({ devtoolsAnywhere: { type: 'toolbox', url: '/tests/e2e/pages/device-mode.html' } }, '*')
+  );
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(await page.evaluate(() => document.querySelectorAll('body > iframe[title="Device mode"]').length), 0);
+});
+
+test('removed from the shell, the element leaves the page filling it, not placed', { skip }, async () => {
+  const style = await page.evaluate(() => {
+    document.querySelector('devtools-anywhere')?.remove();
+    const frame = document.getElementById('devtools-anywhere-page');
+    return frame && { position: frame.style.position, transform: frame.style.transform, height: frame.style.height };
+  });
+  assert.deepEqual(style, { position: '', transform: '', height: '' });
+});
+
 test('no uncaught errors', { skip }, () => {
   assert.deepEqual(errors, []);
 });

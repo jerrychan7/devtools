@@ -106,15 +106,14 @@ export class Grip {
       el.setPointerCapture(down.pointerId);
       this.options.onStart?.(down);
       const move = (e: PointerEvent) => this.options.onMove(e, down);
-      const up = () => {
+      // Released, or the capture lost (the grip removed mid-drag): a single end either way.
+      const end = () => {
         el.removeEventListener('pointermove', move);
-        el.removeEventListener('pointerup', up);
-        el.removeEventListener('pointercancel', up);
+        el.removeEventListener('lostpointercapture', end);
         this.options.onEnd?.();
       };
       el.addEventListener('pointermove', move);
-      el.addEventListener('pointerup', up);
-      el.addEventListener('pointercancel', up);
+      el.addEventListener('lostpointercapture', end);
     });
   }
 }

@@ -52,7 +52,7 @@ import type { ProbeScriptAttributes } from './probe-script';
 import { SHELL_QUERY, SHELL_REMOTE } from './shell-messages';
 
 const script = document.currentScript as HTMLScriptElement | null;
-// Shell configs must come from this script's origin.
+// Shell configs may only point where this script trusts (trust.ts).
 if (script?.src) setShellScriptUrl(script.src);
 
 /** One of the script's attributes (probe-script.ts); `null` when it is absent. */

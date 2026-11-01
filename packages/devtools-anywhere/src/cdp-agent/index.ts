@@ -35,6 +35,7 @@ export {
   storeShellConfig,
   storeShellOpen,
 } from './probe/shell';
+export { isTrusted } from './probe/trust';
 export { FRAME_ID, LOADER_ID } from './core/context';
 export type { SnapdomLoader } from './domains/page/render';
 

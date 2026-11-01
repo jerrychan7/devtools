@@ -5,6 +5,7 @@ import {
   createCdpSession,
   isShellDocument,
   isShellPage,
+  isTrusted,
   markOwn,
   OWN_ATTRIBUTE,
   readShellConfig,
@@ -371,14 +372,16 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     } else if (request.type === 'split') {
       this.shellLayout?.splitArea(request);
     } else if (request.type === 'toolbox') {
-      // Only a page of the frontend's own origin.
-      let url: URL;
+      // Only a page next to the frontend's: on a CDN, its origin is every package's.
+      let url: string;
+      let frontendDir: string;
       try {
-        url = new URL(request.url, this.loadedUrl);
+        url = new URL(request.url, this.loadedUrl).href;
+        frontendDir = new URL('.', this.loadedUrl).href;
       } catch {
         return;
       }
-      if (url.origin === this.frontendOrigin) this.shellLayout?.showToolbox(url.href);
+      if (isTrusted(url, { prefixes: [frontendDir] })) this.shellLayout?.showToolbox(url);
     }
   };
 
