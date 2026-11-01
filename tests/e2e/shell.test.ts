@@ -90,8 +90,8 @@ test('navigation inside the page updates the address bar', async () => {
     if (!pageWindow) throw new Error('no page frame');
     pageWindow.location.href = '/tests/e2e/pages/shell-page.html?second';
   });
-  const state = await waitFor(s => s.url.endsWith('?second'));
-  assert.ok(earlyLogs(state).length >= 3);
+  // The address bar can update before the new page's output arrives, so wait for both.
+  await waitFor(s => s.url.endsWith('?second') && earlyLogs(s).length >= 3);
 });
 
 test("closing (DevTools' own close button) hides DevTools; stopping keeping it open leaves shell mode", async () => {
