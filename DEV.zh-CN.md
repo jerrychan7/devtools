@@ -147,8 +147,9 @@ pnpm typecheck                                # 先构建，再检查所有包�
 
 - **自有入口** `anywhere_app` 代替 `devtools_app`：只引入能对接页面内 CDP agent的面板（元素、控制台、源代码、网络、应用）和投屏，其余面板既不显示也不加载。唯一的补丁就是在构建配置里注册这个入口（4 个 `BUILD.gn`/`.gni` 文件，共 7 行）。
 - **通过官方宿主接口接入**：Chrome 通过原生的 `InspectorFrontendHost` 与 DevTools 通信。入口保留托管模式的 stub，只替换 `sendMessageToBackend` 和 `isHostedMode`，让 CDP 消息经 `postMessage` 与嵌入它的窗口往来；嵌入方通过 `#?embedded=<origin>` 告知自己的 origin。连接相关代码一行都不改。
+- **外壳模式下的设备模式**：外壳传入 `#?shell=1` 时（`can_emulate_device`），入口加载 emulation 模块，由它的应用（上游的 `AdvancedApp`）像 Chrome 一样排布页面和 DevTools；其他情况仍用上游的简单应用和投屏。`setInspectedPageBounds` 发给外壳（`page-bounds`），外壳据此摆放页面 iframe，并通过设置 iframe 的尺寸来响应 `Emulation.setDeviceMetricsOverride`（`packages/devtools-anywhere/src/shell-layout.ts`）。取消停靠时，设备模式的页面 `device_mode_emulation_frame.html` 由外壳放在 iframe 里显示，不另开窗口，由入口把这个页面的 document 交给设备模式。`patches/device-mode-in-shell.patch` 加入这个条件，让投屏不在外壳模式下出现，让设备模式的页面在 `anywhere_app.html` 旁边打开，并从工具栏菜单中去掉设备像素比和设备类型。
 - **小屏**：沿用上游自带的响应式布局（元素面板窄屏时上下分栏、标签页溢出折叠）。
-- **少请求**：上游每个模块各打成一个包，打开 DevTools 要发约 150 个请求，在 HTTP/1.1 或网络不稳时很慢。`scripts/bundle.ts` 用 rollup 把它们重新打包（含摇树）到 `dist/bundle/`：每个懒加载的模块（主要是面板）各成一个 chunk，用到时才加载；入口 chunk 包含入口引入的模块、多个面板共用的模块和体积很小的模块；每个 worker 打成单个文件，SVG 图标内联成 data: URL。打开 DevTools 约 10 个请求。打包出的文件都以内容 hash 命名，可以永久缓存；只有指明入口的 `anywhere_app.html` 需要每次重新验证。由于模块不再是独立文件，端到端测试通过入口导出的 `modules` 访问它们。
+- **少请求**：上游每个模块各打成一个包，打开 DevTools 要发约 150 个请求，在 HTTP/1.1 或网络不稳时很慢。`scripts/bundle.ts` 用 rollup 把它们重新打包（含摇树）到 `dist/bundle/`：每个懒加载的模块（主要是面板）各成一个 chunk，用到时才加载；入口 chunk 包含入口引入的模块、多个面板共用的模块和体积很小的模块；每个 worker 打成单个文件，取消停靠时设备模式用的页面也一样；SVG 图标内联成 data: URL。打开 DevTools 约 10 个请求。打包出的文件都以内容 hash 命名，可以永久缓存；只有指明入口的 `anywhere_app.html` 需要每次重新验证。由于模块不再是独立文件，端到端测试通过入口导出的 `modules` 访问它们。
 
 `packages/devtools-frontend/` 里有：
 

@@ -42,6 +42,7 @@
   - 能显示 WebSocket 连接和帧，但没有握手阶段的请求头和响应头，页面拿不到它们。
   - 投屏（工具栏上的设备按钮，默认关闭）显示的是 [snapDOM](https://github.com/zumerlab/snapdom) 根据 DOM 重新绘制的视口，不是屏幕上的真实像素：canvas、视频和跨域图片可能缺失，每秒最多更新约两次。snapDOM（gzip 后约 90 KB）只在开始投屏或截图时加载。
   - 截图（`Page.captureScreenshot`，供通过 CDP 操作页面的工具和 agent 使用）同样由 snapDOM 绘制，投屏缺失的内容截图里也会缺失。返回结果里会多一个 Chrome 没有的字段 `approximate: true` 来说明这一点。其余参数的行为和 Chrome 一致：`clip` 按页面坐标计算，图片按设备像素输出（`devicePixelRatio` 乘以 `clip.scale`），不带 `clip` 时设置 `captureBeyondViewport` 会截取整个页面。超出浏览器画布上限（单边 32767 像素，Safari 上 16384；面积 16384 × 16384）的图片会等比缩小，snapDOM 会在页面的控制台里给出警告。不支持编码 WebP 的浏览器（Safari）在请求 WebP 时返回 PNG。
+  - 设备模式（只在外壳模式下提供，因为它要求页面在一个可以调整尺寸的 iframe 里）设置的是页面的尺寸，也就是页面看到的视口：媒体查询、`vw`/`vh` 和 `innerWidth` 都会随之变化。它不改变 `devicePixelRatio`、UA 和触摸输入，这些是页面改不了的：工具栏里没有设备像素比和设备类型，选择设备预设时只套用尺寸。它菜单里的截图同样由 snapDOM 绘制，按页面自己的像素比输出。
   - 投屏上的输入以 DOM 事件重放，这些事件不是可信事件（`isTrusted` 为 false）：聚焦、点击、滚动和文本编辑都会执行，但检查 `isTrusted` 的页面会忽略它们。
   - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
   - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。
@@ -85,7 +86,8 @@
 2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere>`，它凭所在的文档认出自己是外壳的元素。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
 3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间转发消息。
 4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化，包括加载、前进后退和同文档导航（有 Navigation API 时也包括 `pushState`），因此刷新或复制链接打开的都是当前显示的页面。
-5. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式。再点一次锁形按钮会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
+5. DevTools 铺满外壳，由它来排布页面和自己，和 Chrome 一样：页面 iframe 放在前端的页面区域上，叠在上层。停靠位置和尺寸由 DevTools 自己管理（用它的分隔条；触屏上，页面和 DevTools 的分界处有一条更宽的拖动条）。取消停靠时，DevTools 是页面上方的浮动窗口。工具栏上的设备按钮是设备模式，和 Chrome 一样，取代了投屏：页面 iframe 按设备尺寸设置并缩放到适合窗口，工具栏的菜单可以截图。取消停靠时，设备模式的工具栏画在前端的一个页面（`device_mode_emulation_frame.html`，Chrome 也是这么做的）里，显示在浮动窗口下方。
+6. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式；在重新显示 devtools 之前，页面按自己的尺寸铺满外壳。再点一次锁形按钮会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
 
 只有与探针脚本同源的地址才会被采信，否则清除配置、页面照常加载。因此外壳模式要求探针、bundle 和前端都由页面所在的源提供。
 
@@ -178,7 +180,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote --port 8080
 
 ### 组件
 
-点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。唯一的属性 `devtools-frontend-url` 是可选的，不写时沿用探针的 `data-devtools-frontend-url`。其余状态都由库维护：探针的参数决定组件的配置，打开和关闭由用户操作；组件没有自己的方法。页面可以用 `devtools-anywhere::part(toggler)` 修改 F12 按钮的样式，外壳模式下同样有效：此时按钮在页面 iframe 里，由页面 `<html>` 下一个只承载按钮的 `<devtools-anywhere>` 显示，点击开关外壳的 DevTools（只有 iframe 里的页面没有探针时，例如其他源的页面，外壳才显示自己的按钮）。探针挂载的组件不把它的 iframe 暴露为部件。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小（外壳模式下用 DevTools 自己的分隔条，见[外壳模式](#2-外壳模式原地改写)）。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。唯一的属性 `devtools-frontend-url` 是可选的，不写时沿用探针的 `data-devtools-frontend-url`。其余状态都由库维护：探针的参数决定组件的配置，打开和关闭由用户操作；组件没有自己的方法。页面可以用 `devtools-anywhere::part(toggler)` 修改 F12 按钮的样式，外壳模式下同样有效：此时按钮在页面 iframe 里，由页面 `<html>` 下一个只承载按钮的 `<devtools-anywhere>` 显示，点击开关外壳的 DevTools（只有 iframe 里的页面没有探针时，例如其他源的页面，外壳才显示自己的按钮）。探针挂载的组件不把它的 iframe 暴露为部件。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 页面也可以自己放置 `<devtools-anywhere>`，作为显示 DevTools 的一个区域：它是页面文档流里的块级盒子（`display: block`），尺寸由页面的 CSS 决定，一连接就加载 DevTools。页面用 CSS 或 `hidden` 控制它的显示和隐藏；隐藏时 DevTools 不会卸载。它没有 F12 按钮，不能停靠或拖拽调整大小，也不会进入外壳模式（DevTools 里没有入口）；在外壳里的页面中照常工作。它只有 `devtools-frontend-url` 一个属性，其他属性一律忽略。里面的 DevTools iframe 可以用 `devtools-anywhere::part(iframe)` 设置样式。
 

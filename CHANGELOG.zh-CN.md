@@ -4,6 +4,7 @@
 
 ## Unreleased
 
+- 外壳模式下新增设备模式，和 Chrome 一样：由 DevTools 排布页面和自己，工具栏上的设备按钮按设备尺寸设置页面（缩放到适合窗口），它的菜单可以截图，停靠和取消停靠时都能用。它只设置页面的尺寸，不改变像素比、UA 和触摸输入。触屏上，页面和 DevTools 的分界处有一条拖动条用来调整大小。非外壳模式下，这个按钮仍然是投屏。
 - 新增 `Page.captureScreenshot` 和 `Page.getLayoutMetrics`：可以截取视口、指定区域或整个页面，由 snapDOM 绘制，并标注 `approximate: true`，供通过 CDP 操作页面的工具和 agent 使用。
 
 ## 0.1.0
