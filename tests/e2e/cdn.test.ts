@@ -51,14 +51,17 @@ async function serve(attributes = '', frontend: 'fake' | 'built' = 'fake') {
     const file = files.find(([prefix]) => at.startsWith(prefix));
     if (!file) return void r.continue();
     // Cross-origin, as from the CDN.
-    void fetch(file[1] + at.slice(file[0].length)).then(async response =>
-      r.respond({
-        status: response.status,
-        contentType: response.headers.get('content-type') ?? '',
-        headers: { 'access-control-allow-origin': '*' },
-        body: Buffer.from(await response.arrayBuffer()),
-      })
-    );
+    void fetch(file[1] + at.slice(file[0].length))
+      .then(async response =>
+        r.respond({
+          status: response.status,
+          contentType: response.headers.get('content-type') ?? '',
+          headers: { 'access-control-allow-origin': '*' },
+          body: Buffer.from(await response.arrayBuffer()),
+        })
+      )
+      // A request that fails, rather than one never answered.
+      .catch(() => r.abort());
   });
 }
 
@@ -93,17 +96,18 @@ test('a shell config pointing to another package on the CDN is removed and ignor
     `${CDN}devtools-anywhere@9.9.9/dist/devtools-anywhere.iife.js`
   );
   await page.reload();
-  await page.waitForFunction(() => window.__pageScriptRan === true);
+  // The probe ran: its own element, out of shell mode.
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere'));
   assert.equal(await page.evaluate(() => !!document.querySelector('devtools-anywhere[data-shell]')), false);
   assert.equal(await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell')), null);
 });
 
 test('data-no-panel: no element, and no shell mode', async () => {
-  await serve('data-no-panel');
+  // Only debugged remotely, at a server that is not there.
+  await serve('data-no-panel data-remote="http://127.0.0.1:9/"');
   await page.goto(url);
-  await page.waitForFunction(() => window.__pageScriptRan === true && document.readyState === 'complete');
-  // The bundle would have mounted the element after the load event.
-  await new Promise(r => setTimeout(r, 500));
+  // The bundle has loaded, and would have mounted the element as it did.
+  await page.waitForFunction(() => 'DevtoolsAnywhere' in window);
   assert.equal(await page.evaluate(() => document.querySelectorAll('devtools-anywhere').length), 0);
   assert.equal(await page.evaluate(() => sessionStorage.getItem('devtools-anywhere:shell')), null);
 });

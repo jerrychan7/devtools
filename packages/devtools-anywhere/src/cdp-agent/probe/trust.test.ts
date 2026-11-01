@@ -63,6 +63,17 @@ describe('what a shell config may point to', () => {
     test(`not ${what}`, () => assert.equal(trusts(PROBE, url), false));
   }
 
+  test('on unpkg too, and at a dist-tag, the same', () => {
+    const unpkg = 'https://unpkg.com/';
+    const probe = `${unpkg}devtools-anywhere@0.2.0/dist/probe.iife.js`;
+    assert.equal(trusts(probe, `${unpkg}@devtools-anywhere/devtools-frontend@0.2.0/dist/anywhere_app.html`), true);
+    assert.equal(trusts(probe, `${unpkg}evil@1.0.0/anywhere_app.html`), false);
+    assert.equal(trusts(probe, FRONTEND), false);
+    const latest = `${JSDELIVR}devtools-anywhere@latest/dist/probe.iife.js`;
+    assert.equal(trusts(latest, `${JSDELIVR}@devtools-anywhere/devtools-frontend@latest/dist/anywhere_app.html`), true);
+    assert.equal(trusts(latest, FRONTEND), false);
+  });
+
   test('on an npm CDN but not this package, nothing', () => {
     const other = `${JSDELIVR}evil@1.0.0/probe.iife.js`;
     assert.equal(trusts(other, `${JSDELIVR}evil@1.0.0/anywhere_app.html`), false);

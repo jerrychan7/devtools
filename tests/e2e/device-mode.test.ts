@@ -186,19 +186,23 @@ test('device mode sizes the page as the device, scaled to fit, and takes its scr
       saved.name = this.download;
     };
   });
-  await runAction('emulation.capture-screenshot');
-  const saved = await waitFor(
-    () =>
-      fe.evaluate(() => {
-        const value: { name?: string; width?: number; height?: number } = Reflect.get(window, '__saved');
-        return value.name ? { name: value.name, width: value.width ?? 0, height: value.height ?? 0 } : null;
-      }),
-    'the screenshot'
-  );
-  await fe.evaluate(() => {
-    const restore: unknown = Reflect.get(window, '__restore');
-    if (typeof restore === 'function') restore();
-  });
+  let saved: { name: string; width: number; height: number };
+  try {
+    await runAction('emulation.capture-screenshot');
+    saved = await waitFor(
+      () =>
+        fe.evaluate(() => {
+          const value: { name?: string; width?: number; height?: number } = Reflect.get(window, '__saved');
+          return value.name ? { name: value.name, width: value.width ?? 0, height: value.height ?? 0 } : null;
+        }),
+      'the screenshot'
+    );
+  } finally {
+    await fe.evaluate(() => {
+      const restore: unknown = Reflect.get(window, '__restore');
+      if (typeof restore === 'function') restore();
+    });
+  }
   assert.match(saved.name, /\(iPhone SE\)\.png$/);
   assert.equal(saved.width, 375);
   near(saved.height, 667, 'screenshot height');
@@ -223,21 +227,24 @@ test('hidden, the page fills the shell at its own size; shown again, device mode
 
 test('undocked, device mode draws into its own page under the floating panel', { skip }, async () => {
   await dock('undocked');
-  const toolbox = await waitFor(() => page.frames().find(f => f.url().includes('device_mode_emulation_frame.html')));
-  // Its toolbar is there, and the page goes where it says.
-  // Another device than before, so that the page's size comes from this toolbar.
-  await waitFor(() => pickDevice(toolbox, 'iPhone 16').then(() => true), "the toolbox's toolbar");
-  const where = await waitFor(async () => {
-    const [state, spot] = [await pageState(), await placeholder(toolbox).catch(() => null)];
-    return spot &&
-      state.viewport.width === 393 &&
-      Math.abs(state.rect.left - spot.left) <= 2 &&
-      Math.abs(state.rect.width - spot.width) <= 2
-      ? { state, spot }
-      : null;
-  }, 'the page in the toolbox');
-  near(where.state.rect.width, where.spot.width, 'width');
-  await dock('bottom');
+  try {
+    const toolbox = await waitFor(() => page.frames().find(f => f.url().includes('device_mode_emulation_frame.html')));
+    // Its toolbar is there, and the page goes where it says.
+    // Another device than before, so that the page's size comes from this toolbar.
+    await waitFor(() => pickDevice(toolbox, 'iPhone 16').then(() => true), "the toolbox's toolbar");
+    const where = await waitFor(async () => {
+      const [state, spot] = [await pageState(), await placeholder(toolbox).catch(() => null)];
+      return spot &&
+        state.viewport.width === 393 &&
+        Math.abs(state.rect.left - spot.left) <= 2 &&
+        Math.abs(state.rect.width - spot.width) <= 2
+        ? { state, spot }
+        : null;
+    }, 'the page in the toolbox');
+    near(where.state.rect.width, where.spot.width, 'width');
+  } finally {
+    await dock('bottom');
+  }
   await waitFor(async () => !page.frames().some(f => f.url().includes('device_mode_emulation_frame.html')));
   await waitFor(async () => (await pageState()).rect.height < 800);
 });
@@ -246,16 +253,19 @@ test('docked to the right, the page goes where the frontend says', { skip }, asy
   await dock('right');
   const fe = await frontend();
   // The page left of DevTools, where the placeholder is.
-  await waitFor(async () => {
-    const [state, spot] = [await pageState(), await placeholder(fe)];
-    return (
-      state.viewport.width === 393 &&
-      spot.left < 500 &&
-      Math.abs(state.rect.left - spot.left) <= 2 &&
-      Math.abs(state.rect.top - spot.top) <= 2
-    );
-  }, 'the page docked right');
-  await dock('bottom');
+  try {
+    await waitFor(async () => {
+      const [state, spot] = [await pageState(), await placeholder(fe)];
+      return (
+        state.viewport.width === 393 &&
+        spot.left < 500 &&
+        Math.abs(state.rect.left - spot.left) <= 2 &&
+        Math.abs(state.rect.top - spot.top) <= 2
+      );
+    }, 'the page docked right');
+  } finally {
+    await dock('bottom');
+  }
 });
 
 test("in device mode, the grip stays on DevTools' edge, not on the device's screen", { skip }, async () => {
@@ -332,22 +342,25 @@ test('on a touch screen, a handle on the edge between the page and DevTools resi
       const { left, top, width, height } = el.getBoundingClientRect();
       return { x: left + width / 2, y: top + height / 2 };
     });
-  const start = await waitFor(handle, 'the touch handle');
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  await page.mouse.move(start.x, start.y - 150, { steps: 5 });
-  await page.mouse.up();
-  // DevTools took the room (as much as its minimum sizes allow): the edge, and the handle on it,
-  // moved up.
-  await waitFor(async () => {
-    const now = await handle();
-    return now && now.y < start.y - 100;
-  }, 'the handle to move up');
-  await page.evaluate(() => {
-    const original: unknown = Reflect.get(window, '__matchMedia');
-    if (original instanceof Function) window.matchMedia = query => Reflect.apply(original, window, [query]);
-    window.dispatchEvent(new Event('resize'));
-  });
+  try {
+    const start = await waitFor(handle, 'the touch handle');
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x, start.y - 150, { steps: 5 });
+    await page.mouse.up();
+    // DevTools took the room (as much as its minimum sizes allow): the edge, and the handle on it,
+    // moved up.
+    await waitFor(async () => {
+      const now = await handle();
+      return now && now.y < start.y - 100;
+    }, 'the handle to move up');
+  } finally {
+    await page.evaluate(() => {
+      const original: unknown = Reflect.get(window, '__matchMedia');
+      if (original instanceof Function) window.matchMedia = query => Reflect.apply(original, window, [query]);
+      window.dispatchEvent(new Event('resize'));
+    });
+  }
 });
 
 test("device mode's page is only one next to the frontend's", { skip }, async () => {
