@@ -196,7 +196,7 @@ pnpm test        # 前端需已构建，真实前端测试才会运行
 
 pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfmt 格式化并把结果加入这次提交，再用 oxlint 检查，有错误就中止提交；还会运行 `scripts/check-contracts.ts`（见「约定放在哪里」），以及两道针对本次新增或改动内容的规模守卫：`scripts/check-file-size.ts` 对超过 1100 行的源码文件（`.ts`、`.js` 及其变体）发出警告，超过 1500 行拒绝提交；`scripts/check-dir-size.ts` 对本次有新增文件的目录，直属文件超过 20 个时警告，超过 30 个拒绝提交。出现警告后，下一次提交就应拆分该文件，或把目录按关注点分进子目录。两者都跳过要放进 devtools-frontend 检出目录、沿用 Chromium 风格的代码（`packages/devtools-frontend/src` 会被复制进去，`patches` 会打到它上面）和 `experiments/`。`pnpm lint` 会对所有已跟踪文件运行这两道守卫（`--all`），绕过钩子的提交也能在那里查出来。`git commit --no-verify` 可以跳过一次钩子。lint 规则：oxlint 的 correctness 规则，禁止 `any`，禁止非空断言（`!`）。代码风格：2 空格缩进、加分号、单引号、行宽 120。`packages/devtools-frontend/src` 沿用 Chromium 的风格，不做 lint 和格式化。
 
-构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`；API Extractor 会丢掉 `declare global` 块，脚本会把它们补进合并后的文件）。`devtools-anywhere` 没有运行时入口：它的 `dist/index.d.ts` 只有类型，脚本都构建成 IIFE。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。设置 `CI=true` 时（供 CI 使用，仓库目前还没有 CI），报告与 API 不一致会让构建失败。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
+构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`；API Extractor 会丢掉 `declare global` 块，脚本会把它们补进合并后的文件）。`devtools-anywhere` 没有运行时入口：它的 `dist/index.d.ts` 只有类型，脚本都构建成 IIFE。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。设置 `CI=true` 时（GitHub Actions 会自动设置），报告与 API 不一致会让构建失败，所以忘了提交的报告会被 CI 拦下。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
 行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本），并在 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 的 `Unreleased` 下各给用户写一行说明（前端升级到新的 Chrome 里程碑时，还要改它的 `Based on Chrome` 那一行）。
 
@@ -205,25 +205,46 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 ### 提交
 
 - 每个提交只做一步。
-- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
+- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`ci`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
 
-### 提 PR
+### 分支与 PR
+
+`main` 是唯一的长期分支：所有改动都合进这里，发布也在这里打 tag，它应当随时可以发布。不设 `develop` 分支：合进 `main` 不会发布任何东西（只有推送 `vx.y.z` tag 才会，见「发布到 npm」），`main` 本身就存放着已合并、尚未发布的改动。
+
+| 分支 | 用途 | 规则 |
+| --- | --- | --- |
+| `main` | 所有开发；发布在它上面打 tag | 只能通过 PR 修改，CI 必须通过，禁止强推 |
+| `feat/…`、`fix/…`、`docs/…`、`ci/…` 等 | 每个分支只做一件事，短期存在；前缀与提交类型一致 | 从 `main` 拉出，通过 PR 合回后删除 |
+| `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 合进 `main`，然后在 `main` 上打 tag |
+| `release/x.y` | 只在需要时用来给旧的 minor 打补丁（见「给旧版本打补丁」） | 从 tag `vx.y.0` 拉出，在该 minor 需要补丁期间保留 |
+
+修复不单独设一类分支：和其它改动一样走 `fix/…` 分支合进 `main`，作为 patch 发布。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。
 
 ```bash
-git switch -c my-change
+git switch -c feat/my-change main
 # … 提交 …
-git push -u origin my-change
+git push -u origin feat/my-change
 gh pr create --fill
 ```
 
-在 PR 里写明验证过什么，尤其是哪些在浏览器里手动确认过、哪些没有（Safari、真机）。
+在 PR 里写明验证过什么，尤其是哪些在浏览器里手动确认过、哪些没有（Safari、真机）。用户能感知的改动，在同一个 PR 里往两份 changelog 的 `Unreleased` 下各加一行，这样发布时 changelog 已经备好。
 
 ### 发布到 npm
 
 所有包使用同一个版本号，一起发布：推送 tag `vx.y.z` 后由 `.github/workflows/release.yml` 发布。npm 信任这个 workflow（可信发布，在 npmjs.com 上为每个包配置了本仓库、`release.yml` 和 `npm` 环境），所以发布时不需要保存令牌，并且带出处证明（provenance）；改了文件名或环境名就会失效。批准发布需要仓库 `npm` 环境的审批人。每个包的可信发布方都要勾选允许 `npm publish` 和 `npm dist-tag`，不能只允许 `npm stage publish`。
 
-版本号按 semver 表示库本身的变化，从 `0.1.0` 开始：修 bug 升 patch；前端升级到新的 Chrome 里程碑升 minor（界面会变）；1.0 之前 minor 也可以有破坏性变更。承诺的范围是 README 写明的用法（`@public`）。Chrome 版本不放进版本号：写成 `+chrome156` 会被 npm 丢掉，写成 `-chrome156` 会被当成预发布版。它记在每个发布包 `package.json` 的 `chrome` 字段里（由 `update` 写入），每次发布的说明也在开头写明（「基于 Chrome 156」）。每次发布还会打上 dist-tag `chrome-<里程碑>`，`npm i devtools-anywhere@chrome-156` 就能装到基于该版 Chrome 的最后一个版本。
+版本号按 semver 表示库本身的变化，从 `0.1.0` 开始：修 bug 升 patch；新功能、或前端升级到新的 Chrome 里程碑（界面会变）升 minor；1.0 之前 minor 也可以有破坏性变更。有值得发布的内容时才发版（攒够一个 minor 的功能、用户在等的修复、新的 Chrome 里程碑），不是每次合并都发。承诺的范围是 README 写明的用法（`@public`）。Chrome 版本不放进版本号：写成 `+chrome156` 会被 npm 丢掉，写成 `-chrome156` 会被当成预发布版。它记在每个发布包 `package.json` 的 `chrome` 字段里（由 `update` 写入），每次发布的说明也在开头写明（「基于 Chrome 156」）。每次发布还会打上 dist-tag `chrome-<里程碑>`，`npm i devtools-anywhere@chrome-156` 就能装到基于该版 Chrome 的最后一个版本。
 
-1. 把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。
-2. 打 tag 并推送：`git tag vx.y.z && git push origin main vx.y.z`。
+1. 从 `main` 拉出 `release/x.y.z` 分支，把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。开 PR，CI 通过后合并。
+2. 在 `main` 上给合并后的提交打 tag 并推送这个 tag：`git switch main && git pull && git tag vx.y.z && git push origin vx.y.z`。
 3. workflow 会检查版本号、构建前端、像 CI 一样跑检查和测试，并打包（pnpm 会把 `workspace:*` 替换成实际版本）。然后在 Actions 页面批准它的 `publish` 任务：它把各包发布到 npm，打上 dist-tag `chrome-<里程碑>`，并发布 GitHub Release，说明是 `CHANGELOG.md` 中该版本的那一节，后面接上 `CHANGELOG.zh-CN.md` 的对应一节。
+
+#### 给旧版本打补丁
+
+通常修复直接从 `main` 作为下一个 patch 发布。只有当 `main` 上已经有暂时不该发布的改动（正在做的新 minor），而旧版本又需要这个修复时，才这样做：
+
+1. 如果还没有 `release/x.y`，从 tag `vx.y.0` 建一次：`git switch -c release/x.y vx.y.0 && git push -u origin release/x.y`。
+2. 先把修复合进 `main`，再通过 PR 把它 cherry-pick 到 `release/x.y`（`git cherry-pick -x <commit>`），连同它的 changelog 条目。
+3. 按上面的步骤从 `release/x.y` 发布，tag 打在这个分支上。
+
+尚未就绪，第一次这样发布前要补上：CI 不在 `release/**` 分支上运行；publish 任务会把 npm 的 `latest` 移到它发布的版本，给旧 minor 打的补丁会顶替更新的版本成为 `latest`，需要改成用 `--tag` 发布（或之后把 `latest` 移回去）。
