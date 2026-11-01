@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- 新增 `Page.captureScreenshot` 和 `Page.getLayoutMetrics`：可以截取视口、指定区域或整个页面，由 snapDOM 绘制，并标注 `approximate: true`，供通过 CDP 操作页面的工具和 agent 使用。
+
 ## 0.1.0
 
 基于 Chrome 156（156.0.8078.80）。
