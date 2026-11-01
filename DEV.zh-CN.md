@@ -2,7 +2,7 @@
 
 [English](DEV.md) | 简体中文
 
-介绍如何搭建开发环境、在实时重新构建下开发各个包，以及改动如何合入或发布。项目做什么、怎么设计的，见 [README](README.zh-CN.md)。
+介绍如何搭建开发环境、在实时重新构建下开发各个包，以及改动如何合入或发布。项目做什么见 [README](README.zh-CN.md)，工作原理和设计取舍见[设计文档](docs/design.zh-CN.md)。
 
 ## 1. 第一次开发：环境配置
 
@@ -88,6 +88,7 @@ tests/            跨包的测试
   e2e/            探针 → CDP → 前端的完整流程
   support/        启动 Chrome 和静态服务器
 playground/       开发调试用的页面和服务器
+docs/             设计文档（design.md、design.zh-CN.md）
 experiments/      验证记录
 ```
 
@@ -198,7 +199,7 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`；API Extractor 会丢掉 `declare global` 块，脚本会把它们补进合并后的文件）。`devtools-anywhere` 没有运行时入口：它的 `dist/index.d.ts` 只有类型，脚本都构建成 IIFE。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。设置 `CI=true` 时（GitHub Actions 会自动设置），报告与 API 不一致会让构建失败，所以忘了提交的报告会被 CI 拦下。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
-行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南的两种语言版本），并在 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 的 `Unreleased` 下各给用户写一行说明（前端升级到新的 Chrome 里程碑时，还要改它的 `Based on Chrome` 那一行）。
+行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南和 `docs/design.md` 的两种语言版本），并在 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 的 `Unreleased` 下各给用户写一行说明（前端升级到新的 Chrome 里程碑时，还要改它的 `Based on Chrome` 那一行）。
 
 新增或升级会进入产物的依赖、移植其它项目的代码（包括把 DevTools 前端换到新的 `REVISION`）时，运行 `pnpm licenses:update` 重新生成根目录和各包的 `THIRD_PARTY_LICENSES.md`（新增的库先加进 `scripts/third-party-licenses.ts` 的清单）。
 

@@ -2,7 +2,7 @@
 
 English | [简体中文](DEV.zh-CN.md)
 
-How to set up a development environment, work on the packages with live rebuilds, and get changes merged or released. For what the project does and how it is designed, see the [README](README.md).
+How to set up a development environment, work on the packages with live rebuilds, and get changes merged or released. For what the project does, see the [README](README.md); for how it works and why, the [design](docs/design.md).
 
 ## 1. First-time setup
 
@@ -88,6 +88,7 @@ tests/            tests that span packages
   e2e/            probe → CDP → frontend
   support/        launches Chrome with the static server
 playground/       pages and server for development
+docs/             design (design.md, design.zh-CN.md)
 experiments/      validation records
 ```
 
@@ -198,7 +199,7 @@ The pre-commit hook (husky + lint-staged) runs on the staged files only: it form
 
 The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`; it copies `declare global` blocks into the rolled-up file, which API Extractor leaves out). `devtools-anywhere` has no runtime entry: its `dist/index.d.ts` is types only, and its scripts are built as IIFEs. Commit a changed report with the change that caused it: it is how a change to the public API shows in review. With `CI=true`, which GitHub Actions sets, a report that no longer matches fails the build, so CI catches a report left uncommitted. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
 
-Also update both `README.md` and `README.zh-CN.md` (and this guide in both languages) when behavior, usage or limitations change, and add a line for users under `Unreleased` in both `CHANGELOG.md` and `CHANGELOG.zh-CN.md` (moving the frontend to a new Chrome milestone also changes its `Based on Chrome` line).
+Also update both `README.md` and `README.zh-CN.md` (and this guide and `docs/design.md` in both languages) when behavior, usage or limitations change, and add a line for users under `Unreleased` in both `CHANGELOG.md` and `CHANGELOG.zh-CN.md` (moving the frontend to a new Chrome milestone also changes its `Based on Chrome` line).
 
 When a dependency that ends up in a build output is added or upgraded, or code is ported from another project (including moving the DevTools frontend to a new `REVISION`), run `pnpm licenses:update` to regenerate `THIRD_PARTY_LICENSES.md` at the root and in the packages (for a new library, add it to the list in `scripts/third-party-licenses.ts` first). It needs the frontend built: the build writes the `front_end/third_party` libraries that end up in `dist/` to `packages/devtools-frontend/dist-third-party.ignore.json` (next to `dist/`, not published), which the script checks its list against; `build:frontend --copy-only` regenerates it from the last build.
 

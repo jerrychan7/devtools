@@ -21,104 +21,6 @@
 3. **刷新不丢 devtools**：页面刷新或跳转时，devtools 保持打开，日志可以持续保留。
 4. **持续跟进新版 Chrome DevTools**：基于官方 devtools-frontend 维护一组补丁，定期升级，不长期停留在旧版本。
 
-## 设计
-
-### 选型
-
-| 部分 | 选择 | 理由 |
-|---|---|---|
-| CDP 实现 | 在本项目中自行实现，参考 [chobitsu](https://github.com/liriliri/chobitsu) | 在页面内调试只能通过 JS API 采集数据，所以只能用 JS/TS 实现。自行实现可以让探针和各个 CDP 域共用同一套 hook（不再需要回放技巧），修掉 chobitsu 的已知问题，并通过 [`devtools-protocol`](https://github.com/ChromeDevTools/devtools-protocol) 的类型跟进最新协议 |
-| 前端 | 官方 devtools-frontend，从源码构建，加一个很小的补丁集 | 构建时钉住官方的某个版本，补丁以 `.patch` 文件维护，升级时逐个重放，不维护长期 fork 分支。补丁只负责注册我们自己的入口（`anywhere_app`），其余定制都不改上游代码（见[修改前端](DEV.zh-CN.md#修改前端)） |
-| 隔离 | iframe | 隔离 devtools 自身的 DOM、日志和请求，避免它们出现在被调试页面中，也避免与页面的全局环境互相干扰 |
-
-本项目不依赖 Chii 和 chobitsu。遇到边界情况时会阅读它们的源码作为参考，但不复制代码；以真实 Chrome 的 CDP 输出和协议定义为准。
-
-### 能力边界
-
-- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在外壳模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器（Android 用 `chrome://inspect`，iOS 用 Safari 的 Web Inspector）；[远程调试](#远程调试)改变不了这一点，因为页面里运行的仍是同一个页面内 CDP agent。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
-- 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
-  - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
-  - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
-  - 能显示 WebSocket 连接和帧，但没有握手阶段的请求头和响应头，页面拿不到它们。
-  - 投屏（工具栏上的设备按钮，默认关闭）显示的是 [snapDOM](https://github.com/zumerlab/snapdom) 根据 DOM 重新绘制的视口，不是屏幕上的真实像素：canvas、视频和跨域图片可能缺失，每秒最多更新约两次。snapDOM（gzip 后约 90 KB）只在开始投屏或截图时加载。
-  - 截图（`Page.captureScreenshot`，供通过 CDP 操作页面的工具和 agent 使用）同样由 snapDOM 绘制，投屏缺失的内容截图里也会缺失。返回结果里会多一个 Chrome 没有的字段 `approximate: true` 来说明这一点。其余参数的行为和 Chrome 一致：`clip` 按页面坐标计算，图片按设备像素输出（`devicePixelRatio` 乘以 `clip.scale`），不带 `clip` 时设置 `captureBeyondViewport` 会截取整个页面。超出浏览器画布上限（单边 32767 像素，Safari 上 16384；面积 16384 × 16384）的图片会等比缩小，snapDOM 会在页面的控制台里给出警告。不支持编码 WebP 的浏览器（Safari）在请求 WebP 时返回 PNG。
-  - 设备模式（只在外壳模式下提供，因为它要求页面在一个可以调整尺寸的 iframe 里）设置的是页面的尺寸，也就是页面看到的视口：媒体查询、`vw`/`vh` 和 `innerWidth` 都会随之变化。它不改变 `devicePixelRatio`、UA 和触摸输入，这些是页面改不了的：工具栏里没有设备像素比和设备类型，选择设备预设时只套用尺寸。它菜单里的截图同样由 snapDOM 绘制，按页面自己的像素比输出。
-  - 投屏上的输入以 DOM 事件重放，这些事件不是可信事件（`isTrusted` 为 false）：聚焦、点击、滚动和文本编辑都会执行，但检查 `isTrusted` 的页面会忽略它们。
-  - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
-  - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。
-- 页面让某个元素全屏（Fullscreen API）期间，devtools 和它的 F12 按钮都无法使用：浏览器不让全屏元素以外的任何内容接收输入，外壳模式下也一样。退出全屏（Esc）后即可恢复。
-- 前端要部署在和页面不同的源上。如果同源，devtools 自己的设置会写进页面的 `localStorage`，并出现在 Application 面板里。
-- 被调试页面一侧只用标准 Web API，可以运行在任何现代浏览器中。devtools 界面由 Google 针对 Chrome 开发和测试，Firefox 和 Safari 尚未验证；新版前端可能需要额外的兼容补丁。
-
-### 架构
-
-```
-┌──────────── 顶层窗口（外壳）─────────────┐
-│  ┌──────────────────────────────────┐  │
-│  │ 用户页面 iframe                   │  │
-│  │  探针（<head> 首个同步脚本）       │  │
-│  │   └─ 缓冲 → CDP 运行时（延迟加载） │  │
-│  └──────────────┬───────────────────┘  │
-│        postMessage（校验 origin）       │
-│  ┌──────────────┴───────────────────┐  │
-│  │ devtools iframe                   │  │
-│  └──────────────────────────────────┘  │
-└────────────────────────────────────────┘
-```
-
-#### 1. 探针
-
-压缩后约 6.2 KB（min+gzip，包含外壳模式、自动挂载和远程调试）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
-
-- 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch`、`XHR` 和 `WebSocket`，把事件连同时间戳写入缓冲。WebSocket 帧按原样保存，二进制负载到 CDP agent 才转成 base64。CDP 会话挂载之前，每类记录（控制台消息、请求、WebSocket、每个 WebSocket 的帧）各保留最近 1 万条，作为从不加载 CDP agent 的页面的兜底；CDP 会话挂载后改由它设定上限，控制台消息与 V8 一样保留最近 1000 条。
-- 无法 hook 的请求（文档、样式表、脚本、图片、字体等）通过 Resource Timing 记录；带 `buffered` 的 `PerformanceObserver` 还能拿到探针运行之前的请求。这些记录有 URL、类型、时序、大小，以及浏览器公开时的状态码和 MIME 类型，但没有请求头和响应头；响应体在需要时从 HTTP 缓存重新读取。外壳模式下启用了 Service Worker 时，它会为同源请求补上请求头和响应头。之所以仍以 hook 为主：hook 从最开始就生效、带调用栈、无需部署；Service Worker 要安装后才能接管页面，会和网站自己的 Service Worker 冲突，而且要代理请求才能看到响应。
-- CDP 运行时和前端延迟加载。运行时的 Runtime、Network 域直接读取探针的缓冲并订阅新事件，因此每个 API 只被 hook 一次。
-
-页面外没有任何途径能观察页面内的输出，只有比业务代码更早执行的脚本才能捕获最早的输出。完整的 CDP 运行时体积太大，不适合同步加载，所以只把最小的捕获逻辑放在最前面。
-
-这个方案已经验证可行，见 [experiments/early-capture/RESULTS.md](experiments/early-capture/RESULTS.md)：用约 1.4 KB 的探针加延迟加载的 chobitsu，所有早期的 console 调用、异常和请求都进入了 devtools，对象可以展开，时间戳和调用栈都是原始的。
-
-#### 2. 外壳模式（原地改写）
-
-不托管独立的 `devtools.html`，也不跳转到 blob URL，因为 blob 会导致刷新失效、地址无法分享。做法是：
-
-1. 使用零配置探针（`data-devtools-frontend-url`，或 Vite 插件）时，顶层页面首次加载就默认进入外壳模式：探针在页面脚本运行前自己把前端地址和 bundle 地址写入 `sessionStorage`，不需要再刷新一次。除非设置了 `data-open-immediately`，devtools 一开始是隐藏的。其他情况下，点击 DevTools 工具栏上的锁形按钮“Keep DevTools open across reloads”，写入这些地址后刷新页面。
-2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的用户页面 iframe，以及 `<devtools-anywhere>`，它凭所在的文档认出自己是外壳的元素。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
-3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间转发消息。
-4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化，包括加载、前进后退和同文档导航（有 Navigation API 时也包括 `pushState`），因此刷新或复制链接打开的都是当前显示的页面。
-5. DevTools 铺满外壳，由它来排布页面和自己，和 Chrome 一样：页面 iframe 放在前端的页面区域上，叠在上层。停靠位置和尺寸由 DevTools 自己管理（用它的分隔条；触屏上，页面和 DevTools 的分界处有一条更宽的拖动条）。取消停靠时，DevTools 是页面上方的浮动窗口。工具栏上的设备按钮是设备模式，和 Chrome 一样，取代了投屏：页面 iframe 按设备尺寸设置并缩放到适合窗口，工具栏的菜单可以截图。取消停靠时，设备模式的工具栏画在前端的一个页面（`device_mode_emulation_frame.html`，Chrome 也是这么做的）里，显示在浮动窗口下方。
-6. 点工具栏上的 × 只隐藏 devtools，仍留在外壳模式；在重新显示 devtools 之前，页面按自己的尺寸铺满外壳。再点一次锁形按钮会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
-
-只有与探针脚本同源的地址才会被采信，否则清除配置、页面照常加载。因此外壳模式要求探针、bundle 和前端都由页面所在的源提供。
-
-页面放进 iframe 后，`viewport`、`100vh`、`position: fixed`、`window.top` 等的行为可能和直接打开时不同；页面的 HTML 会被请求两次（顶层窗口一次，iframe 一次），表单 POST 返回的页面会被用 GET 再请求一次。用 `data-default-shell-mode="off"`（Vite 插件的 `defaultShellMode: 'off'`）可以关闭外壳模式，改为把 devtools 直接嵌在页面中。拒绝被嵌入（`X-Frame-Options`、CSP `frame-ancestors`）或反复把外壳跳走的页面，在本会话剩下的时间里会单独显示。
-
-#### 3. 注入方式
-
-| 方式 | 适用场景 |
-|---|---|
-| 页面手动引入 `<script>`（必须放在 `<head>` 第一个） | 任意页面 |
-| `@devtools-anywhere/vite-plugin`：只在开发模式（`vite serve`）下注入 | 使用 Vite 的项目（之后可能补充 webpack 插件） |
-| `devtools-anywhere-service-worker.js`：外壳模式下，给页面 iframe 中加载的、没有引入探针的同源页面注入探针 | 安全上下文（HTTPS 或 localhost）、作用域覆盖这些页面（`Service-Worker-Allowed: /`），并且站点没有自己的 Service Worker |
-
-所有方式共用同一份探针。
-
-### 发布形式
-
-发布一个总包，以及 npm 组织 [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) 下的几个子包：
-
-| 包 | 内容 |
-|---|---|
-| `devtools-anywhere` | 总包：`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`（`<devtools-anywhere>` 组件，由探针加载）、`devtools-anywhere-service-worker.js`、`snapdom.js`（投屏和截图的绘制器，按需加载），以及组件、事件、探针脚本和切换器属性的 TypeScript 类型。没有可以 import 的模块，运行时只有这些脚本 |
-| `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
-| `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
-| `@devtools-anywhere/vite-plugin` | Vite 插件 |
-| `@devtools-anywhere/remote-server` | 远程调试服务端（Node.js）及其命令行工具 `devtools-anywhere-remote` |
-
-- 页面内的 CDP agent 和探针不单独成包：探针和各个域共用同一套 hook 和缓冲，而且只有 `devtools-anywhere` 使用它们。它们放在 `devtools-anywhere` 中（`src/cdp-agent/`），不会出现版本不匹配；探针仍单独构建成一个很小的文件 `probe.iife.js`。
-- 前端单独成包，因为它体积大（约 16 MB），更新节奏跟随 Chrome 版本。其他语言（约 42 MB）再拆成一个包，需要的人才装。
-- 所有包使用同一个版本号、一起发布，版本号相同的包一定能配合使用。
-
 ## 用法（预览）
 
 各个包已发布到 npm（`npm i devtools-anywhere @devtools-anywhere/devtools-frontend`），下面的路径指它们的 `dist/` 目录，本仓库构建出的文件也一样。`data-devtools-frontend-url` 指向 `@devtools-anywhere/devtools-frontend` 构建产物里的 `anywhere_app.html`。产物里 `bundle/` 下的文件以内容命名，可以永久缓存；`anywhere_app.html` 本身要带重新验证提供（`Cache-Control: no-cache`），更新才能到达浏览器。
@@ -133,7 +35,7 @@
 </head>
 ```
 
-也可以直接用 CDN：jsDelivr 和 unpkg 会提供所有 npm 包，不用自己部署。请固定到确切的版本号，两个包用同一个版本。这种方式只有英文和中文界面，因为其他语言在单独的包里，必须和前端放在同一目录下提供。外壳模式也用不了，因为它要求探针、bundle 和前端都与页面同源（见[外壳模式](#2-外壳模式原地改写)）：用 `data-default-shell-mode="off"` 把 devtools 直接嵌在页面里。
+也可以直接用 CDN：jsDelivr 和 unpkg 会提供所有 npm 包，不用自己部署。请固定到确切的版本号，两个包用同一个版本。这种方式只有英文和中文界面，因为其他语言在单独的包里，必须和前端放在同一目录下提供。外壳模式也用不了，因为它要求探针、bundle 和前端都与页面同源（见[外壳模式](docs/design.zh-CN.md#2-外壳模式原地改写)）：用 `data-default-shell-mode="off"` 把 devtools 直接嵌在页面里。
 
 ```html
 <!-- jsDelivr -->
@@ -142,7 +44,7 @@
 <script src="https://unpkg.com/devtools-anywhere@0.1.0/dist/probe.iife.js" data-devtools-frontend-url="https://unpkg.com/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html" data-default-shell-mode="off"></script>
 ```
 
-页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并在 `<html>` 下、与 `<body>` 同级挂载它自己的 `<devtools-anywhere>`，不管页面里有没有 `<devtools-anywhere>`；每个页面只有一个这样的全局元素，再出现的只在控制台警告。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-service-worker` 在外壳模式下启用 Service Worker，它给页面 iframe 中没有引入探针的同源页面注入探针，并为同源的文档、样式表、脚本、图片等请求补上请求头和响应头；默认关闭，使用条件见[注入方式](#3-注入方式)。
+页面加载完成后，探针会从同目录（或 `data-bundle` 指定的地址）加载 `devtools-anywhere.iife.js`，并在 `<html>` 下、与 `<body>` 同级挂载它自己的 `<devtools-anywhere>`，不管页面里有没有 `<devtools-anywhere>`；每个页面只有一个这样的全局元素，再出现的只在控制台警告。可选属性：`data-open-immediately` 立即打开 devtools；`data-default-shell-mode="off"` 不进入外壳模式（顶层页面默认 `on`，即进入）；`data-shell-mode-locked` 锁定外壳模式，始终按 `data-default-shell-mode` 执行，忽略用户的选择（已存的选择保留）并隐藏 DevTools 里的开关，但页面禁止被嵌入 iframe 时仍会退回普通模式；`data-no-toggler` 隐藏 F12 按钮，外壳模式下同样生效；`data-service-worker` 在外壳模式下启用 Service Worker，它给页面 iframe 中没有引入探针的同源页面注入探针，并为同源的文档、样式表、脚本、图片等请求补上请求头和响应头；默认关闭，使用条件见[注入方式](docs/design.zh-CN.md#3-注入方式)。
 
 ### Vite
 
@@ -155,7 +57,7 @@ export default {
 }
 ```
 
-只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`devtoolsFrontendPath`（本地另一份前端构建的入口文件路径，如 `…/anywhere_app.html`，托管它所在的目录）、`devtoolsFrontendUrl`（托管在别处的前端，设置后不再托管本地文件）、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`（使用条件见[注入方式](#3-注入方式)，`Service-Worker-Allowed` 头由插件返回），与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面同时连接到它，组件照常挂载），以及配合它的 `idInQuery`（`data-id-in-query`，对应服务端的 `idInQuery`）。
+只影响 `vite serve`：探针作为第一个脚本注入每个页面，bundle、Service Worker 和前端都在 `/@devtools-anywhere/` 下提供。前端默认来自 `@devtools-anywhere/devtools-frontend`。选项：`devtoolsFrontendPath`（本地另一份前端构建的入口文件路径，如 `…/anywhere_app.html`，托管它所在的目录）、`devtoolsFrontendUrl`（托管在别处的前端，设置后不再托管本地文件）、`openImmediately`、`defaultShellMode`（`'on'` 或 `'off'`）、`shellModeLocked`、`noToggler`（隐藏 F12 按钮）、`serviceWorker`（使用条件见[注入方式](docs/design.zh-CN.md#3-注入方式)，`Service-Worker-Allowed` 头由插件返回），与探针的属性一一对应；`remote`（[远程调试](#远程调试)服务端的地址，页面同时连接到它，组件照常挂载），以及配合它的 `idInQuery`（`data-id-in-query`，对应服务端的 `idInQuery`）。
 
 ### 远程调试
 
@@ -180,7 +82,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote --port 8080
 
 ### 组件
 
-点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小（外壳模式下用 DevTools 自己的分隔条，见[外壳模式](#2-外壳模式原地改写)）。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。唯一的属性 `devtools-frontend-url` 是可选的，不写时沿用探针的 `data-devtools-frontend-url`。其余状态都由库维护：探针的参数决定组件的配置，打开和关闭由用户操作；组件没有自己的方法。页面可以用 `devtools-anywhere::part(toggler)` 修改 F12 按钮的样式，外壳模式下同样有效：此时按钮在页面 iframe 里，由页面 `<html>` 下一个只承载按钮的 `<devtools-anywhere>` 显示，点击开关外壳的 DevTools（只有 iframe 里的页面没有探针时，例如其他源的页面，外壳才显示自己的按钮）。探针挂载的组件不把它的 iframe 暴露为部件。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
+点击右下角的 F12 悬浮按钮打开面板；拖动面板的横条调整大小（外壳模式下用 DevTools 自己的分隔条，见[外壳模式](docs/design.zh-CN.md#2-外壳模式原地改写)）。DevTools 设置按钮左边，锁形按钮开关外壳模式（开启前有对话框说明，开启后顶部有提示条），刷新按钮重新加载页面；工具栏上的 × 关闭面板。DevTools 主菜单（⋮）里有“停靠位置”：底部（默认）、右侧、左侧，或取消停靠，变成页面上方的浮动窗口，拖动横条移动、拖动右下角调整大小。外壳模式下页面会让出空间，和 Chrome 一样；普通模式下面板盖在页面上。停靠位置和尺寸会记在 localStorage 里；尺寸记的是占视口的百分比（`dvh`/`dvw`），换屏幕或横竖屏切换后依然合适。唯一的属性 `devtools-frontend-url` 是可选的，不写时沿用探针的 `data-devtools-frontend-url`。其余状态都由库维护：探针的参数决定组件的配置，打开和关闭由用户操作；组件没有自己的方法。页面可以用 `devtools-anywhere::part(toggler)` 修改 F12 按钮的样式，外壳模式下同样有效：此时按钮在页面 iframe 里，由页面 `<html>` 下一个只承载按钮的 `<devtools-anywhere>` 显示，点击开关外壳的 DevTools（只有 iframe 里的页面没有探针时，例如其他源的页面，外壳才显示自己的按钮）。探针挂载的组件不把它的 iframe 暴露为部件。组件要固定挂在一个位置，在 DOM 中移动它会导致 iframe 重新加载。
 
 页面也可以自己放置 `<devtools-anywhere>`，作为显示 DevTools 的一个区域：它是页面文档流里的块级盒子（`display: block`），尺寸由页面的 CSS 决定，一连接就加载 DevTools。页面用 CSS 或 `hidden` 控制它的显示和隐藏；隐藏时 DevTools 不会卸载。它没有 F12 按钮，不能停靠或拖拽调整大小，也不会进入外壳模式（DevTools 里没有入口）；在外壳里的页面中照常工作。它只有 `devtools-frontend-url` 一个属性，其他属性一律忽略。里面的 DevTools iframe 可以用 `devtools-anywhere::part(iframe)` 设置样式。
 
@@ -191,6 +93,39 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote --port 8080
 ```
 
 切换器在探针加载 `devtools-anywhere.iife.js`（由它注册组件）后才生效，放在 shadow root 里不起作用。外壳模式下，外壳里那个页面的切换器一律控制外壳的面板，忽略属性值。与外壳不同源的页面（如跨源 iframe）里的切换器不起作用。
+
+## 能力边界
+
+- 页面内的 CDP 实现只能基于 JS API，因此以下能力**无法提供**：断点调试、Profiler、Memory、真实的网络时序。这些面板不打包进前端，而不是展示给用户后再让他发现不能用。页面脚本里的 `debugger;` 语句同样无法暂停；在外壳模式下，同源脚本中执行到的每个 `debugger;` 会改为在控制台输出一条带堆栈的警告。真正的断点要靠浏览器自带的调试器（Android 用 `chrome://inspect`，iOS 用 Safari 的 Web Inspector）；[远程调试](#远程调试)改变不了这一点，因为页面里运行的仍是同一个页面内 CDP agent。源代码面板的“网页”标签页能列出页面的文档、外链脚本和样式表、图片和字体（内联脚本不列出，因为拿不到它们在文档中的位置）；代码段可以用。
+- 页面脚本缺少相应 API 的地方，要么精确补上，要么不做；不会把近似结果当作事实展示：
+  - 不显示浏览器默认样式（user-agent styles）：浏览器不开放它的默认样式表，内置一份副本又可能和浏览器实际使用的不一致。
+  - 事件监听器由探针从它执行的那一刻起记录（探针必须是第一个脚本）；拿不到处理函数的源码位置。
+  - 能显示 WebSocket 连接和帧，但没有握手阶段的请求头和响应头，页面拿不到它们。
+  - 投屏（工具栏上的设备按钮，默认关闭）显示的是 [snapDOM](https://github.com/zumerlab/snapdom) 根据 DOM 重新绘制的视口，不是屏幕上的真实像素：canvas、视频和跨域图片可能缺失，每秒最多更新约两次。snapDOM（gzip 后约 90 KB）只在开始投屏或截图时加载。
+  - 截图（`Page.captureScreenshot`，供通过 CDP 操作页面的工具和 agent 使用）同样由 snapDOM 绘制，投屏缺失的内容截图里也会缺失。返回结果里会多一个 Chrome 没有的字段 `approximate: true` 来说明这一点。其余参数的行为和 Chrome 一致：`clip` 按页面坐标计算，图片按设备像素输出（`devicePixelRatio` 乘以 `clip.scale`），不带 `clip` 时设置 `captureBeyondViewport` 会截取整个页面。超出浏览器画布上限（单边 32767 像素，Safari 上 16384；面积 16384 × 16384）的图片会等比缩小，snapDOM 会在页面的控制台里给出警告。不支持编码 WebP 的浏览器（Safari）在请求 WebP 时返回 PNG。
+  - 设备模式（只在外壳模式下提供，因为它要求页面在一个可以调整尺寸的 iframe 里）设置的是页面的尺寸，也就是页面看到的视口：媒体查询、`vw`/`vh` 和 `innerWidth` 都会随之变化。它不改变 `devicePixelRatio`、UA 和触摸输入，这些是页面改不了的：工具栏里没有设备像素比和设备类型，选择设备预设时只套用尺寸。它菜单里的截图同样由 snapDOM 绘制，按页面自己的像素比输出。
+  - 投屏上的输入以 DOM 事件重放，这些事件不是可信事件（`isTrusted` 为 false）：聚焦、点击、滚动和文本编辑都会执行，但检查 `isTrusted` 的页面会忽略它们。
+  - 跨域样式表通过重新下载的副本读取，需要对方返回 CORS 头；这些规则是只读的。
+  - 强制伪类（样式面板里的 `:hover`、`:focus` 等）通过伴随样式表模拟，层叠顺序保持不变；`@import` 引入的样式表和 `adoptedStyleSheets` 不在覆盖范围内。
+- 页面让某个元素全屏（Fullscreen API）期间，devtools 和它的 F12 按钮都无法使用：浏览器不让全屏元素以外的任何内容接收输入，外壳模式下也一样。退出全屏（Esc）后即可恢复。
+- 前端要部署在和页面不同的源上。如果同源，devtools 自己的设置会写进页面的 `localStorage`，并出现在 Application 面板里。
+- 被调试页面一侧只用标准 Web API，可以运行在任何现代浏览器中。devtools 界面由 Google 针对 Chrome 开发和测试，Firefox 和 Safari 尚未验证；新版前端可能需要额外的兼容补丁。
+
+## 发布形式
+
+发布一个总包，以及 npm 组织 [`@devtools-anywhere`](https://www.npmjs.com/org/devtools-anywhere) 下的几个子包：
+
+| 包 | 内容 |
+|---|---|
+| `devtools-anywhere` | 总包：`probe.iife.js`（探针加自动挂载）、`devtools-anywhere.iife.js`（`<devtools-anywhere>` 组件，由探针加载）、`devtools-anywhere-service-worker.js`、`snapdom.js`（投屏和截图的绘制器，按需加载），以及组件、事件、探针脚本和切换器属性的 TypeScript 类型。没有可以 import 的模块，运行时只有这些脚本 |
+| `@devtools-anywhere/devtools-frontend` | 构建好的前端静态资源，界面带英文和中文，可以自托管，也可以从 CDN 引用 |
+| `@devtools-anywhere/devtools-frontend-locales` | 可选：其余 80 种界面语言，文件路径与前端包一致。两个包放在同一目录下提供即可（装了它的话 Vite 插件会自动这样做）；缺少的语言会退回英文 |
+| `@devtools-anywhere/vite-plugin` | Vite 插件 |
+| `@devtools-anywhere/remote-server` | 远程调试服务端（Node.js）及其命令行工具 `devtools-anywhere-remote` |
+
+## 设计
+
+工作原理和设计取舍（探针、外壳模式、注入方式、选型、拆包理由）见 [docs/design.zh-CN.md](docs/design.zh-CN.md)。
 
 ## 开发
 
