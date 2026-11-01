@@ -17,6 +17,7 @@ import {
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
 import { SHELL_HANDSHAKE } from './shell-messages';
+import { ShellLayout } from './shell-layout';
 import type { GlobalElementConfig } from './api';
 import type { DevtoolsAnywhereAttributes, TogglerAttributes } from './public-types';
 import {
@@ -93,6 +94,9 @@ const REQUEST_CHECKS: { [T in EmbedderRequest['type']]: (request: object) => boo
   close: () => true,
   'keep-open': request => 'keep' in request && typeof request.keep === 'boolean',
   theme: request => ['toolbar', 'divider', 'icon'].every(key => typeof Reflect.get(request, key) === 'string'),
+  'page-bounds': request => ['x', 'y', 'width', 'height'].every(key => finite(Reflect.get(request, key)) !== undefined),
+  split: request => 'size' in request && finite(request.size) !== undefined,
+  toolbox: request => 'url' in request && typeof request.url === 'string',
 };
 const isRequestType = (type: unknown): type is EmbedderRequest['type'] =>
   typeof type === 'string' && Object.hasOwn(REQUEST_CHECKS, type);
@@ -216,6 +220,12 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 :host([data-shell]) { display: flex; flex: none; }
 :host([data-shell]) .panel { position: static; flex: 1 1 auto; }
 :host([data-shell]) .panel[data-dock=undocked] { position: fixed; }
+/* Laid out by the frontend (shell-layout.ts): it fills the shell, the page iframe on top. */
+:host([data-laid-out]) { position: fixed; inset: 0; z-index: 0; }
+:host([data-laid-out]) .panel {
+  position: absolute; inset: 0; width: auto !important; height: auto !important; border: 0;
+}
+:host([data-laid-out]) .bar { display: none; }
 `;
 
 /**
@@ -270,6 +280,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    * (detach), as the page shows or hides it, or removes it (document.open, replaceChildren).
    */
   private shellLink: { attach(): void; detach(): void } | null = null;
+  /** In the shell: places the page where the frontend lays it out (shell-layout.ts). */
+  private shellLayout: ShellLayout | null = null;
 
   constructor() {
     super();
@@ -352,6 +364,14 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       }
     } else if (request.type === 'close') {
       this.setOpen(false);
+    } else if (request.type === 'page-bounds') {
+      this.shellLayout?.pageBounds(request);
+    } else if (request.type === 'split') {
+      this.shellLayout?.splitSize(request.size);
+    } else if (request.type === 'toolbox') {
+      // Only a page of the frontend's own origin.
+      const url = new URL(request.url, this.loadedUrl);
+      if (url.origin === this.frontendOrigin) this.shellLayout?.showToolbox(url.href);
     }
   };
 
@@ -630,6 +650,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (isShellElement(this)) {
       // Only for its styles: what makes it the shell's is its document.
       this.setAttribute('data-shell', '');
+      const page = document.getElementById(SHELL_PAGE_ID);
+      if (page instanceof HTMLIFrameElement && !this.shellLayout) {
+        this.shellLayout = new ShellLayout(this, this.frame, page, () => this.frontendOrigin);
+      }
       this.watchShellPage();
       this.registerShellWorker();
     } else {
@@ -712,6 +736,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // The shell document is ours: the page iframe comes first, then this element.
     if (isShellElement(this)) {
       document.body.style.flexDirection = dock === 'right' ? 'row' : dock === 'left' ? 'row-reverse' : 'column';
+      this.shellLayout?.update(this.isOpen, dock);
     }
   }
 
@@ -762,7 +787,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect?.();
     this.frontendOrigin = url.origin;
     if (this.session) this.disconnect = connectFrontend(this.session, this.frame, url.origin);
-    else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
+    else if (page)
+      this.disconnect = relayShell(page, this.frame, url.origin, metrics => this.shellLayout?.setMetrics(metrics));
     // Whether shell mode is available (it needs the bundle URL) and whether it is on.
     const shell = isShellElement(this);
     const hash = new URLSearchParams({

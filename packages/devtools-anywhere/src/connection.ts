@@ -124,6 +124,13 @@ export function connectToShell(session: CdpSession): () => void {
   return () => connection.disconnect();
 }
 
+/** The page's size in device mode, in CSS pixels (0 for "as laid out"), and its scale. */
+export interface DeviceMetrics {
+  width: number;
+  height: number;
+  scale: number;
+}
+
 /** The shell's side of the relay core: one frontend, in an iframe; the page in another. */
 class ShellRelay extends RelayCore {
   private frontendReady = false;
@@ -135,7 +142,8 @@ class ShellRelay extends RelayCore {
   constructor(
     private readonly page: HTMLIFrameElement,
     private readonly devtools: HTMLIFrameElement,
-    private readonly frontendOrigin: string
+    private readonly frontendOrigin: string,
+    private readonly onMetrics: (metrics: DeviceMetrics | null) => void
   ) {
     super();
     this.session = this.openSession({ send: message => this.postFrontend(message) });
@@ -168,6 +176,31 @@ class ShellRelay extends RelayCore {
 
   private onPagehide = () => this.pagehide();
 
+  /**
+   * Device mode's page size is the shell's to set (shell-layout.ts): it answers
+   * Emulation.setDeviceMetricsOverride and clearDeviceMetricsOverride itself, as Chrome's browser
+   * does, rather than the page.
+   */
+  private emulate(data: string): boolean {
+    if (!data.includes('DeviceMetricsOverride')) return false;
+    const message = parse(data);
+    const method = message?.method;
+    if (method !== 'Emulation.setDeviceMetricsOverride' && method !== 'Emulation.clearDeviceMetricsOverride')
+      return false;
+    const params: unknown = message?.params;
+    const number = (name: string) => {
+      const value: unknown = typeof params === 'object' && params !== null ? Reflect.get(params, name) : undefined;
+      return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    };
+    this.onMetrics(
+      method === 'Emulation.clearDeviceMetricsOverride'
+        ? null
+        : { width: number('width'), height: number('height'), scale: number('scale') || 1 }
+    );
+    this.postFrontend(JSON.stringify({ id: message?.id, result: {} }));
+    return true;
+  }
+
   readonly onMessage = (event: MessageEvent) => {
     if (typeof event.data !== 'string') return;
     if (event.source === this.devtools.contentWindow && event.origin === this.frontendOrigin) {
@@ -175,7 +208,7 @@ class ShellRelay extends RelayCore {
         this.frontendReady = true;
         this.toFrontend.splice(0).forEach(message => this.postFrontend(message));
       }
-      this.clientMessage(this.session, event.data);
+      if (!this.emulate(event.data)) this.clientMessage(this.session, event.data);
     } else if (event.source === this.page.contentWindow && event.origin === location.origin) {
       if (event.data.startsWith(`{"method":"${HELLO_METHOD}"`)) {
         const params = parse(event.data)?.params;
@@ -198,8 +231,13 @@ class ShellRelay extends RelayCore {
  * reloads (the relay core's work, shared with the remote server). Returns a function that
  * disconnects.
  */
-export function relayShell(page: HTMLIFrameElement, devtools: HTMLIFrameElement, frontendOrigin: string): () => void {
-  const relay = new ShellRelay(page, devtools, frontendOrigin);
+export function relayShell(
+  page: HTMLIFrameElement,
+  devtools: HTMLIFrameElement,
+  frontendOrigin: string,
+  onMetrics: (metrics: DeviceMetrics | null) => void
+): () => void {
+  const relay = new ShellRelay(page, devtools, frontendOrigin, onMetrics);
   window.addEventListener('message', relay.onMessage);
   page.contentWindow?.postMessage(PING, location.origin);
   return () => window.removeEventListener('message', relay.onMessage);

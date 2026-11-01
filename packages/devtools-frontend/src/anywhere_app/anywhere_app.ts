@@ -19,6 +19,8 @@ import '../../panels/mobile_throttling/mobile_throttling-meta.js';
 import '../../panels/application/application-meta.js';
 // The page as an image, with input forwarded to it: for when the page is not in view.
 import '../../panels/screencast/screencast-meta.js';
+// Device mode, in shell mode only (`can_emulate_device`): there the screencast is left out.
+import '../../panels/emulation/emulation-meta.js';
 import '../../panels/settings/settings-meta.js';
 import '../../ui/legacy/components/perf_ui/perf_ui-meta.js';
 import '../../ui/legacy/components/quick_open/quick_open-meta.js';
@@ -38,6 +40,7 @@ import {
   type FrontendHash,
   HIDDEN_NOTICE,
   OWN_SCRIPTS,
+  SIDEBAR_SIZE_NOTICE,
   type RemoteFrontendHash,
   REQUEST_KEY,
 } from './embedder.js';
@@ -164,6 +167,65 @@ if (!remote) {
 // Watch stays, evaluating in the global scope (patches/sources-without-pausing.patch).
 Root.Runtime.Runtime.setQueryParamForTesting('can_pause', 'false');
 const dock = param('dock');
+
+// Shell mode: the page is in the shell's other iframe, which the shell places where this frontend
+// says (Chrome's setInspectedPageBounds), and resizes for device mode. DevTools then lays out the
+// page and itself as in Chrome (upstream's AdvancedApp, which device mode needs).
+if (!remote && param('shell') === '1') {
+  Root.Runtime.Runtime.setQueryParamForTesting('can_emulate_device', 'true');
+}
+// Undocked, upstream's AdvancedApp opens device mode's page in a window (Chrome shows it in the
+// tab, under DevTools' window), which hands it its document through window.opener. The shell
+// shows the page in an iframe instead, a sibling of this frontend's (same origin): once loaded,
+// its document is handed over from here.
+const TOOLBOX_PAGE = 'device_mode_emulation_frame.html';
+const isToolbox = (url: string): boolean => new URL(url, location.href).pathname.endsWith(`/${TOOLBOX_PAGE}`);
+/** The shell's iframe of device mode's page, once loaded. */
+function loadedToolbox(): Document|null {
+  for (let i = 0; i < window.parent.frames.length; ++i) {
+    try {
+      const frame = window.parent.frames[i];
+      if (isToolbox(frame.location.href) && frame.document.readyState === 'complete') {
+        return frame.document;
+      }
+    } catch {
+      // Another origin: the page.
+    }
+  }
+  return null;
+}
+function handOverToolbox(deadline: number): void {
+  const toolbox = loadedToolbox();
+  if (toolbox) {
+    useDefaultTheme(toolbox);
+    Reflect.get(globalThis, 'Emulation')?.AdvancedApp?.instance().deviceModeEmulationFrameLoaded(toolbox);
+  } else if (Date.now() < deadline) {
+    setTimeout(() => handOverToolbox(deadline), 100);
+  }
+}
+const open = window.open.bind(window);
+window.open = (url?: string|URL, target?: string, features?: string) => {
+  if (!remote && url !== undefined && isToolbox(String(url))) {
+    notifyEmbedder({type: 'toolbox', url: new URL(url, location.href).href});
+    handOverToolbox(Date.now() + 10000);
+    return null;
+  }
+  return open(url, target, features);
+};
+let splitWatched = false;
+host.setInspectedPageBounds = bounds => {
+  notifyEmbedder({type: 'page-bounds', ...bounds});
+  const split = UI.InspectorView.InspectorView.maybeGetInspectorViewInstance()?.ownerSplit();
+  if (!split) {
+    return;
+  }
+  notifyEmbedder({type: 'split', size: split.sidebarSize()});
+  if (!splitWatched) {
+    splitWatched = true;
+    split.addEventListener(
+        UI.SplitWidget.Events.SIDEBAR_SIZE_CHANGED, event => notifyEmbedder({type: 'split', size: event.data}));
+  }
+};
 
 // devtools-anywhere's own scripts (the probe, the bundle, snapDOM) are listed in Sources, since
 // they hook globals the page uses, but ignore-listed like extension scripts in Chrome: their stack
@@ -326,8 +388,15 @@ window.addEventListener('message', event => {
   if (typeof event.data !== 'string') {
     const data: unknown = event.data;
     const notice: unknown = typeof data === 'object' && data !== null ? Reflect.get(data, REQUEST_KEY) : null;
-    if (typeof notice === 'object' && notice !== null && Reflect.get(notice, 'type') === HIDDEN_NOTICE) {
+    if (typeof notice !== 'object' || notice === null) {
+      return;
+    }
+    const type: unknown = Reflect.get(notice, 'type');
+    const size: unknown = Reflect.get(notice, 'size');
+    if (type === HIDDEN_NOTICE) {
       onHidden();
+    } else if (type === SIDEBAR_SIZE_NOTICE && typeof size === 'number' && Number.isFinite(size)) {
+      UI.InspectorView.InspectorView.maybeGetInspectorViewInstance()?.ownerSplit()?.setSidebarSize(size);
     }
     return;
   }
@@ -339,21 +408,26 @@ window.addEventListener('message', event => {
 // dynamic theme (blue-tinted surfaces). Here the page names Chrome's default theme itself and
 // the request is reported as loaded, which gives Chrome's default look: the palette's
 // fallbacks are its colors.
-const defaultTheme = document.createElement('style');
-defaultTheme.textContent = ':root { --user-color-source: baseline-default; }';
-document.head.append(defaultTheme);
-// The link is added once, at startup: watching stops then, not to run on every node DevTools adds.
-const themeColorsObserver = new MutationObserver(records => {
-  for (const record of records) {
-    for (const node of record.addedNodes) {
-      if (node instanceof HTMLLinkElement && node.href.startsWith('devtools://theme/colors.css')) {
-        node.dispatchEvent(new Event('load'));
-        themeColorsObserver.disconnect();
+// Device mode's page for when DevTools is undocked gets the same.
+function useDefaultTheme(doc: Document): void {
+  const defaultTheme = doc.createElement('style');
+  defaultTheme.textContent = ':root { --user-color-source: baseline-default; }';
+  doc.head.append(defaultTheme);
+  // The link is added once, at startup: watching stops then, not to run on every node DevTools adds.
+  const themeColorsObserver = new MutationObserver(records => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node instanceof (doc.defaultView ?? window).HTMLLinkElement &&
+            node.href.startsWith('devtools://theme/colors.css')) {
+          node.dispatchEvent(new Event('load'));
+          themeColorsObserver.disconnect();
+        }
       }
     }
-  }
-});
-themeColorsObserver.observe(document, {childList: true, subtree: true});
+  });
+  themeColorsObserver.observe(doc, {childList: true, subtree: true});
+}
+useDefaultTheme(document);
 
 // The embedder's bar sits on top of the toolbar: it takes the toolbar's colors, sent whenever
 // the theme is applied (which sets classes on the root element).

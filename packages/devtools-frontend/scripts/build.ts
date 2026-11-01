@@ -250,7 +250,8 @@ if (!args.has('--copy-only')) {
 // The release files (the ones Chrome ships, listed in devtools_resources.grd) serve every
 // DevTools app. Only what anywhere_app can load is kept: the modules reachable from its
 // entrypoint through imports and `new URL(…, import.meta.url)`, the assets next to them,
-// and the UI strings of those modules.
+// and the UI strings of those modules. Device mode, when undocked, draws its toolbar into the
+// page device_mode_emulation_frame.html, which the shell shows in an iframe: it is kept too.
 const gen = path.join(out, 'gen/front_end');
 const grd = fs.readFileSync(path.join(gen, 'devtools_resources.grd'), 'utf8');
 const files = [...grd.matchAll(/<include [^>]*file="([^"]+)"/g)]
@@ -259,7 +260,8 @@ const files = [...grd.matchAll(/<include [^>]*file="([^"]+)"/g)]
 const released = new Set(files);
 
 const reachable = new Set<string>();
-const queue = ['entrypoints/anywhere_app/anywhere_app.js'];
+const PAGES = ['anywhere_app.html', 'device_mode_emulation_frame.html'];
+const queue = PAGES.map(page => `entrypoints/${page.replace('.html', '')}/${page.replace('.html', '.js')}`);
 for (let file; (file = queue.pop());) {
   if (reachable.has(file) || !released.has(file)) continue;
   reachable.add(file);
@@ -292,7 +294,7 @@ const OWN_STRINGS = 'entrypoints/anywhere_app/anywhere_app.ts';
 }
 const keep = (file: string) => {
   if (file.endsWith('.js')) return reachable.has(file);
-  if (file.endsWith('.html')) return file === 'anywhere_app.html';
+  if (file.endsWith('.html')) return PAGES.includes(file);
   if (file.startsWith(LOCALES)) return false; // written below
   return !file.includes('/') || file.startsWith('Images/') || inModule(file);
 };
