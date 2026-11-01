@@ -287,3 +287,59 @@ test('getLayoutMetrics matches Chrome on a scrolled page', async () => {
     await s.page.close();
   }
 });
+
+test('getLayoutMetrics matches Chrome on a screen with a scale factor of 2', async () => {
+  // The deprecated fields are in device pixels, the css* ones in CSS pixels.
+  const hiDpi = await launch(['--force-device-scale-factor=2', '--window-size=800,600'], { defaultViewport: null });
+  try {
+    const s = await openPage(hiDpi, []);
+    await s.page.evaluate(() => {
+      document.body.style.cssText = 'margin:0;width:1500px;height:3000px';
+      scrollTo(30, 500);
+    });
+    assert.equal(await s.page.evaluate(() => devicePixelRatio), 2);
+    const [ours, chrome] = await Promise.all([
+      s.ours.send('Page.getLayoutMetrics'),
+      s.chrome.send('Page.getLayoutMetrics'),
+    ]);
+    assert.deepEqual(ours, chrome);
+  } finally {
+    await hiDpi.close();
+  }
+});
+
+test('captureScreenshot draws again at half the size when drawing fails, not when loading does', async () => {
+  const result = await t.page.evaluate(async () => {
+    const scales: number[] = [];
+    let loads = 0;
+    const drawing = window.DevtoolsAnywhere.createCdpSession({
+      loadSnapdom: async () => ({
+        snapdom: async () => ({
+          async toCanvas({ scale }) {
+            scales.push(scale);
+            // Too large to draw until a quarter of the size.
+            if (scale > 0.25) throw new Error('canvas too large');
+            return Object.assign(document.createElement('canvas'), { width: 10, height: 10 });
+          },
+        }),
+      }),
+    });
+    await drawing.call('Page.captureScreenshot', { clip: { x: 0, y: 0, width: 20000, height: 20000, scale: 1 } });
+    const loading = window.DevtoolsAnywhere.createCdpSession({
+      loadSnapdom: () => {
+        loads++;
+        return Promise.reject(new Error('offline'));
+      },
+    });
+    const error = await loading
+      .call('Page.captureScreenshot', { clip: { x: 0, y: 0, width: 20000, height: 20000, scale: 1 } })
+      .then(
+        () => '',
+        (e: unknown) => String(e)
+      );
+    return { scales, loads, error };
+  });
+  assert.deepEqual(result.scales, [1, 0.5, 0.25]);
+  assert.equal(result.loads, 1);
+  assert.match(result.error, /offline/);
+});
