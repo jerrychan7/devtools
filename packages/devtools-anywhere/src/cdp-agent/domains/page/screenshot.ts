@@ -14,7 +14,7 @@ const SAFE_PIXELS = 4096 * 4096;
 
 /**
  * Page.captureScreenshot's response, with `approximate`: the image is the page's DOM redrawn
- * by snapDOM, not the pixels Chrome painted (README, "Limitations").
+ * by snapDOM, not the pixels Chrome painted (docs/usage.md, "Limitations").
  */
 export type CaptureScreenshotResponse = Protocol.Page.CaptureScreenshotResponse & { approximate: true };
 
