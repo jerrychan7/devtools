@@ -63,6 +63,32 @@ export function registerPage({ session, probe }: Context) {
       return { url: link.href, errors: [], data: await res.text(), manifest: {} };
     },
 
+    /** Chrome reports CSS pixels in both sets of fields while the page is not zoomed. */
+    getLayoutMetrics(): Protocol.Page.GetLayoutMetricsResponse {
+      const root = document.documentElement;
+      const layout = { pageX: scrollX, pageY: scrollY, clientWidth: root.clientWidth, clientHeight: root.clientHeight };
+      const vv = visualViewport;
+      const visual = {
+        offsetX: vv?.offsetLeft ?? 0,
+        offsetY: vv?.offsetTop ?? 0,
+        pageX: vv?.pageLeft ?? scrollX,
+        pageY: vv?.pageTop ?? scrollY,
+        clientWidth: vv?.width ?? root.clientWidth,
+        clientHeight: vv?.height ?? root.clientHeight,
+        scale: vv?.scale ?? 1,
+        zoom: 1,
+      };
+      const content = { x: 0, y: 0, width: root.scrollWidth, height: root.scrollHeight };
+      return {
+        layoutViewport: layout,
+        visualViewport: visual,
+        contentSize: content,
+        cssLayoutViewport: layout,
+        cssVisualViewport: visual,
+        cssContentSize: content,
+      };
+    },
+
     getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({
       currentIndex: 0,
       entries: [
