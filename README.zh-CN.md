@@ -35,12 +35,10 @@ import devtoolsAnywhere from '@devtools-anywhere/vite-plugin'
 export default { plugins: [devtoolsAnywhere()] }
 ```
 
-**任意页面**，用 CDN，放在 `<head>` 里第一个（CDN 上不支持外壳模式，所以关掉）：
+**任意页面**，用 CDN，放在 `<head>` 里第一个：
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.1.0/dist/probe.iife.js"
-  data-devtools-frontend-url="https://cdn.jsdelivr.net/npm/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"
-  data-default-shell-mode="off"></script>
+<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.2.0/dist/probe.iife.js"></script>
 ```
 
 打开页面，点 **F12** 按钮。
@@ -64,7 +62,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | `data-no-toggler` | `noToggler` | 隐藏 F12 按钮 |
 | `data-remote` | `remote` | 连接到远程调试服务端 |
 
-外壳模式（自己部署时默认开启）把页面放进 iframe，刷新时 DevTools 不会关闭，也能用设备模式，见[外壳模式](docs/usage.zh-CN.md#外壳模式)。
+外壳模式（默认开启）把页面放进 iframe，刷新时 DevTools 不会关闭，也能用设备模式，见[外壳模式](docs/usage.zh-CN.md#外壳模式)。
 
 ## 能用什么
 

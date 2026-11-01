@@ -2,6 +2,8 @@
 //
 //   <script src="…/devtools-anywhere/dist/probe.iife.js" data-devtools-frontend-url="…/anywhere_app.html"></script>
 //
+// From jsDelivr or unpkg, `data-devtools-frontend-url` defaults to the frontend package of the same
+// version there (trust.ts); `data-no-panel` goes without it, for a page only debugged remotely.
 // As the first script in <head>, it captures from the very start. With `data-devtools-frontend-url`, it
 // loads devtools-anywhere.iife.js (from `data-bundle`, by default next to this file) after
 // the page has loaded and mounts its own <devtools-anywhere> under <html>, whatever the page has.
@@ -33,6 +35,7 @@
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
 // another tab still uses it. The page's own workers are left alone.
 import {
+  cdnFrontendUrl,
   SHELL_KEY,
   SHELL_MODE_KEY,
   SHELL_PAGE_ID,
@@ -54,7 +57,11 @@ if (script?.src) setShellScriptUrl(script.src);
 
 /** One of the script's attributes (probe-script.ts); `null` when it is absent. */
 const attribute = (name: keyof ProbeScriptAttributes) => script?.getAttribute(name) ?? null;
-const frontend = attribute('data-devtools-frontend-url');
+// Loaded from an npm CDN, the probe finds the frontend of its version there by default.
+const frontend =
+  attribute('data-no-panel') === null
+    ? attribute('data-devtools-frontend-url') || (script?.src ? cdnFrontendUrl(script.src) : null)
+    : null;
 const remote = attribute('data-remote');
 // A probe inlined, without a URL, has no bundle next to it.
 const bundle = script?.src ? new URL(attribute('data-bundle') || BUNDLE_SCRIPT, script.src).href : null;

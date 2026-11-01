@@ -27,17 +27,16 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
   data-devtools-frontend-url="/devtools-frontend/dist/anywhere_app.html"></script>
 ```
 
-用 CDN 时，两个包固定到同一个确切版本，并关掉[外壳模式](#外壳模式)（CDN 上不支持）：
+用 jsDelivr 或 unpkg 时，固定一个确切版本：探针会从同一个 CDN 加载同版本的前端。
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.1.0/dist/probe.iife.js"
-  data-devtools-frontend-url="https://cdn.jsdelivr.net/npm/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"
-  data-default-shell-mode="off"></script>
+<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.2.0/dist/probe.iife.js"></script>
 ```
 
 | | 自己部署 | CDN（jsDelivr、unpkg） |
 |---|---|---|
-| 外壳模式 | ✅ 默认开启 | ❌ 关闭 |
+| `data-devtools-frontend-url` | 必填 | 可选：默认用 CDN 上同版本的前端 |
+| 外壳模式 | ✅ 默认开启 | ✅ 默认开启，但没有 [Service Worker](#service-worker) |
 | 界面语言 | 全部（`@devtools-anywhere/devtools-frontend-locales` 放在前端目录下） | 英文和中文 |
 
 - 页面加载完成后，探针在 `<html>` 下挂载一个 `<devtools-anywhere>`，不管页面里有没有；第二个探针只会警告。
@@ -47,7 +46,8 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 
 | 属性 | Vite 选项 | 默认值 | 作用 |
 |---|---|---|---|
-| `data-devtools-frontend-url` | `devtoolsFrontendUrl` | script 标签：无。Vite：已安装的前端 | 前端的 `anywhere_app.html`。不写就不挂载面板 |
+| `data-devtools-frontend-url` | `devtoolsFrontendUrl` | 来自 jsDelivr、unpkg 的 script 标签：CDN 上同版本的前端。其他 script 标签：无。Vite：已安装的前端 | 前端的 `anywhere_app.html`。没有前端就不挂载面板 |
+| `data-no-panel` | — | 关 | 不管有没有前端，都不挂载面板、不进外壳模式：用于只做[远程调试](#远程调试)的页面 |
 | `data-bundle` | — | 探针同目录 | `devtools-anywhere.iife.js` 的地址 |
 | `data-open-immediately` | `openImmediately` | 关 | 页面加载后直接打开 DevTools |
 | `data-default-shell-mode` | `defaultShellMode` | `on` | `off`：不用外壳模式，面板盖在页面上 |
@@ -132,7 +132,7 @@ export default { plugins: [devtoolsAnywhere()] }
 | 设备模式 | ✅ | 换成投屏 |
 | 布局 | 页面在 DevTools 旁边缩小 | 面板盖在页面上 |
 
-bundle、前端（以及 Service Worker）与探针同源时，顶层页面默认开启外壳模式。以下情况关闭：
+bundle、前端（以及 Service Worker）在探针信任的位置时，顶层页面默认开启外壳模式。信任的位置是：与探针同源；探针来自 jsDelivr 或 unpkg 时，则只限探针所在的包和同版本的前端包。以下情况关闭：
 
 | 情况 | |
 |---|---|
@@ -190,7 +190,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 - 页面刷新或在同一标签页内跳转时，DevTools 保持连接。断线的页面会自动重连，期间仍留在列表里。
 - 多个 DevTools 窗口可以同时调试一个页面，各自一个会话。
 - 目标列表可以筛选，并显示每个页面连着几个 DevTools。
-- 同时写了 `data-devtools-frontend-url` 时，页面还有自己的面板。
+- 同时有前端时（写了 `data-devtools-frontend-url`，或探针来自 jsDelivr、unpkg），页面还有自己的面板；不要面板时加 `data-no-panel`。
 - 断点仍要靠浏览器自带的调试器（`chrome://inspect`、Safari Web Inspector）：页面里运行的仍是同一个页面内 agent。
 
 探针来自别处时，用带值的 `data-remote` 指定服务端，按链接的规则解析：
@@ -205,7 +205,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 - 连接的是外壳里的页面，不是外壳本身。
 - 外壳里的所有页面由外壳的探针决定，页面自己的 `data-remote` 无效，所以页面脚本没法把之后的页面指向别的服务端。
 - 配合 `data-service-worker`，被它注入的页面也会连接。
-- 外壳模式要求前端与探针同源：探针来自服务端、前端在别处时用不了。
+- 外壳模式要求前端在探针信任的位置：探针来自服务端、前端在别处时用不了。
 
 ### Node.js 与接口
 

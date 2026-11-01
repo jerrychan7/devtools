@@ -53,7 +53,7 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 5. DevTools 铺满外壳，由它来排布页面和自己，和 Chrome 一样：页面 iframe 叠放在前端预留的页面区域上方。停靠位置和尺寸由 DevTools 自己管理（用它的分隔条；DevTools 面板边缘正中、靠页面一侧还有一个抓手，像面板的一个小标签，触屏上更大）。取消停靠时，DevTools 是页面上方的浮动窗口。工具栏上的设备按钮是设备模式，和 Chrome 一样，取代了投屏：页面 iframe 按设备尺寸设置并缩放到适合窗口，工具栏的菜单可以截图。取消停靠时，设备模式的工具栏画在前端的一个页面（`device_mode_emulation_frame.html`，Chrome 也是这么做的）里，显示在浮动窗口下方。
 6. 点工具栏上的 × 只隐藏 DevTools，仍留在外壳模式；在重新显示 DevTools 之前，页面按自己的尺寸铺满外壳。再点一次锁形按钮会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
 
-只有与探针脚本同源的地址才会被采信，否则清除配置、页面照常加载。因此外壳模式要求探针、bundle 和前端都由页面所在的源提供。
+只有探针脚本信任的地址才会被采信，否则清除配置、页面照常加载。一般信任的是探针的源；但在 npm CDN（jsDelivr、unpkg）上任何人都能发布包，所以只信任探针所在的包和同版本的前端包。比较前先解析地址（`..`、`%2e%2e` 会被消解），含转义斜杠的地址一律拒绝。因此外壳模式要求 bundle 和前端与探针一起提供：来自页面所在的源，或来自上述 CDN。
 
 页面放进 iframe 后，`viewport`、`100vh`、`position: fixed`、`window.top` 等的行为可能和直接打开时不同；页面的 HTML 会被请求两次（顶层窗口一次，iframe 一次），表单 POST 返回的页面会被用 GET 再请求一次。用 `data-default-shell-mode="off"`（Vite 插件的 `defaultShellMode: 'off'`）可以关闭外壳模式，改为把 DevTools 直接嵌在页面中。拒绝被嵌入（`X-Frame-Options`、CSP `frame-ancestors`）或反复把外壳跳走的页面，在本会话剩下的时间里会单独显示。
 

@@ -35,12 +35,10 @@ import devtoolsAnywhere from '@devtools-anywhere/vite-plugin'
 export default { plugins: [devtoolsAnywhere()] }
 ```
 
-**Any page**, from a CDN, first in `<head>` (shell mode is not supported from a CDN, so it is turned off):
+**Any page**, from a CDN, first in `<head>`:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.1.0/dist/probe.iife.js"
-  data-devtools-frontend-url="https://cdn.jsdelivr.net/npm/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"
-  data-default-shell-mode="off"></script>
+<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.2.0/dist/probe.iife.js"></script>
 ```
 
 Open the page and tap the **F12** button.
@@ -64,7 +62,7 @@ Self-hosting, every option and the element: see the [usage guide](docs/usage.md)
 | `data-no-toggler` | `noToggler` | Hides the F12 button |
 | `data-remote` | `remote` | Connects to a remote debugging server |
 
-Shell mode (on by default when self-hosted) puts the page in an iframe, so DevTools stay open across reloads and device mode works: see [shell mode](docs/usage.md#shell-mode).
+Shell mode (on by default) puts the page in an iframe, so DevTools stay open across reloads and device mode works: see [shell mode](docs/usage.md#shell-mode).
 
 ## What works
 

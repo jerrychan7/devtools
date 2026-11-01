@@ -27,17 +27,16 @@ Serve the two packages' `dist/`, and put the probe first in `<head>`, synchronou
   data-devtools-frontend-url="/devtools-frontend/dist/anywhere_app.html"></script>
 ```
 
-From a CDN, pin one exact version for both packages, and turn [shell mode](#shell-mode) off (it is not supported from a CDN):
+From jsDelivr or unpkg, pin an exact version: the probe loads the frontend of that same version from there.
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.1.0/dist/probe.iife.js"
-  data-devtools-frontend-url="https://cdn.jsdelivr.net/npm/@devtools-anywhere/devtools-frontend@0.1.0/dist/anywhere_app.html"
-  data-default-shell-mode="off"></script>
+<script src="https://cdn.jsdelivr.net/npm/devtools-anywhere@0.2.0/dist/probe.iife.js"></script>
 ```
 
 | | Self-hosted | CDN (jsDelivr, unpkg) |
 |---|---|---|
-| Shell mode | ✅ On by default | ❌ Off |
+| `data-devtools-frontend-url` | Required | Optional: the frontend of the same version on the CDN |
+| Shell mode | ✅ On by default | ✅ On by default, without the [Service Worker](#service-worker) |
 | UI languages | All, with `@devtools-anywhere/devtools-frontend-locales` in the frontend's directory | English and Chinese |
 
 - After the page loads, the probe mounts one `<devtools-anywhere>` under `<html>`, whatever the page has; a second probe only warns.
@@ -47,7 +46,8 @@ From a CDN, pin one exact version for both packages, and turn [shell mode](#shel
 
 | Attribute | Vite option | Default | Effect |
 |---|---|---|---|
-| `data-devtools-frontend-url` | `devtoolsFrontendUrl` | Script tag: none. Vite: the installed frontend | The frontend's `anywhere_app.html`. Without it, no panel is mounted |
+| `data-devtools-frontend-url` | `devtoolsFrontendUrl` | Script tag from jsDelivr or unpkg: the frontend of the same version there. Other script tags: none. Vite: the installed frontend | The frontend's `anywhere_app.html`. Without one, no panel is mounted |
+| `data-no-panel` | — | Off | No panel and no shell mode, whatever the frontend: for a page only [debugged remotely](#remote-debugging) |
 | `data-bundle` | — | Next to the probe | URL of `devtools-anywhere.iife.js` |
 | `data-open-immediately` | `openImmediately` | Off | Opens DevTools as the page loads |
 | `data-default-shell-mode` | `defaultShellMode` | `on` | `off`: no shell mode, the panel covers the page |
@@ -132,7 +132,7 @@ The top-level page is replaced by a shell: the page runs in an iframe next to De
 | Device mode | ✅ | Screencast instead |
 | Layout | The page shrinks next to DevTools | The panel covers the page |
 
-On by default for the top-level page, when the bundle and frontend (and Service Worker) are on the probe's origin. It is off when:
+On by default for the top-level page, when the bundle and frontend (and Service Worker) are where the probe trusts: on its origin, or from jsDelivr or unpkg, in the probe's package and the frontend's at the same version. It is off when:
 
 | Condition | |
 |---|---|
@@ -190,7 +190,7 @@ The server serves the probe, bundle and frontend itself, and the frontend runs o
 - DevTools stays connected across reloads and navigations in the tab. A page whose connection drops reconnects by itself, and stays on the list meanwhile.
 - Several DevTools windows can inspect one page, each in its own session.
 - The target list can be filtered and shows how many DevTools each page has.
-- With `data-devtools-frontend-url` too, the page also has its own panel.
+- With a frontend too (`data-devtools-frontend-url`, or the probe from jsDelivr or unpkg), the page also has its own panel; `data-no-panel` goes without it.
 - Breakpoints still need the browser's own debugger (`chrome://inspect`, Safari Web Inspector): the page runs the same in-page agent.
 
 `data-remote` with a value names the server, when the probe comes from elsewhere. It resolves like a link:
@@ -205,7 +205,7 @@ In shell mode:
 - The page in the shell connects, not the shell.
 - The shell's probe decides for every page in the shell; their own `data-remote` is ignored, so a page's scripts cannot send later pages elsewhere.
 - With `data-service-worker`, pages it injects connect too.
-- Shell mode needs the frontend on the probe's origin: not with the probe from the server and a frontend elsewhere.
+- Shell mode needs the frontend where the probe trusts it: not with the probe from the server and a frontend elsewhere.
 
 ### Node.js and endpoints
 
