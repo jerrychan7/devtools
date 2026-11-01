@@ -1,6 +1,7 @@
 // Device mode in shell mode, with the DevTools frontend built from the official sources: the
 // frontend lays out the page and itself as in Chrome (shell-layout.ts), and device mode sizes the
-// page. Skipped when the frontend has not been built.
+// page. Skipped when the frontend has not been built. The tests run in order, each from where the
+// previous one left the page.
 import { existsSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,19 +27,19 @@ before(async () => {
 });
 after(() => env?.close());
 
-async function waitFor<T>(get: () => T | Promise<T>, timeout = 15000): Promise<NonNullable<T>> {
+async function waitFor<T>(get: () => T | Promise<T>, what = 'condition', timeout = 15000): Promise<NonNullable<T>> {
   const start = Date.now();
   for (;;) {
     const value = await Promise.resolve()
       .then(get)
       .catch(() => null);
     if (value) return value;
-    if (Date.now() - start > timeout) throw new Error('timed out');
+    if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${what}`);
     await new Promise(r => setTimeout(r, 100));
   }
 }
 
-const frontend = () => waitFor(() => page.frames().find(f => f.url().includes('anywhere_app.html')));
+const frontend = () => waitFor(() => page.frames().find(f => f.url().includes('anywhere_app.html')), 'the frontend');
 
 /** Runs an action of the frontend's (UI.ActionRegistry), as its toolbar button or menu item would. */
 async function runAction(id: string) {
@@ -81,7 +82,9 @@ async function pickDevice(frame: Frame, name: string) {
     };
     const select = find(document);
     if (!select) throw new Error('no device select');
-    select.selectedIndex = [...select.options].findIndex(o => o.text === name);
+    const index = [...select.options].findIndex(o => o.text === name);
+    if (index < 0) throw new Error(`no device ${name}`);
+    select.selectedIndex = index;
     select.dispatchEvent(new Event('change', { bubbles: true }));
   }, name);
 }
@@ -168,8 +171,13 @@ test('device mode sizes the page as the device, scaled to fit, and takes its scr
   // the image it draws, and the link it clicks to download it (not followed here).
   await fe.evaluate(() => {
     const saved: { name?: string; width?: number; height?: number } = {};
-    Reflect.set(window, '__saved', saved);
     const convert = OffscreenCanvas.prototype.convertToBlob;
+    const click = HTMLAnchorElement.prototype.click;
+    Reflect.set(window, '__saved', saved);
+    Reflect.set(window, '__restore', () => {
+      OffscreenCanvas.prototype.convertToBlob = convert;
+      HTMLAnchorElement.prototype.click = click;
+    });
     OffscreenCanvas.prototype.convertToBlob = function (this: OffscreenCanvas, options) {
       Object.assign(saved, { width: this.width, height: this.height });
       return convert.call(this, options);
@@ -179,12 +187,18 @@ test('device mode sizes the page as the device, scaled to fit, and takes its scr
     };
   });
   await runAction('emulation.capture-screenshot');
-  const saved = await waitFor(() =>
-    fe.evaluate(() => {
-      const value: { name?: string; width?: number; height?: number } = Reflect.get(window, '__saved');
-      return value.name ? { name: value.name, width: value.width ?? 0, height: value.height ?? 0 } : null;
-    })
+  const saved = await waitFor(
+    () =>
+      fe.evaluate(() => {
+        const value: { name?: string; width?: number; height?: number } = Reflect.get(window, '__saved');
+        return value.name ? { name: value.name, width: value.width ?? 0, height: value.height ?? 0 } : null;
+      }),
+    'the screenshot'
   );
+  await fe.evaluate(() => {
+    const restore: unknown = Reflect.get(window, '__restore');
+    if (typeof restore === 'function') restore();
+  });
   assert.match(saved.name, /\(iPhone SE\)\.png$/);
   assert.equal(saved.width, 375);
   near(saved.height, 667, 'screenshot height');
@@ -211,21 +225,50 @@ test('undocked, device mode draws into its own page under the floating panel', {
   await dock('undocked');
   const toolbox = await waitFor(() => page.frames().find(f => f.url().includes('device_mode_emulation_frame.html')));
   // Its toolbar is there, and the page goes where it says.
-  await waitFor(() => pickDevice(toolbox, 'iPhone SE').then(() => true));
+  // Another device than before, so that the page's size comes from this toolbar.
+  await waitFor(() => pickDevice(toolbox, 'iPhone 16').then(() => true), "the toolbox's toolbar");
   const where = await waitFor(async () => {
     const [state, spot] = [await pageState(), await placeholder(toolbox).catch(() => null)];
-    return spot && state.viewport.width === 375 && Math.abs(state.rect.left - spot.left) <= 2 ? { state, spot } : null;
-  });
+    return spot && state.viewport.width === 393 && Math.abs(state.rect.left - spot.left) <= 2 ? { state, spot } : null;
+  }, 'the page in the toolbox');
   near(where.state.rect.width, where.spot.width, 'width');
   await dock('bottom');
   await waitFor(async () => !page.frames().some(f => f.url().includes('device_mode_emulation_frame.html')));
   await waitFor(async () => (await pageState()).rect.height < 800);
 });
 
+test('docked to the right, the page goes where the frontend says', { skip }, async () => {
+  await dock('right');
+  const fe = await frontend();
+  // The page left of DevTools, where the placeholder is.
+  await waitFor(async () => {
+    const [state, spot] = [await pageState(), await placeholder(fe)];
+    return (
+      state.viewport.width === 393 &&
+      spot.left < 500 &&
+      Math.abs(state.rect.left - spot.left) <= 2 &&
+      Math.abs(state.rect.top - spot.top) <= 2
+    );
+  }, 'the page docked right');
+  await dock('bottom');
+});
+
+test('leaving device mode gives the page the room the frontend lays out for it', { skip }, async () => {
+  await runAction('emulation.toggle-device-mode');
+  const fe = await frontend();
+  const where = await waitFor(async () => {
+    const [state, spot] = [await pageState(), await placeholder(fe)];
+    return state.viewport.width !== 393 && Math.abs(state.rect.width - spot.width) <= 2 ? { state, spot } : null;
+  }, 'the page at its own size');
+  near(where.state.rect.height, where.spot.height, 'height');
+  assert.equal(where.state.viewport.width, Math.round(where.state.rect.width));
+});
+
 test('on a touch screen, a handle on the edge between the page and DevTools resizes them', { skip }, async () => {
   // A touch screen, as the shell sees it; a resize lays the shell out again.
   await page.evaluate(() => {
     const matchMedia = window.matchMedia.bind(window);
+    Reflect.set(window, '__matchMedia', window.matchMedia);
     window.matchMedia = query => (query === '(pointer: coarse)' ? matchMedia('all') : matchMedia(query));
     window.dispatchEvent(new Event('resize'));
   });
@@ -239,7 +282,7 @@ test('on a touch screen, a handle on the edge between the page and DevTools resi
       const { left, top, width, height } = el.getBoundingClientRect();
       return { x: left + width / 2, y: top + height / 2 };
     });
-  const start = await waitFor(handle);
+  const start = await waitFor(handle, 'the touch handle');
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(start.x, start.y - 150, { steps: 5 });
@@ -249,6 +292,11 @@ test('on a touch screen, a handle on the edge between the page and DevTools resi
   await waitFor(async () => {
     const now = await handle();
     return now && now.y < start.y - 100;
+  }, 'the handle to move up');
+  await page.evaluate(() => {
+    const original: unknown = Reflect.get(window, '__matchMedia');
+    if (original instanceof Function) window.matchMedia = query => Reflect.apply(original, window, [query]);
+    window.dispatchEvent(new Event('resize'));
   });
 });
 
