@@ -19,7 +19,17 @@ const NOOPS = {
   Autofill: ['enable', 'setAddresses'],
   BackgroundService: ['startObserving'],
   CSS: ['trackComputedStyleUpdatesForNode'],
-  Emulation: ['setEmulatedMedia', 'setAutoDarkModeOverride', 'setEmulatedVisionDeficiency', 'setFocusEmulationEnabled'],
+  // Device mode's size is the shell's (shell-layout.ts); the rest a page cannot change: the user
+  // agent, safe areas, a hinge or cutout, the pinch zoom.
+  Emulation: [
+    'setEmulatedMedia',
+    'setAutoDarkModeOverride',
+    'setEmulatedVisionDeficiency',
+    'setFocusEmulationEnabled',
+    'setSafeAreaInsetsOverride',
+    'resetPageScaleFactor',
+    'setUserAgentOverride',
+  ],
   HeapProfiler: ['enable'],
   Inspector: ['enable'],
   Log: ['enable', 'clear', 'startViolationsReport'],
@@ -31,6 +41,8 @@ const NOOPS = {
     'setShowScrollSnapOverlays',
     'setShowContainerQueryOverlays',
     'setShowIsolatedElements',
+    'setShowHinge',
+    'setShowDisplayCutout',
   ],
   Network: [
     'overrideNetworkState',
@@ -41,6 +53,7 @@ const NOOPS = {
     'setBypassServiceWorker',
     'setExtraHTTPHeaders',
     'setBlockedURLs',
+    'setUserAgentOverride',
   ],
   Preload: ['enable'],
   Profiler: ['enable'],
