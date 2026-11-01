@@ -4,7 +4,8 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
-- Device mode in shell mode, as in Chrome: DevTools lays out the page and itself, the toolbar's device button sizes the page as a device (scaled to fit) and its menu takes screenshots, docked or undocked. It sets the page's size only, not its pixel ratio, user agent or touch input. On touch screens a handle on the edge between the page and DevTools resizes them. Outside shell mode the button is still the screencast's.
+- The docked panel is resized with a grip on the middle of its inner edge, on the page's side, in place of the bar across its whole edge: it covers neither DevTools nor more of the page than it shows, and looks the same in and out of shell mode. The undocked window keeps its bar, which moves it.
+- Device mode in shell mode, as in Chrome: DevTools lays out the page and itself, the toolbar's device button sizes the page as a device (scaled to fit) and its menu takes screenshots, docked or undocked. It sets the page's size only, not its pixel ratio, user agent or touch input. A grip against the middle of DevTools' edge, on the page's side, resizes them without covering DevTools, larger on touch screens. Outside shell mode the button is still the screencast's.
 - `Page.captureScreenshot` and `Page.getLayoutMetrics`: screenshots of the viewport, a region or the whole page, rendered by snapDOM and marked `approximate: true`, for tools and agents that drive the page over CDP.
 
 ## 0.1.0

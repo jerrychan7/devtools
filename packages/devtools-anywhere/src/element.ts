@@ -17,6 +17,7 @@ import {
 } from './cdp-agent';
 import { connectFrontend, relayShell } from './connection';
 import { SHELL_HANDSHAKE } from './shell-messages';
+import { Grip } from './grip';
 import { ShellLayout } from './shell-layout';
 import type { GlobalElementConfig } from './api';
 import type { DevtoolsAnywhereAttributes, TogglerAttributes } from './public-types';
@@ -63,6 +64,8 @@ const VW = typeof CSS !== 'undefined' && CSS.supports('width', '1dvw') ? 'dvw' :
 const percent = (part: number, whole: number) => Math.round((part / whole) * 1000) / 10;
 const DOCK_KEY = 'devtools-anywhere:dock';
 const MIN_SIZE = 80;
+/** The panel's inner edge, next to the page, for each docked side. */
+const GRIP_EDGE = { bottom: 'top', right: 'left', left: 'right' } as const;
 
 /**
  * localStorage, which throws when it is unavailable: Android WebViews without DOM storage,
@@ -95,7 +98,7 @@ const REQUEST_CHECKS: { [T in EmbedderRequest['type']]: (request: object) => boo
   'keep-open': request => 'keep' in request && typeof request.keep === 'boolean',
   theme: request => ['toolbar', 'divider', 'icon'].every(key => typeof Reflect.get(request, key) === 'string'),
   'page-bounds': request => ['x', 'y', 'width', 'height'].every(key => finite(Reflect.get(request, key)) !== undefined),
-  split: request => 'size' in request && finite(request.size) !== undefined,
+  split: request => ['x', 'y', 'width', 'height'].every(key => finite(Reflect.get(request, key)) !== undefined),
   toolbox: request => 'url' in request && typeof request.url === 'string',
 };
 const isRequestType = (type: unknown): type is EmbedderRequest['type'] =>
@@ -150,11 +153,13 @@ const STYLE = `
   padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 .panel[data-open] { display: flex; }
-/* The bar takes the DevTools toolbar's colors, which the frontend reports (theme request). */
+/* The undocked window's bar, which moves it; it takes the DevTools toolbar's colors, which the
+   frontend reports (theme request), as does the grip that resizes the docked panel (grip.ts). */
 .bar {
   flex: none; position: relative; height: 16px; background: var(--bar-background, #f1f3f4);
-  cursor: row-resize; touch-action: none;
+  cursor: move; touch-action: none; display: none;
 }
+[data-dock=undocked] .bar { display: block; }
 .bar::before {
   content: ''; position: absolute; left: 50%; top: 6px; width: 32px; height: 4px;
   margin-left: -16px; border-radius: 2px; background: var(--bar-handle, #bdc1c6);
@@ -164,8 +169,7 @@ const STYLE = `
   background: none; color: var(--bar-icon, #5f6368); font: 14px/16px system-ui, sans-serif; cursor: pointer;
 }
 /* DevTools' own toolbar has a close button, except when undocked: then the bar has one. */
-.close { right: 4px; display: none; }
-[data-dock=undocked] .close { display: block; }
+.close { right: 4px; }
 /* The undocked window's resize corner, for touch screens where CSS resize does not work. */
 .corner {
   position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; display: none;
@@ -186,27 +190,18 @@ iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
 .panel[data-dock=left] {
   right: auto; flex-direction: row-reverse; border-right: 1px solid var(--bar-border, #cacdd1); padding-right: 0;
 }
-[data-dock=right] .bar, [data-dock=left] .bar { width: 16px; height: auto; cursor: col-resize; }
-[data-dock=right] .bar::before, [data-dock=left] .bar::before {
-  left: 6px; top: 50%; width: 4px; height: 32px; margin: -16px 0 0;
-}
-[data-dock=right] .bar button, [data-dock=left] .bar button { left: 0; right: auto; width: 16px; }
 
 /* Undocked: a window over the page, moved by its bar and resized from its corner. */
 .panel[data-dock=undocked] {
   right: auto; bottom: auto; border: 1px solid var(--bar-border, #cacdd1); border-radius: 6px; overflow: hidden;
   box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both; padding: 0;
 }
-[data-dock=undocked] .bar { cursor: move; }
 
 /* Touch screens: targets large enough for a finger. */
 @media (pointer: coarse) {
   .bar { height: 28px; }
   .bar::before { top: 12px; }
   .bar button { width: 44px; height: 28px; line-height: 28px; font-size: 18px; }
-  [data-dock=right] .bar, [data-dock=left] .bar { width: 28px; }
-  [data-dock=right] .bar::before, [data-dock=left] .bar::before { left: 12px; }
-  [data-dock=right] .bar button, [data-dock=left] .bar button { width: 28px; height: 44px; }
   .corner { width: 32px; height: 32px; }
 }
 
@@ -282,6 +277,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private shellLink: { attach(): void; detach(): void } | null = null;
   /** In the shell: places the page where the frontend lays it out (shell-layout.ts). */
   private shellLayout: ShellLayout | null = null;
+  private readonly grip: Grip;
 
   constructor() {
     super();
@@ -311,7 +307,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     });
     part('.close').addEventListener('click', () => this.setOpen(false));
     this.addEventListener(CONTROL_EVENT, this.onControl);
-    this.setupResizer(part<HTMLElement>('.bar'));
+    this.setupMover(part<HTMLElement>('.bar'));
+    this.grip = this.createGrip();
+    this.panel.append(this.grip.element);
     this.setupCorner(part<HTMLElement>('.corner'));
     // The undocked panel is resized by the browser (CSS resize): remember its size once it
     // settles, not on every frame of the drag.
@@ -354,20 +352,24 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       else void this.exitShell();
     } else if (request.type === 'theme') {
       const colors: [string, string[]][] = [
-        [request.toolbar, ['--bar-background']],
-        [request.divider, ['--bar-handle', '--bar-border']],
-        [request.icon, ['--bar-icon']],
+        [request.toolbar, ['--bar-background', '--grip-background']],
+        [request.divider, ['--bar-handle', '--bar-border', '--grip-border']],
+        [request.icon, ['--bar-icon', '--grip-dot']],
       ];
+      const set: Record<string, string> = {};
       for (const [value, properties] of colors) {
         if (!CSS.supports('color', value)) continue;
-        for (const property of properties) this.panel.style.setProperty(property, value);
+        for (const property of properties) set[property] = value;
       }
+      for (const [property, value] of Object.entries(set)) this.panel.style.setProperty(property, value);
+      // The shell's grip is outside this element.
+      this.shellLayout?.setGripColors(set);
     } else if (request.type === 'close') {
       this.setOpen(false);
     } else if (request.type === 'page-bounds') {
       this.shellLayout?.pageBounds(request);
     } else if (request.type === 'split') {
-      this.shellLayout?.splitSize(request.size);
+      this.shellLayout?.splitArea(request);
     } else if (request.type === 'toolbox') {
       // Only a page of the frontend's own origin.
       let url: URL;
@@ -740,6 +742,9 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       const stored = Number(readStored(WIDTH_KEY));
       style.width = stored ? `${stored}${VW}` : `50${VW}`;
     }
+    // Docked, the grip on the panel's inner edge resizes it; in the shell, the shell's grip does.
+    if (dock !== 'undocked') this.grip.place(GRIP_EDGE[dock], 'outside');
+    this.grip.show(dock !== 'undocked' && !isShellElement(this) && !this.panel.hasAttribute('data-custom'));
     // The shell document is ours: the page iframe comes first, then this element.
     if (isShellElement(this)) {
       document.body.style.flexDirection = dock === 'right' ? 'row' : dock === 'left' ? 'row-reverse' : 'column';
@@ -810,44 +815,58 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.frame.src = `${url.href.split('#')[0]}#?${hash}`;
   }
 
-  /** Dragging the bar resizes the docked panel, or moves the undocked one. */
-  private setupResizer(resizer: HTMLElement) {
-    resizer.addEventListener('pointerdown', down => {
+  /** Dragging the bar moves the undocked panel. */
+  private setupMover(bar: HTMLElement) {
+    bar.addEventListener('pointerdown', down => {
       if ((down.target as HTMLElement).closest('button')) return;
       down.preventDefault();
-      resizer.setPointerCapture(down.pointerId);
+      bar.setPointerCapture(down.pointerId);
       this.panel.classList.add('dragging');
-      const dock = this.dock;
       const start = this.panel.getBoundingClientRect();
-      const clampSize = (size: number, max: number) => Math.min(Math.max(size, MIN_SIZE), max - 16);
       const move = (e: PointerEvent) => {
-        const style = this.panel.style;
-        if (dock === 'bottom') style.height = `${clampSize(innerHeight - e.clientY, innerHeight)}px`;
-        else if (dock === 'right') style.width = `${clampSize(innerWidth - e.clientX, innerWidth)}px`;
-        else if (dock === 'left') style.width = `${clampSize(e.clientX, innerWidth)}px`;
-        else {
-          const left = start.left + e.clientX - down.clientX;
-          const top = start.top + e.clientY - down.clientY;
-          // The whole window stays in the viewport, so its resize corner stays reachable; a
-          // window larger than the viewport keeps its top left corner in view.
-          style.left = `${Math.max(Math.min(left, innerWidth - start.width), 0)}px`;
-          style.top = `${Math.max(Math.min(top, innerHeight - start.height), 0)}px`;
-        }
+        const left = start.left + e.clientX - down.clientX;
+        const top = start.top + e.clientY - down.clientY;
+        // The whole window stays in the viewport, so its resize corner stays reachable; a
+        // window larger than the viewport keeps its top left corner in view.
+        this.panel.style.left = `${Math.max(Math.min(left, innerWidth - start.width), 0)}px`;
+        this.panel.style.top = `${Math.max(Math.min(top, innerHeight - start.height), 0)}px`;
       };
       const up = () => {
         this.panel.classList.remove('dragging');
-        if (dock === 'bottom') store(HEIGHT_KEY, String(percent(this.panel.offsetHeight, innerHeight)));
-        else if (dock === 'undocked') this.saveFloat();
+        this.saveFloat();
+        // From the pixels of the drag to the remembered percentages.
+        this.layout();
+        bar.removeEventListener('pointermove', move);
+        bar.removeEventListener('pointerup', up);
+        bar.removeEventListener('pointercancel', up);
+      };
+      bar.addEventListener('pointermove', move);
+      bar.addEventListener('pointerup', up);
+      bar.addEventListener('pointercancel', up);
+    });
+  }
+
+  /** The grip on the docked panel's inner edge, on the page's side: dragging it resizes the panel. */
+  private createGrip() {
+    const clampSize = (size: number, max: number) => Math.min(Math.max(size, MIN_SIZE), max - 16);
+    return new Grip({
+      edge: 'top',
+      side: 'outside',
+      title: 'Drag to resize',
+      onStart: () => this.panel.classList.add('dragging'),
+      onMove: e => {
+        const style = this.panel.style;
+        if (this.dock === 'bottom') style.height = `${clampSize(innerHeight - e.clientY, innerHeight)}px`;
+        else if (this.dock === 'right') style.width = `${clampSize(innerWidth - e.clientX, innerWidth)}px`;
+        else if (this.dock === 'left') style.width = `${clampSize(e.clientX, innerWidth)}px`;
+      },
+      onEnd: () => {
+        this.panel.classList.remove('dragging');
+        if (this.dock === 'bottom') store(HEIGHT_KEY, String(percent(this.panel.offsetHeight, innerHeight)));
         else store(WIDTH_KEY, String(percent(this.panel.offsetWidth, innerWidth)));
         // From the pixels of the drag to the remembered percentages.
         this.layout();
-        resizer.removeEventListener('pointermove', move);
-        resizer.removeEventListener('pointerup', up);
-        resizer.removeEventListener('pointercancel', up);
-      };
-      resizer.addEventListener('pointermove', move);
-      resizer.addEventListener('pointerup', up);
-      resizer.addEventListener('pointercancel', up);
+      },
     });
   }
 

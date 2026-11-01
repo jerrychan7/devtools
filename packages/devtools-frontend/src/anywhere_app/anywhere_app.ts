@@ -220,17 +220,25 @@ window.open = (url?: string|URL, target?: string, features?: string) => {
   return open(url, target, features);
 };
 let splitWatched = false;
+/** The page's side of the split, next to DevTools, for the shell's grip on DevTools' edge. */
+function notifySplit(split: UI.SplitWidget.SplitWidget): void {
+  const main = split.mainWidget()?.element.getBoundingClientRect();
+  if (main) {
+    notifyEmbedder({type: 'split', x: main.x, y: main.y, width: main.width, height: main.height});
+  }
+}
 host.setInspectedPageBounds = bounds => {
   notifyEmbedder({type: 'page-bounds', ...bounds});
   const split = UI.InspectorView.InspectorView.maybeGetInspectorViewInstance()?.ownerSplit();
   if (!split) {
     return;
   }
-  notifyEmbedder({type: 'split', size: split.sidebarSize()});
+  notifySplit(split);
   if (!splitWatched) {
     splitWatched = true;
+    // Measured once laid out at the new size.
     split.addEventListener(
-        UI.SplitWidget.Events.SIDEBAR_SIZE_CHANGED, event => notifyEmbedder({type: 'split', size: event.data}));
+        UI.SplitWidget.Events.SIDEBAR_SIZE_CHANGED, () => requestAnimationFrame(() => notifySplit(split)));
   }
 };
 

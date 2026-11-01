@@ -5,14 +5,13 @@
 // answers by sizing and scaling the page iframe. Undocked, device mode draws into a page of the
 // frontend's (`toolbox`), shown here in an iframe under the floating panel; the bounds are then in
 // that iframe. Until the frontend says where the page goes, or while DevTools is hidden, the page
-// fills the shell. On touch screens a handle on the edge between the page and DevTools resizes
-// them, since the frontend's own resizer is a few pixels wide.
+// fills the shell. Docked, a grip on the page's side of the middle of the edge between the page
+// and DevTools resizes them, since the frontend's own resizer is a few pixels wide and shows
+// nothing; it covers none of DevTools, and only as much of the page as it shows.
 
 import type { DeviceMetrics } from './connection';
+import { Grip } from './grip';
 import { type DockSide, type FrontendNotice, type PageBounds, REQUEST_KEY, SIDEBAR_SIZE_NOTICE } from './embedder';
-
-/** Width of the touch handle, as the panel's bar on touch screens. */
-const HANDLE = 28;
 
 /** Sets the given inline styles, and clears the others this layout sets. */
 function place(
@@ -35,12 +34,15 @@ function place(
 
 export class ShellLayout {
   private bounds: PageBounds | null = null;
-  private split: number | null = null;
+  /** The page's side of the split next to DevTools (`split`), where the grip goes. */
+  private split: PageBounds | null = null;
   private metrics: DeviceMetrics | null = null;
   private toolbox: HTMLIFrameElement | null = null;
   private open = false;
   private dock: DockSide = 'bottom';
-  private readonly handle: HTMLDivElement;
+  /** The page's side of the split next to DevTools, for the grip on DevTools' edge (grip.ts). */
+  private readonly pageArea: HTMLDivElement;
+  private readonly grip: Grip;
 
   /**
    * @param host the shell's `<devtools-anywhere>`, which fills the shell while the frontend lays out
@@ -54,10 +56,18 @@ export class ShellLayout {
     private readonly page: HTMLIFrameElement,
     private readonly frontendOrigin: () => string
   ) {
-    this.handle = document.createElement('div');
-    this.handle.style.cssText = 'position:fixed;z-index:2;display:none;touch-action:none';
-    document.body.append(this.handle);
-    this.setupHandle();
+    this.pageArea = document.createElement('div');
+    this.pageArea.style.cssText = 'position:fixed;z-index:2;display:none;pointer-events:none';
+    this.grip = new Grip({
+      edge: 'bottom',
+      side: 'inside',
+      title: 'Drag to resize',
+      onMove: e => this.resizeTo(e),
+    });
+    this.grip.element.style.pointerEvents = 'auto';
+    this.grip.show(true);
+    this.pageArea.append(this.grip.element);
+    document.body.append(this.pageArea);
     addEventListener('resize', this.onResize);
   }
 
@@ -66,7 +76,8 @@ export class ShellLayout {
   /** The element left the shell: stops listening and removes what this layout added. */
   dispose() {
     removeEventListener('resize', this.onResize);
-    this.handle.remove();
+    this.grip.dispose();
+    this.pageArea.remove();
     this.removeToolbox();
   }
 
@@ -75,6 +86,7 @@ export class ShellLayout {
     if (dock !== this.dock) {
       // The bounds were in the other side's layout (or in the toolbox): wait for new ones.
       this.bounds = null;
+      this.split = null;
       if (dock !== 'undocked') this.removeToolbox();
     }
     this.open = open;
@@ -87,8 +99,8 @@ export class ShellLayout {
     this.render();
   }
 
-  splitSize(size: number) {
-    this.split = size;
+  splitArea(area: PageBounds) {
+    this.split = area;
     this.render();
   }
 
@@ -130,7 +142,7 @@ export class ShellLayout {
     // (device mode does not recover from starting small); undocked, it stays a floating panel.
     this.host.toggleAttribute('data-laid-out', this.open && this.dock !== 'undocked');
     if (this.toolbox) this.toolbox.style.display = this.open ? '' : 'none';
-    this.renderHandle();
+    this.renderGrip();
     // Until then the page fills the shell, on top.
     if (!laidOut || !this.bounds || !origin)
       return place(this.page, this.open ? { left: '0', top: '0', width: '100%', height: '100%' } : {});
@@ -154,44 +166,41 @@ export class ShellLayout {
     });
   }
 
-  /** The touch handle straddles the edge between the page and DevTools, docked only. */
-  private renderHandle() {
-    const style = this.handle.style;
-    const shown = this.open && this.dock !== 'undocked' && this.split !== null && !!this.bounds;
-    style.display = shown && matchMedia('(pointer: coarse)').matches ? 'block' : 'none';
-    if (!shown || this.split === null) return;
+  /**
+   * The grip sits against the middle of the page's edge next to DevTools, on the page's side, as
+   * a tab of DevTools' panel; docked only.
+   */
+  private renderGrip() {
+    // Not the page bounds: in device mode they are only the device's screen, in the middle.
+    const area = this.split;
+    const shown = this.open && this.dock !== 'undocked' && !!area && !!this.bounds;
+    this.pageArea.style.display = shown ? 'block' : 'none';
+    if (!shown || !area || this.dock === 'undocked') return;
     const frame = this.frontend.getBoundingClientRect();
-    const vertical = this.dock === 'bottom';
-    style.cursor = vertical ? 'row-resize' : 'col-resize';
-    style.left = `${vertical ? frame.left : this.dock === 'right' ? frame.right - this.split - HANDLE / 2 : frame.left + this.split - HANDLE / 2}px`;
-    style.top = `${vertical ? frame.bottom - this.split - HANDLE / 2 : frame.top}px`;
-    style.width = `${vertical ? frame.width : HANDLE}px`;
-    style.height = `${vertical ? HANDLE : frame.height}px`;
+    Object.assign(this.pageArea.style, {
+      left: `${frame.left + area.x}px`,
+      top: `${frame.top + area.y}px`,
+      width: `${area.width}px`,
+      height: `${area.height}px`,
+    });
+    this.grip.place(this.dock);
   }
 
-  private setupHandle() {
-    this.handle.addEventListener('pointerdown', down => {
-      down.preventDefault();
-      this.handle.setPointerCapture(down.pointerId);
-      const move = (e: PointerEvent) => {
-        const frame = this.frontend.getBoundingClientRect();
-        const size =
-          this.dock === 'bottom'
-            ? frame.bottom - e.clientY
-            : this.dock === 'right'
-              ? frame.right - e.clientX
-              : e.clientX - frame.left;
-        const notice: FrontendNotice = { type: SIDEBAR_SIZE_NOTICE, size: Math.round(size) };
-        this.frontend.contentWindow?.postMessage({ [REQUEST_KEY]: notice }, this.frontendOrigin());
-      };
-      const up = () => {
-        this.handle.removeEventListener('pointermove', move);
-        this.handle.removeEventListener('pointerup', up);
-        this.handle.removeEventListener('pointercancel', up);
-      };
-      this.handle.addEventListener('pointermove', move);
-      this.handle.addEventListener('pointerup', up);
-      this.handle.addEventListener('pointercancel', up);
-    });
+  /** The grip's colors (its custom properties, grip.ts), DevTools' toolbar's. */
+  setGripColors(colors: Record<string, string>) {
+    for (const [property, value] of Object.entries(colors)) this.pageArea.style.setProperty(property, value);
+  }
+
+  /** Dragging the grip: DevTools takes the room from the pointer to its far edge. */
+  private resizeTo(e: PointerEvent) {
+    const frame = this.frontend.getBoundingClientRect();
+    const size =
+      this.dock === 'bottom'
+        ? frame.bottom - e.clientY
+        : this.dock === 'right'
+          ? frame.right - e.clientX
+          : e.clientX - frame.left;
+    const notice: FrontendNotice = { type: SIDEBAR_SIZE_NOTICE, size: Math.round(size) };
+    this.frontend.contentWindow?.postMessage({ [REQUEST_KEY]: notice }, this.frontendOrigin());
   }
 }

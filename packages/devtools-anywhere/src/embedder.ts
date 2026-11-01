@@ -15,8 +15,9 @@ export type DockSide = (typeof DOCK_SIDES)[number];
  * Requests from the frontend to the embedder: its dock side menu, its close button, keeping
  * DevTools open across reloads (shell mode), the theme's colors for the panel's bar, and in shell
  * mode where the page goes (`page-bounds`, the frontend's InspectedPagePlaceholder, in CSS pixels
- * of the frontend's viewport, like Chrome's setInspectedPageBounds) and how much room DevTools
- * takes next to it (`split`, in CSS pixels, for the shell's touch handle on the edge between them).
+ * of the frontend's viewport, like Chrome's setInspectedPageBounds) and the page's side of the split
+ * next to DevTools (`split`, in the same pixels: the whole of it, where the page bounds are only the
+ * device's screen in device mode), for the shell's grip on DevTools' edge.
  * Undocked, device mode draws into a page of the frontend's (`toolbox`, its URL), which Chrome
  * opens in the tab under DevTools' window and the shell shows in an iframe under the panel, where
  * the frontend finds it among its parent's frames; the page bounds are then in CSS pixels of that
@@ -28,7 +29,7 @@ export type EmbedderRequest =
   | { type: 'keep-open'; keep: boolean }
   | { type: 'theme'; toolbar: string; divider: string; icon: string }
   | ({ type: 'page-bounds' } & PageBounds)
-  | { type: 'split'; size: number }
+  | ({ type: 'split' } & PageBounds)
   | { type: 'toolbox'; url: string };
 
 /** A rectangle in CSS pixels. */

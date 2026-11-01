@@ -229,7 +229,12 @@ test('undocked, device mode draws into its own page under the floating panel', {
   await waitFor(() => pickDevice(toolbox, 'iPhone 16').then(() => true), "the toolbox's toolbar");
   const where = await waitFor(async () => {
     const [state, spot] = [await pageState(), await placeholder(toolbox).catch(() => null)];
-    return spot && state.viewport.width === 393 && Math.abs(state.rect.left - spot.left) <= 2 ? { state, spot } : null;
+    return spot &&
+      state.viewport.width === 393 &&
+      Math.abs(state.rect.left - spot.left) <= 2 &&
+      Math.abs(state.rect.width - spot.width) <= 2
+      ? { state, spot }
+      : null;
   }, 'the page in the toolbox');
   near(where.state.rect.width, where.spot.width, 'width');
   await dock('bottom');
@@ -253,6 +258,27 @@ test('docked to the right, the page goes where the frontend says', { skip }, asy
   await dock('bottom');
 });
 
+test("in device mode, the grip stays on DevTools' edge, not on the device's screen", { skip }, async () => {
+  const fe = await frontend();
+  await waitFor(async () => {
+    // DevTools' top edge, docked at the bottom, in the shell's coordinates.
+    const edge = await fe.evaluate(async () => {
+      const script = document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '';
+      // The built frontend has no type declarations: InspectorView's element.
+      const UI: { InspectorView: { InspectorView: { instance(): { element: Element } } } } = await (
+        await import(script)
+      ).modules['ui/legacy/legacy.js']();
+      return UI.InspectorView.InspectorView.instance().element.getBoundingClientRect().top;
+    });
+    const offset = await (await fe.frameElement())?.evaluate(f => f.getBoundingClientRect().top);
+    const grip = await page.evaluate(() => {
+      const el = document.querySelector<HTMLElement>('body > div > div[title="Drag to resize"]');
+      return el?.getClientRects().length ? el.getBoundingClientRect().bottom : null;
+    });
+    return grip !== null && offset !== undefined && Math.abs(grip - (edge + offset)) <= 2;
+  }, "the grip on DevTools' edge");
+});
+
 test('leaving device mode gives the page the room the frontend lays out for it', { skip }, async () => {
   await runAction('emulation.toggle-device-mode');
   const fe = await frontend();
@@ -263,6 +289,32 @@ test('leaving device mode gives the page the room the frontend lays out for it',
   near(where.state.rect.height, where.spot.height, 'height');
   assert.equal(where.state.viewport.width, Math.round(where.state.rect.width));
 });
+
+test(
+  "docked, a grip on the edge between the page and DevTools, on the page's side, resizes them",
+  { skip },
+  async () => {
+    const fe = await frontend();
+    const found = await waitFor(async () => {
+      const [spot, handle] = [
+        await placeholder(fe),
+        await page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('body > div > div[title="Drag to resize"]');
+          if (!el || !el.getClientRects().length) return null;
+          const { top, width, height } = el.getBoundingClientRect();
+          return { top, width, height, dots: el.children.length };
+        }),
+      ];
+      // Docked at the bottom, the edge is the bottom of the page's area: the grip sits on it, above.
+      return handle && Math.abs(handle.top + handle.height - (spot.top + spot.height)) <= 2 ? handle : null;
+    }, 'the handle on the edge');
+    // For a mouse, a grip of 36 × 12 pixels with three dots: it takes input only where it is seen.
+    assert.deepEqual(
+      { width: found.width, height: found.height, dots: found.dots },
+      { width: 36, height: 12, dots: 3 }
+    );
+  }
+);
 
 test('on a touch screen, a handle on the edge between the page and DevTools resizes them', { skip }, async () => {
   // A touch screen, as the shell sees it; a resize lays the shell out again.
@@ -275,10 +327,8 @@ test('on a touch screen, a handle on the edge between the page and DevTools resi
   /** The handle's center, once shown. */
   const handle = () =>
     page.evaluate(() => {
-      const el = [...document.body.children].find(
-        (e): e is HTMLElement => e instanceof HTMLDivElement && e.style.cursor === 'row-resize'
-      );
-      if (!el || el.style.display === 'none') return null;
+      const el = document.querySelector<HTMLElement>('body > div > div[title="Drag to resize"]');
+      if (!el || !el.getClientRects().length) return null;
       const { left, top, width, height } = el.getBoundingClientRect();
       return { x: left + width / 2, y: top + height / 2 };
     });
