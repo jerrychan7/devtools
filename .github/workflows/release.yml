@@ -23,6 +23,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    outputs:
+      milestone: ${{ steps.chrome.outputs.milestone }}
     env:
       HUSKY: '0'
     steps:
@@ -81,7 +83,10 @@ jobs:
 
       - name: Chrome version
         id: chrome
-        run: echo "version=$(node -p "require('./packages/devtools-frontend/package.json').chrome")" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(node -p "require('./packages/devtools-frontend/package.json').chrome")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "milestone=${version%%.*}" >> "$GITHUB_OUTPUT"
 
       - name: Restore Chrome for Testing
         uses: actions/cache/restore@v4
@@ -144,6 +149,16 @@ jobs:
         run: |
           for pack in ./packs/*.tgz; do
             npm publish "$pack" --access public --provenance
+          done
+
+      - name: Tag the packages with their Chrome milestone
+        # npm i devtools-anywhere@chrome-156 installs the last release on that Chrome (DEV.md).
+        env:
+          TAG: chrome-${{ needs.build.outputs.milestone }}
+        run: |
+          for pack in ./packs/*.tgz; do
+            spec=$(tar -xOzf "$pack" package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); `${p.name}@${p.version}`')
+            npm dist-tag add "$spec" "$TAG"
           done
 
       - name: Publish the GitHub release
