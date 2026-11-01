@@ -159,7 +159,7 @@ export default {
 要在电脑上的 Chrome 里调试手机上的页面，先在电脑上启动远程调试服务端：
 
 ```bash
-npx devtools-anywhere-remote --port 8080
+npx -p @devtools-anywhere/remote-server devtools-anywhere-remote --port 8080
 ```
 
 它会打印目标列表的地址（带 token）和给页面用的 script 标签，标签里用的是电脑的局域网地址（`--public-url` 可以改成别的地址，例如经过代理时）。从服务端加载探针，带上 `data-remote`，放在页面 `<head>` 的第一个脚本位置：

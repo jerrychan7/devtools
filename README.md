@@ -173,7 +173,7 @@ Togglers work once the probe has loaded `devtools-anywhere.iife.js`, which regis
 To inspect a page on a phone from Chrome on a computer, start the remote debugging server on the computer:
 
 ```bash
-npx devtools-anywhere-remote --port 8080
+npx -p @devtools-anywhere/remote-server devtools-anywhere-remote --port 8080
 ```
 
 It prints the target list's URL, with a token, and the script tag for pages, naming the computer by its LAN address (`--public-url` names it otherwise, for example behind a proxy). Load the probe from the server, with `data-remote`, as the first script in the page's `<head>`:
