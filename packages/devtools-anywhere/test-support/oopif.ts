@@ -1,7 +1,7 @@
 // Real Chrome with cross-site iframes out of process (OOPIFs), driven over a raw browser-level
 // CDP connection, so every message is seen with its sessionId as a client such as the DevTools
 // frontend sees it. Used to record what Chrome does for cross-origin iframes, as the reference
-// for our agent's child targets.
+// for our agent's child targets. Findings are in oopif-notes.md.
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 import { launch, type Env } from '../../../tests/support/browser.ts';
 
