@@ -185,6 +185,36 @@ test('ours: mouse and keys over a cross-origin iframe go to its page as in Chrom
   }
 });
 
+/** Wheels over the iframe scrolled to its end, then to its start: where each page is then. */
+async function chain(side: Side) {
+  await setUp(side);
+  await evaluate(side, "document.body.style.height = '3000px'; scrollTo(0, 0)");
+  await evaluate(side, "document.body.style.height = '1000px'; scrollTo(0, 99999)", side.child);
+  await drawn(side);
+  const frame = JSON.parse(
+    String(await evaluate(side, "JSON.stringify(document.getElementById('child').getBoundingClientRect())"))
+  );
+  const wheel = () =>
+    mouse(side, 'mouseWheel', Math.round(frame.left + 50), Math.round(frame.top + 50), { deltaX: 0, deltaY: 120 });
+  const where = async () => [await evaluate(side, 'scrollY'), await evaluate(side, 'scrollY', side.child)];
+  const before = await where();
+  await wheel();
+  const atEnd = await where();
+  await evaluate(side, 'scrollTo(0, 0)', side.child);
+  await drawn(side);
+  await wheel();
+  return { before, atEnd, atStart: await where() };
+}
+
+test('ours: a wheel over a cross-origin iframe that cannot scroll further scrolls its parent, as in Chrome', async () => {
+  const expected = await run(chromeSide, chain);
+  const actual = await run(oursSide, chain);
+  assert.deepEqual(actual, expected);
+  // As measured: at its end the iframe passes the scroll to the parent, at its start it scrolls itself.
+  assert.equal(expected.atEnd[0], 120);
+  assert.deepEqual(expected.atStart, [120, 120]);
+});
+
 /** Hit testing over the iframe, a highlight in it and inspect mode across both pages. */
 async function overlay(side: Side) {
   await setUp(side);

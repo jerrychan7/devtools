@@ -25,8 +25,18 @@ const modifierKeys = (modifiers = 0) => ({
   shiftKey: (modifiers & 8) !== 0,
 });
 
-/** Scrolls the nearest scrollable ancestor that can still move in the direction of the delta. */
-function scrollBy(target: Target, dx: number, dy: number) {
+/**
+ * A param of a wheel forwarded to a cross-origin iframe's agent, and the field of its answer, for
+ * scroll chaining: set in the answer when nothing in the iframe's page could scroll, for the
+ * parent's page to scroll on from the iframe, as Chrome chains a scroll across processes.
+ */
+const SCROLL_CHAIN = 'devtoolsAnywhereScrollChain';
+
+/**
+ * Scrolls the nearest scrollable ancestor that can still move in the direction of the delta;
+ * false when none could.
+ */
+function scrollBy(target: Target, dx: number, dy: number): boolean {
   // From the target's document out through the iframes holding it, each viewport last.
   for (let doc: Document | null = documentOf(target), from = isElement(target) ? target : null; doc;) {
     for (let el = from; el; el = el.parentElement) {
@@ -37,17 +47,19 @@ function scrollBy(target: Target, dx: number, dy: number) {
       const left = el.scrollLeft;
       const top = el.scrollTop;
       if (canX || canY) el.scrollBy(canX ? dx : 0, canY ? dy : 0);
-      if (el.scrollLeft !== left || el.scrollTop !== top) return;
+      if (el.scrollLeft !== left || el.scrollTop !== top) return true;
     }
     const win = realmOf(doc);
     const parent = parentFrameDocument(doc);
     const [x, y] = [win.scrollX, win.scrollY];
     win.scrollBy(dx, dy);
-    if (!parent || win.scrollX !== x || win.scrollY !== y) return;
+    if (win.scrollX !== x || win.scrollY !== y) return true;
+    if (!parent) return false;
     // Like Chrome, a frame that cannot scroll further passes the scroll on to its parent.
     from = win.frameElement;
     doc = parent;
   }
+  return false;
 }
 
 const isEditable = (el: Element | null) =>
@@ -113,7 +125,26 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
   async function forward(link: ChildLink, owner: Element, method: string, p: MouseEventRequest) {
     const at = pointInFrame(owner.ownerDocument, p.x, p.y);
     const inner = pointInOwnerContent(owner, at.x, at.y);
-    await askChild(link, method, { ...p, x: inner.x, y: inner.y }, FORWARD_TIMEOUT);
+    const wheeled = p.type === 'mouseWheel';
+    const result = await askChild(
+      link,
+      method,
+      { ...p, x: inner.x, y: inner.y, ...(wheeled ? { [SCROLL_CHAIN]: true } : {}) },
+      FORWARD_TIMEOUT
+    );
+    // Nothing in the iframe could scroll: like Chrome, the scroll goes on from the iframe out.
+    if (wheeled && typeof result === 'object' && result !== null && Reflect.get(result, SCROLL_CHAIN) === true)
+      return scrolled(owner, p);
+    return undefined;
+  }
+
+  /**
+   * Scrolls from `target` out for a wheel; when nothing could scroll and the wheel was forwarded
+   * from a parent's agent, answers so, for that page to scroll on.
+   */
+  function scrolled(target: Target, p: MouseEventRequest) {
+    if (scrollBy(target, p.deltaX ?? 0, p.deltaY ?? 0) || Reflect.get(p, SCROLL_CHAIN) !== true) return undefined;
+    return { [SCROLL_CHAIN]: true };
   }
 
   /**
@@ -199,11 +230,11 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
     hovered = next;
   }
 
+  /** A wheel event, and the scroll unless cancelled; see {@link scrolled} for the answer. */
   function wheel(target: Target, p: MouseEventRequest) {
-    const dx = p.deltaX ?? 0;
-    const dy = p.deltaY ?? 0;
-    const init = { ...mouseInit(p, 0, target), deltaX: dx, deltaY: dy, deltaMode: 0 };
-    if (target.dispatchEvent(new (realmOf(target).WheelEvent)('wheel', init))) scrollBy(target, dx, dy);
+    const init = { ...mouseInit(p, 0, target), deltaX: p.deltaX ?? 0, deltaY: p.deltaY ?? 0, deltaMode: 0 };
+    if (target.dispatchEvent(new (realmOf(target).WheelEvent)('wheel', init))) return scrolled(target, p);
+    return undefined;
   }
 
   /** The held buttons, which only Input.dispatchMouseEvent reports. */
@@ -253,9 +284,9 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
         break;
       }
       case 'mouseWheel':
-        wheel(target, p);
-        break;
+        return wheel(target, p);
     }
+    return undefined;
   }
 
   async function touch(p: MouseEventRequest) {
@@ -275,7 +306,7 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
       }
     }
     // Hovering does not touch, and Chrome ignores a release without a touch to end.
-    if ((p.type === 'mouseMoved' || p.type === 'mouseReleased') && !touchStart) return;
+    if ((p.type === 'mouseMoved' || p.type === 'mouseReleased') && !touchStart) return undefined;
     // Once touching, the touch stays with the touched element even off the page, so that
     // the release still ends it. Like Chrome, a touch starting off the page (or on nothing)
     // goes to the root element.
@@ -332,12 +363,13 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
       if (tapped && proceed) {
         const init = mouseInit({ ...p, button: 'left', clickCount: 1 }, 0, target);
         hover(found ? hitAt(p.x, p.y) : [target], p, 0, false);
-        if (touchOffPage) return;
+        if (touchOffPage) return undefined;
         if (target.dispatchEvent(mouseEvent(target, 'mousedown', { ...init, buttons: BUTTONS.left }))) focus(target);
         target.dispatchEvent(mouseEvent(target, 'mouseup', init));
         target.dispatchEvent(mouseEvent(target, 'click', init));
       }
     }
+    return undefined;
   }
 
   function touchEvent(type: 'touchstart' | 'touchmove' | 'touchend', touched: Element, p: MouseEventRequest) {

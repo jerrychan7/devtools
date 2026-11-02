@@ -133,7 +133,12 @@ What each page gets (`domains/input/input-oopif.conformance.test.ts` compares ou
 - A click on an `<input>` in the iframe: the parent's `activeElement` is the `<iframe>` (no focus
   event on it), the iframe's the input. Keys and `insertText` on the parent session then go to the
   input; the parent's page gets nothing.
-- Wheel over the iframe goes to the iframe's element under the point.
+- Wheel over the iframe goes to the iframe's element under the point. Scroll chaining crosses the
+  process: with the iframe's page scrolled to its end, a wheel (deltaY 120) gets a `wheel` event in
+  the iframe's page and scrolls the parent's by 120; at its start it scrolls the iframe's page.
+  Ours: the forwarded wheel carries a param of the agents' own, and the iframe's agent answers when
+  nothing in its page could scroll (and the wheel was not cancelled), for the parent's agent to
+  scroll on from the `<iframe>` element out (and to answer so in turn, nested).
 - Touch emulated on the parent over the iframe (`setEmitTouchEventsForMouse`) got no answer in
   headless Chrome.
 - `DOM.getNodeForLocation` on the parent over the iframe: the `<iframe>` element.
