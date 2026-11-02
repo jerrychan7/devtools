@@ -29,6 +29,8 @@ export class CdpSession {
   private domains = new Map<string, Record<string, Handler>>();
   private listeners = new Set<(message: string) => void>();
   private resets = new Set<() => void>();
+  /** Where the client's messages for other sessions (child targets') go, by session id. */
+  private routes = new Map<string, (message: Record<string, unknown>) => void>();
 
   /** Adds the handlers of `domain`'s methods, keeping those registered before. */
   register(domain: string, handlers: Record<string, Handler>) {
@@ -54,6 +56,22 @@ export class CdpSession {
     this.resets.forEach(fn => fn());
   }
 
+  /**
+   * Routes the client's messages carrying `sessionId` (a child target's session, flattened as
+   * Chrome does) to `deliver`, as parsed, `sessionId` included; returns its removal.
+   */
+  route(sessionId: string, deliver: (message: Record<string, unknown>) => void): () => void {
+    this.routes.set(sessionId, deliver);
+    return () => {
+      if (this.routes.get(sessionId) === deliver) this.routes.delete(sessionId);
+    };
+  }
+
+  /** Sends the client a message as it is: a child target's, carrying its `sessionId`. */
+  post(message: string) {
+    this.listeners.forEach(fn => fn(message));
+  }
+
   /** Sends the client an event. */
   emit(method: string, params: object) {
     this.send({ method, params });
@@ -75,13 +93,30 @@ export class CdpSession {
       this.send({ error: { code: -32600, message: 'Message must be an object' } });
       return;
     }
-    const { id, method, params } = parsed as { id?: unknown; method?: unknown; params?: object };
+    const { id, method, params, sessionId } = parsed as {
+      id?: unknown;
+      method?: unknown;
+      params?: object;
+      sessionId?: unknown;
+    };
     if (typeof id !== 'string' && (typeof id !== 'number' || !Number.isInteger(id))) {
       this.send({ error: { code: -32600, message: "Message must have integer 'id' property" } });
       return;
     }
     if (typeof method !== 'string') {
       this.send({ id, error: { code: -32600, message: "Message must have string 'method' property" } });
+      return;
+    }
+    // Like Chrome's flatten mode, a child target's messages carry its session id; '' is none.
+    if (sessionId !== undefined && typeof sessionId !== 'string') {
+      this.send({ id, error: { code: -32600, message: "Message may have string 'sessionId' property" } });
+      return;
+    }
+    if (sessionId) {
+      const deliver = this.routes.get(sessionId);
+      // Chrome answers without the session id.
+      if (deliver) deliver(parsed as Record<string, unknown>);
+      else this.send({ id, error: { code: -32001, message: 'Session with given id not found.' } });
       return;
     }
     try {
