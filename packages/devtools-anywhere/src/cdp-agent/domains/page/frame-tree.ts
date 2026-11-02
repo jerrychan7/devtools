@@ -17,18 +17,21 @@ function hostnameOf(origin: string): string {
  * A frame as Chrome describes it. Like Chrome, the URL is given without its fragment, an
  * `about:` document (`about:blank`, `about:srcdoc`) has the security origin `://` while its
  * execution context has the origin it inherited, and a child frame is named by its window's
- * name, else its `<iframe>`'s id.
+ * name, else its `<iframe>`'s id. The top frame of a page linked to its parent (in a cross-origin
+ * iframe) is described as the main frame of Chrome's iframe target: with the parent's frame as
+ * `parentId`, and an empty `name` (the parent's view has the iframe's name).
  */
-export function describeFrame(frame: Frame): Protocol.Page.Frame {
+export function describeFrame(frames: FrameRegistry, frame: Frame): Protocol.Page.Frame {
   const win = frame.window;
+  const linked = frame === frames.top ? frames.parent : undefined;
   const href = frame.document.URL;
   const hash = href.indexOf('#');
   const url = hash < 0 ? href : href.slice(0, hash);
   return {
     id: frame.id,
-    ...(frame.parent ? { parentId: frame.parent.id } : {}),
+    ...(frame.parent ? { parentId: frame.parent.id } : linked ? { parentId: linked.parentFrameId } : {}),
     loaderId: frame.loaderId,
-    ...(frame.owner ? { name: win.name || frame.owner.id } : {}),
+    ...(frame.owner ? { name: win.name || frame.owner.id } : linked ? { name: '' } : {}),
     url,
     ...(hash < 0 || hash === href.length - 1 ? {} : { urlFragment: href.slice(hash) }),
     domainAndRegistry: '',
@@ -48,7 +51,7 @@ export function describeFrame(frame: Frame): Protocol.Page.Frame {
 export function frameTree(frames: FrameRegistry, frame: Frame): Protocol.Page.FrameTree {
   const children = frames.childrenOf(frame);
   return {
-    frame: describeFrame(frame),
+    frame: describeFrame(frames, frame),
     ...(children.length ? { childFrames: children.map(child => frameTree(frames, child)) } : {}),
   };
 }
@@ -66,7 +69,7 @@ export function frameEvents(session: CdpSession, frames: FrameRegistry): (change
   const loading = new WeakSet<Frame>();
   const navigated = (frame: Frame) => {
     session.emit('Page.frameNavigated', {
-      frame: describeFrame(frame),
+      frame: describeFrame(frames, frame),
       type: 'Navigation',
     } satisfies Protocol.Page.FrameNavigatedEvent);
   };

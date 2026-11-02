@@ -1,6 +1,6 @@
 // The iframe's side of the handshake (protocol.ts): links this page's agent to its parent's, when
 // the parent's origin is one data-parent-origins names.
-import { type CdpSession, type ParentLink, childTargets } from '../cdp-agent';
+import { type CdpSession, type ParentLink, childTargets, frames } from '../cdp-agent';
 import { endSession } from '../connection';
 import { type OriginPattern, matchOrigin } from './origins';
 import { openPort } from './port';
@@ -36,6 +36,9 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
       close: end.close,
     };
     link = linked;
+    // The page's frames are the iframe target's from now on: its top frame has the parent's id
+    // for it, before the agent reports anything over the link.
+    frames.link({ frameId, parentFrameId });
     const own = (session ??= createSession());
     const offSession = own.onMessage(message => linked.send(message));
     linked.onMessage(message => {
@@ -45,7 +48,10 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     });
     linked.onClose(() => {
       offSession();
-      if (link === linked) link = undefined;
+      if (link === linked) {
+        link = undefined;
+        frames.link(undefined);
+      }
       // Nothing the parent's DevTools asked for outlives the link, as on a frontend's disconnect.
       void endSession(own).then(() => own.reset());
     });

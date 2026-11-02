@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
+import { CdpError } from '../../core/session';
 import { isOwnRequest, refetch } from '../network/network';
 import { frameEvents, frameTree } from './frame-tree';
 import { sameDocumentNavigations } from './history-navigations';
@@ -125,18 +126,22 @@ export function registerPage({ session, probe, frames }: Context) {
       };
     },
 
-    getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({
-      currentIndex: 0,
-      entries: [
-        {
-          id: 0,
-          url: location.href,
-          userTypedURL: location.href,
-          title: frames.top.document.title,
-          transitionType: 'link',
-        },
-      ],
-    }),
+    getNavigationHistory(): Protocol.Page.GetNavigationHistoryResponse {
+      // Like Chrome's iframe targets: the history is the top page's.
+      if (frames.parent) throw new CdpError('Command can only be executed on top-level targets');
+      return {
+        currentIndex: 0,
+        entries: [
+          {
+            id: 0,
+            url: location.href,
+            userTypedURL: location.href,
+            title: frames.top.document.title,
+            transitionType: 'link',
+          },
+        ],
+      };
+    },
 
     reload: () => location.reload(),
 

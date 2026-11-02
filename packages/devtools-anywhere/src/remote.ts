@@ -1,4 +1,4 @@
-import { FRAME_ID, LOADER_ID, installProbe, type CdpSession } from './cdp-agent';
+import { LOADER_ID, frames, installProbe, type CdpSession } from './cdp-agent';
 import {
   DETACH_METHOD,
   HELLO_METHOD,
@@ -77,7 +77,8 @@ export function connectRemote(
       method: HELLO_METHOD,
       params: {
         loaderId: LOADER_ID,
-        frameId: FRAME_ID,
+        // The top frame's id now: a page in a cross-origin iframe takes its parent's once linked.
+        frameId: frames.top.id,
         url: location.href,
         title: document.title,
         favicon: favicon(),

@@ -15,6 +15,7 @@ import {
 
 /** A document the agent exposes as a frame, with the execution context of its window. */
 export interface Frame {
+  /** The top frame's changes once, when the page in a cross-origin iframe is linked to its parent ({@link FrameRegistry.link}). */
   readonly id: string;
   /** Like Chrome, a new one for each document the frame loads. */
   loaderId: string;
@@ -33,6 +34,21 @@ export interface Frame {
 export interface FrameChange {
   type: 'attached' | 'navigated' | 'detached';
   frame: Frame;
+}
+
+/**
+ * Prefix of the ids of this page's iframes: random, so that they are unique across the pages
+ * whose agents are linked (frame-links/), whose frames the frontend sees in one tree, as Chrome's
+ * frame ids are unique in the browser.
+ */
+const CHILD_FRAME_PREFIX = `${FRAME_ID}-${Math.random().toString(36).slice(2, 10)}`;
+
+/** Where the page, in a cross-origin iframe, is in its parent's frame tree once linked to it. */
+export interface ParentFrame {
+  /** The frame id the parent gave the iframe: the top frame's id from then on. */
+  frameId: string;
+  /** The parent's frame that holds the iframe. */
+  parentFrameId: string;
 }
 
 const newLoaderId = () => `devtools-anywhere-loader-${Math.random().toString(36).slice(2)}`;
@@ -97,6 +113,9 @@ export function touchesFrames(records: MutationRecord[], shadowRootOf: ShadowRoo
  */
 export class FrameRegistry {
   readonly top: Frame;
+  /** The top frame, whose id {@link link} changes. */
+  readonly #top: { id: string } & Omit<Frame, 'id'>;
+  #parent: ParentFrame | undefined;
   readonly #byWindow = new WeakMap<Window, Frame>();
   readonly #byId = new Map<string, Frame>();
   readonly #byContext = new Map<number, Frame>();
@@ -121,14 +140,39 @@ export class FrameRegistry {
   };
 
   constructor(top: Window) {
-    this.top = {
+    this.#top = {
       id: FRAME_ID,
       loaderId: LOADER_ID,
       executionContextId: EXECUTION_CONTEXT_ID,
       window: top,
       document: top.document,
     };
+    this.top = this.#top;
     this.#add(this.top);
+  }
+
+  /**
+   * The parent's frame holding the page, while the page, in a cross-origin iframe, is linked to
+   * its parent: like the main frame of Chrome's iframe target, the top frame then has a parent.
+   */
+  get parent(): ParentFrame | undefined {
+    return this.#parent;
+  }
+
+  /**
+   * Places the page in its parent's frame tree, linked to it (frame-links/): the top frame takes
+   * the id the parent gave the iframe, as the main frame of Chrome's iframe target has the id its
+   * parent knows the frame by. A document is linked to one iframe element for its life, which
+   * keeps the id it gave (ChildTargets.frameIdOf), so the id changes at most once, and is kept
+   * when the link closes; it changes before the link carries anything, while the page's own
+   * DevTools is hidden (element/index.ts). Passing undefined leaves the parent's tree.
+   */
+  link(parent: ParentFrame | undefined): void {
+    this.#parent = parent && { ...parent };
+    if (!parent || parent.frameId === this.#top.id) return;
+    this.#byId.delete(this.#top.id);
+    this.#top.id = parent.frameId;
+    this.#byId.set(this.#top.id, this.top);
   }
 
   #add(frame: Frame): void {
@@ -311,7 +355,7 @@ export class FrameRegistry {
     added.sort((a, b) => at(a.owner) - at(b.owner));
     for (const { owner, win, doc } of added) {
       const frame: Frame = {
-        id: `${FRAME_ID}-${++this.#frameSeq}`,
+        id: `${CHILD_FRAME_PREFIX}-${++this.#frameSeq}`,
         loaderId: newLoaderId(),
         executionContextId: ++this.#contextSeq,
         window: win,

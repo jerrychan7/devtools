@@ -42,6 +42,7 @@ export {
 } from './probe/shell';
 export { isTrusted } from './probe/trust';
 export { FRAME_ID, LOADER_ID } from './core/context';
+export { frames } from './core/frames';
 export { childTargets, type ChildLink, type ChildTargets, type ParentLink } from './core/child-targets';
 export { frameOwners, ownerOfWindow, watchOwner } from './frame-owners';
 export type { SnapdomLoader } from './domains/page/render';

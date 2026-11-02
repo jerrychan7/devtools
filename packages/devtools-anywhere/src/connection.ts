@@ -176,6 +176,8 @@ class ShellRelay extends RelayCore {
     } catch {
       // Cross-origin page: assume it is like the shell.
     }
+    // The page of shell mode is the shell's same-origin iframe, never linked to a parent of
+    // another origin (frame-links/): its top frame keeps the first id.
     return { id: FRAME_ID, url, secure };
   }
 
