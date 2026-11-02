@@ -1,0 +1,206 @@
+// Cross-origin iframes linked to their parent's agent: the handshake, whom it trusts, and the
+// link's life. The pages are on two sites of the one server, out of process (launchOopif):
+// the parent on localhost, the child on 127.0.0.1 (or oopif.test).
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import type { Frame, Page } from 'puppeteer-core';
+import { fixtureUrl, launchOopif, THIRD_HOST } from '../../test-support/oopif.ts';
+import type { Env } from '../../../../tests/support/browser.ts';
+
+let env: Env | undefined;
+
+before(async () => {
+  env = await launchOopif();
+});
+after(() => env?.close());
+
+/** The origin of a host of the test server. */
+const originOf = (host: string) => {
+  assert.ok(env);
+  return new URL(fixtureUrl(env, '', host)).origin;
+};
+
+/**
+ * Opens the parent page with `frameOrigins`, its iframe showing the child page on `childHost`
+ * with `parentOrigins` (null for no attribute), and waits for both bundles. The parent records
+ * its links in `__links`.
+ */
+async function open(
+  frameOrigins: string | null,
+  parentOrigins: string | null,
+  childHost = '127.0.0.1'
+): Promise<{ page: Page; child: Frame }> {
+  assert.ok(env);
+  const childUrl = new URL(fixtureUrl(env, 'frame-link-child.html', childHost));
+  if (parentOrigins !== null) childUrl.searchParams.set('parentOrigins', parentOrigins);
+  const parentUrl = new URL(fixtureUrl(env, 'frame-link-parent.html'));
+  if (frameOrigins !== null) parentUrl.searchParams.set('frameOrigins', frameOrigins);
+  parentUrl.searchParams.set('child', childUrl.href);
+  const page = await env.browser.newPage();
+  await page.goto(parentUrl.href);
+  const child = await childFrame(page);
+  await child.waitForFunction(() => 'DevtoolsAnywhere' in window);
+  if (frameOrigins !== null) await page.waitForFunction(() => 'DevtoolsAnywhere' in window);
+  if (frameOrigins !== null) await recordLinks(page);
+  return { page, child };
+}
+
+/** The child page's frame, once loaded. */
+async function childFrame(page: Page): Promise<Frame> {
+  const frame = await page.waitForFrame(f => f.url().split('?')[0]?.endsWith('frame-link-child.html') === true);
+  await frame.waitForFunction(() => document.readyState === 'complete');
+  return frame;
+}
+
+/** Has the parent record each link it gets in `__links`, and whether it has closed. */
+async function recordLinks(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const links: { frameId: string; closed: boolean }[] = (window.__links = []);
+    const record = (link: { frameId: string; onClose(listener: () => void): unknown }) => {
+      const entry = { frameId: link.frameId, closed: false };
+      links.push(entry);
+      link.onClose(() => (entry.closed = true));
+    };
+    for (const link of window.DevtoolsAnywhere.childTargets.children()) record(link);
+    window.DevtoolsAnywhere.childTargets.onChild(record);
+  });
+}
+
+/** The parent's links so far. */
+const links = (page: Page) => page.evaluate(() => window.__links ?? []);
+
+/** Waits for the parent's `count`th link. */
+const waitForLink = (page: Page, count = 1) =>
+  page.waitForFunction(count => (window.__links?.length ?? 0) >= count, { timeout: 5000, polling: 50 }, count);
+
+/** Whether the child page is linked to its parent. */
+const childLinked = (child: Frame) => child.evaluate(() => window.DevtoolsAnywhere.childTargets.parent !== undefined);
+
+/** Waits for the child page to be linked to its parent, or unlinked. */
+const waitForChildLinked = (child: Frame, linked = true) =>
+  child.waitForFunction(
+    linked => (window.DevtoolsAnywhere.childTargets.parent !== undefined) === linked,
+    { timeout: 5000, polling: 50 },
+    linked
+  );
+
+/** Sends a CDP command over the parent's open link and returns its result. */
+const command = (page: Page, method: string, params: object = {}) =>
+  page.evaluate(
+    (method, params) =>
+      new Promise<unknown>((resolve, reject) => {
+        const link = [...window.DevtoolsAnywhere.childTargets.children()][0];
+        if (!link) return reject(new Error('no link'));
+        const id = Math.floor(Math.random() * 1e9);
+        const off = link.onMessage(message => {
+          const reply: { id?: number; result?: unknown; error?: unknown } = JSON.parse(message);
+          if (reply.id !== id) return;
+          off();
+          resolve(reply.result ?? reply.error);
+        });
+        link.send(JSON.stringify({ id, method, params }));
+      }),
+    method,
+    params
+  );
+
+/** Gives a handshake that should not happen time to. */
+const settle = () => new Promise(resolve => setTimeout(resolve, 800));
+
+test('linked when each trusts the other: the parent runs Runtime.evaluate in the child', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    const [link] = await links(page);
+    assert.match(link?.frameId ?? '', /\S/);
+    await waitForChildLinked(child);
+    // The child knows itself by the id the parent gave it, held in the parent's top frame.
+    const ids = await child.evaluate(() => {
+      const parent = window.DevtoolsAnywhere.childTargets.parent;
+      return { frameId: parent?.frameId, parentFrameId: parent?.parentFrameId };
+    });
+    assert.equal(ids.frameId, link?.frameId);
+    assert.match(ids.parentFrameId ?? '', /\S/);
+    const result = await command(page, 'Runtime.evaluate', { expression: 'window.marker' });
+    assert.deepEqual(result, { result: { type: 'string', value: `child of ${originOf('127.0.0.1')}` } });
+  } finally {
+    await page.close();
+  }
+});
+
+test('a subdomain wildcard in the parent list links a child of that site', async () => {
+  const port = new URL(originOf('localhost')).port;
+  const { page, child } = await open(`http://*.test:${port}`, originOf('localhost'), THIRD_HOST);
+  try {
+    await waitForLink(page);
+    await waitForChildLinked(child);
+    const result = await command(page, 'Runtime.evaluate', { expression: 'location.hostname' });
+    assert.deepEqual(result, { result: { type: 'string', value: THIRD_HOST } });
+  } finally {
+    await page.close();
+  }
+});
+
+test('not linked when the parent does not trust the child origin', async () => {
+  const { page, child } = await open(originOf(THIRD_HOST), originOf('localhost'));
+  try {
+    await settle();
+    assert.deepEqual(await links(page), []);
+    assert.equal(await childLinked(child), false);
+  } finally {
+    await page.close();
+  }
+});
+
+test('not linked when the child does not trust the parent origin', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf(THIRD_HOST));
+  try {
+    await settle();
+    assert.deepEqual(await links(page), []);
+    assert.equal(await childLinked(child), false);
+  } finally {
+    await page.close();
+  }
+});
+
+test('not linked when the child trusts no parent', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), null);
+  try {
+    await settle();
+    assert.deepEqual(await links(page), []);
+    assert.equal(await childLinked(child), false);
+  } finally {
+    await page.close();
+  }
+});
+
+test('a hello from a window that is not an iframe of the page, or made up by a script, is not answered', async () => {
+  assert.ok(env);
+  // The iframe does not say hello itself: it trusts no parent.
+  const { page } = await open(originOf('127.0.0.1'), null);
+  try {
+    const hello = { type: 'devtools-anywhere:frame-hello', id: 'forged' };
+    // A popup of the trusted origin, which is no frame of the page.
+    const popupUrl = fixtureUrl(env, 'frame-other.html', '127.0.0.1');
+    const popupTarget = env.browser.waitForTarget(t => t.url() === popupUrl);
+    await page.evaluate(url => void window.open(url), popupUrl);
+    const popup = await (await popupTarget).page();
+    assert.ok(popup);
+    await popup.waitForFunction(() => document.readyState === 'complete');
+    await popup.evaluate(hello => opener.postMessage(hello, '*'), hello);
+    // An event a script made, as if from the iframe and of the trusted origin.
+    await page.evaluate(
+      (hello, origin) => {
+        const iframe = document.querySelector('iframe');
+        dispatchEvent(new MessageEvent('message', { data: hello, origin, source: iframe?.contentWindow ?? null }));
+      },
+      hello,
+      originOf('127.0.0.1')
+    );
+    await settle();
+    assert.deepEqual(await links(page), []);
+    await popup.close();
+  } finally {
+    await page.close();
+  }
+});

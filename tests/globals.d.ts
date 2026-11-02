@@ -64,5 +64,7 @@ declare global {
     __clicks?: number;
     __devtools?: DevtoolsAnywhereElement;
     resourceLoaded?: boolean;
+    /** The links frame-links.test.ts has seen, and how many of them have closed. */
+    __links?: { frameId: string; closed: boolean }[];
   }
 }

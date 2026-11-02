@@ -40,7 +40,7 @@ if (!('DevtoolsAnywhere' in window)) {
     connectRemote: (serverUrl, options) => connectRemote(createPageSession, serverUrl, options),
     createCdpSession,
     createGlobalElement,
-    linkFrames,
+    linkFrames: options => linkFrames(options, createPageSession),
     childTargets,
   };
   Object.assign(window, { DevtoolsAnywhere: api });
