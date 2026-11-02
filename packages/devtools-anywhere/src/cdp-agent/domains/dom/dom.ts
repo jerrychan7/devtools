@@ -16,8 +16,17 @@ import {
   historyOf,
   patchOuterHTML,
 } from '../../core/history';
-import { isDocument, isDocumentFragment, isDocumentType, isElement, isFrameOwner, isNode } from '../../core/realm';
+import {
+  type FrameOwner,
+  isDocument,
+  isDocumentFragment,
+  isDocumentType,
+  isElement,
+  isFrameOwner,
+  isNode,
+} from '../../core/realm';
 import { CdpError } from '../../core/session';
+import { type FrameChange, touchesFrames } from '../../core/frames';
 import {
   type Box,
   type Quad,
@@ -260,6 +269,17 @@ function outerHTML(node: Node): string {
   return new XMLSerializer().serializeToString(node);
 }
 
+/**
+ * Whether an iframe still shows its initial empty document while it loads the one of its `src`
+ * or `srcdoc`, which replaces it at its load.
+ */
+function loadsAnotherDocument(owner: FrameOwner, doc: Document): boolean {
+  if (doc.URL !== 'about:blank') return false;
+  if (owner.hasAttribute('srcdoc')) return true;
+  const src = owner.getAttribute('src')?.trim();
+  return !!src && new URL(src, owner.baseURI).href !== 'about:blank';
+}
+
 export function registerDom(ctx: Context) {
   const { session, nodes, objects } = ctx;
   let observer: MutationObserver | null = null;
@@ -311,8 +331,55 @@ export function registerDom(ctx: Context) {
   }
   ctx.refreshPseudoElements = refreshPseudoElements;
 
+  /**
+   * Sends an iframe the client knows again if its frame changed since it was sent: Chrome removes
+   * and inserts it, with its new document (or none, once it is gone or out of reach). An initial
+   * empty document about to be replaced by the iframe's `src` is not sent: the one loaded is.
+   */
+  function resendFrameOwner(owner: FrameOwner) {
+    const doc = ctx.frames.ofOwner(owner)?.document;
+    if (doc === nodes.contentDocumentOf(owner) || (doc && loadsAnotherDocument(owner, doc))) return;
+    const parent = owner.parentNode;
+    const ownerId = nodes.knownId(owner);
+    const parentId = parent ? nodes.knownId(parent) : undefined;
+    if (!parent || ownerId === undefined || parentId === undefined || !nodes.childrenSent.has(parent)) return;
+    session.emit('DOM.childNodeRemoved', { parentNodeId: parentId, nodeId: ownerId });
+    nodes.forget(owner);
+    let previous = owner.previousSibling;
+    while (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
+      previous = previous.previousSibling;
+    session.emit('DOM.childNodeInserted', {
+      parentNodeId: parentId,
+      previousNodeId: previous ? nodes.idOf(previous) : 0,
+      node: nodes.serialize(owner, 0),
+    } satisfies Protocol.DOM.ChildNodeInsertedEvent);
+  }
+
+  /**
+   * Iframes whose frame changed, sent again together in a microtask: after the mutations being
+   * reported, and once for a frame replaced by another (an iframe loads synchronously when it
+   * is inserted or moved, before its mutation is reported).
+   */
+  let changedFrames: Set<FrameOwner> | null = null;
+  function onFrameChange({ frame }: FrameChange) {
+    if (!observer || !frame.owner) return;
+    if (!changedFrames) {
+      const changed = (changedFrames = new Set());
+      queueMicrotask(() => {
+        changedFrames = null;
+        // Pending mutations first, so that the client has the iframe's current place.
+        flushMutations();
+        changed.forEach(resendFrameOwner);
+      });
+    }
+    changedFrames.add(frame.owner);
+  }
+  let stopFrames: (() => void) | null = null;
+
   /** Reports DOM changes for the parts of the tree the client has received. */
   function onMutations(records: MutationRecord[]) {
+    // Iframes added or removed are registered now, so that they are sent with their frame.
+    if (touchesFrames(records)) ctx.frames.sync();
     reportMutations(records);
     // Attribute and tree changes can make selectors such as `.x::before` start or stop matching.
     // devtools-anywhere's own elements (the highlight layer, …) change nothing on the page.
@@ -325,7 +392,7 @@ export function registerDom(ctx: Context) {
     if (closestOwn(record.target)) return true;
     if (record.type !== 'childList') return false;
     const changed = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
-    return changed.length > 0 && changed.every(n => n instanceof Element && isOwn(n));
+    return changed.length > 0 && changed.every(n => isElement(n) && isOwn(n));
   }
 
   function reportMutations(records: MutationRecord[]) {
@@ -340,7 +407,7 @@ export function registerDom(ctx: Context) {
     for (let i = records.length - 1; i >= 0; i--) {
       const record = records[i];
       const name = record?.attributeName;
-      if (!record || record.type !== 'attributes' || !name || !(record.target instanceof Element)) continue;
+      if (!record || record.type !== 'attributes' || !name || !isElement(record.target)) continue;
       const values = later.get(record.target) ?? new Map<string, string | null>();
       later.set(record.target, values);
       valueAfter.set(record, values.has(name) ? (values.get(name) ?? null) : record.target.getAttribute(name));
@@ -375,13 +442,17 @@ export function registerDom(ctx: Context) {
           let previous = k ? (record.addedNodes[k - 1] ?? null) : record.previousSibling;
           if (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
             previous = previousVisibleSibling(node, pending);
+          // Like Chrome, an inserted iframe comes without its frame, which does not exist yet when
+          // Chrome reports it; the iframe is sent again with its document once that is loaded.
+          const owner = isFrameOwner(node) ? node : null;
           session.emit('DOM.childNodeInserted', {
             parentNodeId: targetId,
             previousNodeId: previous ? nodes.idOf(previous) : 0,
-            node: nodes.serialize(node, 0),
+            node: nodes.serialize(node, 0, false, !!owner),
           } satisfies Protocol.DOM.ChildNodeInsertedEvent);
+          if (owner) resendFrameOwner(owner);
         });
-      } else if (record.type === 'attributes' && targetId !== undefined && target instanceof Element) {
+      } else if (record.type === 'attributes' && targetId !== undefined && isElement(target)) {
         const name = record.attributeName;
         if (name === null || name === FORCE_ATTRIBUTE) continue;
         const value = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
@@ -412,8 +483,12 @@ export function registerDom(ctx: Context) {
   function observe() {
     observer?.disconnect();
     observer = new MutationObserver(onMutations);
-    observer.observe(document, OBSERVE);
+    observer.observe(ctx.frames.top.document, OBSERVE);
+    stopFrames ??= ctx.frames.onChange(onFrameChange);
   }
+  // Like shadow roots, the document of each iframe sent is observed (by the same observer, which
+  // keeps the order of changes across documents).
+  nodes.onContentDocument = doc => observer?.observe(doc, OBSERVE);
   // Observing the document does not reach into shadow trees: observe each one sent.
   nodes.onShadowRoot = root => observer?.observe(root, OBSERVE);
   nodes.pushToClient = node => (observer ? nodes.push(node, parent => emitChildren(parent)) : undefined);
@@ -456,6 +531,8 @@ export function registerDom(ctx: Context) {
     disable() {
       observer?.disconnect();
       observer = null;
+      stopFrames?.();
+      stopFrames = null;
       unpatchAttachShadow();
       searches.clear();
       history.reset();

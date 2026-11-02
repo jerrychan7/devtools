@@ -12,7 +12,7 @@
   "domains/css/style.ts": 1,
   "domains/debugger/debugger.ts": 1,
   "domains/dom-debugger/dom-debugger.ts": 5,
-  "domains/dom/dom.ts": 16,
+  "domains/dom/dom.ts": 12,
   "domains/input/input.ts": 28,
   "domains/network/network.ts": 3,
   "domains/overlay/overlay.ts": 16,

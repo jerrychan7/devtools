@@ -281,7 +281,10 @@ export class NodeRegistry {
       const frame = this.frames?.ofDocument(node.ownerDocument);
       // Like Chrome, the document element of each frame names it.
       if (frame && node === node.ownerDocument.documentElement) result.frameId = frame.id;
-      if (isFrameOwner(node) && !frameless) this.serializeFrame(node, result, depth, pierce);
+      if (isFrameOwner(node)) {
+        this.contentDocuments.delete(node);
+        if (!frameless) this.serializeFrame(node, result, depth, pierce);
+      }
       // Like Chrome, a template's content is listed (without children) apart from its children.
       if (isHtml(node, 'template')) {
         this.templateOf.set(node.content, node);
@@ -315,6 +318,11 @@ export class NodeRegistry {
       }
     }
     return result;
+  }
+
+  /** The document last sent as an iframe's `contentDocument`, if it was sent with one. */
+  contentDocumentOf(owner: Element): Document | undefined {
+    return this.contentDocuments.get(owner);
   }
 
   /**

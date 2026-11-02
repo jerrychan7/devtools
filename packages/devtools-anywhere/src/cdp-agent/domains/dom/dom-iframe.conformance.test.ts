@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
-import type { Env, TestPage } from '../../../../test-support/conformance.ts';
+import type { Env, EventName, EventParams, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
 type Commands = ProtocolMapping.Commands;
@@ -14,6 +14,7 @@ for (const key of ['nodeId', 'backendNodeId', 'parentId', 'parentNodeId', 'previ
   VOLATILE.add(key);
 
 const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
+const OTHER = '/packages/devtools-anywhere/test-support/frame-other.html';
 
 let env: Env | undefined;
 let t: TestPage;
@@ -175,5 +176,171 @@ describe('serialization', () => {
     const [a, b] = await both('DOM.pushNodeByPathToFrontend', { path });
     assert.equal(a.nodeId, byId(ours, 'in').nodeId);
     assert.ok(b.nodeId);
+  });
+});
+
+type Event = { method: string; params: unknown };
+
+/**
+ * Both sides' events of the given kinds after running `expression` in the page, by kind (the
+ * order of events of different kinds is not recorded on Chrome's side).
+ */
+async function eventsOf(expression: string, settled: (events: Event[]) => boolean, methods: EventName[]) {
+  await t.chrome.clear();
+  await t.ours.clear();
+  await t.page.evaluate(expression);
+  const collect = async (side: Side) => {
+    const all: Event[] = [];
+    for (const method of methods) for (const params of await side.events(method)) all.push({ method, params });
+    return all;
+  };
+  const start = Date.now();
+  for (;;) {
+    const [ours, chrome] = [await collect(t.ours), await collect(t.chrome)];
+    if ((settled(ours) && settled(chrome)) || Date.now() - start > 5000) return { ours, chrome };
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+
+/** Waits for an iframe to load after `change`. */
+const load = (id: string, change: string) =>
+  `new Promise(resolve => { const f = document.getElementById(${JSON.stringify(id)}); f.addEventListener('load', resolve, { once: true }); ${change}; })`;
+
+const MUTATIONS: EventName[] = ['DOM.childNodeRemoved', 'DOM.childNodeInserted', 'DOM.attributeModified'];
+const reinsertedOnce = (events: Event[]) => events.filter(e => e.method === 'DOM.childNodeInserted').length >= 1;
+
+/**
+ * Leaves out what differs by timing: Chrome sends a new iframe document as it commits, empty (so
+ * in no-quirks mode) and counts its children as they are parsed (DOM.childNodeCountUpdated); ours
+ * sends it complete, at its load.
+ */
+function withoutCounts(events: Event[]) {
+  return events.map(({ method, params }) => {
+    if (method !== 'DOM.childNodeInserted') return { method, params };
+    const { node, ...rest } = params as EventParams<'DOM.childNodeInserted'>;
+    const doc = node.contentDocument && {
+      ...node.contentDocument,
+      childNodeCount: undefined,
+      compatibilityMode: undefined,
+    };
+    return { method, params: { ...rest, node: { ...node, contentDocument: doc } } };
+  });
+}
+
+/** The last count Chrome reported for the document an iframe was sent again with. */
+async function documentCount(side: Side, events: Event[]) {
+  const inserted = events.findLast(e => e.method === 'DOM.childNodeInserted');
+  const doc = (inserted?.params as EventParams<'DOM.childNodeInserted'> | undefined)?.node.contentDocument;
+  assert.ok(doc);
+  const updates = (await side.events('DOM.childNodeCountUpdated')).filter(u => u.nodeId === doc.nodeId);
+  return updates.at(-1)?.childNodeCount ?? doc.childNodeCount;
+}
+
+describe('changes', () => {
+  before(async () => {
+    await both('DOM.getDocument', { depth: -1, pierce: true });
+  });
+
+  test('mutations inside an iframe document', async () => {
+    const { ours, chrome } = await eventsOf(
+      `(() => {
+        const d = document.getElementById('sd').contentDocument;
+        d.getElementById('in').setAttribute('title', 't');
+        d.body.append(Object.assign(d.createElement('i'), { id: 'added' }));
+        d.querySelector('b').firstChild.nodeValue = 'y';
+        d.getElementById('in').remove();
+      })()`,
+      events => events.length >= 4,
+      ['DOM.attributeModified', 'DOM.childNodeInserted', 'DOM.characterDataModified', 'DOM.childNodeRemoved']
+    );
+    assert.equal(chrome.length, 4);
+    assert.deepEqual(diffSubset(ours, chrome), []);
+  });
+
+  test('a srcdoc iframe that loads another document is sent again', async () => {
+    const { ours, chrome } = await eventsOf(load('sd', `f.srcdoc = '<p id="n2">new</p>'`), reinsertedOnce, MUTATIONS);
+    assert.deepEqual(chrome.map(e => e.method).sort(), [
+      'DOM.attributeModified',
+      'DOM.childNodeInserted',
+      'DOM.childNodeRemoved',
+    ]);
+    assert.deepEqual(diffSubset(withoutCounts(ours), withoutCounts(chrome)), []);
+    assert.equal(await documentCount(t.ours, ours), await documentCount(t.chrome, chrome));
+  });
+
+  test('the new document of a navigated iframe can be expanded', async () => {
+    const [{ root: ours }, { root: chrome }] = await both('DOM.getDocument', { depth: -1, pierce: true });
+    assert.deepEqual(diffSubset(ours, chrome), []);
+    assert.ok(byId(ours, 'n2'));
+  });
+
+  test('a src iframe that navigates is sent again', async () => {
+    const { ours, chrome } = await eventsOf(load('src', `f.src = ${JSON.stringify(OTHER)}`), reinsertedOnce, MUTATIONS);
+    assert.deepEqual(diffSubset(withoutCounts(ours), withoutCounts(chrome)), []);
+    assert.equal(await documentCount(t.ours, ours), await documentCount(t.chrome, chrome));
+  });
+
+  test('an iframe that reloads itself is sent again', async () => {
+    const { ours, chrome } = await eventsOf(
+      load('src', 'f.contentWindow.location.reload()'),
+      reinsertedOnce,
+      MUTATIONS
+    );
+    assert.deepEqual(chrome.map(e => e.method).sort(), ['DOM.childNodeInserted', 'DOM.childNodeRemoved']);
+    assert.deepEqual(diffSubset(withoutCounts(ours), withoutCounts(chrome)), []);
+  });
+
+  for (const [name, init] of [
+    ['without src', ''],
+    ['with srcdoc', `f.srcdoc = '<i>d</i>'`],
+    ['with a same-origin src', `f.src = ${JSON.stringify(CHILD)}`],
+  ] as const) {
+    test(`an iframe added ${name} is sent, then sent again with its document`, async () => {
+      const id = `added-${name.replace(/\W/g, '')}`;
+      const { ours, chrome } = await eventsOf(
+        `new Promise(resolve => {
+          const f = document.createElement('iframe');
+          f.id = ${JSON.stringify(id)};
+          ${init};
+          f.addEventListener('load', resolve, { once: true });
+          document.body.append(f);
+        })`,
+        events => events.filter(e => e.method === 'DOM.childNodeInserted').length >= 2,
+        MUTATIONS
+      );
+      assert.deepEqual(chrome.map(e => e.method).sort(), [
+        'DOM.childNodeInserted',
+        'DOM.childNodeInserted',
+        'DOM.childNodeRemoved',
+      ]);
+      assert.deepEqual(diffSubset(withoutCounts(ours), withoutCounts(chrome)), []);
+      assert.equal(await documentCount(t.ours, ours), await documentCount(t.chrome, chrome));
+    });
+  }
+
+  test('a moved iframe is sent again with its new document', async () => {
+    const { ours, chrome } = await eventsOf(
+      `document.body.prepend(document.getElementById('added-withoutsrc'))`,
+      events => events.filter(e => e.method === 'DOM.childNodeInserted').length >= 2,
+      MUTATIONS
+    );
+    assert.deepEqual(diffSubset(withoutCounts(ours), withoutCounts(chrome)), []);
+  });
+
+  test('a removed iframe takes its document with it', async () => {
+    const [{ root: ours }, { root: chrome }] = await both('DOM.getDocument', { depth: -1, pierce: true });
+    const { ours: a, chrome: b } = await eventsOf(
+      `document.getElementById('src').remove()`,
+      events => events.length >= 1,
+      ['DOM.childNodeRemoved']
+    );
+    assert.deepEqual(diffSubset(a, b), []);
+    const doc = (root: DomNode) => byId(root, 'src').contentDocument?.nodeId ?? 0;
+    const [errOurs, errChrome] = await Promise.all([
+      t.ours.send('DOM.describeNode', { nodeId: doc(ours) }).then(String, (e: Error) => e.message),
+      t.chrome.send('DOM.describeNode', { nodeId: doc(chrome) }).then(String, (e: Error) => e.message),
+    ]);
+    assert.match(errOurs, /Could not find node with given id/);
+    assert.match(errChrome, /Could not find node with given id/);
   });
 });
