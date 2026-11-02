@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>oopif frontend</title>
+    <script>
+      // The probe, opened on the real frontend, trusting the iframe origin in the query
+      // (`frameOrigins`): the server's port is only known at run time.
+      const query = new URLSearchParams(location.search);
+      document.write(
+        '<script src="/packages/devtools-anywhere/dist/probe.iife.js"' +
+          ' data-devtools-frontend-url="/packages/devtools-frontend/dist/anywhere_app.html"' +
+          ' data-default-shell-mode="off" data-open-immediately' +
+          ` data-frame-origins="${query.get('frameOrigins')}"` +
+          '></' +
+          'script>'
+      );
+    </script>
+  </head>
+  <body>
+    <h1 id="parent-marker">parent page</h1>
+    <!-- The cross-origin child's URL is in the query (`child`). -->
+    <iframe id="child" style="width: 400px; height: 200px; border: 0"></iframe>
+    <script>
+      document.getElementById('child').src = query.get('child');
+    </script>
+  </body>
+</html>
