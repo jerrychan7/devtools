@@ -1,6 +1,8 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../../core/nodes';
+import type { Frame } from '../../core/frames';
+import { isElement, isNode, realmOf } from '../../core/realm';
 import { boxModel, resolveNode } from '../dom/dom';
 
 /**
@@ -24,6 +26,15 @@ function isRect(quad: number[]) {
 }
 
 type RGBA = Protocol.DOM.RGBA;
+
+/** The window holding a same-origin frame's window; null for the top one. */
+function frameParent(win: Window): Window | null {
+  try {
+    return win.frameElement?.ownerDocument.defaultView ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const color = (c: RGBA | undefined, fallback: string) => (c ? `rgba(${c.r},${c.g},${c.b},${c.a ?? 1})` : fallback);
 
@@ -58,8 +69,8 @@ class Highlighter {
 
   /** Highlights an element's margin, border, padding and content boxes, with a size label. */
   element(el: Element, config: Protocol.Overlay.HighlightConfig = {}) {
+    if (this.current?.el !== el || !this.tracking) this.track(el);
     this.current = { el, config };
-    this.track();
     this.draw(el, config);
   }
 
@@ -72,10 +83,13 @@ class Highlighter {
     });
   };
 
-  private track() {
-    if (this.tracking) return;
+  private track(el: Element) {
+    if (this.tracking) this.tracking.abort();
     this.tracking = new AbortController();
     const options = { capture: true, passive: true, signal: this.tracking.signal };
+    // Scrolling in the iframes holding the element moves it too, and does not reach the top window.
+    for (let win: Window = realmOf(el), parent = frameParent(win); parent; win = parent, parent = frameParent(win))
+      win.addEventListener('scroll', this.redraw, options);
     addEventListener('scroll', this.redraw, options);
     addEventListener('resize', this.redraw, options);
     // Pinch zoom and the on-screen keyboard move the visual viewport only.
@@ -193,9 +207,9 @@ export function registerOverlay(ctx: Context) {
   let stopInspect: (() => void) | null = null;
   const showViewportSize = viewportSizeOnResize();
 
-  /** Element under a pointer event, ignoring devtools-anywhere's own UI. */
+  /** Element under a pointer event, of any frame, ignoring devtools-anywhere's own UI. */
   function targetOf(event: Event): Element | null {
-    const el = event.target instanceof Element ? event.target : null;
+    const el = isNode(event.target) && isElement(event.target) ? event.target : null;
     return el && !closestOwn(el) ? el : null;
   }
 
@@ -242,20 +256,29 @@ export function registerOverlay(ctx: Context) {
     };
     const listening = new AbortController();
     const options = { capture: true, signal: listening.signal };
-    window.addEventListener('pointermove', onMove, options);
-    // Chrome consumes the whole input event, so the page sees nothing derived from it either:
-    // no enter/leave/over/out, nor dblclick, contextmenu or auxclick from the eaten presses.
-    for (const type of 'mousemove mouseover mouseout mouseenter mouseleave pointerover pointerout pointerenter pointerleave pointerdown mousedown pointerup mouseup dblclick contextmenu auxclick'.split(
-      ' '
-    ))
-      window.addEventListener(type, swallow, options);
-    window.addEventListener('click', onClick, options);
-    // The page gets no touch input either, like in Chrome's inspect mode.
-    const touchOptions = { ...options, passive: false };
-    window.addEventListener('touchstart', swallow, touchOptions);
-    window.addEventListener('touchmove', swallow, touchOptions);
-    window.addEventListener('touchend', swallow, touchOptions);
+    // Like Chrome, the nodes of same-origin iframes are inspected too: their input goes to their
+    // own windows, each listened to (again once it loads another document).
+    const listen = ({ window: win }: Frame) => {
+      win.addEventListener('pointermove', onMove, options);
+      // Chrome consumes the whole input event, so the page sees nothing derived from it either:
+      // no enter/leave/over/out, nor dblclick, contextmenu or auxclick from the eaten presses.
+      for (const type of 'mousemove mouseover mouseout mouseenter mouseleave pointerover pointerout pointerenter pointerleave pointerdown mousedown pointerup mouseup dblclick contextmenu auxclick'.split(
+        ' '
+      ))
+        win.addEventListener(type, swallow, options);
+      win.addEventListener('click', onClick, options);
+      // The page gets no touch input either, like in Chrome's inspect mode.
+      const touchOptions = { ...options, passive: false };
+      win.addEventListener('touchstart', swallow, touchOptions);
+      win.addEventListener('touchmove', swallow, touchOptions);
+      win.addEventListener('touchend', swallow, touchOptions);
+    };
+    const unwatch = ctx.frames.onChange(({ type, frame }) => {
+      if (type !== 'detached') listen(frame);
+    });
+    for (const frame of ctx.frames) listen(frame);
     stopInspect = () => {
+      unwatch();
       listening.abort();
       cancelAnimationFrame(frame);
       highlighter.hide();
@@ -276,7 +299,7 @@ export function registerOverlay(ctx: Context) {
 
     highlightNode(params: Protocol.Overlay.HighlightNodeRequest) {
       const node = resolveNode(ctx, params);
-      const el = node instanceof Element ? node : node.parentElement;
+      const el = isElement(node) ? node : node.parentElement;
       if (el) highlighter.element(el, params.highlightConfig);
     },
 
