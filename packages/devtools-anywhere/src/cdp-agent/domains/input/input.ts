@@ -119,11 +119,13 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
   /**
    * Mouse input over a cross-origin iframe, measured in Chrome: this page's documents get none of
    * it, not even an over or out (their hovered elements stay what they were), nor the iframe's
-   * document an out once the mouse leaves it. The press ends here: a release over this page gets
-   * no click, as in Chrome. The focus moves into the iframe as its page focuses what was pressed.
+   * document an out once the mouse leaves it. Each page keeps its own press, as each process
+   * does: a press here released over the iframe gets no click there (the iframe's page has no
+   * press), and stays this page's, so a release over this page later clicks what holds both; a
+   * press in the iframe released over this page clicks nothing here unless this page has a press
+   * of its own. The focus moves into the iframe as its page focuses what was pressed.
    */
   function mouseInto(link: ChildLink, owner: Element, p: MouseEventRequest) {
-    if (p.type === 'mousePressed' || p.type === 'mouseReleased') pressed = null;
     return forward(link, owner, 'Input.dispatchMouseEvent', p);
   }
 

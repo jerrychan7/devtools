@@ -124,8 +124,12 @@ What each page gets (`domains/input/input-oopif.conformance.test.ts` compares ou
   to the same element: each process keeps its own hover.
 - A press away from the last move moves the hover first (out/over, then down), in the iframe's
   page as anywhere.
-- A press in the iframe and the release over the parent: the release goes to the parent's element,
-  no click anywhere.
+- Each process keeps its own press. A press in the iframe and the release over the parent: the
+  release goes to the parent's element, no click in the iframe's page, nor in the parent's unless it
+  has a press of its own. A press in the parent and the release over the iframe: the iframe's page
+  gets `pointerup`/`mouseup` (`buttons` 0) and no click, the parent's nothing; the parent's press
+  stays, so a later release over the parent (after a press in the iframe, say) clicks the nearest
+  element holding both, `body` in `input-oopif.conformance.test.ts`.
 - A click on an `<input>` in the iframe: the parent's `activeElement` is the `<iframe>` (no focus
   event on it), the iframe's the input. Keys and `insertText` on the parent session then go to the
   input; the parent's page gets nothing.

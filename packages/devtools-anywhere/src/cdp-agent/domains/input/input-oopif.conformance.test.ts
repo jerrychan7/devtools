@@ -128,6 +128,10 @@ async function drive(side: Side) {
   assert.equal(typeof (await side.send('Input.insertText', { text: 'bc' })), 'object');
   steps['keys'] = await take(side);
   steps['typed'] = await evaluate(side, "document.getElementById('field').value", side.child);
+  await mouse(side, 'mousePressed', parent.left + 5, parent.top + 5, left);
+  await mouse(side, 'mouseMoved', target.x, target.y, { button: 'left', buttons: 1 });
+  await mouse(side, 'mouseReleased', target.x, target.y, left);
+  steps['pressed in the parent, released in the iframe'] = await take(side);
   await mouse(side, 'mousePressed', target.x, target.y, left);
   await mouse(side, 'mouseMoved', parent.left + 5, parent.bottom + 5, {
     button: 'left',
@@ -171,6 +175,13 @@ test('ours: mouse and keys over a cross-origin iframe go to its page as in Chrom
     assert.deepEqual(get(expected['into the iframe'], 'root'), []);
     assert.deepEqual(get(expected['back to the parent'], 'child'), []);
     assert.equal(expected['typed'], 'abc');
+    // Each process has its press: the release in the iframe's page gets no click there, and the
+    // parent's press stays, so the next release over the parent clicks what holds both.
+    const across = get(expected['pressed in the parent, released in the iframe'], 'child');
+    assert.ok(Array.isArray(across) && across.some(e => e[0] === 'mouseup'));
+    assert.ok(!across.some(e => e[0] === 'click'));
+    const back = get(expected['pressed in the iframe, released in the parent'], 'root');
+    assert.ok(Array.isArray(back) && back.some(e => e[0] === 'click' && e[1] === 'body'));
   }
 });
 
