@@ -45,7 +45,7 @@
 ## iframe
 
 - **跨域 iframe**：页面拿不到它的文档，只能由 iframe 自己也加载探针，再通过 postMessage 作为子 target 接上来（`Target.setAutoAttach`、`attachedToTarget`、带 `sessionId` 的消息转发）。前端本来就支持子 target，外壳模式的 relay 有类似机制。
-- **同源 iframe 还没覆盖到的**：shadow root 里的 iframe，以及 iframe 脚本后来附加的 shadow root；`<object>`、`<embed>` 的文档；iframe 内 hash 变化的 `Page.navigatedWithinDocument`；`Page.getResourceTree` 里 iframe 自己的资源。
+- **同源 frame 剩下的小差异**：`childFrames` 按文档顺序排列，Chrome 按 frame 创建的顺序（加载较晚的 `<embed>` 排在后面）；Navigation API 拦截的导航（`navigationType: 'other'`）没有报出。
 
 ## 其他能在页面里补上的功能
 

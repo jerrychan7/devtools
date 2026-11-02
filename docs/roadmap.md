@@ -45,7 +45,7 @@ What has been discussed and is not done yet, and why. Directions and known trade
 ## iframes
 
 - **Cross-origin iframes**: their document is out of reach; the iframe has to load the probe too and be attached as a child target over postMessage (`Target.setAutoAttach`, `attachedToTarget`, messages routed by `sessionId`). The frontend handles child targets already; shell mode's relay works similarly.
-- **Same-origin iframes not reached yet**: iframes inside shadow roots, and shadow roots an iframe's scripts attach; the documents of `<object>` and `<embed>`; `Page.navigatedWithinDocument` for an iframe's hash changes; an iframe's own resources in `Page.getResourceTree`.
+- **Same-origin frames, small differences left**: `childFrames` are in document order, Chrome's in the order frames were created (a later-loading `<embed>` comes last); navigations the Navigation API intercepts (`navigationType: 'other'`) are not reported.
 
 ## More that can be filled in the page
 
