@@ -4,6 +4,7 @@ import { base64, readBody } from '../../core/body';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
+import { hookFrames, isFrameDocument } from './frames';
 
 export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return [];
@@ -83,6 +84,11 @@ export async function refetch(probe: Context['probe'], url: string, init?: Reque
   return res;
 }
 
+/** The class of a value of any realm: a same-origin iframe's socket gives its own Blobs and buffers. */
+const classOf = (value: unknown) => Object.prototype.toString.call(value).slice(8, -1);
+const isBlob = (value: unknown): value is Blob => classOf(value) === 'Blob';
+const isArrayBuffer = (value: unknown): value is ArrayBuffer => classOf(value) === 'ArrayBuffer';
+
 /**
  * CDP frame of a WebSocket payload: text as is, binary data (converted only now) as base64.
  * Like Chrome, a Blob given to `send()` is reported without its payload.
@@ -90,9 +96,9 @@ export async function refetch(probe: Context['probe'], url: string, init?: Reque
 async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.WebSocketFrame> {
   if (typeof data === 'string') return { opcode: 1, mask, payloadData: data };
   let blob = new Blob();
-  if (data instanceof Blob) {
+  if (isBlob(data)) {
     if (!mask) blob = data;
-  } else if (data instanceof ArrayBuffer) blob = new Blob([data]);
+  } else if (isArrayBuffer(data)) blob = new Blob([data]);
   // A copy: the view may be on a SharedArrayBuffer, which Blob does not take.
   else if (ArrayBuffer.isView(data))
     blob = new Blob([new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()]);
@@ -102,9 +108,11 @@ async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.W
   return { opcode: 2, mask, payloadData };
 }
 
-export function registerNetwork({ session, probe, frames }: Context) {
+export function registerNetwork(ctx: Context) {
+  const { session, probe, frames } = ctx;
   let unsubscribe: (() => void) | null = null;
   let unsubscribeSockets: (() => void) | null = null;
+  let unhookFrames: (() => void) | null = null;
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
   const sentSockets = new Map<string, Set<'created' | 'open' | 'closed'>>();
   let sentFrames = new WeakSet<SocketEvent>();
@@ -132,7 +140,7 @@ export function registerNetwork({ session, probe, frames }: Context) {
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
-    if (isOwnRequest(probe, rec)) return;
+    if (isOwnRequest(probe, rec) || isFrameDocument(probe, rec)) return;
     prune(sent, probe.requests, 'end');
     let done = sent.get(rec.requestId);
     if (!done) sent.set(rec.requestId, (done = new Set()));
@@ -160,8 +168,8 @@ export function registerNetwork({ session, probe, frames }: Context) {
       const callFrames = parseStack(rec.stack, 1);
       session.emit('Network.requestWillBeSent', {
         requestId: rec.requestId,
-        loaderId: frames.top.loaderId,
-        documentURL: location.href,
+        loaderId: rec.frame?.loaderId ?? frames.top.loaderId,
+        documentURL: rec.frame?.documentURL ?? location.href,
         request,
         timestamp: rec.startTime / 1000,
         wallTime: rec.wallTime / 1000,
@@ -169,7 +177,7 @@ export function registerNetwork({ session, probe, frames }: Context) {
         initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
         redirectHasExtraInfo: false,
         type: rec.type,
-        frameId: frames.top.id,
+        frameId: rec.frame?.frameId ?? frames.top.id,
       } satisfies Protocol.Network.RequestWillBeSentEvent);
     }
 
@@ -177,7 +185,7 @@ export function registerNetwork({ session, probe, frames }: Context) {
       done.add('response');
       session.emit('Network.responseReceived', {
         requestId: rec.requestId,
-        loaderId: frames.top.loaderId,
+        loaderId: rec.frame?.loaderId ?? frames.top.loaderId,
         timestamp: (rec.responseTime ?? performance.now()) / 1000,
         type: rec.type,
         response: {
@@ -193,7 +201,7 @@ export function registerNetwork({ session, probe, frames }: Context) {
           securityState: 'unknown',
         },
         hasExtraInfo: false,
-        frameId: frames.top.id,
+        frameId: rec.frame?.frameId ?? frames.top.id,
       } satisfies Protocol.Network.ResponseReceivedEvent);
     }
 
@@ -301,6 +309,8 @@ export function registerNetwork({ session, probe, frames }: Context) {
         params.maxResourceBufferSize ?? DEFAULT_RESOURCE_BUFFER
       );
       if (unsubscribe) return;
+      // Same-origin iframes' requests from now on, and from Resource Timing those made before.
+      unhookFrames = hookFrames(ctx);
       // Report requests and sockets made before the client connected, including early ones.
       probe.requests.forEach(emit);
       unsubscribe = probe.onRequest(emit);
@@ -313,6 +323,8 @@ export function registerNetwork({ session, probe, frames }: Context) {
       unsubscribe = null;
       unsubscribeSockets?.();
       unsubscribeSockets = null;
+      unhookFrames?.();
+      unhookFrames = null;
       sent.clear();
       sentSockets.clear();
       sentFrames = new WeakSet();
