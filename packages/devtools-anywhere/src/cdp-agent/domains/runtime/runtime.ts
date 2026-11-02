@@ -13,6 +13,7 @@ import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
 import { refetch } from '../network/network';
+import { executionContexts } from './contexts';
 
 // Indirect eval runs in the global scope, like code typed into the console.
 // oxlint-disable-next-line no-eval -- evaluating console input is the point.
@@ -562,13 +563,16 @@ function globalLexicalNames(probe: Context['probe']) {
   }
 }
 
-export function registerRuntime({ session, objects, nodes, probe, frames: { top: topFrame } }: Context) {
+export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
+  const topFrame = frames.top;
   const lexicalNames = globalLexicalNames(probe);
   const repl = replBindings();
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
+  const contexts = executionContexts(frames, (method, params) => session.emit(method, params));
   session.onReset(() => {
+    contexts.disable();
     lastResult = undefined;
     lexicalNames.stop();
   });
@@ -672,15 +676,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames: { top:
   session.register('Runtime', {
     enable() {
       if (unsubscribe) return;
-      session.emit('Runtime.executionContextCreated', {
-        context: {
-          id: topFrame.executionContextId,
-          origin: location.origin,
-          name: '',
-          uniqueId: 'devtools-anywhere',
-          auxData: { isDefault: true, type: 'default', frameId: topFrame.id },
-        },
-      } satisfies Protocol.Runtime.ExecutionContextCreatedEvent);
+      contexts.enable();
       // Like V8, report everything logged before the client connected.
       probe.logs.forEach(emitLog);
       unsubscribe = probe.onLog(emitLog);
@@ -689,6 +685,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames: { top:
     disable() {
       unsubscribe?.();
       unsubscribe = null;
+      contexts.disable();
     },
 
     async evaluate(params: Protocol.Runtime.EvaluateRequest): Promise<Protocol.Runtime.EvaluateResponse> {
