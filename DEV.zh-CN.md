@@ -176,7 +176,7 @@ cd devtools-frontend.ignore/devtools-frontend
 git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
-前端跟随稳定版 Chrome，也就是大多数用户手上的版本：每个里程碑一次，在新稳定版发布一两周后，用下面的命令升级：
+前端跟随稳定版 Chrome，也就是大多数用户手上的版本，小版本更新也要跟：每次都会换一个 devtools-frontend 提交。`.github/workflows/chrome-update.yml` 每天检查一次，稳定版 Chrome 的提交与 `REVISION` 不一致时开一个 issue（同时关闭还没处理的旧 issue）。用下面的命令升级：
 
 ```bash
 pnpm --filter @devtools-anywhere/devtools-frontend update

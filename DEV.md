@@ -176,7 +176,7 @@ cd devtools-frontend.ignore/devtools-frontend
 git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
-The frontend follows stable Chrome, which is what most users have: once per milestone, a week or two after a new stable release, move to it with
+The frontend follows stable Chrome, which is what most users have, minor updates included: each one ships another devtools-frontend commit. `.github/workflows/chrome-update.yml` checks every day and opens an issue when stable Chrome's commit is not the one in `REVISION` (closing an older one not done yet). Move to it with
 
 ```bash
 pnpm --filter @devtools-anywhere/devtools-frontend update
