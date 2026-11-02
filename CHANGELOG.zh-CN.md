@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- 支持同源 iframe，与 Chrome 一致：Elements 能展开；每个 iframe 在 Page 的 frame 树里有自己的 frame，在 Console 的上下文菜单里有自己的执行上下文，带着它的 console 消息和错误；Styles 显示它自己的样式表和媒体条件；Network 的请求标出所属 frame；高亮、检查模式和 Input 都能进入 iframe。iframe 在 load 事件之前的日志和请求拿不到（srcdoc 和空 iframe 除外），导航要加载完成后才报出。跨域 iframe 仍不能检查。
+- `DOM.getNodeForLocation` 按文档坐标而不是视口坐标计算；`DOM.scrollIntoViewIfNeeded` 对不在视口内的元素滚到居中，与 Chrome 一致。`Input.dispatchMouseEvent` 悬停时按 Chrome 的顺序发出 `pointerout`、`pointerover`、`mouseout`、`mouseover`。
+- 探针运行之前页面发出的请求，改为从 Resource Timing 补报（没有调用栈、请求头和请求体），Chrome 同样会报这些请求。
+- `CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错「Frame not found」，与 Chrome 一致。
+
 ## 0.2.0
 
 基于 Chrome 156（156.0.8078.80）。

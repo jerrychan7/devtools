@@ -44,31 +44,12 @@
 
 ## iframe
 
-**现状**：agent 是按「一个页面只有一个文档」写的。全局只有一个 `FRAME_ID` 和一个 `EXECUTION_CONTEXT_ID`（`core/context.ts`），所有事件都写死这两个值；DOM 节点描述里没有 `contentDocument`，Elements 里的 iframe 展不开；console、网络捕获、错误监听只挂在主页面的 `window` 上。
+同源 iframe 已经做完（见 CHANGELOG 0.3.0）。剩下的：
 
-**Chrome 的模型**：同源 iframe 和主页面在同一个 target 里，是多个 frame 和执行上下文；只有跨域 iframe（进程外 iframe）才通过 `Target.setAutoAttach` 作为子 target 挂上来。
-
-**同源 iframe（先做）**：
-
-| 域 | 要做的 |
-|---|---|
-| DOM | iframe 节点带 `contentDocument` 和 `frameId`；每个文档各自用 MutationObserver 监听；iframe 导航后旧文档失效、推送新文档 |
-| Page | frame 表；`frameTree` 带 `childFrames`；`frameAttached`、`frameNavigated`、`frameDetached` 事件 |
-| Runtime | 每个 window 一个执行上下文；`evaluate`、`callFunctionOn` 按 `contextId` 在对应 window 里执行；console 和异常的捕获挂到每个 window 上 |
-| CSS | 样式表带 `frameId`；用节点所在 window 的 `getComputedStyle`；样式表登记和强制伪类区分文档 |
-| Network | 请求带 `frameId`；每个 window 都包装 fetch、XHR 等 |
-| Overlay、Input、几何计算 | 坐标加上 iframe 的偏移和内部滚动 |
-
-- **跨 realm**：iframe 里的元素不是主页面 `Element` 类的实例。agent 里约 166 处 `instanceof` 判断、约 180 处直接引用全局 `document`、`window`、`getComputedStyle` 等，都要改成用节点自己的 realm（`node.ownerDocument.defaultView`）或者按 `nodeType` 判断。
-- **做不到**：iframe 里的「最早日志」。探针没法先于 iframe 自己的脚本运行，只能在加载完成后挂上，要写进 usage 文档。
-- **工作量**：大，按域逐个迁移、各配 Chrome 对照测试，接近一个 minor 版本的主要工作。
-
-**跨域 iframe（之后再说）**：页面拿不到它的文档，只能由 iframe 自己也加载探针，再通过 postMessage 作为子 target 接上来（`Target.setAutoAttach`、`attachedToTarget`、带 `sessionId` 的消息转发）。前端本来就支持子 target，外壳模式的 relay 有类似机制。
-
-**第 0 步：越早越好**。每加一个功能，`instanceof` 和全局 `document` 的用法就多一些。先做一步不改变行为的铺垫，止住债务：
-
-1. Context 里引入 frame 注册表，`FRAME_ID`、`EXECUTION_CONTEXT_ID` 从常量改为按文档或 window 查询，暂时只登记主文档；
-2. 加 `realmOf(node)` 之类的辅助函数，再加 lint 规则：在 `cdp-agent` 里禁止直接用 `instanceof Element` 和全局 `document`，现有代码先豁免，逐步迁移。
+- **跨域 iframe**：页面拿不到它的文档，只能由 iframe 自己也加载探针，再通过 postMessage 作为子 target 接上来（`Target.setAutoAttach`、`attachedToTarget`、带 `sessionId` 的消息转发）。前端本来就支持子 target，外壳模式的 relay 有类似机制。
+- **时机**：iframe 的导航要到 load 事件才发现，比 Chrome 在提交时发出要晚；在此之前的日志和请求拿不到，复用初始 window 的情况（srcdoc、空 iframe）除外。页面里没法解决。
+- **缺口**：shadow root 里的 iframe 发现不了，iframe 脚本后来附加的 shadow root 也不推送；`<object>`、`<embed>` 的文档；`createIsolatedWorld`；iframe 内 hash 变化的 `navigatedWithinDocument`；`Page.getResourceTree` 里 iframe 自己的资源。
+- **realm**：还剩 63 处直接用顶层页面 realm 的地方（scripts/check-realms.json），大多在探针和叠加层里，那里本来就该用顶层页面。
 
 ## 其他能在页面里补上的功能
 

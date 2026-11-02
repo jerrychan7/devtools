@@ -231,6 +231,8 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 浏览器默认样式 | ❌ | 浏览器不向页面公开 |
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
+| 同源 iframe | ⚠️ | iframe 在 load 事件之前的日志和请求拿不到（srcdoc 和空 iframe 除外）；导航要加载完成后才报出 |
+| 跨域 iframe | ❌ | 只显示为元素：页面拿不到它们的文档 |
 | 跨源样式表 | ⚠️ | 需要 CORS；只读 |
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
 | 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |

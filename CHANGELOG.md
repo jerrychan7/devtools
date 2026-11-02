@@ -4,6 +4,11 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
+- Same-origin iframes, as in Chrome: Elements expands them; each has its frame in the Page tree and its execution context in the Console's context menu, with its console messages and errors; Styles shows its own sheets and media; Network tags its requests with its frame; highlighting, inspect mode and Input reach into it. Logs and requests an iframe makes before its load event are missing (except for srcdoc and blank iframes), and its navigations are reported once loaded. Cross-origin iframes are still not inspectable.
+- `DOM.getNodeForLocation` takes document coordinates, not viewport ones, and `DOM.scrollIntoViewIfNeeded` centers an element that is out of view, as in Chrome. Hovering with `Input.dispatchMouseEvent` sends `pointerout`, `pointerover`, `mouseout`, `mouseover` in Chrome's order.
+- Requests the page made before the probe ran are reported from Resource Timing (without stack, headers or body), as Chrome reports them too.
+- `CSS.createStyleSheet` fails with "Frame not found" for an unknown `frameId`, as in Chrome.
+
 ## 0.2.0
 
 Based on Chrome 156 (156.0.8078.80).

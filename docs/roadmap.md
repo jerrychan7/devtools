@@ -44,31 +44,12 @@ What has been discussed and is not done yet, and why. Directions and known trade
 
 ## iframes
 
-**Now**: the agent assumes one document per page. There is a single `FRAME_ID` and `EXECUTION_CONTEXT_ID` (`core/context.ts`) in every event; nodes have no `contentDocument`, so an iframe cannot be expanded in Elements; console, network capture and errors are hooked in the top `window` only.
+Same-origin iframes are done (CHANGELOG, 0.3.0). What is left:
 
-**Chrome's model**: a same-origin iframe is in the same target as its page, as more frames and execution contexts; only a cross-origin one (an out-of-process iframe) is a child target, through `Target.setAutoAttach`.
-
-**Same-origin iframes (first)**:
-
-| Domain | To do |
-|---|---|
-| DOM | iframe nodes with `contentDocument` and `frameId`; a MutationObserver per document; an iframe's navigation invalidates its old document and pushes the new one |
-| Page | A frame registry; `childFrames` in `frameTree`; `frameAttached`, `frameNavigated`, `frameDetached` |
-| Runtime | An execution context per window; `evaluate` and `callFunctionOn` run in the window of their `contextId`; console and exceptions captured in each window |
-| CSS | `frameId` on style sheets; `getComputedStyle` of the node's window; the sheet registry and forced pseudo-classes per document |
-| Network | `frameId` on requests; fetch, XHR, … wrapped in each window |
-| Overlay, Input, geometry | Coordinates offset by the iframe and its scrolling |
-
-- **Realms**: an iframe's elements are not instances of the top page's `Element`. About 166 `instanceof` checks and about 180 uses of the global `document`, `window`, `getComputedStyle`, … in the agent have to use the node's own realm (`node.ownerDocument.defaultView`) or `nodeType` instead.
-- **Not possible**: an iframe's earliest logs. The probe cannot run before the iframe's own scripts, only once it has loaded; usage.md has to say so.
-- **Size**: large; domain by domain, each with tests against Chrome, about the main work of a minor.
-
-**Cross-origin iframes (later)**: their document is out of reach; the iframe has to load the probe too and be attached as a child target over postMessage (`Target.setAutoAttach`, `attachedToTarget`, messages routed by `sessionId`). The frontend handles child targets already; shell mode's relay works similarly.
-
-**Step 0, the earlier the better**: every new feature adds `instanceof` checks and uses of the global `document`. A step that changes no behavior stops that:
-
-1. A frame registry in the Context: `FRAME_ID` and `EXECUTION_CONTEXT_ID` looked up by document or window instead of constants, with only the top document registered for now;
-2. A helper such as `realmOf(node)`, and a lint rule against `instanceof Element` and the global `document` in `cdp-agent`, the existing code exempted and migrated over time.
+- **Cross-origin iframes**: their document is out of reach; the iframe has to load the probe too and be attached as a child target over postMessage (`Target.setAutoAttach`, `attachedToTarget`, messages routed by `sessionId`). The frontend handles child targets already; shell mode's relay works similarly.
+- **Timing**: an iframe's navigation is seen at its load event, later than Chrome's commit; logs and requests before it are missing, except where the initial window is reused (srcdoc, blank). Not fixable from the page.
+- **Gaps**: iframes inside shadow roots are not found, nor shadow roots an iframe's scripts attach; `<object>` and `<embed>` documents; `createIsolatedWorld`; `navigatedWithinDocument` for an iframe's hash changes; an iframe's own resources in `Page.getResourceTree`.
+- **Realms**: 63 uses of the top page's realm are left (scripts/check-realms.json), mostly in the probe and the overlay, where the top page is meant.
 
 ## More that can be filled in the page
 
