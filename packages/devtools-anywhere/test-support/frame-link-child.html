@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <title>frame link child</title>
+    <script>
+      // The probe, with its own panel and data-parent-origins from the query (`parentOrigins`).
+      const origins = new URLSearchParams(location.search).get('parentOrigins');
+      document.write(
+        '<script src="/packages/devtools-anywhere/dist/probe.iife.js"' +
+          ' data-devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"' +
+          (origins === null ? '' : ` data-parent-origins="${origins}"`) +
+          '></' +
+          'script>'
+      );
+    </script>
+  </head>
+  <body style="margin: 0">
+    <p id="target">child page</p>
+    <script>
+      window.marker = 'child of ' + location.origin;
+    </script>
+  </body>
+</html>

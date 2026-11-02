@@ -42,6 +42,8 @@ export type ProbeScriptAttributes = {
     'data-service-worker'?: string | true;
     'data-remote'?: string | true;
     'data-id-in-query'?: true;
+    'data-frame-origins'?: string;
+    'data-parent-origins'?: string;
 };
 
 // @internal

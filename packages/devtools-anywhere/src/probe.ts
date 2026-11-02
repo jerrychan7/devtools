@@ -30,6 +30,10 @@
 // `data-id-in-query` connects to that URL itself, the target in the query, for a server whose
 // host routes WebSocket upgrades by exact path (remote-server's `idInQuery`).
 //
+// With `data-frame-origins`, it loads the bundle too, which links the agents of the cross-origin
+// iframes of those origins that trust this page (frame-links/); with `data-parent-origins`, in an
+// iframe, that of its parent, if of one of those origins and trusting it.
+//
 // Outside shell mode it unregisters the shell's Service Worker if one is left over (shell mode
 // ended without exitShell): recognized by its script URL, which the shell gives `probe` (ending
 // in probe.iife.js) and `shell` query parameters, and kept while it answers that a shell in
@@ -76,6 +80,9 @@ const shellPage = isShellPage();
  */
 const remoteUrl = script?.src && remote !== null ? new URL(remote || '.', script.src).href : null;
 const idInQuery = attribute('data-id-in-query') !== null;
+const frameOrigins = attribute('data-frame-origins');
+// Only in an iframe: the top window has no parent to trust.
+const parentOrigins = window === top ? null : attribute('data-parent-origins');
 
 /** Whether to enter shell mode by default; storage that throws counts as no. */
 const shellByDefault = () => {
@@ -172,7 +179,7 @@ if (!readShellConfig() && navigator.serviceWorker) {
  * Whether the bundle's API (src/api.ts) has the function `name`, once the bundle has run: checked,
  * since it is built separately.
  */
-const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
+const hasApi = <K extends 'connectRemote' | 'createGlobalElement' | 'linkFrames'>(
   api: unknown,
   name: K
 ): api is Pick<DevtoolsAnywhereApi, K> =>
@@ -181,11 +188,12 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
 // In the shell's top window the probe has replaced the document with the shell already. The page in
 // the shell has the bundle from installProbe() already and only connects to the remote server: the shell
 // shows DevTools, and the elements the page places take the shell's frontend (see element/index.ts).
-if (script && bundle && (frontend || remoteUrl || shellPage) && !shellTop) {
+if (script && bundle && (frontend || remoteUrl || shellPage || frameOrigins || parentOrigins) && !shellTop) {
   probe.ownUrls.add(bundle);
 
   const start = () => {
     const api: unknown = Reflect.get(window, 'DevtoolsAnywhere');
+    if ((frameOrigins || parentOrigins) && hasApi(api, 'linkFrames')) api.linkFrames({ frameOrigins, parentOrigins });
     if (shellPage) {
       // The shell's answer, once: its server, or none.
       const onAnswer = (event: MessageEvent) => {
