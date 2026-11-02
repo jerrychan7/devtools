@@ -44,12 +44,8 @@
 
 ## iframe
 
-同源 iframe 已经做完（见 CHANGELOG 0.3.0）。剩下的：
-
 - **跨域 iframe**：页面拿不到它的文档，只能由 iframe 自己也加载探针，再通过 postMessage 作为子 target 接上来（`Target.setAutoAttach`、`attachedToTarget`、带 `sessionId` 的消息转发）。前端本来就支持子 target，外壳模式的 relay 有类似机制。
-- **时机**：iframe 的导航要到 load 事件才发现，比 Chrome 在提交时发出要晚；在此之前的日志和请求拿不到，复用初始 window 的情况（srcdoc、空 iframe）除外。页面里没法解决。
-- **缺口**：shadow root 里的 iframe 发现不了，iframe 脚本后来附加的 shadow root 也不推送；`<object>`、`<embed>` 的文档；`createIsolatedWorld`；iframe 内 hash 变化的 `navigatedWithinDocument`；`Page.getResourceTree` 里 iframe 自己的资源。
-- **realm**：还剩 63 处直接用顶层页面 realm 的地方（scripts/check-realms.json），大多在探针和叠加层里，那里本来就该用顶层页面。
+- **同源 iframe 还没覆盖到的**：shadow root 里的 iframe，以及 iframe 脚本后来附加的 shadow root；`<object>`、`<embed>` 的文档；iframe 内 hash 变化的 `Page.navigatedWithinDocument`；`Page.getResourceTree` 里 iframe 自己的资源。
 
 ## 其他能在页面里补上的功能
 

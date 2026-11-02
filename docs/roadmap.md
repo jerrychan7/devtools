@@ -44,12 +44,8 @@ What has been discussed and is not done yet, and why. Directions and known trade
 
 ## iframes
 
-Same-origin iframes are done (CHANGELOG, 0.3.0). What is left:
-
 - **Cross-origin iframes**: their document is out of reach; the iframe has to load the probe too and be attached as a child target over postMessage (`Target.setAutoAttach`, `attachedToTarget`, messages routed by `sessionId`). The frontend handles child targets already; shell mode's relay works similarly.
-- **Timing**: an iframe's navigation is seen at its load event, later than Chrome's commit; logs and requests before it are missing, except where the initial window is reused (srcdoc, blank). Not fixable from the page.
-- **Gaps**: iframes inside shadow roots are not found, nor shadow roots an iframe's scripts attach; `<object>` and `<embed>` documents; `createIsolatedWorld`; `navigatedWithinDocument` for an iframe's hash changes; an iframe's own resources in `Page.getResourceTree`.
-- **Realms**: 63 uses of the top page's realm are left (scripts/check-realms.json), mostly in the probe and the overlay, where the top page is meant.
+- **Same-origin iframes not reached yet**: iframes inside shadow roots, and shadow roots an iframe's scripts attach; the documents of `<object>` and `<embed>`; `Page.navigatedWithinDocument` for an iframe's hash changes; an iframe's own resources in `Page.getResourceTree`.
 
 ## More that can be filled in the page
 

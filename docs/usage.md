@@ -231,7 +231,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Browser default styles | ❌ | Not exposed to pages |
 | Event listeners | ⚠️ | Only those added after the probe ran; no source location |
 | WebSocket | ⚠️ | Connections and frames; no handshake headers |
-| Same-origin iframes | ⚠️ | Logs and requests from before an iframe's load event are missing (except in srcdoc and blank iframes); navigations are reported once loaded |
+| Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes. No isolated worlds (`Page.createIsolatedWorld`) |
 | Cross-origin iframes | ❌ | Shown as elements only: their documents are out of the page's reach |
 | Cross-origin style sheets | ⚠️ | Need CORS; read-only |
 | Forced `:hover`, `:focus`, … | ⚠️ | Not for `@import` and `adoptedStyleSheets` sheets |

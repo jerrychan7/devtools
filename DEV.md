@@ -108,6 +108,7 @@ experiments/      validation records
 - Every `postMessage` must check `event.origin` and `event.source`; otherwise any page could send CDP commands to the runtime.
 - Detect whether the page is inside the shell through a postMessage handshake rather than reading properties on `window.parent`, which throws a SecurityError across origins.
 - Both ends of the handshake need buffering: messages must not be dropped while DevTools is still loading.
+- The agent serves same-origin iframes too, whose nodes are not instances of the top page's `Element`, … and whose document is not the global `document`. Check nodes with `cdp-agent/core/realm.ts` (by `nodeType`, `realmOf(node)`) and look frames up in `core/frames.ts`. `pnpm lint` counts the remaining uses of the top page's realm per file against `scripts/check-realms.json` (`scripts/check-realms.ts`): a file may have fewer, not more. Where the top page is meant (the probe, the overlay), run `node scripts/check-realms.ts --update`.
 - Frontend assets should be self-hostable, with no dependency on third-party CDNs such as unpkg or jsDelivr.
 - When injecting with a Service Worker:
   - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.
@@ -189,7 +190,7 @@ It builds the devtools-frontend commit the current stable Chrome ships (on its m
 ### Before committing
 
 ```bash
-pnpm lint        # oxlint, then scripts/check-contracts.ts, check-file-size.ts and check-dir-size.ts
+pnpm lint        # oxlint, then scripts/check-contracts.ts, check-realms.ts, check-file-size.ts and check-dir-size.ts
 pnpm fmt         # oxfmt: formats in place (Markdown is not formatted)
 pnpm typecheck
 pnpm test        # with the frontend built, so the real-frontend tests run

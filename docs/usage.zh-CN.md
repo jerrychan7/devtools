@@ -231,7 +231,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 浏览器默认样式 | ❌ | 浏览器不向页面公开 |
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
-| 同源 iframe | ⚠️ | iframe 在 load 事件之前的日志和请求拿不到（srcdoc 和空 iframe 除外）；导航要加载完成后才报出 |
+| 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外。没有隔离 world（`Page.createIsolatedWorld`） |
 | 跨域 iframe | ❌ | 只显示为元素：页面拿不到它们的文档 |
 | 跨源样式表 | ⚠️ | 需要 CORS；只读 |
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
