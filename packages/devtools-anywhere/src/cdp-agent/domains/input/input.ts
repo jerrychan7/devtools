@@ -69,8 +69,9 @@ const isEditable = (el: Element | null) =>
  *
  * Input over a linked cross-origin iframe (core/child-targets.ts) goes to the iframe's agent, as
  * Chrome routes it to the iframe's process: the same command, at the point in the iframe's
- * viewport. The command goes over the link as this agent's own, which the client does not
- * see, and is answered once the iframe's agent has carried it out.
+ * viewport, and keys and text while the iframe has the focus. The command goes over the link as
+ * this agent's own, which the client does not see, and is answered once the iframe's agent has
+ * carried it out.
  */
 export function registerInput({ session, frames }: Context, links: ChildTargets = childTargets) {
   const top = frames.top;
@@ -418,9 +419,16 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
     dispatchMouseEvent: (p: Protocol.Input.DispatchMouseEventRequest) => (emitTouch ? touch(p) : mouse(p)),
     emulateTouchFromMouseEvent: (p: Protocol.Input.EmulateTouchFromMouseEventRequest) => touch(p),
 
-    dispatchKeyEvent(p: Protocol.Input.DispatchKeyEventRequest) {
+    async dispatchKeyEvent(p: Protocol.Input.DispatchKeyEventRequest) {
       const target = focused();
       if (!target) return;
+      // Like Chrome, keys go to the focused frame's process: to the iframe's agent when a
+      // cross-origin iframe has the focus.
+      const link = linkOf(target);
+      if (link) {
+        await askChild(link, 'Input.dispatchKeyEvent', p, FORWARD_TIMEOUT);
+        return;
+      }
       const win = realmOf(target);
       const init: KeyboardEventInit = {
         bubbles: true,
@@ -456,7 +464,11 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
       }
     },
 
-    insertText: (p: Protocol.Input.InsertTextRequest) => insertText(p.text),
+    async insertText(p: Protocol.Input.InsertTextRequest) {
+      const link = linkOf(focused());
+      if (link) await askChild(link, 'Input.insertText', p, FORWARD_TIMEOUT);
+      else insertText(p.text);
+    },
     setIgnoreInputEvents: () => {},
   });
 
