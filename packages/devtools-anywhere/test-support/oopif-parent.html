@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <title>oopif parent</title>
+  </head>
+  <body style="margin: 0">
+    <p id="parent">parent page</p>
+    <!-- Cross-site child (127.0.0.1 against localhost), at a fixed place so input can be aimed at it.
+         The src is set from the page's own port: the server's port is only known at run time. -->
+    <iframe id="child" style="position: absolute; left: 0; top: 100px; width: 400px; height: 300px; border: 0"></iframe>
+    <script>
+      const child = new URL('/packages/devtools-anywhere/test-support/oopif-child.html', location.href);
+      child.hostname = '127.0.0.1';
+      document.getElementById('child').src = child.href;
+    </script>
+  </body>
+</html>

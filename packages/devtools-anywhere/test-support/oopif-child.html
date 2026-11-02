@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <title>oopif child</title>
+    <link rel="stylesheet" href="assets/frame.css" />
+    <style>
+      #target {
+        color: rgb(1, 2, 3);
+        width: 200px;
+        height: 50px;
+      }
+    </style>
+  </head>
+  <body style="margin: 0">
+    <p id="target" class="styled">child <b>page</b></p>
+    <!-- A third site (oopif.test, mapped to 127.0.0.1 by the test browser), so it is out of process again. -->
+    <iframe id="grandchild" style="width: 200px; height: 100px; border: 0"></iframe>
+    <script>
+      window.clicks = [];
+      document.addEventListener('mousedown', e => window.clicks.push([e.type, e.clientX, e.clientY]));
+      document.addEventListener('click', e => window.clicks.push([e.type, e.clientX, e.clientY]));
+      console.log('child loaded', location.origin);
+      fetch('/api/echo?from=child');
+      if (!new URLSearchParams(location.search).has('leaf')) {
+        const grandchild = new URL('/packages/devtools-anywhere/test-support/oopif-grandchild.html', location.href);
+        grandchild.hostname = 'oopif.test';
+        document.getElementById('grandchild').src = grandchild.href;
+      }
+    </script>
+  </body>
+</html>
