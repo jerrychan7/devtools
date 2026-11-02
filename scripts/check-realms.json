@@ -1,7 +1,6 @@
 {
   "core/adopted.ts": 1,
   "core/container-query.ts": 6,
-  "core/geometry.ts": 36,
   "core/history.ts": 1,
   "domains/css/cascade.ts": 7,
   "domains/css/color.ts": 1,
@@ -12,9 +11,8 @@
   "domains/css/style.ts": 1,
   "domains/debugger/debugger.ts": 1,
   "domains/dom-debugger/dom-debugger.ts": 5,
-  "domains/input/input.ts": 28,
   "domains/network/network.ts": 3,
-  "domains/overlay/overlay.ts": 16,
+  "domains/overlay/overlay.ts": 8,
   "domains/page/page.ts": 3,
   "domains/page/render.ts": 4,
   "domains/page/screencast.ts": 1,
