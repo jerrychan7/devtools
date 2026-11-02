@@ -9,6 +9,20 @@ export type Handler = (params: never) => unknown;
 /** Message text of anything thrown. */
 export const errorMessage = (e: unknown) => String(e instanceof Error ? e.message : e);
 
+/** Domains that keep state while enabled; a new frontend instance must start from disabled. */
+const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+
+/**
+ * The calls that end what a frontend started in the page, like a new Chrome session: e.g.
+ * Debugger.enable and CSS.enable only report scripts and style sheets again after a disable.
+ *
+ * @internal
+ */
+export const END_SESSION_CALLS: readonly string[] = [
+  ...STATEFUL_DOMAINS.map(domain => `${domain}.disable`),
+  'Page.stopScreencast',
+];
+
 /** An error answered to the client as a CDP error response. */
 export class CdpError extends Error {
   readonly code: number;

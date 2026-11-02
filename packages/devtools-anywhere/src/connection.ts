@@ -1,4 +1,4 @@
-import { FRAME_ID, LOADER_ID, type CdpSession } from './cdp-agent';
+import { END_SESSION_CALLS, FRAME_ID, LOADER_ID, type CdpSession } from './cdp-agent';
 import {
   HELLO_METHOD,
   PING_METHOD,
@@ -16,8 +16,6 @@ import {
 const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } satisfies Partial<HelloParams> });
 /** Sent by the shell on startup, in case the page started listening first. */
 const PING = JSON.stringify({ method: PING_METHOD });
-/** Domains that keep state while enabled; a new frontend instance must start from disabled. */
-const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
 
 interface Link {
   /**
@@ -80,8 +78,7 @@ function link(session: CdpSession, peer: () => Window | null | undefined, origin
  * CSS.enable only report scripts and style sheets again after a disable.
  */
 export async function endSession(session: CdpSession): Promise<void> {
-  const calls = [...STATEFUL_DOMAINS.map(domain => `${domain}.disable`), 'Page.stopScreencast'];
-  await Promise.all(calls.map(method => session.call(method).catch(() => {})));
+  await Promise.all(END_SESSION_CALLS.map(method => session.call(method).catch(() => {})));
 }
 
 /** For each session, the end of its last frontend's session: the next frontend's messages wait for it. */
@@ -138,14 +135,22 @@ class ShellRelay extends RelayCore {
   private unknownLoaders = 0;
   private readonly toFrontend: string[] = [];
   private readonly session: Session;
+  private readonly page: HTMLIFrameElement;
+  private readonly devtools: HTMLIFrameElement;
+  private readonly frontendOrigin: string;
+  private readonly onMetrics: (metrics: DeviceMetrics | null) => void;
 
   constructor(
-    private readonly page: HTMLIFrameElement,
-    private readonly devtools: HTMLIFrameElement,
-    private readonly frontendOrigin: string,
-    private readonly onMetrics: (metrics: DeviceMetrics | null) => void
+    page: HTMLIFrameElement,
+    devtools: HTMLIFrameElement,
+    frontendOrigin: string,
+    onMetrics: (metrics: DeviceMetrics | null) => void
   ) {
     super();
+    this.page = page;
+    this.devtools = devtools;
+    this.frontendOrigin = frontendOrigin;
+    this.onMetrics = onMetrics;
     this.session = this.openSession({ send: message => this.postFrontend(message) });
   }
 
