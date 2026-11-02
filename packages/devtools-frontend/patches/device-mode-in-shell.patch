@@ -1,0 +1,134 @@
+diff --git a/front_end/core/root/Runtime.ts b/front_end/core/root/Runtime.ts
+index 0c94af63c6..156d0b7818 100644
+--- a/front_end/core/root/Runtime.ts
++++ b/front_end/core/root/Runtime.ts
+@@ -640,6 +640,9 @@ export type Condition = (config?: HostConfig) => boolean;
+ 
+ export const conditions: {
+   canDock: Condition,
++  canEmulateDevice: Condition,
+ } = {
+   canDock: () => Boolean(Runtime.queryParam('can_dock')),
++  // Device mode needs an embedder that can resize the inspected page (devtools-anywhere's shell).
++  canEmulateDevice: () => Boolean(Runtime.queryParam('can_emulate_device')),
+ };
+diff --git a/front_end/panels/emulation/AdvancedApp.ts b/front_end/panels/emulation/AdvancedApp.ts
+index 199ae25afc..e47adfc537 100644
+--- a/front_end/panels/emulation/AdvancedApp.ts
++++ b/front_end/panels/emulation/AdvancedApp.ts
+@@ -83,7 +83,8 @@ export class AdvancedApp implements UI.App.App {
+       return;
+     }
+ 
+-    const url = window.location.href.replace('devtools_app.html', 'device_mode_emulation_frame.html');
++    // Next to the app's page, whichever it is (devtools-anywhere's anywhere_app.html).
++    const url = new URL('device_mode_emulation_frame.html', window.location.href).href;
+     this.toolboxWindow = window.open(url, undefined);
+   }
+ 
+diff --git a/front_end/panels/emulation/DeviceModeToolbar.ts b/front_end/panels/emulation/DeviceModeToolbar.ts
+index aca819ebfb..a10c9d0e6a 100644
+--- a/front_end/panels/emulation/DeviceModeToolbar.ts
++++ b/front_end/panels/emulation/DeviceModeToolbar.ts
+@@ -801,12 +801,8 @@ export class DeviceModeToolbar extends UI.Widget.Widget {
+     appendToggleItem(
+         contextMenu.headerSection(), this.showRulersSetting, i18nString(UIStrings.hideRulers),
+         i18nString(UIStrings.showRulers), undefined, 'rulers');
+-    appendToggleItem(
+-        contextMenu.defaultSection(), this.showDeviceScaleFactorSetting, i18nString(UIStrings.removeDevicePixelRatio),
+-        i18nString(UIStrings.addDevicePixelRatio), undefined, 'device-pixel-ratio');
+-    appendToggleItem(
+-        contextMenu.defaultSection(), this.showUserAgentTypeSetting, i18nString(UIStrings.removeDeviceType),
+-        i18nString(UIStrings.addDeviceType), undefined, 'device-type');
++    // No device pixel ratio or device type: a page cannot have its devicePixelRatio or its
++    // user agent changed (devtools-anywhere), so neither is offered.
+     contextMenu.appendItemsAtLocation('deviceModeMenu');
+     contextMenu.footerSection().appendItem(
+         i18nString(UIStrings.resetToDefaults), this.reset.bind(this), {jslogContext: 'reset-to-defaults'});
+diff --git a/front_end/panels/emulation/emulation-meta.ts b/front_end/panels/emulation/emulation-meta.ts
+index 40bd5bb1ca..ce94de9d03 100644
+--- a/front_end/panels/emulation/emulation-meta.ts
++++ b/front_end/panels/emulation/emulation-meta.ts
+@@ -73,7 +73,7 @@ UI.ActionRegistration.registerActionExtension({
+     const Emulation = await loadEmulationModule();
+     return new Emulation.DeviceModeView.ActionDelegate();
+   },
+-  condition: Root.Runtime.conditions.canDock,
++  condition: Root.Runtime.conditions.canEmulateDevice,
+   title: i18nLazyString(UIStrings.toggleDeviceToolbar),
+   iconClass: UI.ActionRegistration.IconClass.LARGEICON_PHONE,
+   bindings: [
+@@ -95,7 +95,7 @@ UI.ActionRegistration.registerActionExtension({
+     const Emulation = await loadEmulationModule();
+     return new Emulation.DeviceModeView.ActionDelegate();
+   },
+-  condition: Root.Runtime.conditions.canDock,
++  condition: Root.Runtime.conditions.canEmulateDevice,
+   title: i18nLazyString(UIStrings.captureScreenshot),
+ });
+ 
+@@ -106,7 +106,7 @@ UI.ActionRegistration.registerActionExtension({
+     const Emulation = await loadEmulationModule();
+     return new Emulation.DeviceModeView.ActionDelegate();
+   },
+-  condition: Root.Runtime.conditions.canDock,
++  condition: Root.Runtime.conditions.canEmulateDevice,
+   title: i18nLazyString(UIStrings.captureFullSizeScreenshot),
+ });
+ 
+@@ -117,7 +117,7 @@ UI.ActionRegistration.registerActionExtension({
+     const Emulation = await loadEmulationModule();
+     return new Emulation.DeviceModeView.ActionDelegate();
+   },
+-  condition: Root.Runtime.conditions.canDock,
++  condition: Root.Runtime.conditions.canEmulateDevice,
+   title: i18nLazyString(UIStrings.captureNodeScreenshot),
+ });
+ 
+@@ -159,7 +159,7 @@ Common.Settings.registerSettingExtension({
+ 
+ UI.Toolbar.registerToolbarItem({
+   actionId: 'emulation.toggle-device-mode',
+-  condition: Root.Runtime.conditions.canDock,
++  condition: Root.Runtime.conditions.canEmulateDevice,
+   location: UI.Toolbar.ToolbarItemLocation.MAIN_TOOLBAR_LEFT,
+   order: 2,
+ });
+@@ -169,7 +169,7 @@ UI.AppProvider.registerAppProvider({
+     const Emulation = await loadEmulationModule();
+     return Emulation.AdvancedApp.AdvancedAppProvider.instance();
+   },
+-  condition: Root.Runtime.conditions.canDock,
++  condition: Root.Runtime.conditions.canEmulateDevice,
+   order: 0,
+ });
+ 
+diff --git a/front_end/panels/screencast/screencast-meta.ts b/front_end/panels/screencast/screencast-meta.ts
+index b8abbb9d6b..c499ab4f54 100644
+--- a/front_end/panels/screencast/screencast-meta.ts
++++ b/front_end/panels/screencast/screencast-meta.ts
+@@ -2,6 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++import * as Root from '../../core/root/root.js';
+ import * as UI from '../../ui/legacy/legacy.js';
+ 
+ import type * as Screencast from './screencast.js';
+@@ -22,6 +23,8 @@ UI.Toolbar.registerToolbarItem({
+   },
+   order: 1,
+   location: UI.Toolbar.ToolbarItemLocation.MAIN_TOOLBAR_LEFT,
++  // Device mode shows the page itself, and takes the toolbar's device button.
++  condition: () => !Root.Runtime.conditions.canEmulateDevice(),
+ });
+ 
+ UI.AppProvider.registerAppProvider({
+@@ -29,6 +32,7 @@ UI.AppProvider.registerAppProvider({
+     const Screencast = await loadScreencastModule();
+     return Screencast.ScreencastApp.ScreencastAppProvider.instance();
+   },
++  condition: () => !Root.Runtime.conditions.canEmulateDevice(),
+   order: 1,
+ });
+ 

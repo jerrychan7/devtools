@@ -63,6 +63,43 @@ export function registerPage({ session, probe }: Context) {
       return { url: link.href, errors: [], data: await res.text(), manifest: {} };
     },
 
+    /**
+     * The css* fields are in CSS pixels; the deprecated ones are mostly in device pixels, as
+     * Chrome reports them: times the screen's scale factor, devicePixelRatio as page scripts
+     * see it.
+     */
+    getLayoutMetrics(): Protocol.Page.GetLayoutMetricsResponse {
+      const root = document.documentElement;
+      const layout = { pageX: scrollX, pageY: scrollY, clientWidth: root.clientWidth, clientHeight: root.clientHeight };
+      const vv = visualViewport;
+      const visual = {
+        offsetX: vv?.offsetLeft ?? 0,
+        offsetY: vv?.offsetTop ?? 0,
+        pageX: vv?.pageLeft ?? scrollX,
+        pageY: vv?.pageTop ?? scrollY,
+        clientWidth: vv?.width ?? root.clientWidth,
+        clientHeight: vv?.height ?? root.clientHeight,
+        scale: vv?.scale ?? 1,
+        zoom: 1,
+      };
+      const content = { x: 0, y: 0, width: root.scrollWidth, height: root.scrollHeight };
+      const dpr = devicePixelRatio;
+      return {
+        layoutViewport: {
+          pageX: layout.pageX * dpr,
+          pageY: layout.pageY * dpr,
+          clientWidth: layout.clientWidth * dpr,
+          clientHeight: layout.clientHeight * dpr,
+        },
+        // Chrome leaves the visual viewport's position in CSS pixels.
+        visualViewport: { ...visual, clientWidth: visual.clientWidth * dpr, clientHeight: visual.clientHeight * dpr },
+        contentSize: { ...content, width: content.width * dpr, height: content.height * dpr },
+        cssLayoutViewport: layout,
+        cssVisualViewport: visual,
+        cssContentSize: content,
+      };
+    },
+
     getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({
       currentIndex: 0,
       entries: [

@@ -8,6 +8,8 @@
 // storing the config itself on the first load, unless shell mode is turned off (see
 // SHELL_MODE_KEY, SHELL_REFUSED_KEY).
 
+import { type Trust, isTrusted, trustOf } from './trust';
+
 /** @internal */
 export const SHELL_KEY = 'devtools-anywhere:shell';
 /**
@@ -44,44 +46,35 @@ export interface ShellConfig {
 /** What the shell's element takes from the page besides its URLs. @internal */
 export type ShellFlags = Pick<ShellConfig, 'open' | 'locked' | 'noToggler'>;
 
-let trustedOrigin = '';
+let trust: Trust | null = null;
 
 /**
- * Sets the origin shell configs must come from: that of the script that read them (the probe,
- * or the bundle). Its URL is taken while the script runs synchronously. Unset, the page's own
- * origin is used.
+ * Sets where shell configs may point, from the URL of the script that reads them (the probe, or
+ * the bundle; trust.ts). Its URL is taken while the script runs synchronously. Unset, the page's
+ * own origin is trusted.
  *
  * @internal
  */
 export function setShellScriptUrl(url: string) {
-  try {
-    trustedOrigin = new URL(url).origin;
-  } catch {
-    // Keep the previous origin.
-  }
+  // An invalid URL keeps the previous trust.
+  trust = trustOf(url) ?? trust;
 }
 
 /**
- * True when every URL of the config is http(s) on the trusted origin. sessionStorage can be
- * written by any script of the page, so a config pointing elsewhere is not trusted. Only the
- * origin is checked: the frontend, bundle and probe may sit in different directories (e.g. the
- * Vite plugin's base vs. a zero-config `data-devtools-frontend-url`). The remote server, which
- * may be anywhere, is not kept here for that reason: the shell's probe gives it to the pages in
- * the shell itself (see probe.ts).
+ * True when every URL of the config is trusted (trust.ts). sessionStorage can be written by any
+ * script of the page, so a config pointing elsewhere is not trusted. Off npm CDNs only the origin
+ * is checked: the frontend, bundle and probe may sit in different directories (e.g. the Vite
+ * plugin's base vs. a zero-config `data-devtools-frontend-url`). The remote server, which may be
+ * anywhere, is not kept here for that reason: the shell's probe gives it to the pages in the
+ * shell itself (see probe.ts).
  *
  * @internal
  */
 export function isTrustedShellConfig(config: ShellConfig): boolean {
-  const origin = trustedOrigin || location.origin;
-  return [config.frontend, config.bundle, config.serviceWorker].every(url => {
-    if (url === undefined) return true;
-    try {
-      const parsed = new URL(url);
-      return /^https?:$/.test(parsed.protocol) && parsed.origin === origin;
-    } catch {
-      return false;
-    }
-  });
+  const trusted = trust ?? { origin: location.origin };
+  return [config.frontend, config.bundle, config.serviceWorker].every(
+    url => url === undefined || isTrusted(url, trusted)
+  );
 }
 
 /**

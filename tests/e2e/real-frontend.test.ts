@@ -386,6 +386,14 @@ test('the screencast is off by default and shows the page when turned on', { ski
   // asElement() is typed as a handle to any Node; the page function returns an Element or null.
   const button = toggle.asElement() as ElementHandle<Element> | null;
   assert.ok(button, 'the toolbar offers the screencast');
+  // Device mode needs the shell, which can resize the page (device-mode.test.ts).
+  const deviceMode = await frontend.evaluate(() => {
+    const find = (root: Document | ShadowRoot): boolean =>
+      !!root.querySelector('[aria-label="Toggle device toolbar"]') ||
+      [...root.querySelectorAll('*')].some(el => !!el.shadowRoot && find(el.shadowRoot));
+    return find(document);
+  });
+  assert.equal(deviceMode, false, 'no device mode outside the shell');
   await button.click();
   await waitFor(async () => ((await frames()) ?? 0) > 0);
   await button.click();

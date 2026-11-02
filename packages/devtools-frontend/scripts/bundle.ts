@@ -4,7 +4,8 @@
 //   - each module loaded with import() (a panel, mostly) is a chunk with what only it needs,
 //     loaded when it is; the entry, what several of them share, and the ones too small to be
 //     worth a request are the chunk DevTools loads when it opens;
-//   - each worker is a single file of its own;
+//   - each worker is a single file of its own, and so is device mode's page for when DevTools is
+//     undocked (device_mode_emulation_frame.html, which the shell shows in an iframe);
 //   - the SVG icons are inlined into Images.js as data: URLs (each declared once, as the CSS
 //     variable every use reads);
 //   - every bundled file is named after a hash of its content, so it can be cached for good:
@@ -22,6 +23,9 @@ import { transform } from 'esbuild';
 
 const OUT_DIR = 'bundle';
 const APP = 'entrypoints/anywhere_app/anywhere_app.js';
+/** Device mode's page for when DevTools is undocked, and the module it loads. */
+const TOOLBOX_PAGE = 'device_mode_emulation_frame.html';
+const TOOLBOX = 'entrypoints/device_mode_emulation_frame/device_mode_emulation_frame.js';
 const WORKERS = [
   'entrypoints/formatter_worker/formatter_worker-entrypoint.js',
   'entrypoints/wasmparser_worker/wasmparser_worker-entrypoint.js',
@@ -213,6 +217,7 @@ export async function bundle(src: string, out: string): Promise<string[]> {
   // The workers first: the app names their files.
   for (const worker of WORKERS) workerOutput.set(worker, `./${await write(worker, false)}`);
   const app = await write(APP, true);
+  const toolbox = await write(TOOLBOX, false);
   if (!legacyImport) throw new Error('bundle: Root.Runtime#loadLegacyModule not found (upstream changed?)');
 
   // The text of the bundle and of the other text files, to tell whether an SVG is still named.
@@ -239,9 +244,15 @@ export async function bundle(src: string, out: string): Promise<string[]> {
     const dir = thirdPartyDir(name);
     if (dir) thirdParty.add(dir);
   }
-  const html = path.join(out, 'anywhere_app.html');
-  const page = fs.readFileSync(html, 'utf8');
-  if (!page.includes(`./${APP}`)) throw new Error(`bundle: anywhere_app.html does not load ./${APP}`);
-  fs.writeFileSync(html, page.replace(`./${APP}`, `./${OUT_DIR}/${app}`));
+  const pages: [file: string, module: string, bundled: string][] = [
+    ['anywhere_app.html', APP, app],
+    [TOOLBOX_PAGE, TOOLBOX, toolbox],
+  ];
+  for (const [file, module, bundled] of pages) {
+    const html = path.join(out, file);
+    const page = fs.readFileSync(html, 'utf8');
+    if (!page.includes(`./${module}`)) throw new Error(`bundle: ${file} does not load ./${module}`);
+    fs.writeFileSync(html, page.replace(`./${module}`, `./${OUT_DIR}/${bundled}`));
+  }
   return [...thirdParty].sort();
 }

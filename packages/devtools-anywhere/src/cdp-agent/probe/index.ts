@@ -20,6 +20,7 @@ import { isShellPage, readShellConfig, writeShellDocument } from './shell';
 
 export * from './types';
 export * from './shell';
+export { cdnFrontendUrl } from './trust';
 
 /** The probe keeps everything up to a coarse bound, for pages that never load the CDP agent. */
 const LIMIT = 10_000;

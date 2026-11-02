@@ -26,6 +26,7 @@ devtools_entrypoint("entrypoint") {
     "../../panels/console:meta",
     "../../panels/console_counters:meta",
     "../../panels/elements:meta",
+    "../../panels/emulation:meta",
     "../../panels/mobile_throttling:meta",
     "../../panels/network:meta",
     "../../panels/screencast:meta",

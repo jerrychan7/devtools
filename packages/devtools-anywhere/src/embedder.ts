@@ -13,13 +13,32 @@ export type DockSide = (typeof DOCK_SIDES)[number];
 
 /**
  * Requests from the frontend to the embedder: its dock side menu, its close button, keeping
- * DevTools open across reloads (shell mode), and the theme's colors for the panel's bar.
+ * DevTools open across reloads (shell mode), the theme's colors for the panel's bar, and in shell
+ * mode where the page goes (`page-bounds`, the frontend's InspectedPagePlaceholder, in CSS pixels
+ * of the frontend's viewport, like Chrome's setInspectedPageBounds) and the page's side of the split
+ * next to DevTools (`split`, in the same pixels: the whole of it, where the page bounds are only the
+ * device's screen in device mode), for the shell's grip on DevTools' edge.
+ * Undocked, device mode draws into a page of the frontend's (`toolbox`, its URL), which Chrome
+ * opens in the tab under DevTools' window and the shell shows in an iframe under the panel, where
+ * the frontend finds it among its parent's frames; the page bounds are then in CSS pixels of that
+ * iframe.
  */
 export type EmbedderRequest =
   | { type: 'dock'; side: DockSide }
   | { type: 'close' }
   | { type: 'keep-open'; keep: boolean }
-  | { type: 'theme'; toolbar: string; divider: string; icon: string };
+  | { type: 'theme'; toolbar: string; divider: string; icon: string }
+  | ({ type: 'page-bounds' } & PageBounds)
+  | ({ type: 'split' } & PageBounds)
+  | { type: 'toolbox'; url: string };
+
+/** A rectangle in CSS pixels. */
+export interface PageBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 /**
  * Tells the frontend, posted to it under {@link REQUEST_KEY} (`{ type: HIDDEN_NOTICE }`), that the
@@ -27,10 +46,13 @@ export type EmbedderRequest =
  * highlights, which would otherwise keep taking the page over.
  */
 export const HIDDEN_NOTICE = 'hidden';
-/** What the embedder posts to the frontend: {@link HIDDEN_NOTICE}. */
-export interface FrontendNotice {
-  type: typeof HIDDEN_NOTICE;
-}
+/**
+ * Tells the frontend, in shell mode, to give DevTools `size` CSS pixels next to the page: the
+ * shell's touch handle on the edge between them was dragged.
+ */
+export const SIDEBAR_SIZE_NOTICE = 'sidebar-size';
+/** What the embedder posts to the frontend: {@link HIDDEN_NOTICE} or {@link SIDEBAR_SIZE_NOTICE}. */
+export type FrontendNotice = { type: typeof HIDDEN_NOTICE } | { type: typeof SIDEBAR_SIZE_NOTICE; size: number };
 
 /**
  * The key a request is posted under (`{ [REQUEST_KEY]: request }`): requests are objects, so
