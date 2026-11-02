@@ -1,12 +1,12 @@
 import type { Protocol } from 'devtools-protocol';
-import { isCssom } from '../../core/realm';
+import { documentOf, isCssom, isElement, isHtml, isNode } from '../../core/realm';
 import { type Context } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
 import { parentOf } from '../../core/container-query';
 import { CdpError } from '../../core/session';
 import { resolveElement } from '../dom/dom';
 import { historyOf } from '../../core/history';
-import { quietly, watchAdopted } from '../../core/adopted';
+import { quietly, watchAdopted, watchTrees } from '../../core/adopted';
 import { ForcedPseudoClasses } from './forced-pseudo';
 import { backgroundsBehind } from './color';
 import { Cascade } from './cascade';
@@ -26,8 +26,11 @@ export function registerCss(ctx: Context) {
   const { session, nodes } = ctx;
   const history = historyOf(ctx);
 
+  /** The documents of the frames, the top one first. */
+  const documents = () => Array.from(ctx.frames, f => f.document);
+
   /**
-   * Shadow roots in the document (closed ones too, when the probe recorded them), in tree order.
+   * Shadow roots in the frames' documents (closed ones too, when the probe recorded them), in tree order.
    * While the CSS domain is enabled they are kept until the observer sees an element come or go,
    * or a shadow root is attached.
    */
@@ -40,9 +43,9 @@ export function registerCss(ctx: Context) {
     if (shadowRootCache) return shadowRootCache;
     const roots: ShadowRoot[] = [];
     const visit = (root: Document | ShadowRoot) => {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!(node instanceof Element) || isOwn(node)) continue;
+        if (!isElement(node) || isOwn(node)) continue;
         const shadowRoot = nodes.shadowRootOf(node);
         if (!shadowRoot) continue;
         roots.push(shadowRoot);
@@ -54,7 +57,7 @@ export function registerCss(ctx: Context) {
         visit(shadowRoot);
       }
     };
-    visit(document);
+    documents().forEach(visit);
     if (observer) shadowRootCache = roots;
     return roots;
   }
@@ -71,10 +74,17 @@ export function registerCss(ctx: Context) {
   // The DOM does not tell which <style> the parser made: those in the document before the
   // parser is done are taken as its own, those added later as a script's. A script that adds
   // one while the page loads is taken for the parser.
+  // The same goes for the document of each iframe, from when the agent first sees it.
   const parsed = new WeakSet<HTMLStyleElement>();
-  const collectParsed = () => document.querySelectorAll('style').forEach(s => parsed.add(s));
-  collectParsed();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', collectParsed, { once: true });
+  const parsedIn = new WeakSet<Document>();
+  const collectParsed = (doc: Document) => {
+    if (parsedIn.has(doc)) return;
+    parsedIn.add(doc);
+    const collect = () => doc.querySelectorAll('style').forEach(s => parsed.add(s));
+    collect();
+    if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', collect, { once: true });
+  };
+  documents().forEach(collectParsed);
   sheets.fromParser = style => parsed.has(style);
 
   /** After the page's styles changed: keep forced states and pseudo-elements in sync. */
@@ -117,8 +127,44 @@ export function registerCss(ctx: Context) {
 
   /** `load` reaches the document for every image and script too: only style elements matter. */
   const onLoad = (event: Event) => {
-    if (event.target instanceof HTMLLinkElement || event.target instanceof HTMLStyleElement) void syncSheets();
+    const target = event.target;
+    if (isNode(target) && (isHtml(target, 'link') || isHtml(target, 'style'))) void syncSheets();
   };
+
+  /** The frames' documents the observer and the load listener watch. */
+  let watched = new Set<Document>();
+  let stopFrames: (() => void) | null = null;
+
+  /** Watches the documents of frames not watched yet for style sheet changes. */
+  function watchDocuments() {
+    const current = new Set(documents());
+    // Those of removed iframes and those navigated away from are let go.
+    for (const doc of watched) {
+      if (current.has(doc)) continue;
+      doc.removeEventListener('load', onLoad, true);
+      watched.delete(doc);
+    }
+    for (const doc of current) {
+      if (watched.has(doc)) continue;
+      watched.add(doc);
+      collectParsed(doc);
+      observer?.observe(doc, OBSERVED);
+      // A <link> stylesheet (or a <style> with @import) becomes available once loaded.
+      doc.addEventListener('load', onLoad, true);
+    }
+    // Adopted style sheets change without a DOM mutation, in the iframes' realms too.
+    watchTrees(documents());
+  }
+
+  /**
+   * Like Chrome, an iframe's style sheets are added when it is attached or loads another
+   * document, and removed with the document it leaves.
+   */
+  function framesChanged() {
+    shadowRootCache = null;
+    watchDocuments();
+    void syncSheets();
+  }
 
   /** Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in. */
   const loadCopies = () =>
@@ -224,8 +270,7 @@ export function registerCss(ctx: Context) {
       if (enabled) return;
       enabled = true;
       known = new Set();
-      const ownsSheet = (n: Node | null) =>
-        (n instanceof HTMLStyleElement || n instanceof HTMLLinkElement) && !isOwn(n);
+      const ownsSheet = (n: Node | null) => (isHtml(n, 'style') || isHtml(n, 'link')) && !isOwn(n);
       observer = new MutationObserver(records => {
         // Adding or removing a <style> or <link>, changing the text of a <style> or the href
         // of a <link> all replace style sheets.
@@ -235,15 +280,11 @@ export function registerCss(ctx: Context) {
             ownsSheet(r.target.parentNode) ||
             [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(
               // A shadow host brings or takes away the sheets of its shadow tree.
-              n => ownsSheet(n) || (n instanceof Element && !isOwn(n) && !!nodes.shadowRootOf(n))
+              n => ownsSheet(n) || (isElement(n) && !isOwn(n) && !!nodes.shadowRootOf(n))
             )
         );
         // Shadow hosts may come or go with any element: look for shadow roots again when needed.
-        if (
-          records.some(r =>
-            [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(n => n instanceof Element)
-          )
-        )
+        if (records.some(r => [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(n => isElement(n))))
           shadowRootCache = null;
         quietly(() => forced.removed(records.flatMap(r => Array.from(r.removedNodes))));
         if (touchesSheets) syncSheets();
@@ -251,15 +292,15 @@ export function registerCss(ctx: Context) {
       observed = new WeakSet();
       shadowRootCache = null;
       stopShadowRoots ??= ctx.probe.onShadowRoot(() => (shadowRootCache = null));
-      observer.observe(document, OBSERVED);
-      syncSheets();
-      // A <link> stylesheet (or a <style> with @import) becomes available once loaded.
-      document.addEventListener('load', onLoad, true);
+      watched = new Set();
       // Adopted style sheets change without a DOM mutation.
       stopAdopted = watchAdopted(
         () => void syncSheets(),
-        () => [document, ...shadowRoots()]
+        () => [...documents(), ...shadowRoots()]
       );
+      stopFrames = ctx.frames.onChange(framesChanged);
+      watchDocuments();
+      syncSheets();
     },
 
     disable() {
@@ -270,7 +311,10 @@ export function registerCss(ctx: Context) {
       shadowRootCache = null;
       stopShadowRoots?.();
       stopShadowRoots = null;
-      document.removeEventListener('load', onLoad, true);
+      for (const doc of watched) doc.removeEventListener('load', onLoad, true);
+      watched = new Set();
+      stopFrames?.();
+      stopFrames = null;
       stopAdopted?.();
       stopAdopted = null;
     },

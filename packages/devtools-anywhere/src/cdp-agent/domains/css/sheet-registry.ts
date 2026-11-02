@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { isCssom } from '../../core/realm';
+import { isCssom, isHtml, isShadowRoot, realmOf } from '../../core/realm';
 import { frames } from '../../core/frames';
 import { isOwn } from '../../core/nodes';
 import { CdpError } from '../../core/session';
@@ -66,13 +66,14 @@ export class SheetRegistry {
   }
 
   /**
-   * The document and the shadow roots with their top-level style sheets in cascade order: those
-   * of <style> and <link>, then adopted ones.
+   * The documents of the frames and the shadow roots with their top-level style sheets in
+   * cascade order: those of <style> and <link>, then adopted ones. Like Chrome, each same-origin
+   * iframe's document has sheets of its own, which apply only to it.
    */
   trees(): { tree: TreeScope; sheets: CSSStyleSheet[] }[] {
     if (this.memo?.trees) return this.memo.trees;
     const result: { tree: TreeScope; sheets: CSSStyleSheet[] }[] = [];
-    for (const tree of [document, ...this.shadowRoots()]) {
+    for (const tree of [...Array.from(frames, f => f.document), ...this.shadowRoots()]) {
       const list: CSSStyleSheet[] = [];
       for (const sheet of Array.from(tree.styleSheets)) {
         // devtools-anywhere's own sheets are not the page's.
@@ -262,16 +263,18 @@ export class SheetRegistry {
     const isInspector = sheet === this.inspectorSheet;
     const constructed = isConstructed(sheet);
     // Like Chrome, sheets in shadow trees, constructed ones and those of a <style> a script
-    // inserted have no source URL and are not inline.
+    // inserted have no source URL and are not inline. The others name the frame they are in, and
+    // inline ones the base URL of its document: like Chrome, that of the parent for a srcdoc
+    // iframe (Chrome takes the base URL the sheet was parsed with, ours is the current one).
     const owner = sheet.ownerNode;
     const local =
       constructed ||
-      owner?.getRootNode() instanceof ShadowRoot ||
-      (owner instanceof HTMLStyleElement && !this.fromParser(owner));
+      (owner && isShadowRoot(owner.getRootNode())) ||
+      (isHtml(owner, 'style') && !this.fromParser(owner));
     return {
       styleSheetId: this.idOf(sheet),
-      frameId: frames.ofNode(owner).id,
-      sourceURL: sheet.href ?? (isInspector || local ? '' : location.href),
+      frameId: frames.ofWindow(realmOfSheet(sheet)).id,
+      sourceURL: sheet.href ?? (isInspector || local || !owner ? '' : owner.baseURI),
       origin: this.origin(sheet),
       title: sheet.title ?? '',
       disabled: sheet.disabled,
@@ -293,4 +296,20 @@ export function isConstructed(sheet: CSSStyleSheet): boolean {
   let top = sheet;
   while (top.ownerRule?.parentStyleSheet) top = top.ownerRule.parentStyleSheet;
   return !top.ownerNode && !top.ownerRule;
+}
+
+/**
+ * The window whose document the sheet (or the sheet importing it) belongs to: that of its owner
+ * node, or for a constructed sheet, the realm it was made in, whose trees alone can adopt it.
+ */
+export function realmOfSheet(sheet: CSSStyleSheet): Window & typeof globalThis {
+  let top = sheet;
+  while (top.ownerRule?.parentStyleSheet) top = top.ownerRule.parentStyleSheet;
+  if (top.ownerNode) return realmOf(top.ownerNode);
+  const proto: unknown = Object.getPrototypeOf(top);
+  for (const frame of frames) {
+    const realm = realmOf(frame.document);
+    if (proto === realm.CSSStyleSheet.prototype) return realm;
+  }
+  return window;
 }

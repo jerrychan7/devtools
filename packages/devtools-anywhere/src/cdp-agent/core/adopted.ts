@@ -1,4 +1,4 @@
-import { isCssom } from './realm';
+import { isCssom, isShadowRoot, realmOf } from './realm';
 
 /**
  * Notices changes to `adoptedStyleSheets` soon after they happen. Assigning goes through the
@@ -7,7 +7,8 @@ import { isCssom } from './realm';
  * watches. In a microtask, once per turn, the trees touched are compared with their sheets as
  * last seen: listeners are only called when one changed, so merely reading costs a comparison.
  * A change made through an array read long before is only seen at the next read or assignment
- * by anyone (including the page's own code).
+ * by anyone (including the page's own code). Each realm has prototypes of its own: those of a
+ * same-origin iframe are hooked once one of its trees is watched.
  */
 type Listener = () => void;
 type Tree = Document | ShadowRoot;
@@ -27,7 +28,10 @@ let touched = new Set<Tree>();
 /** Each tree's sheets as last seen. */
 let seen = new WeakMap<Tree, CSSStyleSheet[]>();
 
-const protoOf = (tree: Tree) => (tree instanceof ShadowRoot ? ShadowRoot.prototype : Document.prototype);
+const protoOf = (tree: Tree) => {
+  const realm = realmOf(tree);
+  return isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
+};
 
 function read(tree: Tree): CSSStyleSheet[] {
   const get = natives.get(protoOf(tree))?.get;
@@ -60,8 +64,9 @@ function notify(tree: Tree) {
   });
 }
 
-function install() {
-  for (const proto of [Document.prototype, ShadowRoot.prototype]) {
+/** Hooks the prototypes of a realm (a window's globals). */
+function install(realm: Window & typeof globalThis) {
+  for (const proto of [realm.Document.prototype, realm.ShadowRoot.prototype]) {
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
     const get = descriptor?.get;
     const set = descriptor?.set;
@@ -101,13 +106,24 @@ function uninstall() {
  * gives the trees to take as seen now, so that the first read does not count as a change.
  */
 export function watchAdopted(listener: Listener, trees: () => Tree[]): () => void {
-  if (!listeners.size) install();
   listeners.add(listener);
-  for (const tree of trees()) changed(tree);
+  watchTrees(trees());
   return () => {
     listeners.delete(listener);
     if (!listeners.size) uninstall();
   };
+}
+
+/**
+ * Takes `trees` as seen now, and hooks their realms if not yet: e.g. the document of an iframe
+ * that loaded after watching started. Does nothing while no one watches.
+ */
+export function watchTrees(trees: Tree[]): void {
+  if (!listeners.size) return;
+  for (const tree of trees) {
+    install(realmOf(tree));
+    changed(tree);
+  }
 }
 
 /** Runs `fn` without taking its own reads and writes of adopted style sheets for the page's. */
