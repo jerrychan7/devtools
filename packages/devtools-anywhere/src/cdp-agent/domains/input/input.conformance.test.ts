@@ -341,11 +341,12 @@ test('a release or a move without a touch sends nothing', async () => {
     }
     await side.send('Emulation.setEmitTouchEventsForMouse', { enabled: false });
   };
-  // Chrome's hover from earlier tests sometimes gets a pointerover and a mouseover through:
-  // only what a touch would send is compared.
-  const touchy = (events: string[]) => events.filter(e => !/^(pointer|mouse)over:/.test(e));
+  // Chrome's hover from earlier tests sometimes gets a pointerover and a mouseover through, and on
+  // CI a release sometimes reaches the page as a mouse release (pointerup, mouseup) before touch
+  // emulation takes it: on Chrome's side only what a touch would send is compared. Ours sends nothing.
+  const touchy = (events: string[]) => events.filter(e => !/^(pointer|mouse)(over|up):/.test(e));
   assert.deepEqual(touchy((await run(t.chrome, steps('chrome'))).events), []);
-  assert.deepEqual(touchy((await run(t.ours, steps('ours'))).events), []);
+  assert.deepEqual((await run(t.ours, steps('ours'))).events, []);
   assert.deepEqual(responses['ours'], responses['chrome']);
   assert.deepEqual(responses['chrome'], [{}, {}, {}, {}]);
 });
