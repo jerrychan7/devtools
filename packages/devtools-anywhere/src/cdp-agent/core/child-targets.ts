@@ -50,6 +50,46 @@ export interface ParentLink {
 
 type Listener<T> = (value: T) => void;
 
+/**
+ * Prefix of the ids of an agent's own commands to an iframe's agent (askChild): their responses
+ * are not the client's, and are not passed on to it.
+ */
+export const OWN_ID_PREFIX = 'target-own-';
+let ownSeq = 0;
+
+function parse(message: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(message);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? { ...value } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Sends the iframe's agent a command of this agent's own, the response to which no client sees;
+ * resolves with its result, or undefined on an error, when the link closes or after `timeout` ms.
+ */
+export function askChild(link: ChildLink, method: string, params: object, timeout: number): Promise<unknown> {
+  const id = `${OWN_ID_PREFIX}${++ownSeq}`;
+  return new Promise(resolve => {
+    const done = (result: unknown) => {
+      off();
+      offClose();
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const off = link.onMessage(message => {
+      if (!message.includes(id)) return;
+      const parsed = parse(message);
+      if (parsed?.['id'] === id) done(parsed['result']);
+    });
+    const offClose = link.onClose(() => done(undefined));
+    const timer = setTimeout(() => done(undefined), timeout);
+    link.send(JSON.stringify({ id, method, params }));
+  });
+}
+
 /** The links of a page's agent: to its cross-origin iframes, and to its parent if it is one. */
 export class ChildTargets {
   readonly #children = new Set<ChildLink>();
@@ -82,6 +122,12 @@ export class ChildTargets {
 
   children(): Iterable<ChildLink> {
     return this.#children;
+  }
+
+  /** The link of a cross-origin iframe's element, if it has one. */
+  childOf(owner: Element): ChildLink | undefined {
+    for (const link of this.#children) if (link.owner === owner) return link;
+    return undefined;
   }
 
   /** Listens to new children; returns its removal. */

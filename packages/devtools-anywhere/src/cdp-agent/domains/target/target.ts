@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { type ChildLink, type ChildTargets, childTargets } from '../../core/child-targets';
+import { askChild, type ChildLink, type ChildTargets, childTargets, OWN_ID_PREFIX } from '../../core/child-targets';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 
@@ -18,8 +18,6 @@ import { CdpError } from '../../core/session';
  * on.
  */
 
-/** Prefix of the ids of the domain's own commands to the iframe's agent: their responses are not the client's. */
-const OWN_ID_PREFIX = 'target-own-';
 /** How long the iframe's agent has to tell its URL and title, in ms, before the iframe's `src` is used. */
 const INFO_TIMEOUT = 1000;
 
@@ -27,8 +25,6 @@ const INFO_TIMEOUT = 1000;
 const claims = new WeakMap<ChildLink, object>();
 /** Listeners to links let go, which another CDP session may then attach. */
 const releases = new Set<(link: ChildLink) => void>();
-
-let ownSeq = 0;
 
 /** A session id: random, unique across the page and the iframes' agents, like Chrome's. */
 function newSessionId() {
@@ -50,29 +46,8 @@ function parse(message: string): Record<string, unknown> | undefined {
 const field = (value: unknown, name: string): unknown =>
   typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
 
-/**
- * Sends the iframe's agent a command of the domain's own, the response to which no client
- * sees; resolves with its result, or undefined on an error or after `timeout` ms.
- */
-function ask(link: ChildLink, method: string, params: object = {}, timeout = INFO_TIMEOUT): Promise<unknown> {
-  const id = `${OWN_ID_PREFIX}${++ownSeq}`;
-  return new Promise(resolve => {
-    const done = (result: unknown) => {
-      off();
-      offClose();
-      clearTimeout(timer);
-      resolve(result);
-    };
-    const off = link.onMessage(message => {
-      if (!message.includes(id)) return;
-      const parsed = parse(message);
-      if (parsed?.['id'] === id) done(parsed['result']);
-    });
-    const offClose = link.onClose(() => done(undefined));
-    const timer = setTimeout(() => done(undefined), timeout);
-    link.send(JSON.stringify({ id, method, params }));
-  });
-}
+/** Asks the iframe's agent, waiting {@link INFO_TIMEOUT} ms at most. */
+const ask = (link: ChildLink, method: string, params: object = {}) => askChild(link, method, params, INFO_TIMEOUT);
 
 /** The URL an iframe was given, for one whose agent does not tell its own. */
 function srcOf(owner: Element): string {

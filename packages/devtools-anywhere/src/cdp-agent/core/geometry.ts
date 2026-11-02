@@ -273,6 +273,14 @@ export function pointInFrame(doc: Document, x: number, y: number): { x: number; 
   return m ? unmapPoint(m, x, y) : { x, y };
 }
 
+/**
+ * A point of a frame owner's viewport in the viewport of the document it shows: for a cross-origin
+ * iframe, whose document is out of reach, the point its own page sees.
+ */
+export function pointInOwnerContent(owner: Element, x: number, y: number): { x: number; y: number } {
+  return unmapPoint(frameContentToViewport(owner), x, y);
+}
+
 /** The document a frame owner (`<iframe>`, `<object>`, …) shows, when within reach (same origin). */
 export function frameDocumentOf(el: Element): Document | null {
   return isFrameOwner(el) ? contentDocumentOf(el) : null;

@@ -1,8 +1,12 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { closestOwn } from '../../core/nodes';
-import { frameDocumentOf, hitPath, parentFrameDocument, pointInFrame } from '../../core/geometry';
+import { askChild, type ChildLink, type ChildTargets, childTargets } from '../../core/child-targets';
+import { frameDocumentOf, hitPath, parentFrameDocument, pointInFrame, pointInOwnerContent } from '../../core/geometry';
 import { documentOf, isElement, isHtml, isHtmlElement, realmOf } from '../../core/realm';
+
+/** How long a cross-origin iframe's agent has to carry out forwarded input, in ms. */
+const FORWARD_TIMEOUT = 5000;
 
 type MouseEventRequest = Protocol.Input.DispatchMouseEventRequest | Protocol.Input.EmulateTouchFromMouseEventRequest;
 
@@ -62,8 +66,13 @@ const isEditable = (el: Element | null) =>
  * Like Chrome, input over a same-origin iframe goes to the element under it in the iframe's
  * document, at the point in that document's viewport, as events of that document's window; and
  * keys and text go to the element focused in the focused frame.
+ *
+ * Input over a linked cross-origin iframe (core/child-targets.ts) goes to the iframe's agent, as
+ * Chrome routes it to the iframe's process: the same command, at the point in the iframe's
+ * viewport. The command goes over the link as this agent's own, which the client does not
+ * see, and is answered once the iframe's agent has carried it out.
  */
-export function registerInput({ session, frames }: Context) {
+export function registerInput({ session, frames }: Context, links: ChildTargets = childTargets) {
   const top = frames.top;
   let emitTouch = false;
   /** What the mouse is over: the element in each document from the top one in (see `hitAt`). */
@@ -88,6 +97,34 @@ export function registerInput({ session, frames }: Context) {
   };
 
   const innermost = (path: Target[]): Target => path[path.length - 1] ?? top.document;
+
+  /** The link of the cross-origin iframe `target` is, if it is one. */
+  const linkOf = (target: Target | null): ChildLink | undefined =>
+    target && isElement(target) ? links.childOf(target) : undefined;
+
+  /** The touch going on in a cross-origin iframe: the iframe's agent has it till it ends. */
+  let touchIn: { link: ChildLink; owner: Element } | null = null;
+
+  /**
+   * Sends a mouse (or touch) command on to a cross-origin iframe's agent, at the top viewport
+   * point mapped into the iframe's viewport, and waits for it to be carried out.
+   */
+  async function forward(link: ChildLink, owner: Element, method: string, p: MouseEventRequest) {
+    const at = pointInFrame(owner.ownerDocument, p.x, p.y);
+    const inner = pointInOwnerContent(owner, at.x, at.y);
+    await askChild(link, method, { ...p, x: inner.x, y: inner.y }, FORWARD_TIMEOUT);
+  }
+
+  /**
+   * Mouse input over a cross-origin iframe, measured in Chrome: this page's documents get none of
+   * it, not even an over or out (their hovered elements stay what they were), nor the iframe's
+   * document an out once the mouse leaves it. The press ends here: a release over this page gets
+   * no click, as in Chrome. The focus moves into the iframe as its page focuses what was pressed.
+   */
+  function mouseInto(link: ChildLink, owner: Element, p: MouseEventRequest) {
+    if (p.type === 'mousePressed' || p.type === 'mouseReleased') pressed = null;
+    return forward(link, owner, 'Input.dispatchMouseEvent', p);
+  }
 
   function mouseInit(p: MouseEventRequest, buttons: number, target: Target): MouseEventInit {
     const at = pointInFrame(documentOf(target), p.x, p.y);
@@ -169,9 +206,11 @@ export function registerInput({ session, frames }: Context) {
   /** The held buttons, which only Input.dispatchMouseEvent reports. */
   const buttonsOf = (p: MouseEventRequest) => ('buttons' in p ? p.buttons : undefined);
 
-  function mouse(p: MouseEventRequest) {
+  async function mouse(p: MouseEventRequest) {
     const path = hitAt(p.x, p.y);
     const target = innermost(path);
+    const link = linkOf(target);
+    if (link && isElement(target)) return await mouseInto(link, target, p);
     const button = p.button ?? 'none';
     switch (p.type) {
       case 'mouseMoved': {
@@ -213,7 +252,22 @@ export function registerInput({ session, frames }: Context) {
     }
   }
 
-  function touch(p: MouseEventRequest) {
+  async function touch(p: MouseEventRequest) {
+    // A touch that started in a cross-origin iframe is the iframe's agent's till it ends, as a
+    // touch stays with what it touched; a wheel over one is too.
+    if (touchIn) {
+      const { link, owner } = touchIn;
+      if (p.type === 'mouseReleased') touchIn = null;
+      return await forward(link, owner, 'Input.emulateTouchFromMouseEvent', p);
+    }
+    if (p.type === 'mousePressed' || p.type === 'mouseWheel') {
+      const owner = elementsAt(p.x, p.y).pop() ?? null;
+      const link = linkOf(owner);
+      if (link && owner) {
+        if (p.type === 'mousePressed') touchIn = { link, owner };
+        return await forward(link, owner, 'Input.emulateTouchFromMouseEvent', p);
+      }
+    }
     // Hovering does not touch, and Chrome ignores a release without a touch to end.
     if ((p.type === 'mouseMoved' || p.type === 'mouseReleased') && !touchStart) return;
     // Once touching, the touch stays with the touched element even off the page, so that
@@ -358,10 +412,7 @@ export function registerInput({ session, frames }: Context) {
   }
 
   session.register('Input', {
-    dispatchMouseEvent(p: Protocol.Input.DispatchMouseEventRequest) {
-      if (emitTouch) touch(p);
-      else mouse(p);
-    },
+    dispatchMouseEvent: (p: Protocol.Input.DispatchMouseEventRequest) => (emitTouch ? touch(p) : mouse(p)),
     emulateTouchFromMouseEvent: (p: Protocol.Input.EmulateTouchFromMouseEventRequest) => touch(p),
 
     dispatchKeyEvent(p: Protocol.Input.DispatchKeyEventRequest) {
