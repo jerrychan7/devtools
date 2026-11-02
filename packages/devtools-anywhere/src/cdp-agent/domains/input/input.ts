@@ -220,6 +220,8 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
         break;
       }
       case 'mousePressed': {
+        // Like Chrome, a press elsewhere than the last move moves the hover there first.
+        hover(path, p, buttonsOf(p) ?? BUTTONS[button]);
         pressed = target;
         if (fire(target, 'down', mouseInit(p, buttonsOf(p) ?? BUTTONS[button], target))) focus(target);
         if (button === 'right')
@@ -227,6 +229,7 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
         break;
       }
       case 'mouseReleased': {
+        hover(path, p, buttonsOf(p) ?? 0);
         const init = mouseInit(p, buttonsOf(p) ?? 0, target);
         fire(target, 'up', init);
         const down = pressed;
