@@ -237,14 +237,16 @@ test('the Sources panel shows source and Watch, without breakpoints or pausing c
 
   // Watch stays: without pausing, its expressions are evaluated in the global scope.
   assert.equal(await (await query('[aria-label="Watch"]')).evaluate(el => el === null), false, 'Watch');
+  /** The element, once laid out: there is a point to click on. */
+  const laidOut = async (el: ElementHandle<Element> | null) => (el && (await el.boundingBox()) ? el : null);
   const addWatch = async () =>
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
     (await query('[aria-label="Add watch expression"]')).asElement() as ElementHandle<Element> | null;
-  await (await waitFor(addWatch)).click();
+  await (await waitFor(async () => laidOut(await addWatch()))).click();
   const prompt = async () =>
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
     (await query('.text-prompt[contenteditable]')).asElement() as ElementHandle<Element> | null;
-  await (await waitFor(prompt)).click();
+  await (await waitFor(async () => laidOut(await prompt()))).click();
   await frontend.page().keyboard.type('document.title');
   await frontend.page().keyboard.press('Enter');
   await waitFor(async () => (await text()).includes('document.title: "real frontend"'));
@@ -253,7 +255,7 @@ test('the Sources panel shows source and Watch, without breakpoints or pausing c
   const lineNumber = async () =>
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
     (await query('.cm-lineNumbers .cm-gutterElement:nth-child(2)')).asElement() as ElementHandle<Element> | null;
-  await (await waitFor(lineNumber)).click();
+  await (await waitFor(async () => laidOut(await lineNumber()))).click();
   await new Promise(r => setTimeout(r, 500));
   assert.equal(await (await query('.cm-breakpoint')).evaluate(el => el === null), true);
   const breakpoints = await frontend.evaluate(async () => {
