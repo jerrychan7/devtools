@@ -601,7 +601,12 @@ export function registerDom(ctx: Context) {
 
     requestChildNodes(params: Protocol.DOM.RequestChildNodesRequest) {
       const depth = params.depth ?? 1;
-      emitChildren(resolveNode(ctx, params), depth === -1 ? -1 : depth, params.pierce);
+      const node = resolveNode(ctx, params);
+      // Like Chrome, children the client has are not sent again unless deeper ones are asked for:
+      // the frontend asks again while its first request is pending, and would replace the nodes it
+      // has (an iframe's grafted document with them) by new ones.
+      if (depth !== -1 && depth <= 1 && nodes.childrenSent.has(node)) return;
+      emitChildren(node, depth === -1 ? -1 : depth, params.pierce);
     },
 
     describeNode(params: Protocol.DOM.DescribeNodeRequest): Protocol.DOM.DescribeNodeResponse {

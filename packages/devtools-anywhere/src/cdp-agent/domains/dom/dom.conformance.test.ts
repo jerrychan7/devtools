@@ -76,6 +76,28 @@ describe('DOM', () => {
     assert.deepEqual(diffSubset(ours.nodes, chrome.nodes), []);
   });
 
+  test('requestChildNodes again: children the client has are not sent again, unless deeper', async () => {
+    const html = (r: DomNode) => r.children?.find(n => n.nodeName === 'HTML')?.nodeId ?? 0;
+    const counts = async () =>
+      Promise.all([t.ours.events('DOM.setChildNodes'), t.chrome.events('DOM.setChildNodes')]).then(([o, c]) => [
+        o.length,
+        c.length,
+      ]);
+    // The frontend asks again while its first request is pending: Chrome sends them once.
+    await Promise.all([
+      t.ours.send('DOM.requestChildNodes', { nodeId: html(ourRoot) }),
+      t.chrome.send('DOM.requestChildNodes', { nodeId: html(chromeRoot) }),
+    ]);
+    await new Promise(r => setTimeout(r, 200));
+    assert.deepEqual(await counts(), [1, 1]);
+    await Promise.all([
+      t.ours.send('DOM.requestChildNodes', { nodeId: html(ourRoot), depth: 2 }),
+      t.chrome.send('DOM.requestChildNodes', { nodeId: html(chromeRoot), depth: 2 }),
+    ]);
+    // Sent then (Chrome splits them by parent, which is not compared here).
+    await waitForBoth(t, 'DOM.setChildNodes', 2);
+  });
+
   describe('mutations', () => {
     before(async () => {
       [{ root: ourRoot }, { root: chromeRoot }] = await both('DOM.getDocument', { depth: -1 });
