@@ -30,10 +30,10 @@ export class SheetRegistry {
   /** Whether a <style> came from the HTML parser rather than from a script. */
   fromParser: (style: HTMLStyleElement) => boolean = () => true;
 
-  private fetch: typeof window.fetch;
+  private fetch: typeof globalThis.fetch;
   private shadowRoots: () => ShadowRoot[];
 
-  constructor(fetch: typeof window.fetch, shadowRoots: () => ShadowRoot[]) {
+  constructor(fetch: typeof globalThis.fetch, shadowRoots: () => ShadowRoot[]) {
     this.fetch = fetch;
     this.shadowRoots = shadowRoots;
   }
