@@ -1,4 +1,15 @@
 import type { Protocol } from 'devtools-protocol';
+import type { FrameRegistry } from './frames';
+import {
+  isDocument,
+  isDocumentFragment,
+  isDocumentType,
+  isElement,
+  isFrameOwner,
+  isHtml,
+  isShadowRoot,
+  realmOf,
+} from './realm';
 
 type DomNode = Protocol.DOM.Node;
 
@@ -23,8 +34,7 @@ export const isOwn = (node: Node) => ownNodes.has(node);
 
 /** Whether `node` is one of ours or inside one, through shadow roots too. */
 export function closestOwn(node: Node): boolean {
-  for (let n: Node | null = node; n; n = n instanceof ShadowRoot ? n.host : n.parentNode)
-    if (ownNodes.has(n)) return true;
+  for (let n: Node | null = node; n; n = isShadowRoot(n) ? n.host : n.parentNode) if (ownNodes.has(n)) return true;
   return false;
 }
 /** Pseudo-classes forced on an element (CSS.forcePseudoState); hidden from the client. */
@@ -64,8 +74,8 @@ export type Inspectable = Node | PseudoElement;
 
 /** Whether `host` currently generates the pseudo-element. */
 export function hasPseudoElement(host: Element, type: PseudoType): boolean {
-  if (type === 'marker') return getComputedStyle(host).display.includes('list-item');
-  const content = getComputedStyle(host, `::${type}`).content;
+  if (type === 'marker') return realmOf(host).getComputedStyle(host).display.includes('list-item');
+  const content = realmOf(host).getComputedStyle(host, `::${type}`).content;
   return content !== 'none' && content !== 'normal' && content !== '';
 }
 
@@ -96,6 +106,10 @@ export class NodeRegistry {
   inspected: Node[] = [];
   /** The `<template>` of each template content fragment sent to the client. */
   private templateOf = new WeakMap<DocumentFragment, HTMLTemplateElement>();
+  /** The document sent as each frame owner's `contentDocument`, to forget it with the owner. */
+  private contentDocuments = new WeakMap<Element, Document>();
+  /** Called for every iframe document sent to the client, e.g. to observe its mutations. */
+  onContentDocument: ((doc: Document) => void) | null = null;
   /** Called for every shadow root sent to the client, e.g. to observe its mutations. */
   onShadowRoot: ((root: ShadowRoot) => void) | null = null;
   /**
@@ -107,8 +121,15 @@ export class NodeRegistry {
   /** Also finds closed shadow roots (recorded by the probe). */
   readonly shadowRootOf: (host: Element) => ShadowRoot | null;
 
-  constructor(shadowRootOf: (host: Element) => ShadowRoot | null = host => host.shadowRoot) {
+  /** The page's frames, for the documents of iframes; without it, iframes are sent without. */
+  readonly frames: FrameRegistry | null;
+
+  constructor(
+    shadowRootOf: (host: Element) => ShadowRoot | null = host => host.shadowRoot,
+    frames: FrameRegistry | null = null
+  ) {
     this.shadowRootOf = shadowRootOf;
+    this.frames = frames;
   }
 
   /** Starts a new session: previously sent node ids become invalid. */
@@ -165,7 +186,7 @@ export class NodeRegistry {
       if (id === undefined) return;
       this.ids.delete(n);
       this.nodes.delete(id);
-      if (n instanceof Element) {
+      if (isElement(n)) {
         for (const type of this.pseudoSent.get(n) ?? []) {
           const pseudo = this.pseudoOf(n, type);
           const pseudoId = this.ids.get(pseudo);
@@ -175,7 +196,9 @@ export class NodeRegistry {
         this.pseudoSent.delete(n);
         const shadowRoot = this.shadowRootOf(n);
         if (shadowRoot) visit(shadowRoot);
-        if (n instanceof HTMLTemplateElement) visit(n.content);
+        if (isHtml(n, 'template')) visit(n.content);
+        const contentDocument = this.contentDocuments.get(n);
+        if (contentDocument) visit(contentDocument);
       }
       if (!this.childrenSent.has(n)) return;
       this.childrenSent.delete(n);
@@ -216,7 +239,7 @@ export class NodeRegistry {
   /** Whether a node is shown to the client at all. */
   isVisible(node: Node): boolean {
     if (node.nodeType === Node.TEXT_NODE) return !!node.nodeValue?.trim();
-    if (node instanceof Element) return !isOwn(node);
+    if (isElement(node)) return !isOwn(node);
     return true;
   }
 
@@ -227,16 +250,18 @@ export class NodeRegistry {
 
   /**
    * Serializes `node`, including children down to `depth` (-1: the whole subtree). Like
-   * Chrome, shadow roots are listed but their children only follow with `pierce`.
+   * Chrome, shadow roots and iframe documents are listed but their children only follow with
+   * `pierce`. A `frameless` iframe is sent without its frame, as Chrome first reports an
+   * inserted one (see the DOM domain).
    */
-  serialize(node: Node, depth = 0, pierce = false): DomNode {
+  serialize(node: Node, depth = 0, pierce = false, frameless = false): DomNode {
     const children = this.children(node);
     const result: DomNode = {
       nodeId: this.idOf(node),
       backendNodeId: this.backendIdOf(node),
       nodeType: node.nodeType,
       nodeName: node.nodeName,
-      localName: node instanceof Element ? node.localName : '',
+      localName: isElement(node) ? node.localName : '',
       nodeValue:
         node.nodeType === Node.TEXT_NODE || node.nodeType === Node.COMMENT_NODE
           ? truncateNodeValue(node.nodeValue ?? '')
@@ -244,7 +269,7 @@ export class NodeRegistry {
     };
     if (node.parentNode) result.parentId = this.idOf(node.parentNode);
 
-    if (node instanceof Element) {
+    if (isElement(node)) {
       result.attributes = visibleAttributes(node);
       const shadowRoot = this.shadowRootOf(node);
       if (shadowRoot) result.shadowRoots = [this.serializeShadowRoot(shadowRoot, pierce ? depth : 0, pierce)];
@@ -253,17 +278,21 @@ export class NodeRegistry {
         result.pseudoElements = pseudoTypes.map(type => this.serializePseudo(this.pseudoOf(node, type)));
       }
       this.pseudoSent.set(node, new Set(pseudoTypes));
+      const frame = this.frames?.ofDocument(node.ownerDocument);
+      // Like Chrome, the document element of each frame names it.
+      if (frame && node === node.ownerDocument.documentElement) result.frameId = frame.id;
+      if (isFrameOwner(node) && !frameless) this.serializeFrame(node, result, depth, pierce);
       // Like Chrome, a template's content is listed (without children) apart from its children.
-      if (node instanceof HTMLTemplateElement) {
+      if (isHtml(node, 'template')) {
         this.templateOf.set(node.content, node);
         result.templateContent = this.serialize(node.content, 0, pierce);
       }
-    } else if (node instanceof Document) {
+    } else if (isDocument(node)) {
       result.documentURL = node.URL;
       result.baseURL = node.baseURI;
       result.xmlVersion = '';
       result.compatibilityMode = node.compatMode === 'BackCompat' ? 'QuirksMode' : 'NoQuirksMode';
-    } else if (node instanceof DocumentType) {
+    } else if (isDocumentType(node)) {
       result.publicId = node.publicId;
       result.systemId = node.systemId;
     }
@@ -288,11 +317,26 @@ export class NodeRegistry {
     return result;
   }
 
-  /** The parent, or the host of a shadow root or template content. */
+  /**
+   * Adds an iframe's frame id and document. Like Chrome, the document is not one of the
+   * iframe's children (`childNodeCount` counts its fallback content) and has no parent id.
+   */
+  private serializeFrame(owner: Element, result: DomNode, depth: number, pierce: boolean) {
+    const frame = this.frames?.ofOwner(owner);
+    if (!frame) return;
+    result.frameId = frame.id;
+    result.contentDocument = this.serialize(frame.document, pierce ? depth : 0, pierce);
+    this.contentDocuments.set(owner, frame.document);
+    this.onContentDocument?.(frame.document);
+  }
+
+  /** The parent, or the host of a shadow root, template content or iframe document. */
   private hostOf(node: Node): Node | null {
     if (node.parentNode) return node.parentNode;
-    if (node instanceof ShadowRoot) return node.host;
-    return node instanceof DocumentFragment ? (this.templateOf.get(node) ?? null) : null;
+    if (isShadowRoot(node)) return node.host;
+    // The document of an iframe is under the iframe, like in Chrome.
+    if (isDocument(node)) return this.frames?.ofDocument(node)?.owner ?? null;
+    return isDocumentFragment(node) ? (this.templateOf.get(node) ?? null) : null;
   }
 
   private serializeShadowRoot(root: ShadowRoot, depth: number, pierce: boolean): DomNode {

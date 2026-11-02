@@ -74,7 +74,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   const ctx: Context = {
     session: new CdpSession(),
     objects: new ObjectRegistry(),
-    nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
+    nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null, frames),
     probe: viewProbe(probe),
     frames,
   };

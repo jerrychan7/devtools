@@ -67,3 +67,11 @@ export type FrameOwner = HTMLIFrameElement | HTMLFrameElement;
 export function isFrameOwner(node: Node | null | undefined): node is FrameOwner {
   return isHtml(node, 'iframe') || (isHtmlElement(node) && node.localName === 'frame');
 }
+
+export function isDocumentType(node: Node | null | undefined): node is DocumentType {
+  return node?.nodeType === Node.DOCUMENT_TYPE_NODE;
+}
+
+export function isDocumentFragment(node: Node | null | undefined): node is DocumentFragment {
+  return node?.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
+}

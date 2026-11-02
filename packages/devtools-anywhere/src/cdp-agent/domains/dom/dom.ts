@@ -16,6 +16,7 @@ import {
   historyOf,
   patchOuterHTML,
 } from '../../core/history';
+import { isDocument, isDocumentFragment, isDocumentType, isElement, isFrameOwner, isNode } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import {
   type Box,
@@ -40,21 +41,21 @@ export function resolveNode({ nodes, objects }: Context, ref: NodeRef): Node {
   else if (ref.backendNodeId) node = nodes.getByBackendId(ref.backendNodeId);
   else if (ref.objectId) node = objects.get(ref.objectId);
   if (node instanceof PseudoElement) throw new CdpError('Not supported for pseudo-elements');
-  if (!(node instanceof Node)) throw new CdpError('Could not find node with given id');
+  if (!isNode(node)) throw new CdpError('Could not find node with given id');
   return node;
 }
 
 /** The element a command refers to. */
 export function resolveElement(ctx: Context, ref: NodeRef): Element {
   const node = resolveNode(ctx, ref);
-  if (!(node instanceof Element)) throw new CdpError('Node is not an Element');
+  if (!isElement(node)) throw new CdpError('Node is not an Element');
   return node;
 }
 
 /** The node a command refers to, which must be able to have children (querySelector, …). */
 function resolveContainer(ctx: Context, ref: NodeRef): ParentNode {
   const node = resolveNode(ctx, ref);
-  if (!(node instanceof Element || node instanceof Document || node instanceof DocumentFragment)) {
+  if (!(isElement(node) || isDocument(node) || isDocumentFragment(node))) {
     throw new CdpError('Not a container node');
   }
   return node;
@@ -182,9 +183,11 @@ function elementQuads(el: Element): Quad[] {
 /**
  * Nodes matched by DOM.performSearch, in the order Chrome collects them: tag names, attributes
  * and text (case-insensitively) in tree order, a shadow tree right after its host (`shadowRootOf`
- * also finds closed ones), then the document's XPath and selector matches.
+ * also finds closed ones), then XPath and selector matches. Like Chrome, each step goes through
+ * the documents of all frames, the top one first.
  */
 function searchNodes(
+  documents: Document[],
   query: string,
   isVisible: (n: Node) => boolean,
   shadowRootOf: (host: Element) => ShadowRoot | null
@@ -192,7 +195,7 @@ function searchNodes(
   const found = new Set<Node>();
   const needle = query.toLowerCase().replace(/^<|>$/g, '');
   const walk = (root: Document | ShadowRoot) => {
-    const walker = document.createTreeWalker(
+    const walker = (isDocument(root) ? root : root.ownerDocument).createTreeWalker(
       root,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
       {
@@ -200,7 +203,7 @@ function searchNodes(
       }
     );
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node instanceof Element) {
+      if (isElement(node)) {
         if (node.localName.includes(needle)) found.add(node);
         else if (Array.from(node.attributes).some(a => `${a.name}="${a.value}"`.toLowerCase().includes(needle)))
           found.add(node);
@@ -211,39 +214,42 @@ function searchNodes(
       }
     }
   };
-  walk(document);
-  try {
-    const result = document.evaluate(query, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-    for (let i = 0; i < result.snapshotLength; i++) {
-      const node = result.snapshotItem(i);
-      if (node && isVisible(node)) found.add(node);
+  documents.forEach(walk);
+  for (const doc of documents) {
+    try {
+      const result = doc.evaluate(query, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      for (let i = 0; i < result.snapshotLength; i++) {
+        const node = result.snapshotItem(i);
+        if (node && isVisible(node)) found.add(node);
+      }
+    } catch {
+      // Not an XPath expression.
     }
-  } catch {
-    // Not an XPath expression.
   }
-  try {
-    document.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
-  } catch {
-    // Not a selector.
+  for (const doc of documents) {
+    try {
+      doc.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
+    } catch {
+      // Not a selector.
+    }
   }
   return Array.from(found);
 }
 
 /** Markup of `node` as DOM.getOuterHTML returns it: without forced pseudo-class markers. */
 function outerHTML(node: Node): string {
-  if (node instanceof Element) {
+  if (isElement(node)) {
     if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`)) return node.outerHTML;
     // Leave out forced pseudo-class markers.
     const copy = node.cloneNode(true);
-    if (!(copy instanceof Element)) return node.outerHTML;
+    if (!isElement(copy)) return node.outerHTML;
     for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
       el.removeAttribute(FORCE_ATTRIBUTE);
     return copy.outerHTML;
   }
   // The whole document, doctype included, like Chrome.
-  if (node instanceof Document || node instanceof DocumentFragment)
-    return Array.from(node.childNodes, outerHTML).join('');
-  if (node instanceof DocumentType) {
+  if (isDocument(node) || isDocumentFragment(node)) return Array.from(node.childNodes, outerHTML).join('');
+  if (isDocumentType(node)) {
     const ids = node.publicId
       ? ` PUBLIC "${node.publicId}"${node.systemId ? ` "${node.systemId}"` : ''}`
       : node.systemId
@@ -462,7 +468,8 @@ export function registerDom(ctx: Context) {
       history.reset();
       observe();
       patchAttachShadow();
-      return { root: nodes.serialize(document, params.depth ?? 2, params.pierce) };
+      ctx.frames.sync();
+      return { root: nodes.serialize(ctx.frames.top.document, params.depth ?? 2, params.pierce) };
     },
 
     requestChildNodes(params: Protocol.DOM.RequestChildNodesRequest) {
@@ -604,7 +611,9 @@ export function registerDom(ctx: Context) {
 
     performSearch(params: Protocol.DOM.PerformSearchRequest): Protocol.DOM.PerformSearchResponse {
       const searchId = String(++searchSeq);
+      ctx.frames.sync();
       const results = searchNodes(
+        Array.from(ctx.frames, frame => frame.document),
         params.query,
         n => nodes.isVisible(n),
         host => nodes.shadowRootOf(host)
@@ -696,21 +705,27 @@ export function registerDom(ctx: Context) {
 
     /**
      * Finds a node by the path the frontend keeps to select it again after a reload: pairs of
-     * the index among the parent's children (`u`/`a` for a shadow root) and the node name.
+     * the index among the parent's children (`u`/`a` for a shadow root, `d` for an iframe's
+     * document) and the node name.
      */
     pushNodeByPathToFrontend(
       params: Protocol.DOM.PushNodeByPathToFrontendRequest
     ): Protocol.DOM.PushNodeByPathToFrontendResponse {
       const parts = params.path.split(',');
-      let node: Node = document;
+      ctx.frames.sync();
+      let node: Node = ctx.frames.top.document;
       for (let i = 0; i + 1 < parts.length; i += 2) {
         const [key = '', name = ''] = [parts[i], parts[i + 1]];
         const next: Node | null | undefined =
           key === 'u' || key === 'a'
-            ? node instanceof Element
+            ? isElement(node)
               ? nodes.shadowRootOf(node)
               : null
-            : nodes.children(node)[Number(key)];
+            : key === 'd'
+              ? isFrameOwner(node)
+                ? ctx.frames.ofOwner(node)?.document
+                : null
+              : nodes.children(node)[Number(key)];
         if (!next || next.nodeName !== name) throw new CdpError('No node with given path found');
         node = next;
       }
