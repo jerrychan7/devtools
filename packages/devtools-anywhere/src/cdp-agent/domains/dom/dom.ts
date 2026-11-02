@@ -33,7 +33,8 @@ import {
   realmOf,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
-import { type FrameChange, touchesFrames } from '../../core/frames';
+import { type Frame, type FrameChange, touchesFrames } from '../../core/frames';
+import { attachShadowHook } from './attach-shadow';
 import {
   type Box,
   type Quad,
@@ -403,8 +404,10 @@ export function registerDom(ctx: Context) {
    * is inserted or moved, before its mutation is reported).
    */
   let changedFrames: Set<FrameOwner> | null = null;
-  function onFrameChange({ frame }: FrameChange) {
+  function onFrameChange({ type, frame }: FrameChange) {
     if (!observer || !frame.owner) return;
+    // Each document a frame loads has its own realm.
+    if (type !== 'detached') patchAttachShadow(frame);
     if (!changedFrames) {
       const changed = (changedFrames = new Set());
       queueMicrotask(() => {
@@ -535,35 +538,18 @@ export function registerDom(ctx: Context) {
   nodes.onShadowRoot = root => observer?.observe(root, OBSERVE);
   nodes.pushToClient = node => (observer ? nodes.push(node, parent => emitChildren(parent)) : undefined);
 
-  // Shadow roots attached to hosts the client already knows are pushed to it. The prototype is
-  // only patched while the client follows the tree (getDocument until disable).
-  let nativeAttachShadow: typeof Element.prototype.attachShadow | null = null;
-  function pushingAttachShadow(this: Element, init: ShadowRootInit): ShadowRoot {
-    const root = (nativeAttachShadow ?? attachShadowFallback).call(this, init);
-    const hostId = observer ? nodes.knownId(this) : undefined;
-    if (hostId !== undefined) {
-      const serialized = nodes.serialize(root, 0);
-      serialized.shadowRootType = root.mode === 'open' ? 'open' : 'closed';
-      nodes.onShadowRoot?.(root);
-      session.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
-    }
-    return root;
-  }
-  // Kept for a page that grabbed the wrapper before it was removed.
-  const attachShadowFallback = Element.prototype.attachShadow;
-  function patchAttachShadow() {
-    if (nativeAttachShadow) return;
-    nativeAttachShadow = Element.prototype.attachShadow;
-    Element.prototype.attachShadow = pushingAttachShadow;
-  }
-  function unpatchAttachShadow() {
-    if (!nativeAttachShadow) return;
-    // A wrapper installed on top of ours stays, and ours with it: it no longer pushes once the
-    // observer is gone.
-    if (Element.prototype.attachShadow !== pushingAttachShadow) return;
-    Element.prototype.attachShadow = nativeAttachShadow;
-    nativeAttachShadow = null;
-  }
+  // Shadow roots attached to hosts the client already knows are pushed to it, in the top page and
+  // in each frame's document. The prototypes are only patched while the client follows the tree
+  // (getDocument until disable).
+  const attachShadow = attachShadowHook((host, root) => {
+    const hostId = observer ? nodes.knownId(host) : undefined;
+    if (hostId === undefined) return;
+    const serialized = nodes.serialize(root, 0);
+    serialized.shadowRootType = root.mode === 'open' ? 'open' : 'closed';
+    nodes.onShadowRoot?.(root);
+    session.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
+  });
+  const patchAttachShadow = (frame: Frame) => attachShadow.patch(realmOf(frame.document));
 
   const element = (ref: NodeRef) => resolveElement(ctx, ref);
   const history = historyOf(ctx);
@@ -575,7 +561,7 @@ export function registerDom(ctx: Context) {
       observer = null;
       stopFrames?.();
       stopFrames = null;
-      unpatchAttachShadow();
+      attachShadow.unpatch();
       searches.clear();
       history.reset();
     },
@@ -586,8 +572,8 @@ export function registerDom(ctx: Context) {
       // Chrome's DiscardFrontendBindings: edits on the old node ids can no longer be undone.
       history.reset();
       observe();
-      patchAttachShadow();
       ctx.frames.sync();
+      for (const frame of ctx.frames) patchAttachShadow(frame);
       return { root: nodes.serialize(ctx.frames.top.document, params.depth ?? 2, params.pierce) };
     },
 

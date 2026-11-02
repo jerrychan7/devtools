@@ -72,6 +72,7 @@ export function installProbe(): Probe {
       hookConsole(add, win);
       hookDebugger(add, win);
       hookErrors(add, win);
+      hookShadowRoots(probe.shadowRoots, shadowRootListeners, win);
     },
     shadowRoots: new WeakMap(),
     onShadowRoot(listener) {
@@ -97,7 +98,7 @@ export function installProbe(): Probe {
   hookConsole(addLog);
   hookDebugger(addLog);
   hookErrors(addLog);
-  hookShadowRoots(probe.shadowRoots, shadowRootListeners);
+  hookShadowRoots(probe.shadowRoots, shadowRootListeners, w);
   // The network hooks' own listeners are not the page's.
   const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
@@ -230,10 +231,15 @@ function hookConsole(addLog: (entry: ProbeLog) => void, w: Window & typeof globa
 // ---- shadow roots ----
 
 /** Records shadow roots as they are attached: closed ones are not reachable otherwise. */
-function hookShadowRoots(roots: WeakMap<Element, ShadowRoot>, listeners: Set<(root: ShadowRoot) => void>) {
-  const attachShadow = Element.prototype.attachShadow;
+function hookShadowRoots(
+  roots: WeakMap<Element, ShadowRoot>,
+  listeners: Set<(root: ShadowRoot) => void>,
+  w: Window & typeof globalThis
+) {
+  const proto = w.Element.prototype;
+  const attachShadow = proto.attachShadow;
   if (!attachShadow) return;
-  Element.prototype.attachShadow = function (this: Element, init: ShadowRootInit) {
+  proto.attachShadow = function (this: Element, init: ShadowRootInit) {
     const root = attachShadow.call(this, init);
     roots.set(this, root);
     for (const listener of listeners) listener(root);

@@ -209,7 +209,7 @@ export interface Probe {
   clearLogs(): void;
   /**
    * Captures the console calls and uncaught errors of a same-origin iframe's document, as for the
-   * top page; entries name the document. Once per document: a frame that loads another one needs
+   * top page; entries name the document. Records its shadow roots too, as {@link shadowRoots}. Once per document: a frame that loads another one needs
    * it again. What the document logged before is not captured.
    */
   hookWindow(win: Window & typeof globalThis): void;
