@@ -69,5 +69,10 @@ declare global {
     resourceLoaded?: boolean;
     /** The links frame-links.test.ts has seen, and how many of them have closed. */
     __links?: { frameId: string; closed: boolean }[];
+    /** A flatten client of the page's agent: its events, and its commands' replies (oopif.conformance.test.ts). */
+    __client?: {
+      log: Record<string, unknown>[];
+      send(method: string, params?: object, sessionId?: string): Promise<Record<string, unknown>>;
+    };
   }
 }
