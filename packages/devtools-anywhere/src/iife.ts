@@ -19,7 +19,7 @@ import { connectRemote } from './remote';
 // again itself: only the first copy runs.
 if (!('DevtoolsAnywhere' in window)) {
   const script = document.currentScript as HTMLScriptElement | null;
-  // Shell configs must come from this script's origin.
+  // Shell configs may only point where this script trusts (trust.ts).
   if (script?.src) setShellScriptUrl(script.src);
   const probe = installProbe();
   if (script?.src) {

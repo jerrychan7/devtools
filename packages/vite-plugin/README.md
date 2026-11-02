@@ -8,4 +8,4 @@ import devtoolsAnywhere from '@devtools-anywhere/vite-plugin';
 export default { plugins: [devtoolsAnywhere()] };
 ```
 
-Options: [Vite](https://github.com/jerrychan7/devtools#vite) ([中文](https://github.com/jerrychan7/devtools/blob/main/README.zh-CN.md#vite)). Requires Node.js 22.18 or later. MIT licensed.
+Options: [Vite](https://github.com/jerrychan7/devtools/blob/main/docs/usage.md#vite) ([中文](https://github.com/jerrychan7/devtools/blob/main/docs/usage.zh-CN.md#vite)). Requires Node.js 22.18 or later. MIT licensed.

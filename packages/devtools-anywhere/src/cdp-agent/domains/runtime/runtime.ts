@@ -11,7 +11,7 @@ import {
 } from '../../core/lexer';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
-import type { LogEntry } from '../../probe/types';
+import type { ConsoleEntry, LogEntry } from '../../probe/types';
 import { refetch } from '../network/network';
 
 // Indirect eval runs in the global scope, like code typed into the console.
@@ -625,11 +625,24 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
     };
   }
 
+  /**
+   * Like V8, console.table of an object sends that object alone, previewed as a table; the
+   * columns to show, if given as an array, filter its rows.
+   */
+  function consoleArgs(entry: ConsoleEntry) {
+    const [data, columns] = entry.args;
+    if (entry.type === 'table' && typeof data === 'object' && data !== null) {
+      const names = Array.isArray(columns) ? columns.map(String) : undefined;
+      return [objects.wrap(data, { group: 'console', table: { columns: names } })];
+    }
+    return entry.args.map(arg => objects.wrap(arg, { generatePreview: true, group: 'console' }));
+  }
+
   function emitLog(entry: LogEntry) {
     if (entry.kind === 'console') {
       session.emit('Runtime.consoleAPICalled', {
         type: entry.type,
-        args: entry.args.map(arg => objects.wrap(arg, { generatePreview: true, group: 'console' })),
+        args: consoleArgs(entry),
         executionContextId: EXECUTION_CONTEXT_ID,
         timestamp: entry.time,
         // Drop the probe's console wrapper frame.

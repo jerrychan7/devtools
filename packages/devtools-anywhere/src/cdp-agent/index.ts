@@ -12,7 +12,9 @@ import { registerNetwork } from './domains/network/network';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
 import { registerRuntime } from './domains/runtime/runtime';
-import { registerScreencast, type SnapdomLoader } from './domains/page/screencast';
+import { createRender, type SnapdomLoader } from './domains/page/render';
+import { registerScreencast } from './domains/page/screencast';
+import { registerScreenshot } from './domains/page/screenshot';
 import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp/webmcp';
@@ -33,14 +35,16 @@ export {
   storeShellConfig,
   storeShellOpen,
 } from './probe/shell';
+export { isTrusted } from './probe/trust';
 export { FRAME_ID, LOADER_ID } from './core/context';
-export type { SnapdomLoader } from './domains/page/screencast';
+export type { SnapdomLoader } from './domains/page/render';
 
 /** @internal */
 export interface CdpSessionOptions {
   /**
    * Loads snapDOM (`() => import('@zumer/snapdom')`), which renders the frames of
-   * Page.startScreencast. Without it, screencasting is not available.
+   * Page.startScreencast and the images of Page.captureScreenshot. Without it, neither is
+   * available.
    */
   loadSnapdom?: SnapdomLoader;
 }
@@ -88,7 +92,9 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerStorage(ctx);
   registerDomDebugger(ctx);
   registerDebugger(ctx);
-  registerScreencast(ctx, options.loadSnapdom);
+  const render = options.loadSnapdom && createRender(options.loadSnapdom);
+  registerScreencast(ctx, render);
+  registerScreenshot(ctx, render);
   registerInput(ctx);
   registerWebMcp(ctx);
   return ctx.session;

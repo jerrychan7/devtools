@@ -166,8 +166,10 @@ test('a keyDown with text (Puppeteer style) fires keypress and types', async () 
   assert.equal(result.value, 'h');
 });
 
+// Where Chrome's hover was after the test before is not always where ours was (on CI, Chrome
+// sometimes sends no pointerout for the field it last clicked): only the press is compared.
 test('a middle click fires auxclick', async () => {
-  const result = await same(async side => {
+  const steps = async (side: Side) => {
     await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 50, y: 30 });
     await side.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
@@ -185,8 +187,12 @@ test('a middle click fires auxclick', async () => {
       buttons: 0,
       clickCount: 1,
     });
-  });
-  assert.ok(result.events.includes('auxclick:btn'));
+  };
+  const pressed = (events: string[]) => events.filter(e => !/^(pointer|mouse)(over|out):/.test(e));
+  const chrome = pressed((await run(t.chrome, steps)).events);
+  const ours = pressed((await run(t.ours, steps)).events);
+  assert.deepEqual(ours, chrome);
+  assert.ok(ours.includes('auxclick:btn'));
 });
 
 // Off the page, Chrome sends the events to the document, the release included, and clicks it
@@ -341,11 +347,12 @@ test('a release or a move without a touch sends nothing', async () => {
     }
     await side.send('Emulation.setEmitTouchEventsForMouse', { enabled: false });
   };
-  // Chrome's hover from earlier tests sometimes gets a pointerover and a mouseover through:
-  // only what a touch would send is compared.
-  const touchy = (events: string[]) => events.filter(e => !/^(pointer|mouse)over:/.test(e));
+  // Chrome's hover from earlier tests sometimes gets a pointerover and a mouseover through, and on
+  // CI a release sometimes reaches the page as a mouse release (pointerup, mouseup) before touch
+  // emulation takes it: on Chrome's side only what a touch would send is compared. Ours sends nothing.
+  const touchy = (events: string[]) => events.filter(e => !/^(pointer|mouse)(over|up):/.test(e));
   assert.deepEqual(touchy((await run(t.chrome, steps('chrome'))).events), []);
-  assert.deepEqual(touchy((await run(t.ours, steps('ours'))).events), []);
+  assert.deepEqual((await run(t.ours, steps('ours'))).events, []);
   assert.deepEqual(responses['ours'], responses['chrome']);
   assert.deepEqual(responses['chrome'], [{}, {}, {}, {}]);
 });

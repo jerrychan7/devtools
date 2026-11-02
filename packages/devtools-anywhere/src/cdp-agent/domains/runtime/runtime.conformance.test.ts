@@ -79,6 +79,28 @@ describe('Runtime.consoleAPICalled arguments', () => {
   }
 });
 
+describe('console.table', () => {
+  // The frontend draws the table from the rows' previews: they must match Chrome's whole.
+  const cases = {
+    objects: "console.table([{ a: 1, b: 'x' }, { a: 2, c: [1, 2] }])",
+    arrays: 'console.table([[1, 2], [3, 4]])',
+    objectOfObjects: 'console.table({ r1: { a: 1 }, r2: { b: { c: 1 } } })',
+    columns: "console.table([{ a: 1, b: 2 }, { a: 3, b: 4 }], ['b'])",
+    columnsNotAnArray: "console.table([{ a: 1 }], 'a')",
+    manyColumns: 'console.table([Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`, i]))])',
+    manyRows: 'console.table(Array.from({ length: 1200 }, (_, i) => ({ a: i })))',
+    primitive: "console.table('x', 1)",
+  };
+  const withoutIds = (args: unknown) => JSON.parse(JSON.stringify(args, (k, v) => (k === 'objectId' ? undefined : v)));
+  for (const [name, expr] of Object.entries(cases)) {
+    test(name, async () => {
+      const { ours, chrome } = await logged(expr);
+      assert.equal(ours.type, chrome.type);
+      assert.deepEqual(withoutIds(ours.args), withoutIds(chrome.args));
+    });
+  }
+});
+
 describe('Runtime.consoleAPICalled types', () => {
   const cases = {
     warn: "console.warn('w')",

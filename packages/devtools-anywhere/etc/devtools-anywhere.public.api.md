@@ -33,6 +33,7 @@ export interface DevtoolsAnywhereTagNameMap {
 // @public
 export type ProbeScriptAttributes = {
     'data-devtools-frontend-url'?: string;
+    'data-no-panel'?: true;
     'data-bundle'?: string;
     'data-open-immediately'?: true;
     'data-default-shell-mode'?: 'on' | 'off';

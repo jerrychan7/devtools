@@ -5,8 +5,14 @@
  * @public
  */
 export type ProbeScriptAttributes = {
-  /** The frontend to mount <devtools-anywhere> with, after the page has loaded. */
+  /**
+   * The frontend to mount <devtools-anywhere> with, after the page has loaded. By default, with the
+   * probe from jsDelivr or unpkg, the frontend package of the same version there; otherwise none,
+   * and no element.
+   */
   'data-devtools-frontend-url'?: string;
+  /** No element (and no shell mode), whatever the frontend: for a page only debugged remotely. */
+  'data-no-panel'?: true;
   /** Where devtools-anywhere.iife.js is, by default next to the probe. */
   'data-bundle'?: string;
   /** Opens DevTools right away. */

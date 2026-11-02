@@ -142,8 +142,9 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Update npm
-        # Trusted publishing needs npm 11.5.1 or later; Node 22 comes with npm 10.
-        run: npm install -g npm@11
+        # Trusted publishing needs npm 11.5.1 or later, and 11.21.0 for npm dist-tag; Node 22 comes
+        # with npm 10.
+        run: npm install -g npm@^11.21.0
 
       - name: Publish to npm
         run: |

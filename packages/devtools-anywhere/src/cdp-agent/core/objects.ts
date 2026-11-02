@@ -20,6 +20,8 @@ function toProtocolSubtype(subtype: NonNullable<Subtype>): ProtocolSubtype {
 const MAX_OBJECT_PREVIEW = 5;
 const MAX_ARRAY_PREVIEW = 100;
 const MAX_ENTRY_PREVIEW = 5;
+/** console.table's rows, and the columns of each, as V8 previews them. */
+const MAX_TABLE_PREVIEW = 1000;
 
 /** An entry of a Map or Set, exposed under the `[[Entries]]` internal property. */
 class InternalEntry {
@@ -181,6 +183,11 @@ export interface WrapOptions {
   generatePreview?: boolean | undefined;
   returnByValue?: boolean | undefined;
   group?: string | undefined;
+  /**
+   * console.table's data: like V8, its preview lists up to 1000 rows, each with a preview of its
+   * own (one level deep), of only the given columns if any.
+   */
+  table?: { columns?: readonly string[] | undefined } | undefined;
 }
 
 /** Turns page values into CDP RemoteObjects and keeps the objects alive by id. */
@@ -223,7 +230,8 @@ export class ObjectRegistry {
     if (type === 'function') result.className = 'Function';
     else if (type === 'object')
       result.className = subtype === 'error' ? (value as Error).name || className(value) : className(value);
-    if (options.generatePreview && type === 'object') result.preview = this.preview(value as object, subtype);
+    if (options.table && type === 'object') result.preview = this.tablePreview(value as object, subtype, options.table);
+    else if (options.generatePreview && type === 'object') result.preview = this.preview(value as object, subtype);
     result.objectId = this.idOf(value, options.group);
     return result;
   }
@@ -385,7 +393,25 @@ export class ObjectRegistry {
     return result;
   }
 
-  private preview(obj: object, subtype: Subtype): ObjectPreview {
+  private tablePreview(obj: object, subtype: Subtype, { columns }: { columns?: readonly string[] | undefined }) {
+    const preview = this.preview(obj, subtype, MAX_TABLE_PREVIEW);
+    for (const row of preview.properties) {
+      if (row.type !== 'object' || row.subtype === 'null') continue;
+      let value: unknown;
+      try {
+        value = Reflect.get(obj, row.name);
+      } catch {
+        continue;
+      }
+      const { subtype: rowSubtype } = classify(value);
+      const rowPreview = this.preview(value as object, rowSubtype, MAX_TABLE_PREVIEW);
+      if (columns) rowPreview.properties = rowPreview.properties.filter(p => columns.includes(p.name));
+      row.valuePreview = rowPreview;
+    }
+    return preview;
+  }
+
+  private preview(obj: object, subtype: Subtype, limitOverride?: number): ObjectPreview {
     const preview: ObjectPreview = {
       type: 'object',
       description: describe(obj, subtype),
@@ -396,7 +422,7 @@ export class ObjectRegistry {
     if (subtype === 'internal#entry') return preview;
 
     const isArrayLike = subtype === 'array' || subtype === 'typedarray';
-    const limit = isArrayLike ? MAX_ARRAY_PREVIEW : MAX_OBJECT_PREVIEW;
+    const limit = limitOverride ?? (isArrayLike ? MAX_ARRAY_PREVIEW : MAX_OBJECT_PREVIEW);
     const add = (property: PropertyPreview) => {
       if (preview.properties.length >= limit) {
         preview.overflow = true;

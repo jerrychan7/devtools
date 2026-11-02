@@ -3,8 +3,8 @@ import {
   SHELL_KEY,
   SHELL_PAGE_ID,
   createCdpSession,
-  isShellDocument,
   isShellPage,
+  isTrusted,
   markOwn,
   OWN_ATTRIBUTE,
   readShellConfig,
@@ -14,22 +14,49 @@ import {
   storeShellOpen,
   type CdpSession,
   type SnapdomLoader,
-} from './cdp-agent';
-import { connectFrontend, relayShell } from './connection';
-import { SHELL_HANDSHAKE } from './shell-messages';
-import type { GlobalElementConfig } from './api';
-import type { DevtoolsAnywhereAttributes, TogglerAttributes } from './public-types';
+} from '../cdp-agent';
+import { connectFrontend, relayShell } from '../connection';
+import { SHELL_HANDSHAKE } from '../shell-messages';
+import type { Grip } from '../grip';
+import { isDockSide, isEmbedderRequest } from './request';
 import {
-  DOCK_SIDES,
+  createPanelGrip,
+  DOCK_KEY,
+  GRIP_EDGE,
+  readStored,
+  saveFloat,
+  setupCorner,
+  setupMover,
+  sizePanel,
+  store,
+} from './panel';
+import { ShellLayout } from '../shell-layout';
+import { STYLE } from './style';
+import {
+  CONTROL_EVENT,
+  customElementsLoading,
+  globalConfigs,
+  globalElements,
+  globals,
+  inactiveGlobals,
+  isCustom,
+  isShellElement,
+  ownElements,
+  shellTogglers,
+  STATE_EVENT,
+} from './registry';
+import { controlElement, installTogglers, refreshTogglers, shellElement } from './togglers';
+import type { GlobalElementConfig } from '../api';
+import type { DevtoolsAnywhereAttributes } from '../public-types';
+import {
   HIDDEN_NOTICE,
   PROBE_SCRIPT,
   SNAPDOM_SCRIPT,
   REQUEST_KEY,
   type DockSide,
-  type EmbedderRequest,
   type FrontendNotice,
   type FrontendHash,
-} from './embedder';
+} from '../embedder';
 
 let bundleUrl = '';
 
@@ -51,66 +78,6 @@ let loadSnapdom: SnapdomLoader = () => Promise.reject(new Error('snapDOM: the bu
 /** The CDP session of a page, with the screencast's renderer. */
 export const createPageSession = () => createCdpSession({ loadSnapdom: () => loadSnapdom() });
 
-// Sizes are remembered as percentages of the viewport, so they fit any screen and orientation.
-const HEIGHT_KEY = 'devtools-anywhere:height%';
-const WIDTH_KEY = 'devtools-anywhere:width%';
-const FLOAT_KEY = 'devtools-anywhere:float%';
-/** Viewport units that follow the browser's collapsing toolbars on mobile, where supported. */
-const VH = typeof CSS !== 'undefined' && CSS.supports('height', '1dvh') ? 'dvh' : 'vh';
-const VW = typeof CSS !== 'undefined' && CSS.supports('width', '1dvw') ? 'dvw' : 'vw';
-/** `part` as a percentage of `whole`, to one decimal. */
-const percent = (part: number, whole: number) => Math.round((part / whole) * 1000) / 10;
-const DOCK_KEY = 'devtools-anywhere:dock';
-const MIN_SIZE = 80;
-
-/**
- * localStorage, which throws when it is unavailable: Android WebViews without DOM storage,
- * Safari blocking all cookies, sandboxed iframes. Sizes and dock side are only preferences.
- */
-function readStored(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function store(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
-/** A finite number from a stored value, else undefined. */
-const finite = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
-
-const isDockSide = (value: unknown): value is DockSide => DOCK_SIDES.some(side => side === value);
-
-/**
- * Checks the fields of each type of request from the frontend, which is built separately: a type
- * added to EmbedderRequest (embedder.ts) does not compile here until it is checked.
- */
-const REQUEST_CHECKS: { [T in EmbedderRequest['type']]: (request: object) => boolean } = {
-  dock: request => 'side' in request && isDockSide(request.side),
-  close: () => true,
-  'keep-open': request => 'keep' in request && typeof request.keep === 'boolean',
-  theme: request => ['toolbar', 'divider', 'icon'].every(key => typeof Reflect.get(request, key) === 'string'),
-};
-const isRequestType = (type: unknown): type is EmbedderRequest['type'] =>
-  typeof type === 'string' && Object.hasOwn(REQUEST_CHECKS, type);
-const isEmbedderRequest = (value: unknown): value is EmbedderRequest =>
-  typeof value === 'object' &&
-  value !== null &&
-  'type' in value &&
-  isRequestType(value.type) &&
-  REQUEST_CHECKS[value.type](value);
-
-/** Position and size of the undocked panel, in percent of the viewport. */
-interface FloatRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
 /**
  * Whether the browser has the top layer for popovers. There the toggler and the panel are above
  * everything the page draws, whatever its z-index; elsewhere they fall back to the highest z-index.
@@ -121,102 +88,6 @@ const TOP_LAYER = typeof HTMLElement.prototype.showPopover === 'function';
 function setPopoverOpen(el: HTMLElement, open: boolean) {
   if (el.matches(':popover-open') !== open) el.togglePopover(open);
 }
-
-const STYLE = `
-:host { all: initial; display: block; }
-:host([hidden]) { display: none; }
-/* Both go into the top layer as popovers (see TOP_LAYER): undo the browser's popover style. */
-.toggler, .panel {
-  inset: auto; width: auto; height: auto; margin: 0; padding: 0; border: 0; overflow: visible; color: inherit;
-}
-.toggler {
-  position: fixed; z-index: 2147483647;
-  right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  width: 44px; height: 44px; border: 0; border-radius: 50%;
-  background: #1a73e8; color: #fff; font: 600 13px/44px system-ui, sans-serif;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .3); cursor: pointer; touch-action: manipulation;
-}
-.toggler[hidden] { display: none; }
-.panel {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647;
-  display: none; flex-direction: column; box-sizing: border-box;
-  background: #fff; border-top: 1px solid var(--bar-border, #cacdd1);
-  /* Clear of the screen's cutouts and rounded corners (a page with viewport-fit=cover has them):
-     the home indicator below, and the notch on the sides in landscape. */
-  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
-}
-.panel[data-open] { display: flex; }
-/* The bar takes the DevTools toolbar's colors, which the frontend reports (theme request). */
-.bar {
-  flex: none; position: relative; height: 16px; background: var(--bar-background, #f1f3f4);
-  cursor: row-resize; touch-action: none;
-}
-.bar::before {
-  content: ''; position: absolute; left: 50%; top: 6px; width: 32px; height: 4px;
-  margin-left: -16px; border-radius: 2px; background: var(--bar-handle, #bdc1c6);
-}
-.bar button {
-  position: absolute; top: 0; width: 24px; height: 16px; padding: 0; border: 0;
-  background: none; color: var(--bar-icon, #5f6368); font: 14px/16px system-ui, sans-serif; cursor: pointer;
-}
-/* DevTools' own toolbar has a close button, except when undocked: then the bar has one. */
-.close { right: 4px; display: none; }
-[data-dock=undocked] .close { display: block; }
-/* The undocked window's resize corner, for touch screens where CSS resize does not work. */
-.corner {
-  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; display: none;
-  cursor: nwse-resize; touch-action: none;
-}
-[data-dock=undocked] .corner { display: block; }
-iframe { flex: 1; min-width: 0; min-height: 0; border: 0; }
-.dragging iframe { pointer-events: none; }
-
-/* Docked to a side: full height, with the bar as a vertical strip on the inner edge. */
-.panel[data-dock=right], .panel[data-dock=left] {
-  top: 0; border-top: 0; padding-top: env(safe-area-inset-top, 0px);
-}
-/* No inset on the inner edge, which is in the middle of the screen. */
-.panel[data-dock=right] {
-  left: auto; flex-direction: row; border-left: 1px solid var(--bar-border, #cacdd1); padding-left: 0;
-}
-.panel[data-dock=left] {
-  right: auto; flex-direction: row-reverse; border-right: 1px solid var(--bar-border, #cacdd1); padding-right: 0;
-}
-[data-dock=right] .bar, [data-dock=left] .bar { width: 16px; height: auto; cursor: col-resize; }
-[data-dock=right] .bar::before, [data-dock=left] .bar::before {
-  left: 6px; top: 50%; width: 4px; height: 32px; margin: -16px 0 0;
-}
-[data-dock=right] .bar button, [data-dock=left] .bar button { left: 0; right: auto; width: 16px; }
-
-/* Undocked: a window over the page, moved by its bar and resized from its corner. */
-.panel[data-dock=undocked] {
-  right: auto; bottom: auto; border: 1px solid var(--bar-border, #cacdd1); border-radius: 6px; overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .3); resize: both; padding: 0;
-}
-[data-dock=undocked] .bar { cursor: move; }
-
-/* Touch screens: targets large enough for a finger. */
-@media (pointer: coarse) {
-  .bar { height: 28px; }
-  .bar::before { top: 12px; }
-  .bar button { width: 44px; height: 28px; line-height: 28px; font-size: 18px; }
-  [data-dock=right] .bar, [data-dock=left] .bar { width: 28px; }
-  [data-dock=right] .bar::before, [data-dock=left] .bar::before { left: 12px; }
-  [data-dock=right] .bar button, [data-dock=left] .bar button { width: 28px; height: 44px; }
-  .corner { width: 32px; height: 32px; }
-}
-
-/* An element placed by the page: a box in the page's flow, sized by its CSS, always loaded. */
-.panel[data-custom] {
-  position: static; display: flex; width: 100%; height: 100%; border: 0; padding: 0;
-}
-[data-custom] .bar, .toggler[data-custom] { display: none; }
-
-/* Shell mode: the panel takes its place next to the page iframe, unless undocked. */
-:host([data-shell]) { display: flex; flex: none; }
-:host([data-shell]) .panel { position: static; flex: 1 1 auto; }
-:host([data-shell]) .panel[data-dock=undocked] { position: fixed; }
-`;
 
 /**
  * `<devtools-anywhere devtools-frontend-url="…/anywhere_app.html">`
@@ -270,9 +141,13 @@ export class DevtoolsAnywhereElement extends HTMLElement {
    * (detach), as the page shows or hides it, or removes it (document.open, replaceChildren).
    */
   private shellLink: { attach(): void; detach(): void } | null = null;
+  /** In the shell: places the page where the frontend lays it out (shell-layout.ts). */
+  private shellLayout: ShellLayout | null = null;
+  private readonly grip: Grip;
 
   constructor() {
     super();
+    ownElements.add(this);
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>${STYLE}</style>
 <button class="toggler" part="toggler" popover="manual" aria-label="Open DevTools">F12</button>
@@ -299,15 +174,18 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     });
     part('.close').addEventListener('click', () => this.setOpen(false));
     this.addEventListener(CONTROL_EVENT, this.onControl);
-    this.setupResizer(part<HTMLElement>('.bar'));
-    this.setupCorner(part<HTMLElement>('.corner'));
+    const relayout = () => this.layout();
+    setupMover(part<HTMLElement>('.bar'), this.panel, relayout);
+    this.grip = createPanelGrip(this.panel, () => this.dock, relayout);
+    this.panel.append(this.grip.element);
+    setupCorner(part<HTMLElement>('.corner'), this.panel, relayout);
     // The undocked panel is resized by the browser (CSS resize): remember its size once it
     // settles, not on every frame of the drag.
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     new ResizeObserver(() => {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
-        if (this.dock === 'undocked' && this.isOpen && this.panel.offsetWidth) this.saveFloat();
+        if (this.dock === 'undocked' && this.isOpen && this.panel.offsetWidth) saveFloat(this.panel);
       }, 300);
     }).observe(this.panel);
   }
@@ -342,16 +220,35 @@ export class DevtoolsAnywhereElement extends HTMLElement {
       else void this.exitShell();
     } else if (request.type === 'theme') {
       const colors: [string, string[]][] = [
-        [request.toolbar, ['--bar-background']],
-        [request.divider, ['--bar-handle', '--bar-border']],
-        [request.icon, ['--bar-icon']],
+        [request.toolbar, ['--bar-background', '--grip-background']],
+        [request.divider, ['--bar-handle', '--bar-border', '--grip-border']],
+        [request.icon, ['--bar-icon', '--grip-dot']],
       ];
+      const set: Record<string, string> = {};
       for (const [value, properties] of colors) {
         if (!CSS.supports('color', value)) continue;
-        for (const property of properties) this.panel.style.setProperty(property, value);
+        for (const property of properties) set[property] = value;
       }
+      for (const [property, value] of Object.entries(set)) this.panel.style.setProperty(property, value);
+      // The shell's grip is outside this element.
+      this.shellLayout?.setGripColors(set);
     } else if (request.type === 'close') {
       this.setOpen(false);
+    } else if (request.type === 'page-bounds') {
+      this.shellLayout?.pageBounds(request);
+    } else if (request.type === 'split') {
+      this.shellLayout?.splitArea(request);
+    } else if (request.type === 'toolbox') {
+      // Only a page next to the frontend's: on a CDN, its origin is every package's.
+      let url: string;
+      let frontendDir: string;
+      try {
+        url = new URL(request.url, this.loadedUrl).href;
+        frontendDir = new URL('.', this.loadedUrl).href;
+      } catch {
+        return;
+      }
+      if (isTrusted(url, { prefixes: [frontendDir] })) this.shellLayout?.showToolbox(url);
     }
   };
 
@@ -460,7 +357,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     return (
       this.getAttribute('devtools-frontend-url') ||
       this.config.frontend ||
-      probeFrontend ||
+      globals.probeFrontend ||
       (isShellPage() && readShellConfig()?.frontend) ||
       ''
     );
@@ -595,14 +492,14 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (this.custom) return this.connectCustom();
     // Only the first global element connected works, even once it is gone.
     if (globalElements.has(this) && !this.firstGlobal) {
-      if (globalTaken) {
+      if (globals.taken) {
         if (!inactiveGlobals.has(this))
           console.warn('devtools-anywhere: the page has a global <devtools-anywhere> already');
         inactiveGlobals.add(this);
         this.style.setProperty('display', 'none', 'important');
         return;
       }
-      globalTaken = this.firstGlobal = true;
+      globals.taken = this.firstGlobal = true;
     }
     // The options, once: the probe's, or in the shell the shell config's, kept for its reloads.
     if (this.openState === null) {
@@ -630,6 +527,10 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     if (isShellElement(this)) {
       // Only for its styles: what makes it the shell's is its document.
       this.setAttribute('data-shell', '');
+      const page = document.getElementById(SHELL_PAGE_ID);
+      if (page instanceof HTMLIFrameElement && !this.shellLayout) {
+        this.shellLayout = new ShellLayout(this, this.frame, page, () => this.frontendOrigin);
+      }
       this.watchShellPage();
       this.registerShellWorker();
     } else {
@@ -647,6 +548,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect?.();
     this.disconnect = null;
     this.loadedUrl = '';
+    this.shellLayout?.dispose();
+    this.shellLayout = null;
     window.removeEventListener('message', this.onFrontendRequest);
     window.removeEventListener('pageshow', this.onShellPageshow);
     // The togglers without a value may point to another element now.
@@ -693,58 +596,16 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Sizes the panel for its dock side; in shell mode, also lays out the shell around it. */
   private layout() {
-    const style = this.panel.style;
-    style.width = style.height = style.left = style.top = '';
     const dock = this.dock;
-    if (dock === 'bottom') {
-      const stored = Number(readStored(HEIGHT_KEY));
-      style.height = stored ? `${stored}${VH}` : `50${VH}`;
-    } else if (dock === 'undocked') {
-      const rect = this.floatRect();
-      style.left = `${rect.left}${VW}`;
-      style.top = `${rect.top}${VH}`;
-      style.width = `${rect.width}${VW}`;
-      style.height = `${rect.height}${VH}`;
-    } else {
-      const stored = Number(readStored(WIDTH_KEY));
-      style.width = stored ? `${stored}${VW}` : `50${VW}`;
-    }
+    sizePanel(this.panel, dock);
+    // Docked, the grip on the panel's inner edge resizes it; in the shell, the shell's grip does.
+    if (dock !== 'undocked') this.grip.place(GRIP_EDGE[dock], 'outside');
+    this.grip.show(dock !== 'undocked' && !isShellElement(this) && !this.panel.hasAttribute('data-custom'));
     // The shell document is ours: the page iframe comes first, then this element.
     if (isShellElement(this)) {
       document.body.style.flexDirection = dock === 'right' ? 'row' : dock === 'left' ? 'row-reverse' : 'column';
+      this.shellLayout?.update(this.isOpen, dock);
     }
-  }
-
-  /** The undocked panel's last position and size, kept inside the viewport. */
-  private floatRect(): FloatRect {
-    let stored: unknown = null;
-    try {
-      stored = JSON.parse(readStored(FLOAT_KEY) || 'null');
-    } catch {}
-    // Written by an older version or by the page itself: only finite numbers are used.
-    const field = (key: keyof FloatRect) =>
-      typeof stored === 'object' && stored ? finite(Reflect.get(stored, key)) : undefined;
-    const width = Math.min(field('width') || 80, 100);
-    const height = Math.min(field('height') || 60, 100);
-    const clamp = (value: number | undefined, fallback: number, max: number) =>
-      Math.min(Math.max(value ?? fallback, 0), max);
-    return {
-      left: clamp(field('left'), (100 - width) / 2, 100 - width),
-      top: clamp(field('top'), (100 - height) / 2, 100 - height),
-      width,
-      height,
-    };
-  }
-
-  private saveFloat() {
-    const { left, top, width, height } = this.panel.getBoundingClientRect();
-    const rect: FloatRect = {
-      left: percent(left, innerWidth),
-      top: percent(top, innerHeight),
-      width: percent(width, innerWidth),
-      height: percent(height, innerHeight),
-    };
-    store(FLOAT_KEY, JSON.stringify(rect));
   }
 
   private loadFrontend() {
@@ -762,7 +623,11 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.disconnect?.();
     this.frontendOrigin = url.origin;
     if (this.session) this.disconnect = connectFrontend(this.session, this.frame, url.origin);
-    else if (page) this.disconnect = relayShell(page, this.frame, url.origin);
+    else if (page) {
+      // Device mode was the previous frontend's: Chrome clears it with the frontend.
+      this.shellLayout?.setMetrics(null);
+      this.disconnect = relayShell(page, this.frame, url.origin, metrics => this.shellLayout?.setMetrics(metrics));
+    }
     // Whether shell mode is available (it needs the bundle URL) and whether it is on.
     const shell = isShellElement(this);
     const hash = new URLSearchParams({
@@ -773,89 +638,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     } satisfies FrontendHash);
     this.frame.src = `${url.href.split('#')[0]}#?${hash}`;
   }
-
-  /** Dragging the bar resizes the docked panel, or moves the undocked one. */
-  private setupResizer(resizer: HTMLElement) {
-    resizer.addEventListener('pointerdown', down => {
-      if ((down.target as HTMLElement).closest('button')) return;
-      down.preventDefault();
-      resizer.setPointerCapture(down.pointerId);
-      this.panel.classList.add('dragging');
-      const dock = this.dock;
-      const start = this.panel.getBoundingClientRect();
-      const clampSize = (size: number, max: number) => Math.min(Math.max(size, MIN_SIZE), max - 16);
-      const move = (e: PointerEvent) => {
-        const style = this.panel.style;
-        if (dock === 'bottom') style.height = `${clampSize(innerHeight - e.clientY, innerHeight)}px`;
-        else if (dock === 'right') style.width = `${clampSize(innerWidth - e.clientX, innerWidth)}px`;
-        else if (dock === 'left') style.width = `${clampSize(e.clientX, innerWidth)}px`;
-        else {
-          const left = start.left + e.clientX - down.clientX;
-          const top = start.top + e.clientY - down.clientY;
-          // The whole window stays in the viewport, so its resize corner stays reachable; a
-          // window larger than the viewport keeps its top left corner in view.
-          style.left = `${Math.max(Math.min(left, innerWidth - start.width), 0)}px`;
-          style.top = `${Math.max(Math.min(top, innerHeight - start.height), 0)}px`;
-        }
-      };
-      const up = () => {
-        this.panel.classList.remove('dragging');
-        if (dock === 'bottom') store(HEIGHT_KEY, String(percent(this.panel.offsetHeight, innerHeight)));
-        else if (dock === 'undocked') this.saveFloat();
-        else store(WIDTH_KEY, String(percent(this.panel.offsetWidth, innerWidth)));
-        // From the pixels of the drag to the remembered percentages.
-        this.layout();
-        resizer.removeEventListener('pointermove', move);
-        resizer.removeEventListener('pointerup', up);
-        resizer.removeEventListener('pointercancel', up);
-      };
-      resizer.addEventListener('pointermove', move);
-      resizer.addEventListener('pointerup', up);
-      resizer.addEventListener('pointercancel', up);
-    });
-  }
-
-  /** Dragging the corner resizes the undocked panel, within the viewport. */
-  private setupCorner(corner: HTMLElement) {
-    corner.addEventListener('pointerdown', down => {
-      down.preventDefault();
-      corner.setPointerCapture(down.pointerId);
-      this.panel.classList.add('dragging');
-      const start = this.panel.getBoundingClientRect();
-      const move = (e: PointerEvent) => {
-        const width = start.width + e.clientX - down.clientX;
-        const height = start.height + e.clientY - down.clientY;
-        this.panel.style.width = `${Math.min(Math.max(width, MIN_SIZE), innerWidth - start.left)}px`;
-        this.panel.style.height = `${Math.min(Math.max(height, MIN_SIZE), innerHeight - start.top)}px`;
-      };
-      const up = () => {
-        this.panel.classList.remove('dragging');
-        this.saveFloat();
-        this.layout();
-        corner.removeEventListener('pointermove', move);
-        corner.removeEventListener('pointerup', up);
-        corner.removeEventListener('pointercancel', up);
-      };
-      corner.addEventListener('pointermove', move);
-      corner.addEventListener('pointerup', up);
-      corner.addEventListener('pointercancel', up);
-    });
-  }
 }
-
-/**
- * The global elements, created for the probe (createGlobalElement), whether one has connected, and
- * those connected after it, which do nothing.
- */
-const globalElements = new WeakSet<Element>();
-let globalTaken = false;
-const inactiveGlobals = new WeakSet<Element>();
-/** The probe's frontend URL, for the elements placed by the page without one. */
-let probeFrontend = '';
-/** The connected elements placed by the page, each with what loads its frontend. */
-const customElementsLoading = new Map<Element, () => void>();
-/** The probe's options for each global element, taken when it first connects. */
-const globalConfigs = new WeakMap<Element, GlobalElementConfig>();
 
 /** Creates a global element with the probe's options: only the first one connected works. @internal */
 export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhereElement | null {
@@ -863,8 +646,8 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
     const element = new DevtoolsAnywhereElement();
     globalElements.add(element);
     globalConfigs.set(element, config);
-    if (config.frontend && !probeFrontend) {
-      probeFrontend = config.frontend;
+    if (config.frontend && !globals.probeFrontend) {
+      globals.probeFrontend = config.frontend;
       customElementsLoading.forEach(load => load());
     }
     return element;
@@ -874,9 +657,6 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
     return null;
   }
 }
-
-/** The F12 buttons of the shell's element, in the shell's page (mountShellToggler). */
-const shellTogglers = new WeakSet<Element>();
 
 /**
  * In the shell's page iframe: mounts the shell element's F12 button in the page, under <html> like
@@ -896,143 +676,6 @@ export function mountShellToggler() {
   const mount = () => document.documentElement.appendChild(element);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
   else mount();
-}
-
-/** What a toggler fires on an element placed by the page, which has no open state. */
-const TOGGLE_REQUEST_EVENT = 'devtools-toggle-request';
-/** Whether `el` is an element placed by the page (of this window). */
-const isCustom = (el: Element) =>
-  el instanceof DevtoolsAnywhereElement && !globalElements.has(el) && !shellTogglers.has(el) && !isShellElement(el);
-/**
- * Whether `el` is the shell's element: one in the shell document the probe wrote (not created
- * for the probe), maybe of another window. Its document is marked as the shell's when the probe writes the
- * shell; a `shell` attribute no longer makes an element the shell's.
- */
-const isShellElement = (el: Element) => !globalElements.has(el) && isShellDocument(el.ownerDocument);
-
-/**
- * Fired on the global element when it opens or closes, for the togglers of the shell's page: an
- * internal convention, not part of the API, which has only their aria-expanded. A page of the
- * same origin can fire it too: it is not meant to be trusted.
- */
-const STATE_EVENT = 'devtools-anywhere-state';
-
-/**
- * The event a toggler controls its element with (see controlElement): an internal convention, not
- * part of the API. A page of the same origin can fire it too: it is not meant to be trusted.
- */
-const CONTROL_EVENT = 'devtools-anywhere-control';
-
-/** Elements with this attribute open and close DevTools when clicked (see togglerTarget). */
-const TOGGLE_ATTRIBUTE: keyof TogglerAttributes = 'data-devtools-anywhere-toggle';
-/** The tag the togglers look for, once they are installed. */
-let togglerTag = '';
-/** Toggler values already warned about. */
-const warned = new Set<string>();
-
-/**
- * The element a toggler controls: the element whose id is the attribute's value, or without one
- * the first global element, or in the shell's page iframe the shell's element.
- */
-function togglerTarget(toggler: Element, warn: boolean): Element | null {
-  const id = toggler.getAttribute(TOGGLE_ATTRIBUTE) ?? '';
-  const doc = toggler.ownerDocument;
-  let target: Element | null | undefined = null;
-  if (isShellPage()) {
-    // An element the page placed in the shell's page: the toggler names it. Without a value, the
-    // shell's element, of the shell window's class: it is toggled through an event.
-    const named = id ? doc.getElementById(id) : null;
-    if (named && customElementsLoading.has(named)) return named;
-    if (!id) return shellElement();
-  } else {
-    // Without a value, the global element (or the shell's); global elements after the first do
-    // nothing: they are not targets.
-    target = id
-      ? doc.getElementById(id)
-      : [...doc.querySelectorAll(togglerTag)].find(
-          el => (globalElements.has(el) || isShellElement(el)) && !inactiveGlobals.has(el)
-        );
-  }
-  if (target instanceof DevtoolsAnywhereElement && !inactiveGlobals.has(target)) return target;
-  if (warn && !warned.has(id)) {
-    warned.add(id);
-    console.warn(`devtools-anywhere: no <${togglerTag}>${id ? ` with id "${id}"` : ''} for ${TOGGLE_ATTRIBUTE}`);
-  }
-  return null;
-}
-
-/** In the shell's page iframe: the shell's element, of the shell window's class. */
-function shellElement(): Element | null {
-  const shellDocument = window.frameElement?.ownerDocument;
-  return (shellDocument && [...shellDocument.querySelectorAll(togglerTag)].find(isShellElement)) ?? null;
-}
-
-/**
- * Asks a toggler's element, maybe of another window, whether it is open, toggling it first when
- * `toggle`. Undefined when it does not answer.
- */
-function controlElement(target: Element, toggle: boolean): boolean | undefined {
-  const detail: { toggle: boolean; open?: boolean } = { toggle };
-  target.dispatchEvent(new CustomEvent(CONTROL_EVENT, { detail }));
-  return detail.open;
-}
-
-/** Sets aria-expanded on a toggler from the state of its element. */
-function refreshToggler(toggler: Element, warn = false) {
-  const target = togglerTarget(toggler, warn);
-  // An element placed by the page has no open state.
-  if (target && isCustom(target)) return target;
-  const open = target && controlElement(target, false);
-  if (open !== undefined && open !== null) toggler.setAttribute('aria-expanded', String(open));
-  return target;
-}
-
-function refreshTogglers(doc: Document) {
-  if (!togglerTag) return;
-  for (const toggler of doc.querySelectorAll(`[${TOGGLE_ATTRIBUTE}]`)) refreshToggler(toggler);
-}
-
-/** Makes any element with TOGGLE_ATTRIBUTE, including those added later, a toggler. */
-function installTogglers(tag: string) {
-  if (togglerTag) return;
-  togglerTag = tag;
-  document.addEventListener(
-    'click',
-    event => {
-      const clicked = event.target instanceof Element ? event.target : null;
-      const toggler = clicked?.closest(`[${TOGGLE_ATTRIBUTE}]`);
-      // A label's click is followed by one on its control: that one toggles, once.
-      const control = clicked?.closest('label')?.control;
-      if (!toggler || (control && control !== clicked && toggler.contains(control))) return;
-      const target = toggler && refreshToggler(toggler, true);
-      if (!target) return;
-      // An element placed by the page only tells its listeners, which decide.
-      if (isCustom(target)) target.dispatchEvent(new Event(TOGGLE_REQUEST_EVENT));
-      else controlElement(target, true);
-      refreshToggler(toggler);
-    },
-    true
-  );
-  const refresh = () => refreshTogglers(document);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refresh);
-  else refresh();
-  // In the shell's page iframe, the togglers follow the shell's element while this page is shown.
-  if (!isShellPage()) return;
-  const shellDocument = window.frameElement?.ownerDocument;
-  let shell: Element | null = null;
-  const listen = () => {
-    shell = togglerTarget(document.documentElement, false);
-    shell?.addEventListener(STATE_EVENT, refresh);
-    refresh();
-  };
-  // The shell parses its element after its bundle, which may load after this page has run.
-  if (shellDocument?.readyState === 'loading') shellDocument.addEventListener('DOMContentLoaded', listen);
-  else listen();
-  window.addEventListener('pagehide', () => {
-    shellDocument?.removeEventListener('DOMContentLoaded', listen);
-    shell?.removeEventListener(STATE_EVENT, refresh);
-  });
-  window.addEventListener('pageshow', event => event.persisted && listen());
 }
 
 /**
