@@ -88,6 +88,14 @@ test('chrome: input aimed at an iframe on the parent session reaches the iframe'
   const page = await OopifPage.open(env, fixtureUrl(env, 'oopif-parent.html'));
   try {
     const child = await page.child('oopif-child');
+    // Chrome routes input to an out-of-process iframe by the compositor's hit-test data, which
+    // the iframe has only once it has been drawn: wait for frames in both before clicking.
+    const drawn = {
+      expression: 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))',
+      awaitPromise: true,
+    };
+    await page.cdp.send('Runtime.evaluate', drawn, child);
+    await page.cdp.send('Runtime.evaluate', drawn, page.sessionId);
     for (const type of ['mousePressed', 'mouseReleased'] as const) {
       await page.cdp.send(
         'Input.dispatchMouseEvent',
