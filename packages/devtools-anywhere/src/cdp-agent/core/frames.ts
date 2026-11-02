@@ -359,6 +359,9 @@ export class FrameRegistry {
         parent,
       };
       this.#add(frame);
+      // Back from another origin, the iframe is a frame of this page again: like Chrome, its
+      // child target ends first.
+      childTargets.end(owner);
       this.#emit('attached', frame);
       found.add(frame);
       this.#syncChildren(frame);

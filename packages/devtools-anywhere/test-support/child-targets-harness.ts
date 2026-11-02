@@ -17,6 +17,9 @@ interface Agent {
   link: ChildLink;
   /** The messages it received, parsed. */
   received: Record<string, unknown>[];
+  /** The agent it is linked to (none for the page's), and that agent's links. */
+  parent: string | undefined;
+  holder: ChildTargets;
 }
 
 const parse = (message: string): Record<string, unknown> => ({ ...Object(JSON.parse(message)) });
@@ -96,6 +99,12 @@ export class Harness {
     const holder = parent === undefined ? childTargets : this.agents.get(parent)?.targets;
     if (!holder) throw new Error(`no agent ${parent}`);
     const frameId = holder.frameIdOf(owner);
+    this.#link(name, owner, frameId, parent, holder);
+    return frameId;
+  }
+
+  /** A stand-in agent for the document in `owner`, linked to `holder`. */
+  #link(name: string, owner: Element, frameId: string, parent: string | undefined, holder: ChildTargets) {
     const session = new CdpSession();
     const targets = new ChildTargets();
     targets.setParent(
@@ -115,17 +124,33 @@ export class Harness {
       return dispatch(message);
     };
     const link = newLink(owner, frameId, session, received);
-    this.agents.set(name, { session, targets, link, received });
+    this.agents.set(name, { session, targets, link, received, parent, holder });
     holder.addChild(link);
-    return frameId;
+  }
+
+  /**
+   * The iframe of agent `name` loads another document, whose agent (a new stand-in, the same
+   * name) links again, unless `relink` is false.
+   */
+  navigate(name: string, relink = true) {
+    const agent = this.agents.get(name);
+    if (!agent) throw new Error(`no agent ${name}`);
+    agent.link.close();
+    if (relink) this.#link(name, agent.link.owner, agent.link.frameId, agent.parent, agent.holder);
   }
 
   received(name: string): Record<string, unknown>[] {
     return this.agents.get(name)?.received ?? [];
   }
 
+  /** Removes the iframe of agent `name`. */
   close(name: string) {
-    this.agents.get(name)?.link.close();
+    const agent = this.agents.get(name);
+    if (!agent) return;
+    agent.link.owner.remove();
+    agent.link.close();
+    // As the handshake's watch of the element does, between two documents too.
+    agent.holder.end(agent.link.owner);
   }
 
   /** Ends the client's session, as when it disconnects. */

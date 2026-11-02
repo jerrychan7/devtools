@@ -176,6 +176,66 @@ test("an iframe's own children are attached on its session, and their sessions a
   }
 });
 
+test('a navigated iframe keeps its target and session, and its next document is set up as the last', async () => {
+  const child = await add('child');
+  await add('grandchild', 'child');
+  send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const s1 = await attached(child);
+  send({ id: 2, method: 'Runtime.enable', sessionId: s1 });
+  send({ id: 3, method: 'Target.setAutoAttach', params: AUTO_ATTACH, sessionId: s1 });
+  const nested = await message(m => m['method'] === 'Target.attachedToTarget' && m['sessionId'] === s1);
+  const s2 = String(field(nested['params'], 'sessionId'));
+  await page.evaluate(() => window.__harness?.navigate('child'));
+  // Like Chrome (oopif-notes.md, Lifecycle): the old document's children go, on its session;
+  // the target stays, with its new URL and title on the page's session.
+  const gone = await message(m => m['method'] === 'Target.detachedFromTarget');
+  assert.deepEqual(gone, {
+    method: 'Target.detachedFromTarget',
+    params: { sessionId: s2, targetId: field(field(nested['params'], 'targetInfo'), 'targetId') },
+    sessionId: s1,
+  });
+  const changed = await message(m => m['method'] === 'Target.targetInfoChanged');
+  assert.equal(field(field(changed['params'], 'targetInfo'), 'targetId'), child);
+  assert.equal(field(field(changed['params'], 'targetInfo'), 'attached'), true);
+  const cleared = await message(m => m['method'] === 'Runtime.executionContextsCleared');
+  assert.equal(cleared['sessionId'], s1);
+  // The next document's agent got what the client set up, under ids of the domain's own.
+  const replayed = await waitFor(async () => {
+    const got = (await received('child')).filter(m => !/getFrameTree|getTargetInfo/.test(String(m['method'])));
+    return got.length >= 2 ? got : undefined;
+  });
+  assert.deepEqual(
+    replayed.map(m => [m['method'], m['params']]),
+    [
+      ['Runtime.enable', {}],
+      ['Target.setAutoAttach', AUTO_ATTACH],
+    ]
+  );
+  assert.ok(replayed.every(m => String(m['id']).startsWith('target-own-')));
+  send({ id: 4, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: s1 });
+  assert.deepEqual(await reply(4), { id: 4, result: { result: { type: 'string', value: 'child' } }, sessionId: s1 });
+  assert.ok(!(await out()).some(m => m['method'] === 'Target.detachedFromTarget' && m['sessionId'] === undefined));
+  assert.equal((await events('Target.attachedToTarget')).filter(m => m['sessionId'] === undefined).length, 1);
+});
+
+test('between two documents, what sets the session up succeeds and the rest fails; removed, the target goes', async () => {
+  const child = await add('child');
+  send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const s1 = await attached(child);
+  await page.evaluate(() => window.__harness?.navigate('child', false));
+  send({ id: 2, method: 'Runtime.enable', sessionId: s1 });
+  assert.deepEqual(await reply(2), { id: 2, result: {}, sessionId: s1 });
+  send({ id: 3, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: s1 });
+  assert.deepEqual(await reply(3), {
+    id: 3,
+    error: { code: -32000, message: 'Inspected target navigated or closed' },
+    sessionId: s1,
+  });
+  await page.evaluate(() => window.__harness?.close('child'));
+  const detached = await message(m => m['method'] === 'Target.detachedFromTarget');
+  assert.deepEqual(detached['params'], { sessionId: s1, targetId: child });
+});
+
 test('turning auto-attach off detaches, as in Chrome; without flatten nothing is attached', async () => {
   const frameId = await add('child');
   send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });

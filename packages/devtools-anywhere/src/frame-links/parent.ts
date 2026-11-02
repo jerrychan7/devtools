@@ -18,6 +18,12 @@ interface Linked {
  */
 export function linkChildren(patterns: readonly OriginPattern[]): () => void {
   const linked = new Map<Element, Linked>();
+  /** The elements of the targets there are, watched for removal, with what stops watching. */
+  const watched = new Map<Element, () => void>();
+  const offGone = childTargets.onGone(({ owner }) => {
+    watched.get(owner)?.();
+    watched.delete(owner);
+  });
 
   const onMessage = (event: MessageEvent) => {
     const hello = event.isTrusted ? readHello(event.data) : null;
@@ -54,14 +60,19 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
       close: end.close,
     };
     linked.set(owner, { id: hello.id, end });
-    // The iframe's page says bye when it goes, but not when its element does; removed or moved,
-    // the element's next frame is a new one.
-    const unwatch = watchOwner(owner, () => {
-      end.close();
-      childTargets.forget(owner);
-    });
+    // The iframe's page says bye when it goes, but not when its element does, which is watched
+    // till its target ends, between two documents too; removed or moved, the element's next
+    // frame is a new one.
+    if (!watched.has(owner)) {
+      const unwatch = watchOwner(owner, () => {
+        watched.delete(owner);
+        linked.get(owner)?.end.close();
+        childTargets.end(owner);
+        childTargets.forget(owner);
+      });
+      watched.set(owner, unwatch);
+    }
     end.onClose(() => {
-      unwatch();
       if (linked.get(owner)?.end === end) linked.delete(owner);
     });
     childTargets.addChild(link);
@@ -71,8 +82,12 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     for (const { window: target } of frameOwners()) if (target) postToTrusted(target, { type: FRAME_PING }, patterns);
   };
 
+  // Their targets end with them: this page leaves, or the iframes link again at once.
   const closeAll = () => {
-    for (const { end } of linked.values()) end.close();
+    for (const [owner, { end }] of linked) {
+      end.close();
+      childTargets.end(owner);
+    }
   };
   // Leaving, this page ends its links; back from the back/forward cache, its iframes link again.
   const onPageshow = (event: PageTransitionEvent) => event.persisted && ping();
@@ -92,5 +107,6 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     removeEventListener('pageshow', onPageshow);
     offParent();
     closeAll();
+    offGone();
   };
 }

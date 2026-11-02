@@ -21,10 +21,31 @@ import { CdpError } from '../../core/session';
 /** How long the iframe's agent has to tell its URL and title, in ms, before the iframe's `src` is used. */
 const INFO_TIMEOUT = 1000;
 
-/** The CDP session each link is attached to: a link carries one session. */
-const claims = new WeakMap<ChildLink, object>();
+/** The CDP session each child target is attached to, by target id: a link carries one session. */
+const claims = new Map<string, object>();
 /** Listeners to links let go, which another CDP session may then attach. */
 const releases = new Set<(link: ChildLink) => void>();
+
+/** Chrome's error for a command to a target whose document went away. */
+const NAVIGATED_ERROR = { code: -32000, message: 'Inspected target navigated or closed' };
+
+/**
+ * Commands that set up what a session gets, besides the `enable`s: what the client sent of them is
+ * sent the iframe's next document too, which starts from nothing, as Chrome's session keeps them
+ * across the iframe's navigations.
+ */
+const KEPT = new Set([
+  'Target.setAutoAttach',
+  'Overlay.setInspectMode',
+  'Runtime.setAsyncCallStackDepth',
+  'Debugger.setAsyncCallStackDepth',
+  'Debugger.setPauseOnExceptions',
+  'Debugger.setBreakpointsActive',
+  'Debugger.setSkipAllPauses',
+  'Network.setCacheDisabled',
+  'Emulation.setEmitTouchEventsForMouse',
+]);
+let replaySeq = 0;
 
 /** A session id: random, unique across the page and the iframes' agents, like Chrome's. */
 function newSessionId() {
@@ -46,6 +67,12 @@ function parse(message: string): Record<string, unknown> | undefined {
 const field = (value: unknown, name: string): unknown =>
   typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
 
+/** The child frames of a Page.getFrameTree tree. */
+function childFrames(tree: unknown): unknown[] {
+  const children = field(tree, 'childFrames');
+  return Array.isArray(children) ? children : [];
+}
+
 /** Asks the iframe's agent, waiting {@link INFO_TIMEOUT} ms at most. */
 const ask = (link: ChildLink, method: string, params: object = {}) => askChild(link, method, params, INFO_TIMEOUT);
 
@@ -59,12 +86,22 @@ function srcOf(owner: Element): string {
   }
 }
 
-/** A link attached as a session. */
+/** A child target attached as a session: its link's, and its next links' (the iframe's next documents'). */
 interface Attached {
   readonly sessionId: string;
+  /** The link now, or the last one while the iframe is between two documents. */
+  link: ChildLink;
+  /** The link closed: the iframe is between two documents, and the target kept for the next one. */
+  between: boolean;
+  /** What the client's messages wait for: the next document set up as the client set up the last. */
+  ready: Promise<void>;
   /** The sessions of the iframe's own child targets (and theirs), routed to the link as they are. */
-  readonly nested: Map<string, () => void>;
+  readonly nested: Map<string, { targetId: string; off: () => void }>;
+  /** The `enable`s and {@link KEPT} commands the client sent on the session, with their params. */
+  readonly kept: Map<string, unknown>;
   readonly offs: (() => void)[];
+  /** What ends with the link. */
+  linkOffs: (() => void)[];
 }
 
 /** Registers the Target domain on `ctx.session`, for the links in `targets`. */
@@ -73,7 +110,8 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
   const claim = {};
   let autoAttach = false;
   let discover = false;
-  const attached = new Map<ChildLink, Attached>();
+  /** By target id. */
+  const attached = new Map<string, Attached>();
 
   /** This page's target: an iframe's too, when its agent is linked to its parent's. */
   function ownInfo(): Protocol.Target.TargetInfo {
@@ -110,54 +148,151 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
       type: 'iframe',
       title: typeof title === 'string' && title ? title : url,
       url,
-      attached: claims.has(link),
+      attached: claims.has(link.frameId),
       parentId: ownId,
       canAccessOpener: false,
       parentFrameId: holder === ctx.frames.top ? ownId : holder.id,
     };
   }
 
+  /** Sends the client a message on a child target's session. */
+  const postOn = (entry: Attached, message: object) =>
+    session.post(JSON.stringify({ ...message, sessionId: entry.sessionId }));
+
   /** A message from the iframe's agent, on to the client with the link's session id unless it has one. */
-  function fromChild(link: ChildLink, entry: Attached, message: string) {
+  function fromChild(entry: Attached, message: string) {
     const parsed = parse(message);
     if (!parsed) return;
     const { id, method, params } = parsed;
     if (typeof id === 'string' && id.startsWith(OWN_ID_PREFIX)) return;
+    const own = parsed['sessionId'];
+    if (typeof own === 'string' && own) return session.post(message);
     // The iframe's own children: their sessions are the iframe's to route to.
     const nested = field(params, 'sessionId');
-    if (typeof nested === 'string') {
-      if (method === 'Target.attachedToTarget' && !entry.nested.has(nested)) {
-        entry.nested.set(
-          nested,
-          session.route(nested, m => link.send(JSON.stringify(m)))
-        );
-      } else if (method === 'Target.detachedFromTarget') {
-        entry.nested.get(nested)?.();
-        entry.nested.delete(nested);
-      }
+    if (typeof nested === 'string' && method === 'Target.attachedToTarget' && !entry.nested.has(nested)) {
+      const targetId = field(field(params, 'targetInfo'), 'targetId');
+      entry.nested.set(nested, {
+        targetId: typeof targetId === 'string' ? targetId : '',
+        off: session.route(nested, m => entry.link.send(JSON.stringify(m))),
+      });
+    } else if (typeof nested === 'string' && method === 'Target.detachedFromTarget') {
+      entry.nested.get(nested)?.off();
+      entry.nested.delete(nested);
     }
-    const own = parsed['sessionId'];
-    session.post(typeof own === 'string' && own ? message : JSON.stringify({ ...parsed, sessionId: entry.sessionId }));
+    postOn(entry, parsed);
+  }
+
+  /** Keeps what the client set up on a child target's session, for the iframe's next document. */
+  function keep(entry: Attached, method: string, params: unknown) {
+    if (method.endsWith('.enable') || KEPT.has(method)) entry.kept.set(method, params ?? {});
+    else if (method.endsWith('.disable')) entry.kept.delete(method.replace(/disable$/, 'enable'));
+  }
+
+  /** The client's message on a child target's session, to the iframe's agent as its own client's, without the session id. */
+  function toChild(entry: Attached, message: Record<string, unknown>) {
+    const { id, method, params } = message;
+    if (typeof method === 'string') keep(entry, method, params);
+    delete message['sessionId'];
+    if (entry.between) {
+      // Like the relay for a page between two instances: what the next document is set up with
+      // succeeds, anything else fails as in Chrome.
+      if (id === undefined) return;
+      const enable = typeof method === 'string' && (method.endsWith('.enable') || KEPT.has(method));
+      postOn(entry, enable ? { id, result: {} } : { id, error: NAVIGATED_ERROR });
+      return;
+    }
+    void entry.ready.then(() => entry.link.send(JSON.stringify(message)));
+  }
+
+  /** Starts listening to a link of an attached target. */
+  function follow(entry: Attached, link: ChildLink) {
+    entry.link = link;
+    entry.between = false;
+    entry.linkOffs = [link.onMessage(message => fromChild(entry, message)), link.onClose(() => leave(entry, link))];
+  }
+
+  /**
+   * The iframe's document went away, its link with it: like Chrome, the target and its session
+   * stay for the next document, and the document's own children go at once, on its session.
+   */
+  function leave(entry: Attached, link: ChildLink) {
+    if (entry.link !== link || entry.between) return;
+    entry.between = true;
+    entry.linkOffs.forEach(off => off());
+    for (const [sessionId, { targetId, off }] of entry.nested) {
+      off();
+      postOn(entry, {
+        method: 'Target.detachedFromTarget',
+        params: { sessionId, targetId } satisfies Protocol.Target.DetachedFromTargetEvent,
+      });
+    }
+    entry.nested.clear();
+  }
+
+  /**
+   * The iframe's next document linked: it carries the target on. Like Chrome on the iframe's
+   * navigation, the client hears of the new document on the target's session (the old
+   * document's contexts cleared, its main frame navigated, its document updated) and of the new
+   * URL and title on this one; the new document's agent gets what the client set up on the
+   * session, as the relay replays a page's (packages/relay-core), and reports what it has.
+   */
+  function relink(entry: Attached, link: ChildLink) {
+    follow(entry, link);
+    entry.ready = (async () => {
+      const [tree, targetInfo] = await Promise.all([ask(link, 'Page.getFrameTree'), infoOf(link)]);
+      if (attached.get(link.frameId) !== entry || entry.link !== link) return;
+      const { kept } = entry;
+      if (kept.has('Runtime.enable')) postOn(entry, { method: 'Runtime.executionContextsCleared', params: {} });
+      const frameTree = field(tree, 'frameTree');
+      const frame = field(frameTree, 'frame');
+      const page = kept.has('Page.enable');
+      if (page && frame) postOn(entry, { method: 'Page.frameNavigated', params: { frame, type: 'Navigation' } });
+      changed(targetInfo);
+      if (kept.has('DOM.enable')) postOn(entry, { method: 'DOM.documentUpdated', params: {} });
+      // The new document's own frames, which came before its agent was linked.
+      if (page) for (const child of childFrames(frameTree)) attachFrame(entry, child);
+      for (const [method, params] of kept) {
+        link.send(JSON.stringify({ id: `${OWN_ID_PREFIX}replay-${++replaySeq}`, method, params }));
+      }
+    })();
+  }
+
+  /** Tells the client of a frame of a child target's document, and of its own frames, as Chrome does as they load. */
+  function attachFrame(entry: Attached, tree: unknown) {
+    const frame = field(tree, 'frame');
+    postOn(entry, {
+      method: 'Page.frameAttached',
+      params: { frameId: field(frame, 'id'), parentFrameId: field(frame, 'parentId') },
+    });
+    postOn(entry, { method: 'Page.frameNavigated', params: { frame, type: 'Navigation' } });
+    for (const child of childFrames(tree)) attachFrame(entry, child);
+  }
+
+  /** A child target's URL changed. */
+  function changed(targetInfo: Protocol.Target.TargetInfo) {
+    if (!discover && !attached.has(targetInfo.targetId)) return;
+    session.emit('Target.targetInfoChanged', { targetInfo } satisfies Protocol.Target.TargetInfoChangedEvent);
   }
 
   async function attach(link: ChildLink) {
-    if (attached.has(link) || claims.has(link)) return;
-    claims.set(link, claim);
-    const entry: Attached = { sessionId: newSessionId(), nested: new Map(), offs: [] };
-    attached.set(link, entry);
-    // Like Chrome when the iframe is removed (or goes back to the parent's origin).
-    entry.offs.push(link.onClose(() => detach(link, true, false)));
+    if (attached.has(link.frameId) || claims.has(link.frameId)) return;
+    claims.set(link.frameId, claim);
+    const entry: Attached = {
+      sessionId: newSessionId(),
+      link,
+      between: false,
+      ready: Promise.resolve(),
+      nested: new Map(),
+      kept: new Map(),
+      offs: [],
+      linkOffs: [],
+    };
+    attached.set(link.frameId, entry);
+    follow(entry, link);
     const targetInfo = await infoOf(link);
     // Let go meanwhile: auto-attach turned off, the iframe gone, or the client.
-    if (attached.get(link) !== entry) return;
-    entry.offs.push(
-      // To the iframe's agent as its own client's, without the session id.
-      session.route(entry.sessionId, message => {
-        delete message['sessionId'];
-        link.send(JSON.stringify(message));
-      }),
-      link.onMessage(message => fromChild(link, entry, message))
-    );
+    if (attached.get(link.frameId) !== entry) return;
+    entry.offs.push(session.route(entry.sessionId, message => toChild(entry, message)));
     session.emit('Target.attachedToTarget', {
       sessionId: entry.sessionId,
       targetInfo,
@@ -165,23 +300,24 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     } satisfies Protocol.Target.AttachedToTargetEvent);
   }
 
-  /** Lets a link go: with an event when the client is to hear of it, and ending its session in the iframe when it is still there. */
-  function detach(link: ChildLink, notify: boolean, open = true) {
-    const entry = attached.get(link);
-    if (!entry) return;
-    attached.delete(link);
-    claims.delete(link);
+  /** Lets a target go: with an event when the client is to hear of it, and ending its session in the iframe when it is still there. */
+  function detach(entry: Attached, notify: boolean) {
+    const { link } = entry;
+    if (attached.get(link.frameId) !== entry) return;
+    attached.delete(link.frameId);
+    if (claims.get(link.frameId) === claim) claims.delete(link.frameId);
     entry.offs.forEach(off => off());
-    entry.nested.forEach(off => off());
+    entry.linkOffs.forEach(off => off());
+    entry.nested.forEach(({ off }) => off());
     // What the client started there ends, its own children let go too, as a new Chrome session starts clean.
-    if (open) link.endSession();
+    if (!entry.between) link.endSession();
     if (notify) {
       session.emit('Target.detachedFromTarget', {
         sessionId: entry.sessionId,
         targetId: link.frameId,
       } satisfies Protocol.Target.DetachedFromTargetEvent);
     }
-    releases.forEach(listener => listener(link));
+    if (!entry.between) releases.forEach(listener => listener(link));
   }
 
   async function announce(link: ChildLink) {
@@ -189,12 +325,26 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     if (discover) session.emit('Target.targetCreated', { targetInfo } satisfies Protocol.Target.TargetCreatedEvent);
   }
 
-  targets.onChild(link => {
+  targets.onChild((link, previous) => {
+    const entry = previous && attached.get(previous.frameId);
+    if (entry && entry.link === previous) return relink(entry, link);
+    // Another session's target carried on: news to this one only if it discovers targets.
+    if (previous) {
+      if (discover) void infoOf(link).then(changed);
+      return;
+    }
     if (discover) void announce(link);
-    link.onClose(() => {
-      if (discover) session.emit('Target.targetDestroyed', { targetId: link.frameId });
-    });
     if (autoAttach) void attach(link);
+  });
+  // Like Chrome when the iframe is removed, or comes back to this page's origin; its own children
+  // went first, when its link closed.
+  targets.onGone(link => {
+    const entry = attached.get(link.frameId);
+    if (entry?.link === link) {
+      leave(entry, link);
+      detach(entry, true);
+    }
+    if (discover) session.emit('Target.targetDestroyed', { targetId: link.frameId });
   });
   // A link another CDP session let go, still there: this one's if it auto-attaches.
   releases.add(link => {
@@ -204,7 +354,7 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     // The client is gone: no one to tell.
     autoAttach = false;
     discover = false;
-    for (const link of attached.keys()) detach(link, false);
+    for (const entry of attached.values()) detach(entry, false);
   });
 
   session.register('Target', {
@@ -215,7 +365,7 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
       autoAttach = params.autoAttach === true && params.flatten === true;
       if (autoAttach) for (const link of targets.children()) void attach(link);
       // Like Chrome, turning it off detaches the targets it attached.
-      else for (const link of attached.keys()) detach(link, true);
+      else for (const entry of attached.values()) detach(entry, true);
     },
 
     async setDiscoverTargets(params: Protocol.Target.SetDiscoverTargetsRequest) {
@@ -241,11 +391,11 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     },
 
     detachFromTarget(params: Protocol.Target.DetachFromTargetRequest) {
-      const link = [...attached].find(
-        ([child, entry]) => entry.sessionId === params.sessionId || child.frameId === params.targetId
-      )?.[0];
-      if (!link) throw new CdpError('No session with given id', -32602);
-      detach(link, true);
+      const entry = [...attached.values()].find(
+        ({ sessionId, link }) => sessionId === params.sessionId || link.frameId === params.targetId
+      );
+      if (!entry) throw new CdpError('No session with given id', -32602);
+      detach(entry, true);
     },
   });
 }

@@ -27,7 +27,10 @@ export interface ChildLink {
    * forgotten. Messages sent after it reach the new session.
    */
   endSession(): void;
-  /** Listens to the link's end: the iframe navigated away, was removed, or closed it. */
+  /**
+   * Listens to the link's end: the iframe navigated away, was removed, or closed it. The target
+   * may outlive it (ChildTargets.onGone), for the iframe's next document.
+   */
   onClose(listener: () => void): () => void;
   close(): void;
 }
@@ -49,6 +52,18 @@ export interface ParentLink {
 }
 
 type Listener<T> = (value: T) => void;
+
+/**
+ * How long, in ms, a cross-origin iframe's target outlives its link while the element is still
+ * there: for the iframe's next document (a reload, a navigation) to link again and carry the
+ * target on, as Chrome keeps the target across the iframe's navigations.
+ */
+export const RELINK_TIMEOUT = 10_000;
+/**
+ * How long, in ms, once the iframe's next document has loaded: one with the probe has said hello
+ * by then, and one without it (or not trusting this page) never will.
+ */
+export const RELINK_AFTER_LOAD = 2000;
 
 /**
  * Prefix of the ids of an agent's own commands to an iframe's agent (askChild): their responses
@@ -93,7 +108,10 @@ export function askChild(link: ChildLink, method: string, params: object, timeou
 /** The links of a page's agent: to its cross-origin iframes, and to its parent if it is one. */
 export class ChildTargets {
   readonly #children = new Set<ChildLink>();
-  readonly #listeners = new Set<Listener<ChildLink>>();
+  readonly #listeners = new Set<(link: ChildLink, previous: ChildLink | undefined) => void>();
+  /** The last links of targets kept for the iframe's next document, by frame id, with what stops waiting. */
+  readonly #between = new Map<string, { link: ChildLink; stop: () => void }>();
+  readonly #goneListeners = new Set<Listener<ChildLink>>();
   #parent: ParentLink | undefined;
   readonly #parentListeners = new Set<Listener<ParentLink>>();
   readonly #ids = new WeakMap<Element, string>();
@@ -120,11 +138,64 @@ export class ChildTargets {
     this.#ids.delete(owner);
   }
 
-  /** Called by the handshake when a cross-origin iframe is linked. */
+  /**
+   * Called by the handshake when a cross-origin iframe is linked: a new target, or the one the
+   * element's previous link left, which this link carries on.
+   */
   addChild(link: ChildLink): void {
+    const previous = this.#between.get(link.frameId);
+    previous?.stop();
+    this.#between.delete(link.frameId);
     this.#children.add(link);
-    link.onClose(() => this.#children.delete(link));
-    this.#listeners.forEach(listener => listener(link));
+    link.onClose(() => this.#closed(link));
+    this.#listeners.forEach(listener => listener(link, previous?.link));
+  }
+
+  /**
+   * A link closed: its target ends at once when its element is gone, and is kept a while
+   * otherwise ({@link RELINK_TIMEOUT}), for the iframe's next document.
+   */
+  #closed(link: ChildLink): void {
+    this.#children.delete(link);
+    const { owner, frameId } = link;
+    if (!owner.isConnected) return this.#gone(link);
+    let timer = setTimeout(() => this.end(owner), RELINK_TIMEOUT);
+    const onLoad = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => this.end(owner), RELINK_AFTER_LOAD);
+    };
+    owner.addEventListener('load', onLoad);
+    const stop = () => {
+      clearTimeout(timer);
+      owner.removeEventListener('load', onLoad);
+    };
+    this.#between.set(frameId, { link, stop });
+  }
+
+  #gone(link: ChildLink): void {
+    this.#goneListeners.forEach(listener => listener(link));
+  }
+
+  /**
+   * Ends the target that the element's last link left, if it is kept for the iframe's next
+   * document: the element was removed, the page leaves, or the iframe came back to this page's
+   * origin and is a frame of this page again.
+   */
+  end(owner: Element): void {
+    // A link still open is done with too: its document is gone, or going.
+    for (const link of this.#children) if (link.owner === owner) link.close();
+    for (const [frameId, { link, stop }] of this.#between) {
+      if (link.owner !== owner) continue;
+      stop();
+      this.#between.delete(frameId);
+      this.#gone(link);
+    }
+  }
+
+  /** Listens to targets ending, each with its last link, closed by then; returns its removal. */
+  onGone(listener: Listener<ChildLink>): () => void {
+    this.#goneListeners.add(listener);
+    return () => this.#goneListeners.delete(listener);
   }
 
   children(): Iterable<ChildLink> {
@@ -137,8 +208,11 @@ export class ChildTargets {
     return undefined;
   }
 
-  /** Listens to new children; returns its removal. */
-  onChild(listener: Listener<ChildLink>): () => void {
+  /**
+   * Listens to new links; returns its removal. `previous` is the closed link whose target the new
+   * one carries on (the iframe's previous document's), if any.
+   */
+  onChild(listener: (link: ChildLink, previous: ChildLink | undefined) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
