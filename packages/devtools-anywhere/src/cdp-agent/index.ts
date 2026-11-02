@@ -41,6 +41,7 @@ export {
 } from './probe/shell';
 export { isTrusted } from './probe/trust';
 export { FRAME_ID, LOADER_ID } from './core/context';
+export { childTargets, type ChildLink, type ParentLink } from './core/child-targets';
 export type { SnapdomLoader } from './domains/page/render';
 
 /** @internal */
