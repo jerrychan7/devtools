@@ -2,7 +2,7 @@
 
 [English](DEV.md) | 简体中文
 
-介绍如何搭建开发环境、在实时重新构建下开发各个包，以及改动如何合入或发布。项目做什么见 [README](README.zh-CN.md)，工作原理和设计取舍见[设计文档](docs/design.zh-CN.md)。
+介绍如何搭建开发环境、在实时重新构建下开发各个包，以及改动如何合入或发布。项目做什么见 [README](README.zh-CN.md)，工作原理和设计取舍见[设计文档](docs/design.zh-CN.md)，计划中、还没做的事见[路线图](docs/roadmap.zh-CN.md)。
 
 ## 1. 第一次开发：环境配置
 

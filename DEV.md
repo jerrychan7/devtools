@@ -2,7 +2,7 @@
 
 English | [简体中文](DEV.zh-CN.md)
 
-How to set up a development environment, work on the packages with live rebuilds, and get changes merged or released. For what the project does, see the [README](README.md); for how it works and why, the [design](docs/design.md).
+How to set up a development environment, work on the packages with live rebuilds, and get changes merged or released. For what the project does, see the [README](README.md); for how it works and why, the [design](docs/design.md); for what is planned and not done yet, the [roadmap](docs/roadmap.md).
 
 ## 1. First-time setup
 
