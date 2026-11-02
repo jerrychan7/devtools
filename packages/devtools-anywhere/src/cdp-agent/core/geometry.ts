@@ -284,26 +284,44 @@ export function frameDocumentOf(el: Element): Document | null {
 }
 
 /**
- * The topmost element at a point of `doc`'s viewport that `accept` takes, looking into the
- * documents of same-origin iframes like Chrome's hit testing: the element there in the iframe's
- * document, at the point mapped into its viewport, or the iframe itself where its document has
- * none (its border and padding). The point is returned in the viewport of the found element.
+ * The topmost elements at a point of `doc`'s viewport that `accept` takes, looking into the
+ * documents of same-origin iframes like Chrome's hit testing: the element in `doc`, then, if it is
+ * an iframe, the element there in its document at the point mapped into its viewport, and so on.
+ * The path ends at an iframe where its document has nothing (its border and padding), and is
+ * empty where `doc` has nothing (outside its viewport). Each point is in its element's viewport.
  */
-export function hitTest(
+export function hitPath(
   doc: Document,
   x: number,
   y: number,
   accept: (el: Element) => boolean = () => true
-): { el: Element; x: number; y: number } | null {
-  const el = doc.elementsFromPoint(x, y).find(accept);
-  if (!el) return null;
-  const inner = frameDocumentOf(el);
-  if (inner) {
-    const p = unmapPoint(frameContentToViewport(el), x, y);
-    const found = Number.isFinite(p.x) && Number.isFinite(p.y) ? hitTest(inner, p.x, p.y, accept) : null;
-    if (found) return found;
+): { el: Element; x: number; y: number }[] {
+  const path: { el: Element; x: number; y: number }[] = [];
+  for (let d: Document | null = doc, p = { x, y }; d;) {
+    const el = d.elementsFromPoint(p.x, p.y).find(accept);
+    if (!el) break;
+    path.push({ el, ...p });
+    d = frameDocumentOf(el);
+    if (d) p = unmapPoint(frameContentToViewport(el), p.x, p.y);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) break;
   }
-  return { el, x, y };
+  return path;
+}
+
+/** The innermost element of {@link hitPath}: the node Chrome finds at a point. */
+export function hitTest(
+  doc: Document,
+  x: number,
+  y: number,
+  accept?: (el: Element) => boolean
+): { el: Element; x: number; y: number } | null {
+  const path = hitPath(doc, x, y, accept);
+  return path[path.length - 1] ?? null;
+}
+
+/** The document holding the iframe that shows a same-origin frame's document; null for the top one. */
+export function parentFrameDocument(doc: Document): Document | null {
+  return frameElementOf(doc)?.ownerDocument ?? null;
 }
 
 /**
