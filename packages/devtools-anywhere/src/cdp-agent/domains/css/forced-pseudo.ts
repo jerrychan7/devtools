@@ -1,4 +1,6 @@
 import { quietly } from '../../core/adopted';
+import { frames } from '../../core/frames';
+import { isCssom, isShadowRoot, realmOf } from '../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../core/nodes';
 
 /** A document or shadow root: what style sheets apply to. */
@@ -26,7 +28,7 @@ const FORCEABLE = new RegExp(`:(${FORCEABLE_CLASSES.join('|')})(?![\\w-])`, 'g')
 
 /** Whether `el` is `node` or inside it, in its shadow trees too. */
 function containsAcrossShadow(node: Node, el: Element): boolean {
-  for (let n: Node | null = el; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
+  for (let n: Node | null = el; n; n = isShadowRoot(n) ? n.host : n.parentNode) {
     if (n === node) return true;
   }
   return false;
@@ -58,8 +60,16 @@ class SharedForcedPseudoClasses {
   private sheetsOfCompanions = new WeakSet<CSSStyleSheet>();
   /** Media queries the companions depend on (for the layer order), and their change listeners. */
   private queries = new Map<string, { list: MediaQueryList; listener: () => void }>();
-  private queried = new Set<string>();
+  /** By key (see mediaKey), with the window and the text of the query. */
+  private queried = new Map<string, { realm: Window; text: string }>();
   private mediaLists = new Map<string, MediaQueryList>();
+  /**
+   * The window of the tree whose companion is being built: its media queries hold in its own
+   * viewport, an iframe's in the iframe's.
+   */
+  private realm: Window | null = null;
+  private realmKeys = new WeakMap<Window, number>();
+  private realmSeq = 0;
   /** Media queries the last rebuild looked at: the others are let go. */
   private usedMedia = new Set<string>();
   /** `forced` and `active()` as of the last change of `owners`: a rebuild reads them for every rule. */
@@ -188,7 +198,8 @@ class SharedForcedPseudoClasses {
   private prune(): boolean {
     let pruned = false;
     for (const el of this.forced.keys()) {
-      if (el.isConnected) continue;
+      // An element of a document without a window (its iframe removed or navigated) is gone too.
+      if (el.isConnected && el.ownerDocument.defaultView) continue;
       this.forget(el);
       pruned = true;
     }
@@ -228,12 +239,16 @@ class SharedForcedPseudoClasses {
     this.usedMedia.clear();
     if (this.owners.size) {
       for (const { tree, sheets } of this.trees()) {
+        const realm = realmOf(tree);
+        this.realm = realm;
         const text = this.companionText(sheets);
+        this.realm = null;
         if (!text) continue;
         seen.add(tree);
         let companion = this.companions.get(tree);
         if (!companion) {
-          companion = { sheet: new CSSStyleSheet(), restore: null };
+          // Only the realm's own constructed sheets can be adopted by its trees.
+          companion = { sheet: new realm.CSSStyleSheet(), restore: null };
           this.sheetsOfCompanions.add(companion.sheet);
           this.companions.set(tree, companion);
         }
@@ -252,30 +267,43 @@ class SharedForcedPseudoClasses {
     }
   }
 
-  private mediaList(text: string): MediaQueryList {
-    this.usedMedia.add(text);
-    let list = this.mediaLists.get(text);
+  /** The window media queries are evaluated in now: that of the tree being built, else the top one. */
+  private currentRealm(): Window {
+    return this.realm ?? frames.top.window;
+  }
+
+  /** A media query in a window, as a key of mediaLists, queried and queries. */
+  private mediaKey(realm: Window, text: string): string {
+    let key = this.realmKeys.get(realm);
+    if (key === undefined) this.realmKeys.set(realm, (key = ++this.realmSeq));
+    return `${key} ${text}`;
+  }
+
+  private mediaList(text: string, realm = this.currentRealm()): MediaQueryList {
+    const key = this.mediaKey(realm, text);
+    this.usedMedia.add(key);
+    let list = this.mediaLists.get(key);
     if (!list) {
-      list = matchMedia(text);
-      this.mediaLists.set(text, list);
+      list = realm.matchMedia(text);
+      this.mediaLists.set(key, list);
     }
     return list;
   }
 
   /** Rebuilds when a media query the layer order depended on changes; only while something is forced. */
   private watch() {
-    for (const [text, { list, listener }] of this.queries) {
-      if (this.queried.has(text)) continue;
+    for (const [key, { list, listener }] of this.queries) {
+      if (this.queried.has(key)) continue;
       list.removeEventListener('change', listener);
-      this.queries.delete(text);
-      this.mediaLists.delete(text);
+      this.queries.delete(key);
+      this.mediaLists.delete(key);
     }
-    for (const text of this.queried) {
-      if (this.queries.has(text)) continue;
-      const list = this.mediaList(text);
+    for (const [key, { realm, text }] of this.queried) {
+      if (this.queries.has(key)) continue;
+      const list = this.mediaList(text, realm);
       const listener = () => this.rebuild();
       list.addEventListener('change', listener);
-      this.queries.set(text, { list, listener });
+      this.queries.set(key, { list, listener });
     }
   }
 
@@ -294,14 +322,15 @@ class SharedForcedPseudoClasses {
    */
   private attach(tree: TreeScope, companion: Companion) {
     const sheet = companion.sheet;
-    const proto = tree instanceof ShadowRoot ? ShadowRoot.prototype : Document.prototype;
+    const realm = realmOf(tree);
+    const proto = isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
     const get = descriptor?.get;
     const set = descriptor?.set;
     if (!get || !set) return;
     const native = (): CSSStyleSheet[] => {
       const value: unknown = get.call(tree);
-      return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => s instanceof CSSStyleSheet) : [];
+      return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => isCssom(s, 'CSSStyleSheet')) : [];
     };
     // Our own reads and writes are not changes of the page's adopted sheets.
     quietly(() => {
@@ -407,7 +436,8 @@ class SharedForcedPseudoClasses {
      * `conditions`, the preludes since `parent`) into it and each layer on the way.
      */
     const enter = (rule: CSSRule, parent: Layer, name: string, conditions: string[], live: boolean) => {
-      for (const text of open) this.queried.add(text);
+      const realm = this.currentRealm();
+      for (const text of open) this.queried.set(this.mediaKey(realm, text), { realm, text });
       const names = name ? name.split('.') : [''];
       const layers: Layer[] = [];
       let at = parent;
@@ -440,7 +470,7 @@ class SharedForcedPseudoClasses {
       let out = '';
       let own = '';
       for (const rule of list) {
-        if (rule instanceof CSSStyleRule) {
+        if (isCssom(rule, 'CSSStyleRule')) {
           // Nested rules (`&:hover`) resolve `&` against the copy of their parent, which only
           // carries its own declarations once copying started.
           const rewritten = this.rewrite(rule.selectorText);
@@ -465,12 +495,12 @@ class SharedForcedPseudoClasses {
             out += text;
             own += text;
           }
-        } else if (rule instanceof CSSNestedDeclarations) {
+        } else if (isCssom(rule, 'CSSNestedDeclarations')) {
           if ((started || all) && rule.style.cssText) {
             out += `${rule.style.cssText}\n`;
             own += `${rule.style.cssText}\n`;
           }
-        } else if (rule instanceof CSSLayerBlockRule) {
+        } else if (isCssom(rule, 'CSSLayerBlockRule')) {
           const record = all ? enter(rule, layer, rule.name, conditions, live) : null;
           const sub = all ? (anonymousOf.get(rule) ?? layer) : layer;
           const [inner, innerOwn] = walk(this.rulesOf(rule), sub, [], live);
@@ -479,19 +509,19 @@ class SharedForcedPseudoClasses {
             // Copied at the end instead, see above.
             if (inner) copiedRules.add(rule);
           } else if (inner) out += wrap(inner, [prelude(rule)]);
-        } else if (rule instanceof CSSGroupingRule) {
+        } else if (isCssom(rule, 'CSSGroupingRule')) {
           const p = prelude(rule);
           let holds = live;
-          const query = rule instanceof CSSMediaRule ? rule.media.mediaText : '';
+          const query = isCssom(rule, 'CSSMediaRule') ? rule.media.mediaText : '';
           if (query) holds &&= media(query);
-          else if (rule instanceof CSSSupportsRule) holds &&= CSS.supports(rule.conditionText);
+          else if (isCssom(rule, 'CSSSupportsRule')) holds &&= CSS.supports(rule.conditionText);
           const [inner, innerOwn] = under(query, () => walk(this.rulesOf(rule), layer, [...conditions, p], holds));
           if (inner) out += wrap(inner, [p]);
           if (innerOwn) own += wrap(innerOwn, [p]);
-        } else if (rule instanceof CSSLayerStatementRule) {
+        } else if (isCssom(rule, 'CSSLayerStatementRule')) {
           if (all && live) for (const name of rule.nameList) enter(rule, layer, name, conditions, true);
           if (all) out += `${rule.cssText}\n`;
-        } else if (rule instanceof CSSImportRule && rule.styleSheet) {
+        } else if (isCssom(rule, 'CSSImportRule') && rule.styleSheet) {
           const wrappers: string[] = [];
           if (rule.supportsText) wrappers.push(`@supports ${rule.supportsText}`);
           if (rule.media.length) wrappers.push(`@media ${rule.media.mediaText}`);

@@ -1,13 +1,5 @@
 {
-  "core/adopted.ts": 1,
-  "core/container-query.ts": 6,
   "core/history.ts": 1,
-  "domains/css/cascade.ts": 7,
-  "domains/css/color.ts": 1,
-  "domains/css/css.ts": 25,
-  "domains/css/forced-pseudo.ts": 2,
-  "domains/css/sheet-registry.ts": 5,
-  "domains/css/source.ts": 3,
   "domains/css/style.ts": 1,
   "domains/debugger/debugger.ts": 1,
   "domains/dom-debugger/dom-debugger.ts": 5,

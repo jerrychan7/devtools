@@ -80,7 +80,9 @@ test('querySelector on a text node fails', async () => {
 
 test('CSS.addRule rejects a rule that is not a style rule and leaves the sheet unchanged', async () => {
   await t.ours.send('CSS.enable');
-  const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', { frameId: 'x' });
+  const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', {
+    frameId: (await t.ours.send('Page.getResourceTree')).frameTree.frame.id,
+  });
   const before = await t.ours.send('CSS.getStyleSheetText', { styleSheetId });
   await assert.rejects(
     t.ours.send('CSS.addRule', {
@@ -167,7 +169,9 @@ test('CSS.setStyleSheetText keeps the style sheet id', async () => {
   await p.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="restyled"></div>'));
   await p.ours.send('CSS.enable');
   const { root } = await p.ours.send('DOM.getDocument', { depth: -1 });
-  const { styleSheetId } = await p.ours.send('CSS.createStyleSheet', { frameId: 'x' });
+  const { styleSheetId } = await p.ours.send('CSS.createStyleSheet', {
+    frameId: (await p.ours.send('Page.getResourceTree')).frameTree.frame.id,
+  });
   await p.ours.send('CSS.setStyleSheetText', { styleSheetId, text: '#restyled { color: red; }' });
   const { matchedCSSRules } = await p.ours.send('CSS.getMatchedStylesForNode', {
     nodeId: byId(root, 'restyled').nodeId,

@@ -1,11 +1,12 @@
 import type { Protocol } from 'devtools-protocol';
+import { documentOf, isCssom, isElement, isHtml, isHtmlElement, isNode, isSvgElement, realmOf } from '../../core/realm';
 import { type Context } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
 import { parentOf } from '../../core/container-query';
 import { CdpError } from '../../core/session';
 import { resolveElement } from '../dom/dom';
 import { historyOf } from '../../core/history';
-import { quietly, watchAdopted } from '../../core/adopted';
+import { quietly, watchAdopted, watchTrees } from '../../core/adopted';
 import { ForcedPseudoClasses } from './forced-pseudo';
 import { backgroundsBehind } from './color';
 import { Cascade } from './cascade';
@@ -25,8 +26,11 @@ export function registerCss(ctx: Context) {
   const { session, nodes } = ctx;
   const history = historyOf(ctx);
 
+  /** The documents of the frames, the top one first. */
+  const documents = () => Array.from(ctx.frames, f => f.document);
+
   /**
-   * Shadow roots in the document (closed ones too, when the probe recorded them), in tree order.
+   * Shadow roots in the frames' documents (closed ones too, when the probe recorded them), in tree order.
    * While the CSS domain is enabled they are kept until the observer sees an element come or go,
    * or a shadow root is attached.
    */
@@ -39,9 +43,9 @@ export function registerCss(ctx: Context) {
     if (shadowRootCache) return shadowRootCache;
     const roots: ShadowRoot[] = [];
     const visit = (root: Document | ShadowRoot) => {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!(node instanceof Element) || isOwn(node)) continue;
+        if (!isElement(node) || isOwn(node)) continue;
         const shadowRoot = nodes.shadowRootOf(node);
         if (!shadowRoot) continue;
         roots.push(shadowRoot);
@@ -53,7 +57,7 @@ export function registerCss(ctx: Context) {
         visit(shadowRoot);
       }
     };
-    visit(document);
+    documents().forEach(visit);
     if (observer) shadowRootCache = roots;
     return roots;
   }
@@ -70,10 +74,17 @@ export function registerCss(ctx: Context) {
   // The DOM does not tell which <style> the parser made: those in the document before the
   // parser is done are taken as its own, those added later as a script's. A script that adds
   // one while the page loads is taken for the parser.
+  // The same goes for the document of each iframe, from when the agent first sees it.
   const parsed = new WeakSet<HTMLStyleElement>();
-  const collectParsed = () => document.querySelectorAll('style').forEach(s => parsed.add(s));
-  collectParsed();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', collectParsed, { once: true });
+  const parsedIn = new WeakSet<Document>();
+  const collectParsed = (doc: Document) => {
+    if (parsedIn.has(doc)) return;
+    parsedIn.add(doc);
+    const collect = () => doc.querySelectorAll('style').forEach(s => parsed.add(s));
+    collect();
+    if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', collect, { once: true });
+  };
+  documents().forEach(collectParsed);
   sheets.fromParser = style => parsed.has(style);
 
   /** After the page's styles changed: keep forced states and pseudo-elements in sync. */
@@ -89,7 +100,7 @@ export function registerCss(ctx: Context) {
 
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
-    if (sheet.ownerNode && sheet !== sheets.inspectorSheet) h.ownerNode = nodes.backendIdOf(sheet.ownerNode);
+    if (sheet.ownerNode && !sheets.isInspector(sheet)) h.ownerNode = nodes.backendIdOf(sheet.ownerNode);
     return h;
   }
 
@@ -116,8 +127,44 @@ export function registerCss(ctx: Context) {
 
   /** `load` reaches the document for every image and script too: only style elements matter. */
   const onLoad = (event: Event) => {
-    if (event.target instanceof HTMLLinkElement || event.target instanceof HTMLStyleElement) void syncSheets();
+    const target = event.target;
+    if (isNode(target) && (isHtml(target, 'link') || isHtml(target, 'style'))) void syncSheets();
   };
+
+  /** The frames' documents the observer and the load listener watch. */
+  let watched = new Set<Document>();
+  let stopFrames: (() => void) | null = null;
+
+  /** Watches the documents of frames not watched yet for style sheet changes. */
+  function watchDocuments() {
+    const current = new Set(documents());
+    // Those of removed iframes and those navigated away from are let go.
+    for (const doc of watched) {
+      if (current.has(doc)) continue;
+      doc.removeEventListener('load', onLoad, true);
+      watched.delete(doc);
+    }
+    for (const doc of current) {
+      if (watched.has(doc)) continue;
+      watched.add(doc);
+      collectParsed(doc);
+      observer?.observe(doc, OBSERVED);
+      // A <link> stylesheet (or a <style> with @import) becomes available once loaded.
+      doc.addEventListener('load', onLoad, true);
+    }
+    // Adopted style sheets change without a DOM mutation, in the iframes' realms too.
+    watchTrees(documents());
+  }
+
+  /**
+   * Like Chrome, an iframe's style sheets are added when it is attached or loads another
+   * document, and removed with the document it leaves.
+   */
+  function framesChanged() {
+    shadowRootCache = null;
+    watchDocuments();
+    void syncSheets();
+  }
 
   /** Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in. */
   const loadCopies = () =>
@@ -155,7 +202,7 @@ export function registerCss(ctx: Context) {
   function applyEdit(edit: Protocol.CSS.StyleDeclarationEdit): CSSStyle {
     if (edit.styleSheetId.startsWith(INLINE_PREFIX)) {
       const el = ctx.nodes.getByBackendId(Number(edit.styleSheetId.slice(INLINE_PREFIX.length)));
-      if (!(el instanceof HTMLElement || el instanceof SVGElement)) throw new CdpError('Node not found');
+      if (!isNode(el) || !(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Node not found');
       const old = el.getAttribute('style');
       const oldSource = sources.get(el.style);
       perform(
@@ -189,6 +236,8 @@ export function registerCss(ctx: Context) {
     el: Element,
     pseudo: PseudoType | null
   ): Promise<Protocol.CSS.GetMatchedStylesForNodeResponse> {
+    // Without the DOM domain listening, an iframe loaded since may not be known yet.
+    if (!ctx.frames.ofDocument(documentOf(el))) ctx.frames.sync();
     // Adopted sheets change unseen: catch up before answering.
     if (enabled) await syncSheets();
     else await loadCopies();
@@ -223,8 +272,7 @@ export function registerCss(ctx: Context) {
       if (enabled) return;
       enabled = true;
       known = new Set();
-      const ownsSheet = (n: Node | null) =>
-        (n instanceof HTMLStyleElement || n instanceof HTMLLinkElement) && !isOwn(n);
+      const ownsSheet = (n: Node | null) => (isHtml(n, 'style') || isHtml(n, 'link')) && !isOwn(n);
       observer = new MutationObserver(records => {
         // Adding or removing a <style> or <link>, changing the text of a <style> or the href
         // of a <link> all replace style sheets.
@@ -234,15 +282,11 @@ export function registerCss(ctx: Context) {
             ownsSheet(r.target.parentNode) ||
             [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(
               // A shadow host brings or takes away the sheets of its shadow tree.
-              n => ownsSheet(n) || (n instanceof Element && !isOwn(n) && !!nodes.shadowRootOf(n))
+              n => ownsSheet(n) || (isElement(n) && !isOwn(n) && !!nodes.shadowRootOf(n))
             )
         );
         // Shadow hosts may come or go with any element: look for shadow roots again when needed.
-        if (
-          records.some(r =>
-            [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(n => n instanceof Element)
-          )
-        )
+        if (records.some(r => [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(n => isElement(n))))
           shadowRootCache = null;
         quietly(() => forced.removed(records.flatMap(r => Array.from(r.removedNodes))));
         if (touchesSheets) syncSheets();
@@ -250,15 +294,15 @@ export function registerCss(ctx: Context) {
       observed = new WeakSet();
       shadowRootCache = null;
       stopShadowRoots ??= ctx.probe.onShadowRoot(() => (shadowRootCache = null));
-      observer.observe(document, OBSERVED);
-      syncSheets();
-      // A <link> stylesheet (or a <style> with @import) becomes available once loaded.
-      document.addEventListener('load', onLoad, true);
+      watched = new Set();
       // Adopted style sheets change without a DOM mutation.
       stopAdopted = watchAdopted(
         () => void syncSheets(),
-        () => [document, ...shadowRoots()]
+        () => [...documents(), ...shadowRoots()]
       );
+      stopFrames = ctx.frames.onChange(framesChanged);
+      watchDocuments();
+      syncSheets();
     },
 
     disable() {
@@ -269,7 +313,10 @@ export function registerCss(ctx: Context) {
       shadowRootCache = null;
       stopShadowRoots?.();
       stopShadowRoots = null;
-      document.removeEventListener('load', onLoad, true);
+      for (const doc of watched) doc.removeEventListener('load', onLoad, true);
+      watched = new Set();
+      stopFrames?.();
+      stopFrames = null;
       stopAdopted?.();
       stopAdopted = null;
     },
@@ -291,7 +338,8 @@ export function registerCss(ctx: Context) {
 
     getComputedStyleForNode(params: Protocol.CSS.GetComputedStyleForNodeRequest): ComputedStyleResponse {
       const { el, pseudo } = target(params.nodeId);
-      const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
+      // The element's own window: in an iframe, its viewport and media queries.
+      const style = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null);
       return {
         computedStyle: Array.from(style, name => ({ name, value: style.getPropertyValue(name) })),
         extraFields: { isAppearanceBase: false, isTableSetVisuallyTable: false },
@@ -300,7 +348,7 @@ export function registerCss(ctx: Context) {
 
     getBackgroundColors(params: Protocol.CSS.GetBackgroundColorsRequest): Protocol.CSS.GetBackgroundColorsResponse {
       const { el, pseudo } = target(params.nodeId);
-      const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
+      const style = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null);
       // Chrome reports no background for a pseudo-element.
       const backgroundColors = pseudo ? null : backgroundsBehind(el, style);
       return {
@@ -328,7 +376,7 @@ export function registerCss(ctx: Context) {
         stylesChanged();
         return {};
       }
-      if (!(owner instanceof HTMLStyleElement)) throw new CdpError('Style sheet is not editable');
+      if (!isHtml(owner, 'style')) throw new CdpError('Style sheet is not editable');
       const setText = (text: string) => {
         const current = sheets.get(id);
         owner.textContent = text;
@@ -357,7 +405,7 @@ export function registerCss(ctx: Context) {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
       const rule = sheets.findRule(sheet, params.range.startLine);
-      if (!(rule instanceof CSSStyleRule)) throw new CdpError('No rule at given range');
+      if (!isCssom(rule, 'CSSStyleRule')) throw new CdpError('No rule at given range');
       const old = rule.selectorText;
       perform(
         () => (rule.selectorText = params.selector),
@@ -367,19 +415,27 @@ export function registerCss(ctx: Context) {
       return { selectorList: rules.selectorList(sheet, rule) };
     },
 
-    createStyleSheet(): Protocol.CSS.CreateStyleSheetResponse {
-      if (!sheets.inspectorSheet?.ownerNode?.isConnected) {
-        const style = document.createElement('style');
+    createStyleSheet(params: Protocol.CSS.CreateStyleSheetRequest): Protocol.CSS.CreateStyleSheetResponse {
+      // Like Chrome, in the document of the frame asked for, each frame with its own sheet; with
+      // `force`, a new one every time.
+      const frame = ctx.frames.byId(params.frameId);
+      if (!frame) throw new CdpError('Frame not found');
+      const doc = frame.document;
+      const force = params.force ?? false;
+      let sheet = force ? null : sheets.inspectorOf(doc);
+      if (!sheet) {
+        const style = doc.createElement('style');
         style.setAttribute(OWN_ATTRIBUTE, 'inspector-stylesheet');
         markOwn(style);
-        document.head.appendChild(style);
+        (doc.head ?? doc.documentElement).appendChild(style);
         // A connected <style> always has a sheet.
         if (!style.sheet) throw new CdpError('Could not create the inspector style sheet');
-        sheets.inspectorSheet = style.sheet;
-        known.add(style.sheet);
-        session.emit('CSS.styleSheetAdded', { header: header(style.sheet) });
+        sheet = style.sheet;
+        sheets.addInspector(sheet, doc, force);
+        known.add(sheet);
+        session.emit('CSS.styleSheetAdded', { header: header(sheet) });
       }
-      return { styleSheetId: sheets.idOf(sheets.inspectorSheet) };
+      return { styleSheetId: sheets.idOf(sheet) };
     },
 
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {
@@ -396,7 +452,7 @@ export function registerCss(ctx: Context) {
         // The group rule (not a style rule: addRule does not nest) the rule is in.
         let child: CSSRule = onLine;
         for (let p = child.parentRule; p; child = p, p = p.parentRule)
-          if (p instanceof CSSGroupingRule && !(p instanceof CSSStyleRule)) {
+          if (isCssom(p, 'CSSGroupingRule') && !isCssom(p, 'CSSStyleRule')) {
             parent = p;
             break;
           }
@@ -410,7 +466,7 @@ export function registerCss(ctx: Context) {
       const target = parent;
       const index = target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at);
       const rule = target.cssRules[index];
-      if (!(rule instanceof CSSStyleRule)) {
+      if (!isCssom(rule, 'CSSStyleRule')) {
         target.deleteRule(index);
         throw new CdpError('Failed to parse rule text');
       }
@@ -435,7 +491,7 @@ export function registerCss(ctx: Context) {
     collectClassNames(params: Protocol.CSS.CollectClassNamesRequest): Protocol.CSS.CollectClassNamesResponse {
       const names = new Set<string>();
       for (const { rule } of sheets.entries(sheets.get(params.styleSheetId))) {
-        if (!(rule instanceof CSSStyleRule)) continue;
+        if (!isCssom(rule, 'CSSStyleRule')) continue;
         for (const [, name] of rule.selectorText.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) if (name) names.add(name);
       }
       return { classNames: Array.from(names) };
@@ -451,7 +507,7 @@ export function registerCss(ctx: Context) {
     takeComputedStyleUpdates: (): Protocol.CSS.TakeComputedStyleUpdatesResponse => ({ nodeIds: [] }),
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {
       const el = element(params.nodeId);
-      if (!(el instanceof HTMLElement || el instanceof SVGElement)) throw new CdpError('Element has no inline style');
+      if (!(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Element has no inline style');
       const old = el.getAttribute('style');
       perform(
         () => el.style.setProperty(params.propertyName, params.value),

@@ -1,4 +1,5 @@
 import { splitTopLevel } from '../../core/selectors';
+import { isCssom, isElement, isHtml, isShadowRoot } from '../../core/realm';
 import { nestingParent } from './rules';
 
 /**
@@ -25,7 +26,7 @@ const blank = (m: string) => ' '.repeat(m.length);
 
 export function sourceOf(sheet: CSSStyleSheet): Source | null {
   const owner = sheet.ownerNode;
-  if (!(owner instanceof HTMLStyleElement) || owner.sheet !== sheet) return null;
+  if (!isHtml(owner, 'style') || owner.sheet !== sheet) return null;
   const raw = owner.textContent;
   if (lastSource?.raw !== raw) {
     const text = raw.replace(/\/\*[\s\S]*?\*\//g, blank);
@@ -71,7 +72,7 @@ export function find(source: Source, rule: CSSStyleRule): Located | null {
   let from = 0;
   let to = source.text.length;
   if (parent) {
-    if (!(parent instanceof CSSStyleRule)) return null;
+    if (!isCssom(parent, 'CSSStyleRule')) return null;
     const outer = locate(source, parent);
     if (!outer) return null;
     from = outer.open;
@@ -103,7 +104,7 @@ export function find(source: Source, rule: CSSStyleRule): Located | null {
  * is unknown (a <link>, a constructed sheet) or the rule is not found in it.
  */
 export function sourceSelectors(sheet: CSSStyleSheet, rule: CSSStyleRule, parts: string[]): string[] | null {
-  if (!(nestingParent(rule) instanceof CSSStyleRule)) return null;
+  if (!isCssom(nestingParent(rule), 'CSSStyleRule')) return null;
   if (!parts.some(p => p.startsWith('& '))) return null;
   const source = sourceOf(sheet);
   return source === null ? null : (locate(source, rule)?.selectors ?? null);
@@ -139,7 +140,7 @@ export function parseHost(selector: string): ((host: Element) => boolean) | null
     for (let node: Element | null = host; node;) {
       if (node.matches(arg)) return true;
       const parent: Node | null = node.parentNode;
-      node = parent instanceof ShadowRoot ? parent.host : parent instanceof Element ? parent : null;
+      node = isShadowRoot(parent) ? parent.host : isElement(parent) ? parent : null;
     }
     return false;
   };
