@@ -56,6 +56,24 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 | `data-service-worker` | `serviceWorker`（开 / 关） | 关 | 启用 [Service Worker](#service-worker)。作为属性时可以写它的地址（留空：bundle 同目录） |
 | `data-remote` | `remote` | 关 | 连接[远程调试](#远程调试)服务端：它的地址（留空：探针所在的服务端） |
 | `data-id-in-query` | `idInQuery` | 关 | 配合开启了 `idInQuery` 的服务端 |
+| `data-frame-origins` | `frameOrigins`（数组） | 无 | 本页 DevTools 可以调试的[跨域 iframe](#跨域-iframe) 的源，空格分隔 |
+| `data-parent-origins` | `parentOrigins`（数组） | 无 | 可以在自己的 iframe 里调试本页的页面的源，空格分隔 |
+
+### 跨域 iframe
+
+页面拿不到跨域 iframe 的文档。如果 iframe 里的页面也加载了探针，并且双方互相信任，就能在父页面的 DevTools 里调试它，和 Chrome 调试进程外 iframe 一样：Elements 里它的文档挂在 `<iframe>` 下，Console 的上下文菜单里有它的执行上下文，请求、样式、高亮和输入也都能用。
+
+```html
+<!-- https://app.example.com -->
+<script src="…/probe.iife.js" data-frame-origins="https://widget.example.net"></script>
+<!-- https://widget.example.net，在上面页面的 iframe 里 -->
+<script src="…/probe.iife.js" data-parent-origins="https://app.example.com"></script>
+```
+
+- 两边的名单都要配，默认都关闭：父页面的 DevTools 能在 iframe 里执行任意代码。
+- 每一项是确切的源，或者 `https://*.example.com`，表示任意层级的子域（不含 `example.com` 本身）；协议和端口要完全一致。单独的 `*` 会被忽略并给出警告。
+- 连上以后，iframe 自己的 F12 按钮和面板会隐藏。
+- iframe 重新加载、或者导航到同样会连接的页面，连接都会保留；iframe 里再嵌的跨域 iframe 也按同样方式逐级连上。
 
 ## Vite
 
@@ -232,7 +250,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
 | 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到。没有隔离 world（`Page.createIsolatedWorld`） |
-| 跨域 iframe | ❌ | 只显示为元素：页面拿不到它们的文档 |
+| 跨域 iframe | ⚠️ | 需要 iframe 页面也加载探针，并且双方都配了[源名单](#跨域-iframe)，否则只显示为元素。要等 iframe 的探针运行后才连上：它的文档本身的请求报在它自己的会话里，而不是父页面的；导航后按 URL 设置的断点不会重新设上。导航后没有重新连接的页面，最多 10 秒后断开。远程调试有多个前端时，同一时间只有一个能调试它 |
 | 跨源样式表 | ⚠️ | 需要 CORS；只读 |
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
 | 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |

@@ -44,7 +44,7 @@
 
 ## iframe
 
-- **跨域 iframe**：页面拿不到它的文档，只能由 iframe 自己也加载探针，再通过 postMessage 作为子 target 接上来（`Target.setAutoAttach`、`attachedToTarget`、带 `sessionId` 的消息转发）。前端本来就支持子 target，外壳模式的 relay 有类似机制。
+- **多个远程前端与跨域 iframe**：一个连接同一时间只服务一个父会话。Chrome 给每个客户端各开一个子会话；这里需要 iframe 的 agent 为每个父会话各开一个会话，在连接上多路复用。
 
 ## 其他能在页面里补上的功能
 
@@ -76,4 +76,5 @@ DEV.md「给旧版本打补丁」一节记下的两处缺口：CI 不在 `releas
 ## 搁置的问题
 
 - **外壳模式下分隔条拖动**：Chrome 会把鼠标事件留在按下时所在的 frame，拖快了分隔条会跟丢。在 headless 下复现不了，之前的改动已全部撤回。
+- **直接嵌入时前端重新加载**：和修复之前的外壳模式一样，`connectFrontend` 把前端 iframe 的 load 事件当作新实例的开始，而 load 可能晚于新实例的第一批命令。还没见过出错；外壳模式现在改为按命令 id 重新从 1 开始来判断。
 - **触屏体验**：要优化的地方很多，但都很零碎，优先级低。

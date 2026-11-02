@@ -44,7 +44,7 @@ What has been discussed and is not done yet, and why. Directions and known trade
 
 ## iframes
 
-- **Cross-origin iframes**: their document is out of reach; the iframe has to load the probe too and be attached as a child target over postMessage (`Target.setAutoAttach`, `attachedToTarget`, messages routed by `sessionId`). The frontend handles child targets already; shell mode's relay works similarly.
+- **Several remote frontends and a cross-origin iframe**: a link serves one parent session at a time. Chrome gives each client its own child session; here the iframe's agent would need one session per parent session, multiplexed on the link.
 
 ## More that can be filled in the page
 
@@ -76,4 +76,5 @@ The two gaps noted in DEV.md, "Patching an older release": CI does not run on `r
 ## Shelved
 
 - **Dragging the divider in shell mode**: Chrome keeps mouse events in the frame where the button was pressed, so a fast drag loses the divider. It does not reproduce headless, and the earlier attempts were reverted.
+- **A reloaded frontend when embedded**: like shell mode before it was fixed, `connectFrontend` takes the frontend iframe's load event as the new instance's start, which may come after its first commands. Not seen to fail; shell mode now tells by the command ids starting again.
 - **Touch screens**: many small things to improve; low priority.

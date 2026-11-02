@@ -56,6 +56,24 @@ From jsDelivr or unpkg, pin an exact version: the probe loads the frontend of th
 | `data-service-worker` | `serviceWorker` (on / off) | Off | Turns the [Service Worker](#service-worker) on. As an attribute, its URL (empty: next to the bundle) |
 | `data-remote` | `remote` | Off | Connects to a [remote debugging](#remote-debugging) server: its URL (empty: where the probe is served from) |
 | `data-id-in-query` | `idInQuery` | Off | For a server with `idInQuery` |
+| `data-frame-origins` | `frameOrigins` (array) | None | Origins of [cross-origin iframes](#cross-origin-iframes) this page's DevTools debugs, space-separated |
+| `data-parent-origins` | `parentOrigins` (array) | None | Origins of the pages that may debug this one in their iframe, space-separated |
+
+### Cross-origin iframes
+
+A page cannot reach a cross-origin iframe's document. When the iframe's page loads the probe too, and each side trusts the other, the iframe is debugged from the parent's DevTools as Chrome debugs an out-of-process iframe: its document under the `<iframe>` in Elements, its context in the Console's menu, its requests, styles, highlighting and input.
+
+```html
+<!-- https://app.example.com -->
+<script src="…/probe.iife.js" data-frame-origins="https://widget.example.net"></script>
+<!-- https://widget.example.net, in an iframe of the page above -->
+<script src="…/probe.iife.js" data-parent-origins="https://app.example.com"></script>
+```
+
+- Both lists are needed, and off by default: the parent's DevTools can run any code in the iframe.
+- An entry is an exact origin, or `https://*.example.com` for every subdomain at any depth (not `example.com` itself); scheme and port are exact. `*` alone is ignored, with a warning.
+- While linked, the iframe's own F12 button and panel are hidden.
+- The link survives the iframe's reloads and navigations to pages that link again; iframes in the iframe link the same way, level by level.
 
 ## Vite
 
@@ -232,7 +250,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Event listeners | ⚠️ | Only those added after the probe ran; no source location |
 | WebSocket | ⚠️ | Connections and frames; no handshake headers |
 | Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it. No isolated worlds (`Page.createIsolatedWorld`) |
-| Cross-origin iframes | ❌ | Shown as elements only: their documents are out of the page's reach |
+| Cross-origin iframes | ⚠️ | Only with the probe in the iframe's page and both [origin lists](#cross-origin-iframes); otherwise shown as elements only. Linked once the iframe's probe runs: its document's own request is reported in its session, not the parent's; breakpoints by URL are not set again after it navigates. A page that does not link again after a navigation is detached up to 10 s later. With several remote frontends, one at a time |
 | Cross-origin style sheets | ⚠️ | Need CORS; read-only |
 | Forced `:hover`, `:focus`, … | ⚠️ | Not for `@import` and `adoptedStyleSheets` sheets |
 | Screencast (device button outside shell mode) | ⚠️ | Redrawn by [snapDOM](https://github.com/zumerlab/snapdom) from the DOM: canvas, video and cross-origin images may be missing; ≤ 2 fps. Input replayed with `isTrusted: false` |
