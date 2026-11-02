@@ -75,3 +75,22 @@ export function isDocumentType(node: Node | null | undefined): node is DocumentT
 export function isDocumentFragment(node: Node | null | undefined): node is DocumentFragment {
   return node?.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
 }
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
+
+export function isSvgElement(node: Node | null | undefined): node is SVGElement {
+  return isElement(node) && node.namespaceURI === SVG_NS;
+}
+
+/** Whether `node` is the SVG element `<name>`, e.g. `isSvg(node, 'svg')`. */
+export function isSvg<K extends keyof SVGElementTagNameMap>(
+  node: Node | null | undefined,
+  name: K
+): node is SVGElementTagNameMap[K] {
+  return isSvgElement(node) && node.localName === name;
+}
+
+export function isMathMlElement(node: Node | null | undefined): node is MathMLElement {
+  return isElement(node) && node.namespaceURI === MATHML_NS;
+}

@@ -20,10 +20,17 @@ import {
   type FrameOwner,
   isDocument,
   isDocumentFragment,
+  documentOf,
   isDocumentType,
   isElement,
   isFrameOwner,
+  isHtmlElement,
+  isMathMlElement,
   isNode,
+  isSvg,
+  isSvgElement,
+  isText,
+  realmOf,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import { type FrameChange, touchesFrames } from '../../core/frames';
@@ -86,8 +93,8 @@ const quad = (r: { left: number; top: number; right: number; bottom: number }) =
  * null for plain layouts, where the bounding rectangle is exact.
  */
 function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: number; height: number } | null {
-  if (el instanceof SVGSVGElement && hasTransformedAncestor(el)) return svgRootLayout(el);
-  if (!(el instanceof HTMLElement) || !hasTransformedAncestor(el)) return null;
+  if (isSvg(el, 'svg') && hasTransformedAncestor(el)) return svgRootLayout(el);
+  if (!isHtmlElement(el) || !hasTransformedAncestor(el)) return null;
   const m = localToViewport(el);
   if (!m || (m.is2D && m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1)) return null;
   const width = el.offsetWidth;
@@ -97,7 +104,7 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
   const ys: number[] = [];
   mapQuad(m, { left: 0, top: 0, right: width, bottom: height }).forEach((v, i) => (i % 2 ? ys : xs).push(v));
   // The line boxes of an inline element can fall short of its bounds, when transformed.
-  const inline = getComputedStyle(el).display === 'inline';
+  const inline = realmOf(el).getComputedStyle(el).display === 'inline';
   const near = (a: number, b: number, inside: number) => (inline ? (b - a) * inside >= -1 : Math.abs(a - b) <= 1);
   const ok =
     near(Math.min(...xs), rect.left, 1) &&
@@ -118,7 +125,7 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
     return { content: q, padding: q, border: q, margin: q, width, height };
   }
   const rect = el.getBoundingClientRect();
-  const style = getComputedStyle(el);
+  const style = realmOf(el).getComputedStyle(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const side = (prefix: string, suffix = '') => ({
     top: px(`${prefix}-top${suffix}`),
@@ -589,9 +596,9 @@ export function registerDom(ctx: Context) {
 
     setAttributesAsText(params: Protocol.DOM.SetAttributesAsTextRequest) {
       const el = element(params);
-      const parsed = document.createElement('template');
+      const parsed = el.ownerDocument.createElement('template');
       // Parse in the element's namespace, where e.g. SVG's `viewBox` keeps its case.
-      const context = el instanceof SVGElement ? 'svg' : el instanceof MathMLElement ? 'math' : null;
+      const context = isSvgElement(el) ? 'svg' : isMathMlElement(el) ? 'math' : null;
       parsed.innerHTML = context
         ? `<${context}><${context} ${params.text}></${context}></${context}>`
         : `<div ${params.text}></div>`;
@@ -632,7 +639,7 @@ export function registerDom(ctx: Context) {
 
     setNodeName(params: Protocol.DOM.SetNodeNameRequest): Protocol.DOM.SetNodeNameResponse {
       const el = element(params);
-      const renamed = document.createElement(params.name);
+      const renamed = el.ownerDocument.createElement(params.name);
       for (const attr of Array.from(el.attributes))
         if (attr.name !== FORCE_ATTRIBUTE) renamed.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
       history.record(
@@ -666,7 +673,7 @@ export function registerDom(ctx: Context) {
     copyTo(params: Protocol.DOM.CopyToRequest): Protocol.DOM.CopyToResponse {
       const copy = resolveNode(ctx, params).cloneNode(true);
       // The copy is not forced into any pseudo-class state.
-      if (copy instanceof Element)
+      if (isElement(copy))
         for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
           el.removeAttribute(FORCE_ATTRIBUTE);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
@@ -722,8 +729,8 @@ export function registerDom(ctx: Context) {
     getContentQuads(params: Protocol.DOM.GetContentQuadsRequest): Protocol.DOM.GetContentQuadsResponse {
       const node = resolveNode(ctx, params);
       // Chrome also reports the line boxes of a text node.
-      if (node instanceof Text) {
-        const range = document.createRange();
+      if (isText(node)) {
+        const range = documentOf(node).createRange();
         range.selectNodeContents(node);
         return { quads: Array.from(range.getClientRects()).map(quad) };
       }
@@ -732,7 +739,8 @@ export function registerDom(ctx: Context) {
 
     getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
       // The page's element under devtools-anywhere's own UI, which the page tree does not have.
-      const el = document.elementsFromPoint(params.x, params.y).find(e => !closestOwn(e));
+      // Coordinates are the top page's (iframes are Overlay and geometry's to come).
+      const el = ctx.frames.top.document.elementsFromPoint(params.x, params.y).find(e => !closestOwn(e));
       if (!el) throw new CdpError('No node found at given location');
       const nodeId = nodes.knownId(el);
       return {
@@ -770,7 +778,7 @@ export function registerDom(ctx: Context) {
       const visit = (root: ParentNode) => {
         for (const el of root.querySelectorAll('*')) {
           if (!nodes.isVisible(el) || closestOwn(el)) continue;
-          const style = getComputedStyle(el);
+          const style = realmOf(el).getComputedStyle(el);
           if (params.computedStyles.some(({ name, value }) => style.getPropertyValue(name) === value)) found.push(el);
           const shadowRoot = params.pierce && nodes.shadowRootOf(el);
           if (shadowRoot) visit(shadowRoot);

@@ -344,3 +344,36 @@ describe('changes', () => {
     assert.match(errChrome, /Could not find node with given id/);
   });
 });
+
+describe('edits', () => {
+  test('editing nodes of an iframe document changes that document', async () => {
+    const snapshots: string[] = [];
+    for (const side of [t.chrome, t.ours]) {
+      await t.page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('#sd')?.contentDocument;
+        if (doc) doc.body.innerHTML = '<p id="e">one</p><svg id="g"></svg>';
+      });
+      const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+      await side.send('DOM.setAttributesAsText', { nodeId: byId(root, 'g').nodeId, text: 'id="g" viewBox="0 0 1 1"' });
+      await side.send('DOM.setOuterHTML', {
+        nodeId: byId(root, 'e').nodeId,
+        outerHTML: '<p id="e" class="x">two</p><i>3</i>',
+      });
+      const html = byId(root, 'sd').contentDocument?.children?.find(n => n.nodeName === 'HTML');
+      assert.ok(html);
+      await side.send('DOM.setOuterHTML', {
+        nodeId: html.nodeId,
+        outerHTML: '<html><head><title>t</title></head><body><p id="e" class="x">two</p><b>doc</b></body></html>',
+      });
+      snapshots.push(
+        await t.page.evaluate(
+          () =>
+            `${document.querySelector<HTMLIFrameElement>('#sd')?.contentDocument?.documentElement.outerHTML}|${document.title}`
+        )
+      );
+    }
+    const [chrome, ours] = snapshots;
+    assert.equal(ours, chrome);
+    assert.match(chrome ?? '', /<b>doc<\/b>.*\|conformance fixture$/);
+  });
+});
