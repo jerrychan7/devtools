@@ -70,7 +70,7 @@ export function registerPage({ session, probe, frames }: Context) {
      * what page scripts can tell without Chrome's parser: nothing.
      */
     async getAppManifest(): Promise<Protocol.Page.GetAppManifestResponse> {
-      const link = document.querySelector<HTMLLinkElement>('link[rel~="manifest"][href]');
+      const link = frames.top.document.querySelector<HTMLLinkElement>('link[rel~="manifest"][href]');
       if (!link) return { url: '', errors: [], data: '', manifest: {} };
       const res = await refetch(probe, link.href, {
         credentials: link.crossOrigin === 'use-credentials' ? 'include' : 'omit',
@@ -84,7 +84,7 @@ export function registerPage({ session, probe, frames }: Context) {
      * see it.
      */
     getLayoutMetrics(): Protocol.Page.GetLayoutMetricsResponse {
-      const root = document.documentElement;
+      const root = frames.top.document.documentElement;
       const layout = { pageX: scrollX, pageY: scrollY, clientWidth: root.clientWidth, clientHeight: root.clientHeight };
       const vv = visualViewport;
       const visual = {
@@ -118,7 +118,13 @@ export function registerPage({ session, probe, frames }: Context) {
     getNavigationHistory: (): Protocol.Page.GetNavigationHistoryResponse => ({
       currentIndex: 0,
       entries: [
-        { id: 0, url: location.href, userTypedURL: location.href, title: document.title, transitionType: 'link' },
+        {
+          id: 0,
+          url: location.href,
+          userTypedURL: location.href,
+          title: frames.top.document.title,
+          transitionType: 'link',
+        },
       ],
     }),
 

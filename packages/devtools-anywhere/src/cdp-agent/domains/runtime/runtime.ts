@@ -2,7 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import type { Frame } from '../../core/frames';
 import { returnOutsideFunction } from '../../core/lexer';
-import { realmOf } from '../../core/realm';
+import { isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
@@ -177,12 +177,13 @@ function parseUnserializable(value: string): unknown {
   return undefined;
 }
 
-function copyToClipboard(value: unknown) {
+/** `copy()` of the console, run in the document `doc` of the frame the input runs in. */
+function copyToClipboard(value: unknown, doc: Document) {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text, doc));
   } else {
-    fallbackCopy(text);
+    fallbackCopy(text, doc);
   }
 }
 
@@ -191,22 +192,22 @@ function copyToClipboard(value: unknown) {
  * Read-only with a 16px font so iOS neither opens the keyboard nor zooms; `select()` selects
  * nothing there, hence `setSelectionRange`. The page's focus and selection are restored.
  */
-function fallbackCopy(text: string) {
-  const focused = document.activeElement;
-  const selection = document.getSelection();
+function fallbackCopy(text: string, doc: Document) {
+  const focused = doc.activeElement;
+  const selection = doc.getSelection();
   const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i)) : [];
-  const textarea = document.createElement('textarea');
+  const textarea = doc.createElement('textarea');
   textarea.value = text;
   textarea.readOnly = true;
   textarea.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
-  (document.body ?? document.documentElement).appendChild(textarea);
+  (doc.body ?? doc.documentElement).appendChild(textarea);
   textarea.focus({ preventScroll: true });
   textarea.setSelectionRange(0, text.length);
   try {
-    document.execCommand('copy');
+    doc.execCommand('copy');
   } finally {
     textarea.remove();
-    if (focused instanceof HTMLElement || focused instanceof SVGElement) focused.focus({ preventScroll: true });
+    if (isHtmlElement(focused) || isSvgElement(focused)) focused.focus({ preventScroll: true });
     if (selection) {
       selection.removeAllRanges();
       ranges.forEach(range => selection.addRange(range));
@@ -267,7 +268,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         const result = doc.evaluate(path, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
         return Array.from({ length: result.snapshotLength }, (_, i) => result.snapshotItem(i));
       },
-      copy: copyToClipboard,
+      copy: (value: unknown) => copyToClipboard(value, doc),
       keys: Object.keys,
       values: Object.values,
       clear: () => win.console.clear(),
