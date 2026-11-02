@@ -10,6 +10,7 @@ import { registerDebugger } from './domains/debugger/debugger';
 import { registerDom } from './domains/dom/dom';
 import { registerDomDebugger } from './domains/dom-debugger/dom-debugger';
 import { registerInput } from './domains/input/input';
+import { hookFrameNetwork } from './domains/network/frames';
 import { registerNetwork } from './domains/network/network';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
@@ -56,9 +57,10 @@ export interface CdpSessionOptions {
 let hookingFrames = false;
 
 /**
- * Has the probe capture the console calls and uncaught errors of each same-origin iframe document,
- * from the moment the frame registry finds it (on load, for a document that replaced another):
- * what a document logged before is not captured. For the page's lifetime, like the probe's hooks
+ * Has the probe capture the console calls, uncaught errors and requests of each same-origin iframe
+ * document, from the moment the frame registry finds it (on load, for a document that replaced
+ * another): what a document logged before is not captured; its requests from before are, as far
+ * as Resource Timing knows them. For the page's lifetime, like the probe's hooks
  * of the top page; the registry keeps watching the documents for iframes meanwhile.
  */
 function hookFrames(probe: Probe) {
@@ -68,7 +70,9 @@ function hookFrames(probe: Probe) {
   frames.shadowRootOf = host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null;
   probe.onShadowRoot(root => frames.watchShadowRoot(root));
   const hook = (frame: Frame) => {
-    if (frame !== frames.top) probe.hookWindow(realmOf(frame.document));
+    if (frame === frames.top) return;
+    probe.hookWindow(realmOf(frame.document));
+    hookFrameNetwork(probe, frames, frame);
   };
   frames.onChange(({ type, frame }) => {
     if (type !== 'detached') hook(frame);

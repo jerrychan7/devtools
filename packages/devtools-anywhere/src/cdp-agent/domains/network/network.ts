@@ -4,7 +4,7 @@ import { base64, readBody } from '../../core/body';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
-import { hookFrames, isFrameDocument } from './frames';
+import { isFrameDocument } from './frames';
 
 export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return [];
@@ -112,7 +112,6 @@ export function registerNetwork(ctx: Context) {
   const { session, probe, frames } = ctx;
   let unsubscribe: (() => void) | null = null;
   let unsubscribeSockets: (() => void) | null = null;
-  let unhookFrames: (() => void) | null = null;
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
   const sentSockets = new Map<string, Set<'created' | 'open' | 'closed'>>();
   let sentFrames = new WeakSet<SocketEvent>();
@@ -309,8 +308,6 @@ export function registerNetwork(ctx: Context) {
         params.maxResourceBufferSize ?? DEFAULT_RESOURCE_BUFFER
       );
       if (unsubscribe) return;
-      // Same-origin iframes' requests from now on, and from Resource Timing those made before.
-      unhookFrames = hookFrames(ctx);
       // Report requests and sockets made before the client connected, including early ones.
       probe.requests.forEach(emit);
       unsubscribe = probe.onRequest(emit);
@@ -323,8 +320,6 @@ export function registerNetwork(ctx: Context) {
       unsubscribe = null;
       unsubscribeSockets?.();
       unsubscribeSockets = null;
-      unhookFrames?.();
-      unhookFrames = null;
       sent.clear();
       sentSockets.clear();
       sentFrames = new WeakSet();

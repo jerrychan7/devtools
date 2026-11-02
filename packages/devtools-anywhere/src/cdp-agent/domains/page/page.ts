@@ -7,6 +7,8 @@ import { sameDocumentNavigations } from './history-navigations';
 
 /** Resource Timing initiators of documents: a frame's own, not resources of the page. */
 const DOCUMENT_INITIATORS = new Set(['navigation', 'iframe', 'frame']);
+/** Initiators whose loads are a frame's document when they are documents, else the page's resources. */
+const EMBEDDING_INITIATORS = new Set(['object', 'embed']);
 
 export function registerPage({ session, probe, frames }: Context) {
   let stopFrames: (() => void) | null = null;
@@ -38,30 +40,30 @@ export function registerPage({ session, probe, frames }: Context) {
 
     getResourceTree(): Protocol.Page.GetResourceTreeResponse {
       frames.sync();
-      // The top page's own resources, as far as Resource Timing knows them (Sources panel).
-      // Those of iframes are not known: the probe watches the top page's requests only.
-      const resources = probe.requests
-        .filter(
-          rec =>
-            rec.initiatorType &&
-            !DOCUMENT_INITIATORS.has(rec.initiatorType) &&
-            rec.type !== 'Ping' &&
-            !isOwnRequest(probe, rec)
+      // Each frame's own resources, as far as Resource Timing knows them (Sources panel): like
+      // Chrome, those of the document the frame shows now, not its parent's or its children's.
+      const byFrame = new Map<string, Protocol.Page.FrameResource[]>();
+      for (const rec of probe.requests) {
+        if (
+          !rec.initiatorType ||
+          DOCUMENT_INITIATORS.has(rec.initiatorType) ||
+          (EMBEDDING_INITIATORS.has(rec.initiatorType) && rec.type === 'Document') ||
+          rec.type === 'Ping' ||
+          isOwnRequest(probe, rec)
         )
-        .map(rec => ({
-          url: rec.url,
-          type: rec.type,
-          mimeType: rec.mimeType || '',
-        }));
-      const withResources = (
-        tree: Protocol.Page.FrameTree,
-        own: Protocol.Page.FrameResource[]
-      ): Protocol.Page.FrameResourceTree => ({
+          continue;
+        const frame = rec.frame ? frames.byId(rec.frame.frameId) : frames.top;
+        if (!frame || (rec.frame && rec.frame.loaderId !== frame.loaderId)) continue;
+        const own = byFrame.get(frame.id) ?? [];
+        byFrame.set(frame.id, own);
+        own.push({ url: rec.url, type: rec.type, mimeType: rec.mimeType || '' });
+      }
+      const withResources = (tree: Protocol.Page.FrameTree): Protocol.Page.FrameResourceTree => ({
         frame: tree.frame,
-        ...(tree.childFrames ? { childFrames: tree.childFrames.map(child => withResources(child, [])) } : {}),
-        resources: own,
+        ...(tree.childFrames ? { childFrames: tree.childFrames.map(withResources) } : {}),
+        resources: byFrame.get(tree.frame.id) ?? [],
       });
-      return { frameTree: withResources(frameTree(frames, frames.top), resources) };
+      return { frameTree: withResources(frameTree(frames, frames.top)) };
     },
 
     /** Re-fetches the resource, from the HTTP cache when possible; not recorded by the probe. */

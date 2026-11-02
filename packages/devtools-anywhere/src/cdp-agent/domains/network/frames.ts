@@ -2,7 +2,7 @@
 // top page's, and tags their requests with the frame and document that made them.
 import type { Context } from '../../core/context';
 import type { Frame, FrameRegistry } from '../../core/frames';
-import type { FrameTag, RequestRecord } from '../../probe/types';
+import type { FrameTag, Probe, RequestRecord } from '../../probe/types';
 
 /**
  * The frame of a request when it starts. Scripts of a document an iframe has just loaded run
@@ -15,23 +15,14 @@ function tagOf(frames: FrameRegistry, frame: Frame, win: Window): FrameTag {
 }
 
 /**
- * Hooks the network APIs of every same-origin iframe document, those there now and those to
- * come; returns a function that stops following the frames (the hooks stay, like the top
- * page's). Nothing with a probe from before 0.3.0, which cannot hook other windows.
+ * Hooks the network APIs of a same-origin iframe's document, tagging its requests with the frame
+ * and document that made them. Called for each document a frame loads (each has its own globals);
+ * the hooks stay, like the top page's. Nothing with a probe from before 0.3.0, which cannot hook
+ * other windows.
  */
-export function hookFrames({ probe, frames }: Context): () => void {
-  const hook = probe.hookNetwork;
-  if (!hook) return () => {};
-  const install = (frame: Frame) => {
-    const win = frame.document.defaultView;
-    if (frame.owner && win) hook(win, () => tagOf(frames, frame, win));
-  };
-  // Each new document of a frame has a new global object, without the hooks.
-  const stop = frames.onChange(change => {
-    if (change.type !== 'detached') install(change.frame);
-  });
-  for (const frame of frames) install(frame);
-  return stop;
+export function hookFrameNetwork(probe: Pick<Probe, 'hookNetwork'>, frames: FrameRegistry, frame: Frame): void {
+  const win = frame.document.defaultView;
+  if (frame.owner && win) probe.hookNetwork?.(win, () => tagOf(frames, frame, win));
 }
 
 /**
