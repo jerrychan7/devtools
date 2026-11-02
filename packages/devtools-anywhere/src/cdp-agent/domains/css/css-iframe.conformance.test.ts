@@ -334,3 +334,68 @@ describe('editing styles in iframes', () => {
     assert.equal(await innerStyle('font-weight'), '300');
   });
 });
+
+// Chrome and we both act on the same page: each side forces, measures and un-forces in turn.
+describe('forced pseudo-classes in iframes', () => {
+  before(() =>
+    t.page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('#styled')?.contentDocument;
+      if (!doc) throw new Error('no iframe');
+      const style = doc.createElement('style');
+      // Holds in the narrow iframe only.
+      style.textContent = '@media (max-width: 400px) { #inner:focus { outline-color: rgb(7, 8, 9) } }';
+      doc.head.append(style);
+    })
+  );
+
+  async function forced(side: Side, classes: string[]) {
+    const id = await nodeId(side, 'inner');
+    await side.send('CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: classes });
+    try {
+      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId: id });
+      return {
+        selectors: rules(matchedCSSRules).map(r => r.selector),
+        decoration: await innerStyle('text-decoration-line'),
+        outline: await innerStyle('outline-color'),
+      };
+    } finally {
+      await side.send('CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: [] });
+    }
+  }
+
+  test('forcePseudoState applies the rules of the iframe, in its viewport', async () => {
+    const ours = await forced(t.ours, ['hover', 'focus']);
+    const chrome = await forced(t.chrome, ['hover', 'focus']);
+    assert.deepEqual(ours, chrome);
+    assert.equal(chrome.decoration, 'underline');
+    assert.equal(chrome.outline, 'rgb(7, 8, 9)');
+  });
+
+  test('un-forcing takes the states back', async () => {
+    const ours = await forced(t.ours, []);
+    const chrome = await forced(t.chrome, []);
+    assert.deepEqual(ours, chrome);
+    assert.equal(chrome.decoration, 'none');
+  });
+
+  test('removing the iframe un-forces its elements', async () => {
+    const id = await nodeId(t.ours, 'inner');
+    await t.ours.send('CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: ['hover'] });
+    assert.equal(await innerStyle('text-decoration-line'), 'underline');
+    await t.page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('#styled');
+      Object.assign(window, { detachedInner: frame?.contentDocument?.querySelector('#inner') });
+      frame?.remove();
+    });
+    // The forced element is let go once anything is forced again, as Chrome forgets removed nodes.
+    const { root } = await t.ours.send('DOM.getDocument', { depth: -1 });
+    const app = find(root, hasId('app'));
+    assert.ok(app);
+    await t.ours.send('CSS.forcePseudoState', { nodeId: app.nodeId, forcedPseudoClasses: ['hover'] });
+    await t.ours.send('CSS.forcePseudoState', { nodeId: app.nodeId, forcedPseudoClasses: [] });
+    const marker = await t.page.evaluate(() =>
+      (Reflect.get(window, 'detachedInner') as Element | undefined)?.getAttribute('data-devtools-anywhere-force')
+    );
+    assert.equal(marker, null);
+  });
+});
