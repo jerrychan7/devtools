@@ -204,3 +204,124 @@ export class OopifPage {
     this.cdp.close();
   }
 }
+
+/** One event in a recorded sequence, with ids and URLs made stable so runs compare equal. */
+export interface Step {
+  session: string;
+  method: string;
+  params: unknown;
+}
+
+/** The events that show how targets and frames come and go. */
+export const LIFECYCLE_EVENTS: RegExp =
+  /^(Target\.|Page\.frame(Attached|Detached|Navigated|StartedNavigating)$|Page\.navigatedWithinDocument$|Runtime\.executionContext(Created|Destroyed|sCleared)$|DOM\.documentUpdated$)/;
+
+/** Keys that differ on every run and say nothing about the sequence. */
+const DROPPED = new Set([
+  'timestamp',
+  'wallTime',
+  'uniqueId',
+  'executionContextUniqueId',
+  'browserContextId',
+  'securityOriginDetails',
+  'adFrameStatus',
+  'gatedAPIFeatures',
+  'secureContextType',
+  'crossOriginIsolatedContextType',
+  'domainAndRegistry',
+  'mimeType',
+  'stackTrace',
+]);
+
+/**
+ * Rewrites a log for reading and comparing: sessions are named root, s1, s2… in the order they
+ * were attached, ids (targets, frames, loaders) id1, id2… in the order they first appear (a frame's
+ * id is also its target's when the frame is a target's main frame), and URLs lose their port.
+ */
+export function compact(page: OopifPage, log: Recorded[], match: RegExp = LIFECYCLE_EVENTS): Step[] {
+  const sessions = new Map<string, string>([[page.sessionId, 'root']]);
+  page.children.forEach((c, i) => sessions.set(c.sessionId, `s${i + 1}`));
+  const ids = new Map<string, string>([[page.targetId, 'page']]);
+  const rewrite = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      if (sessions.has(value)) return sessions.get(value);
+      if (/^[0-9A-F]{32}$/.test(value)) {
+        if (!ids.has(value)) ids.set(value, `id${ids.size}`);
+        return ids.get(value);
+      }
+      return value.replace(/^(https?:\/\/[^/:]+):\d+(\/packages\/devtools-anywhere\/test-support)?/, '$1');
+    }
+    if (Array.isArray(value)) return value.map(rewrite);
+    if (typeof value === 'object' && value !== null) {
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([key]) => !DROPPED.has(key))
+          .map(([key, v]) => [key, rewrite(v)])
+      );
+    }
+    return value;
+  };
+  return log
+    .filter(e => match.test(e.method))
+    .map(e => ({
+      session: e.sessionId ? (sessions.get(e.sessionId) ?? e.sessionId) : 'browser',
+      method: e.method,
+      params: rewrite(e.params),
+    }));
+}
+
+/** Runs `expression` in a session's page and waits for it. */
+export function evaluate(page: OopifPage, sessionId: string, expression: string): Promise<unknown> {
+  return page.cdp.send('Runtime.evaluate', { expression, awaitPromise: true }, sessionId);
+}
+
+/**
+ * Opens oopif-parent.html (parent, cross-site child, cross-site grandchild) with the targets set
+ * up as the frontend does, waits for things to settle, runs `act` and returns Chrome's events from
+ * then on: the reference sequence for that action.
+ */
+export async function chromeSequence(
+  env: Env,
+  act: (page: OopifPage) => Promise<void>,
+  match: RegExp = LIFECYCLE_EVENTS
+): Promise<{ setup: Step[]; steps: Step[] }> {
+  const page = await OopifPage.open(env, fixtureUrl(env, 'oopif-parent.html'));
+  try {
+    await page.child(THIRD_HOST);
+    await page.cdp.settle();
+    const from = page.cdp.log.length;
+    await act(page);
+    await page.cdp.settle();
+    const all = compact(page, page.cdp.log, match);
+    const setup = compact(page, page.cdp.log.slice(0, from), match);
+    return { setup, steps: all.slice(setup.length) };
+  } finally {
+    page.close();
+  }
+}
+
+/** Actions on the child iframe, for chromeSequence. */
+export const SCENARIOS = {
+  /** The child reloads itself. */
+  reload: async (page: OopifPage) => {
+    await evaluate(page, await page.child('oopif-child'), 'location.reload()');
+  },
+  /** The child goes to another page of its own origin (one without a grandchild). */
+  sameOrigin: async (page: OopifPage) => {
+    await evaluate(page, await page.child('oopif-child'), "location.href = 'oopif-child.html?leaf'");
+  },
+  /** The parent points the iframe at a third site. */
+  otherSite: (env: Env) => async (page: OopifPage) => {
+    const url = fixtureUrl(env, 'oopif-child.html?leaf', THIRD_HOST);
+    await evaluate(page, page.sessionId, `document.getElementById('child').src = ${JSON.stringify(url)}`);
+  },
+  /** The parent points the iframe at a page of its own origin: the frame is no longer a target. */
+  parentOrigin: (env: Env) => async (page: OopifPage) => {
+    const url = fixtureUrl(env, 'frame-child.html');
+    await evaluate(page, page.sessionId, `document.getElementById('child').src = ${JSON.stringify(url)}`);
+  },
+  /** The parent removes the iframe. */
+  remove: async (page: OopifPage) => {
+    await evaluate(page, page.sessionId, "document.getElementById('child').remove()");
+  },
+};
