@@ -210,19 +210,20 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 
 ### Branches and pull requests
 
-`main` is the only long-lived branch: it is where all work lands and what releases are tagged from, and it should always be releasable. There is no `develop` branch: merging into `main` does not release anything (only a pushed `vx.y.z` tag does, see "Releasing to npm"), so `main` itself holds what is merged and not yet released.
+`main` holds what is released: releases are tagged on it, and it changes only through pull requests. Work for the next minor goes on its development branch, `dev/x.y.0` (now `dev/0.3.0`), pushed freely; it reaches `main` through `release/x.y.0` when that minor is released: `dev` → `release` → `main`.
 
 | Branch | For | Rules |
 | --- | --- | --- |
-| `main` | All development; releases are tagged on it | Changed through pull requests only, CI must pass, no force pushes |
-| `feat/…`, `fix/…`, `docs/…`, `ci/…`, … | One change each, short-lived; the prefix is the commit type | Branched from `main`, merged back through a pull request and deleted |
-| `release/x.y.z` | The pull request that prepares release x.y.z (version and changelog) | Merged into `main`, then the tag goes on `main` |
+| `main` | What is released; releases are tagged on it | Changed through pull requests only, CI must pass, no force pushes |
+| `dev/x.y.0` | Development of the next minor x.y.0 | Branched from `main` after the previous release; committed to and pushed directly, or through `feat/…` branches; no force pushes |
+| `feat/…`, `fix/…`, `docs/…`, `ci/…`, … | One change each, short-lived, when it deserves a pull request of its own; the prefix is the commit type | Branched from `dev/x.y.0` and merged back, or from `main` for a patch release (see below), then deleted |
+| `release/x.y.z` | The pull request that prepares release x.y.z (version and changelog) | Branched from `dev/x.y.0` (or from `main` for a patch), merged into `main`, then the tag goes on `main` |
 | `release/x.y` | Patches to an older minor, only when needed (see "Patching an older release") | Branched from the tag `vx.y.0`, kept while that minor is patched |
 
-A fix is not a branch type of its own: it goes through a `fix/…` branch into `main` like any change, and is released as a patch. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: lint, typecheck, the frontend build and all the tests.
+A fix that should not wait for the next minor goes through a `fix/…` branch from `main` into `main` and is released as a patch from there; then `main` is merged into `dev/x.y.0`, so the fix is there too. Once x.y.0 is released, `dev/x.y.0` is deleted and `dev/x.(y+1).0` branched from `main`. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main` and `dev/**`: lint, typecheck, the frontend build and all the tests.
 
 ```bash
-git switch -c feat/my-change main
+git switch -c feat/my-change dev/0.3.0
 # … commits …
 git push -u origin feat/my-change
 gh pr create --fill
@@ -236,7 +237,7 @@ All packages share one version number and are released together, by `.github/wor
 
 Versions are semver for the library itself, starting at `0.1.0`: a fix is a patch; a new feature, or moving the frontend to a new Chrome milestone (its UI changes), is a minor; before 1.0 a minor may also break. Releases are cut when there is something worth releasing (features that add up to a minor, a fix users are waiting for, a new Chrome milestone), not on every merge. What is promised is what the README documents (`@public`). The Chrome version is not in the version number, where npm would drop it (`+chrome156`) or take it for a prerelease (`-chrome156`): each published package's `package.json` has it as `chrome`, which `update` writes, and each release says it first (`Based on Chrome 156`). Each release also gets the dist-tag `chrome-<milestone>`, so that `npm i devtools-anywhere@chrome-156` installs the last release on that Chrome.
 
-1. On a branch `release/x.y.z` from `main`, set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`). `node scripts/release.ts check x.y.z` checks both. Open a pull request and merge it once CI passes.
+1. On a branch `release/x.y.z` from `dev/x.y.0` (from `main` for a patch), set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`). `node scripts/release.ts check x.y.z` checks both. Open a pull request and merge it once CI passes.
 2. Tag the merged commit on `main` and push the tag: `git switch main && git pull && git tag vx.y.z && git push origin vx.y.z`.
 3. The workflow checks the version, builds the frontend, runs the checks and tests as CI does and packs the packages (pnpm replaces `workspace:*` with the real version). Then approve its `publish` job in the Actions tab: it publishes the packages to npm, tags them `chrome-<milestone>`, and publishes the GitHub release with that version's section of `CHANGELOG.md` followed by that of `CHANGELOG.zh-CN.md`.
 

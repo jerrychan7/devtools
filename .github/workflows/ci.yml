@@ -1,6 +1,6 @@
-# Checks every push to main and every pull request: lint, types, the DevTools frontend built from
-# source at the pinned REVISION, and all tests against Chrome for Testing at the version the
-# frontend comes from (the packages' "chrome" field).
+# Checks every push to main and to the development branches (dev/x.y.0), and every pull request:
+# lint, types, the DevTools frontend built from source at the pinned REVISION, and all tests
+# against Chrome for Testing at the version the frontend comes from (the packages' "chrome" field).
 #
 # Caches (actions/cache: a key that misses is saved at the end of the job; a hit is not saved
 # again):
@@ -15,7 +15,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'dev/**']
   pull_request:
   workflow_dispatch:
 

@@ -210,19 +210,20 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 ### 分支与 PR
 
-`main` 是唯一的长期分支：所有改动都合进这里，发布也在这里打 tag，它应当随时可以发布。不设 `develop` 分支：合进 `main` 不会发布任何东西（只有推送 `vx.y.z` tag 才会，见「发布到 npm」），`main` 本身就存放着已合并、尚未发布的改动。
+`main` 存放已发布的内容：发布在它上面打 tag，只能通过 PR 修改。下一个 minor 的开发放在它的开发分支 `dev/x.y.0` 上（现在是 `dev/0.3.0`），可以随时推送；发布该 minor 时经 `release/x.y.0` 进入 `main`：`dev` → `release` → `main`。
 
 | 分支 | 用途 | 规则 |
 | --- | --- | --- |
-| `main` | 所有开发；发布在它上面打 tag | 只能通过 PR 修改，CI 必须通过，禁止强推 |
-| `feat/…`、`fix/…`、`docs/…`、`ci/…` 等 | 每个分支只做一件事，短期存在；前缀与提交类型一致 | 从 `main` 拉出，通过 PR 合回后删除 |
-| `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 合进 `main`，然后在 `main` 上打 tag |
+| `main` | 已发布的内容；发布在它上面打 tag | 只能通过 PR 修改，CI 必须通过，禁止强推 |
+| `dev/x.y.0` | 下一个 minor x.y.0 的开发 | 上一次发布后从 `main` 拉出；可以直接提交、推送，也可以经 `feat/…` 分支合入；禁止强推 |
+| `feat/…`、`fix/…`、`docs/…`、`ci/…` 等 | 值得单独开 PR 的改动，每个分支只做一件事，短期存在；前缀与提交类型一致 | 从 `dev/x.y.0` 拉出再合回；patch 发布则从 `main` 拉出（见下文）；合入后删除 |
+| `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 从 `dev/x.y.0` 拉出（patch 从 `main` 拉出），合进 `main`，然后在 `main` 上打 tag |
 | `release/x.y` | 只在需要时用来给旧的 minor 打补丁（见「给旧版本打补丁」） | 从 tag `vx.y.0` 拉出，在该 minor 需要补丁期间保留 |
 
-修复不单独设一类分支：和其它改动一样走 `fix/…` 分支合进 `main`，作为 patch 发布。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。
+不能等到下一个 minor 的修复，走从 `main` 拉出的 `fix/…` 分支合进 `main`，从那里作为 patch 发布；然后把 `main` 合并进 `dev/x.y.0`，让修复也进入开发分支。x.y.0 发布后删除 `dev/x.y.0`，再从 `main` 拉出 `dev/x.(y+1).0`。CI（`.github/workflows/ci.yml`）在每个 PR 以及每次推送到 `main` 和 `dev/**` 时运行：lint、类型检查、构建前端、跑全部测试。
 
 ```bash
-git switch -c feat/my-change main
+git switch -c feat/my-change dev/0.3.0
 # … 提交 …
 git push -u origin feat/my-change
 gh pr create --fill
@@ -236,7 +237,7 @@ gh pr create --fill
 
 版本号按 semver 表示库本身的变化，从 `0.1.0` 开始：修 bug 升 patch；新功能、或前端升级到新的 Chrome 里程碑（界面会变）升 minor；1.0 之前 minor 也可以有破坏性变更。有值得发布的内容时才发版（攒够一个 minor 的功能、用户在等的修复、新的 Chrome 里程碑），不是每次合并都发。承诺的范围是 README 写明的用法（`@public`）。Chrome 版本不放进版本号：写成 `+chrome156` 会被 npm 丢掉，写成 `-chrome156` 会被当成预发布版。它记在每个发布包 `package.json` 的 `chrome` 字段里（由 `update` 写入），每次发布的说明也在开头写明（「基于 Chrome 156」）。每次发布还会打上 dist-tag `chrome-<里程碑>`，`npm i devtools-anywhere@chrome-156` 就能装到基于该版 Chrome 的最后一个版本。
 
-1. 从 `main` 拉出 `release/x.y.z` 分支，把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。开 PR，CI 通过后合并。
+1. 从 `dev/x.y.0`（patch 则从 `main`）拉出 `release/x.y.z` 分支，把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。开 PR，CI 通过后合并。
 2. 在 `main` 上给合并后的提交打 tag 并推送这个 tag：`git switch main && git pull && git tag vx.y.z && git push origin vx.y.z`。
 3. workflow 会检查版本号、构建前端、像 CI 一样跑检查和测试，并打包（pnpm 会把 `workspace:*` 替换成实际版本）。然后在 Actions 页面批准它的 `publish` 任务：它把各包发布到 npm，打上 dist-tag `chrome-<里程碑>`，并发布 GitHub Release，说明是 `CHANGELOG.md` 中该版本的那一节，后面接上 `CHANGELOG.zh-CN.md` 的对应一节。
 
