@@ -225,3 +225,112 @@ describe('style sheets', () => {
     assert.equal(ours.length, chrome.length);
   });
 });
+
+/** The id of the frame of the iframe `#id`. */
+async function frameOf(side: Side, id: string): Promise<string> {
+  const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+  const frameId = find(root, hasId(id))?.frameId;
+  assert.ok(frameId, `frame of #${id}`);
+  return frameId;
+}
+
+/** A computed style of `#inner` in the styled iframe, as the page sees it. */
+const innerStyle = (name: string) =>
+  t.page.evaluate(name => {
+    const doc = document.querySelector<HTMLIFrameElement>('#styled')?.contentDocument;
+    const el = doc?.querySelector('#inner');
+    if (!doc?.defaultView || !el) throw new Error('no #inner');
+    return doc.defaultView.getComputedStyle(el).getPropertyValue(name);
+  }, name);
+
+describe('editing styles in iframes', () => {
+  test('createStyleSheet makes one inspector sheet per frame, in its document', async () => {
+    await clear();
+    const ids = await Promise.all(
+      [t.ours, t.chrome].map(async side => {
+        const frameId = await frameOf(side, 'styled');
+        const a = await side.send('CSS.createStyleSheet', { frameId });
+        const b = await side.send('CSS.createStyleSheet', { frameId });
+        const forced = await side.send('CSS.createStyleSheet', { frameId, force: true });
+        const top = await side.send('CSS.createStyleSheet', {
+          frameId: (await side.send('Page.getResourceTree')).frameTree.frame.id,
+        });
+        return [
+          a.styleSheetId === b.styleSheetId,
+          forced.styleSheetId !== a.styleSheetId,
+          top.styleSheetId !== a.styleSheetId,
+        ];
+      })
+    );
+    assert.deepEqual(ids[0], ids[1]);
+    assert.deepEqual(ids[1], [true, true, true]);
+    // Two inspector sheets in the iframe, announced with its frame (the top one is left out).
+    // Chrome also sees the <style> elements we add, as sheets of the page: those are left out,
+    // as are ownerNode and isMutable, where ours differ for the top frame too.
+    const pick = async (side: Side) =>
+      (await headers(side, await side.events('CSS.styleSheetAdded')))
+        .filter(h => h.origin === 'inspector')
+        .map(h => `${h.frame} ${h.sourceURL} ${h.isInline}`);
+    const [ours, chrome] = [await pick(t.ours), await pick(t.chrome)];
+    assert.deepEqual(ours, chrome);
+    assert.equal(chrome.length, 2);
+  });
+
+  test('createStyleSheet of an unknown frame fails like in Chrome', async () => {
+    const errors = await Promise.all(
+      [t.ours, t.chrome].map(side =>
+        side.send('CSS.createStyleSheet', { frameId: 'nope' }).then(
+          () => 'resolved',
+          (e: Error) => e.message.replace(/^Protocol error \(CSS\.createStyleSheet\): /, '')
+        )
+      )
+    );
+    assert.equal(errors[0], errors[1]);
+  });
+
+  test('a rule added to the iframe inspector sheet applies there', async () => {
+    const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', { frameId: await frameOf(t.ours, 'styled') });
+    const { rule } = await t.ours.send('CSS.addRule', {
+      styleSheetId,
+      ruleText: '#inner { word-spacing: 3px; }',
+      location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    });
+    assert.equal(rule.origin, 'inspector');
+    assert.equal(await innerStyle('word-spacing'), '3px');
+    const { matchedCSSRules } = await t.ours.send('CSS.getMatchedStylesForNode', {
+      nodeId: await nodeId(t.ours, 'inner'),
+    });
+    assert.ok(matchedCSSRules?.some(m => m.rule.styleSheetId === styleSheetId));
+  });
+
+  test('setStyleTexts and setRuleSelector edit the rules of an iframe sheet', async () => {
+    const { matchedCSSRules } = await t.ours.send('CSS.getMatchedStylesForNode', {
+      nodeId: await nodeId(t.ours, 'inner'),
+    });
+    const match = matchedCSSRules?.find(m => m.rule.selectorList.text === '#inner' && m.rule.origin === 'regular');
+    const { styleSheetId, style, selectorList } = match?.rule ?? {};
+    const selectorRange = selectorList?.selectors[0]?.range;
+    assert.ok(styleSheetId && style?.range && selectorRange);
+    const { styles } = await t.ours.send('CSS.setStyleTexts', {
+      edits: [{ styleSheetId, range: style.range, text: 'color: rgb(4, 5, 6); padding: 2px;' }],
+    });
+    assert.equal(styles[0]?.cssProperties.find(p => p.name === 'color')?.value, 'rgb(4, 5, 6)');
+    assert.equal(await innerStyle('color'), 'rgb(4, 5, 6)');
+    const { selectorList: list } = await t.ours.send('CSS.setRuleSelector', {
+      styleSheetId,
+      range: selectorRange,
+      selector: '#inner.narrow',
+    });
+    assert.equal(list.text, '#inner.narrow');
+    assert.equal(await innerStyle('color'), 'rgb(4, 5, 6)');
+  });
+
+  test('setStyleTexts edits the inline style of an iframe element', async () => {
+    const { inlineStyle } = await t.ours.send('CSS.getInlineStylesForNode', { nodeId: await nodeId(t.ours, 'inner') });
+    assert.ok(inlineStyle?.styleSheetId && inlineStyle.range);
+    await t.ours.send('CSS.setStyleTexts', {
+      edits: [{ styleSheetId: inlineStyle.styleSheetId, range: inlineStyle.range, text: 'font-weight: 300' }],
+    });
+    assert.equal(await innerStyle('font-weight'), '300');
+  });
+});

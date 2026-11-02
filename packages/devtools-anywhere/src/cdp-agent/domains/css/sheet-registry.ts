@@ -21,7 +21,10 @@ export class SheetRegistry {
   private ruleIds = new WeakMap<StyleRule, number>();
   private nextRuleId = new WeakMap<CSSStyleSheet, number>();
   private seq = 0;
-  inspectorSheet: CSSStyleSheet | null = null;
+  /** Inspector style sheets (CSS.createStyleSheet), in any frame. */
+  private inspectorSheets = new WeakSet<CSSStyleSheet>();
+  /** The inspector style sheet each document reuses (one made without `force`). */
+  private inspectorOfDocument = new WeakMap<Document, CSSStyleSheet>();
   /** Whether a sheet is ours rather than the page's (forced pseudo-class companions). */
   isOwnSheet: (sheet: CSSStyleSheet) => boolean = () => false;
   /** Whether a <style> came from the HTML parser rather than from a script. */
@@ -53,7 +56,26 @@ export class SheetRegistry {
     const id = this.idOf(sheet);
     this.sheetIds.set(replacement, id);
     this.sheets.set(id, new WeakRef(replacement));
-    if (this.inspectorSheet === sheet) this.inspectorSheet = replacement;
+    if (!this.inspectorSheets.has(sheet)) return;
+    this.inspectorSheets.add(replacement);
+    const doc = replacement.ownerNode?.ownerDocument;
+    if (doc && this.inspectorOfDocument.get(doc) === sheet) this.inspectorOfDocument.set(doc, replacement);
+  }
+
+  isInspector(sheet: CSSStyleSheet): boolean {
+    return this.inspectorSheets.has(sheet);
+  }
+
+  /** The inspector style sheet `doc` reuses, while its <style> is in the document. */
+  inspectorOf(doc: Document): CSSStyleSheet | null {
+    const sheet = this.inspectorOfDocument.get(doc);
+    return sheet?.ownerNode?.isConnected ? sheet : null;
+  }
+
+  /** Takes `sheet` for an inspector style sheet of `doc`, the one it reuses unless `force`d. */
+  addInspector(sheet: CSSStyleSheet, doc: Document, force: boolean) {
+    this.inspectorSheets.add(sheet);
+    if (!force) this.inspectorOfDocument.set(doc, sheet);
   }
 
   get(styleSheetId: string): CSSStyleSheet {
@@ -78,7 +100,7 @@ export class SheetRegistry {
       for (const sheet of Array.from(tree.styleSheets)) {
         // devtools-anywhere's own sheets are not the page's.
         const owner = sheet.ownerNode;
-        if (owner && isOwn(owner) && sheet !== this.inspectorSheet) continue;
+        if (owner && isOwn(owner) && !this.isInspector(sheet)) continue;
         list.push(sheet);
       }
       for (const sheet of adoptedOf(tree)) if (!this.isOwnSheet(sheet)) list.push(sheet);
@@ -259,13 +281,13 @@ export class SheetRegistry {
   }
 
   origin(sheet: CSSStyleSheet): StyleOrigin {
-    return sheet === this.inspectorSheet ? 'inspector' : 'regular';
+    return this.isInspector(sheet) ? 'inspector' : 'regular';
   }
 
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
     const text = this.text(sheet);
     const lines = text.split('\n');
-    const isInspector = sheet === this.inspectorSheet;
+    const isInspector = this.isInspector(sheet);
     const constructed = isConstructed(sheet);
     // Like Chrome, sheets in shadow trees, constructed ones and those of a <style> a script
     // inserted have no source URL and are not inline. The others name the frame they are in, and

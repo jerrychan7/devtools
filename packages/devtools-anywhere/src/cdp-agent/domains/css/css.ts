@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { documentOf, isCssom, isElement, isHtml, isNode, realmOf } from '../../core/realm';
+import { documentOf, isCssom, isElement, isHtml, isHtmlElement, isNode, isSvgElement, realmOf } from '../../core/realm';
 import { type Context } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
 import { parentOf } from '../../core/container-query';
@@ -100,7 +100,7 @@ export function registerCss(ctx: Context) {
 
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
-    if (sheet.ownerNode && sheet !== sheets.inspectorSheet) h.ownerNode = nodes.backendIdOf(sheet.ownerNode);
+    if (sheet.ownerNode && !sheets.isInspector(sheet)) h.ownerNode = nodes.backendIdOf(sheet.ownerNode);
     return h;
   }
 
@@ -202,7 +202,7 @@ export function registerCss(ctx: Context) {
   function applyEdit(edit: Protocol.CSS.StyleDeclarationEdit): CSSStyle {
     if (edit.styleSheetId.startsWith(INLINE_PREFIX)) {
       const el = ctx.nodes.getByBackendId(Number(edit.styleSheetId.slice(INLINE_PREFIX.length)));
-      if (!(el instanceof HTMLElement || el instanceof SVGElement)) throw new CdpError('Node not found');
+      if (!isNode(el) || !(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Node not found');
       const old = el.getAttribute('style');
       const oldSource = sources.get(el.style);
       perform(
@@ -376,7 +376,7 @@ export function registerCss(ctx: Context) {
         stylesChanged();
         return {};
       }
-      if (!(owner instanceof HTMLStyleElement)) throw new CdpError('Style sheet is not editable');
+      if (!isHtml(owner, 'style')) throw new CdpError('Style sheet is not editable');
       const setText = (text: string) => {
         const current = sheets.get(id);
         owner.textContent = text;
@@ -415,19 +415,27 @@ export function registerCss(ctx: Context) {
       return { selectorList: rules.selectorList(sheet, rule) };
     },
 
-    createStyleSheet(): Protocol.CSS.CreateStyleSheetResponse {
-      if (!sheets.inspectorSheet?.ownerNode?.isConnected) {
-        const style = document.createElement('style');
+    createStyleSheet(params: Protocol.CSS.CreateStyleSheetRequest): Protocol.CSS.CreateStyleSheetResponse {
+      // Like Chrome, in the document of the frame asked for, each frame with its own sheet; with
+      // `force`, a new one every time.
+      const frame = ctx.frames.byId(params.frameId);
+      if (!frame) throw new CdpError('Frame not found');
+      const doc = frame.document;
+      const force = params.force ?? false;
+      let sheet = force ? null : sheets.inspectorOf(doc);
+      if (!sheet) {
+        const style = doc.createElement('style');
         style.setAttribute(OWN_ATTRIBUTE, 'inspector-stylesheet');
         markOwn(style);
-        document.head.appendChild(style);
+        (doc.head ?? doc.documentElement).appendChild(style);
         // A connected <style> always has a sheet.
         if (!style.sheet) throw new CdpError('Could not create the inspector style sheet');
-        sheets.inspectorSheet = style.sheet;
-        known.add(style.sheet);
-        session.emit('CSS.styleSheetAdded', { header: header(style.sheet) });
+        sheet = style.sheet;
+        sheets.addInspector(sheet, doc, force);
+        known.add(sheet);
+        session.emit('CSS.styleSheetAdded', { header: header(sheet) });
       }
-      return { styleSheetId: sheets.idOf(sheets.inspectorSheet) };
+      return { styleSheetId: sheets.idOf(sheet) };
     },
 
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {
@@ -499,7 +507,7 @@ export function registerCss(ctx: Context) {
     takeComputedStyleUpdates: (): Protocol.CSS.TakeComputedStyleUpdatesResponse => ({ nodeIds: [] }),
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {
       const el = element(params.nodeId);
-      if (!(el instanceof HTMLElement || el instanceof SVGElement)) throw new CdpError('Element has no inline style');
+      if (!(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Element has no inline style');
       const old = el.getAttribute('style');
       perform(
         () => el.style.setProperty(params.propertyName, params.value),

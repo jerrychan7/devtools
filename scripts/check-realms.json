@@ -1,7 +1,6 @@
 {
   "core/geometry.ts": 36,
   "core/history.ts": 1,
-  "domains/css/css.ts": 7,
   "domains/css/forced-pseudo.ts": 2,
   "domains/css/sheet-registry.ts": 2,
   "domains/css/style.ts": 1,
