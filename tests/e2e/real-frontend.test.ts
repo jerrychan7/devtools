@@ -243,9 +243,17 @@ test('the Sources panel shows source and Watch, without breakpoints or pausing c
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
     (await query('[aria-label="Add watch expression"]')).asElement() as ElementHandle<Element> | null;
   await (await waitFor(async () => laidOut(await addWatch()))).click();
+  // As in Chrome, adding a watch expression starts editing it: its prompt takes the focus. That
+  // prompt is clicked (other prompts may be in the DOM), which also gives the frontend's frame the keys.
   const prompt = async () =>
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
-    (await query('.text-prompt[contenteditable]')).asElement() as ElementHandle<Element> | null;
+    (
+      await frontend.evaluateHandle(() => {
+        let active = document.activeElement;
+        while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+        return active?.matches('.text-prompt[contenteditable]') ? active : null;
+      })
+    ).asElement() as ElementHandle<Element> | null;
   await (await waitFor(async () => laidOut(await prompt()))).click();
   await frontend.page().keyboard.type('document.title');
   await frontend.page().keyboard.press('Enter');
