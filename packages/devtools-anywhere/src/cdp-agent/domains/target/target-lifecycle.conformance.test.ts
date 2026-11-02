@@ -209,3 +209,58 @@ test("a cross-origin iframe's own is a target on its session, end to end, as in 
   });
   assert.deepEqual(actual?.console, ['grandchild']);
 });
+
+test('same-origin iframes in the iframe and in its own are frames of their targets, as in Chrome', async () => {
+  assert.ok(env);
+  const seen = [];
+  for (const open of [chromeSide, oursSide]) {
+    const side = await open(env, { nested: true });
+    try {
+      await settle(side);
+      const all = await side.events();
+      const s2 = String(
+        get(all.find(e => e.sessionId === side.child && e.method === 'Target.attachedToTarget')?.params, 'sessionId')
+      );
+      const from = all.length;
+      const add = `new Promise(r => { const f = document.createElement('iframe'); f.src = 'frame-child.html';
+        f.onload = r; document.body.append(f); }).then(() => 0)`;
+      for (const sessionId of [side.child, s2]) {
+        await side.send('Runtime.evaluate', { expression: add, awaitPromise: true }, sessionId);
+      }
+      await settle(side);
+      const names = new Map([
+        ['', 'root'],
+        [side.child, 's1'],
+        [s2, 's2'],
+      ]);
+      seen.push(
+        (await side.events())
+          .slice(from)
+          .filter(e => /^Page\.frame(Attached|Navigated)$|^Runtime\.executionContextCreated$/.test(e.method))
+          .map(e => {
+            const url = get(get(e.params, 'frame'), 'url') ?? get(get(e.params, 'context'), 'origin');
+            return `${names.get(e.sessionId) ?? e.sessionId} ${e.method} ${String(url ?? '')
+              .replace(/:\d+/, '')
+              .replace(/^.*\//, '')}`;
+          })
+      );
+    } finally {
+      await side.close();
+    }
+  }
+  // A same-origin iframe's context comes before or after its frameNavigated, in Chrome from run to
+  // run: the order is left out.
+  const [chrome = [], ours = []] = seen.map(lines => lines.toSorted());
+  assert.deepEqual(
+    chrome,
+    [
+      's1 Page.frameAttached ',
+      's1 Page.frameNavigated frame-child.html',
+      's1 Runtime.executionContextCreated 127.0.0.1',
+      's2 Page.frameAttached ',
+      's2 Page.frameNavigated frame-child.html',
+      's2 Runtime.executionContextCreated oopif.test',
+    ].toSorted()
+  );
+  assert.deepEqual(ours, chrome);
+});
