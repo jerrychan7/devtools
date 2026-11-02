@@ -166,8 +166,10 @@ test('a keyDown with text (Puppeteer style) fires keypress and types', async () 
   assert.equal(result.value, 'h');
 });
 
+// Where Chrome's hover was after the test before is not always where ours was (on CI, Chrome
+// sometimes sends no pointerout for the field it last clicked): only the press is compared.
 test('a middle click fires auxclick', async () => {
-  const result = await same(async side => {
+  const steps = async (side: Side) => {
     await side.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 50, y: 30 });
     await side.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
@@ -185,8 +187,12 @@ test('a middle click fires auxclick', async () => {
       buttons: 0,
       clickCount: 1,
     });
-  });
-  assert.ok(result.events.includes('auxclick:btn'));
+  };
+  const pressed = (events: string[]) => events.filter(e => !/^(pointer|mouse)(over|out):/.test(e));
+  const chrome = pressed((await run(t.chrome, steps)).events);
+  const ours = pressed((await run(t.ours, steps)).events);
+  assert.deepEqual(ours, chrome);
+  assert.ok(ours.includes('auxclick:btn'));
 });
 
 // Off the page, Chrome sends the events to the document, the release included, and clicks it
