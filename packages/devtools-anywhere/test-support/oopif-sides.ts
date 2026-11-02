@@ -3,7 +3,7 @@
 // the probe, trusting each other), each set up as the frontend sets up a page and its iframe target.
 import type { Page } from 'puppeteer-core';
 import type { Env } from '../../../tests/support/browser.ts';
-import { FRONTEND_ENABLES, fixtureUrl, OopifPage } from './oopif.ts';
+import { FRONTEND_ENABLES, fixtureUrl, OopifPage, THIRD_HOST } from './oopif.ts';
 
 /** A message a client got: an event with the session it came on ('' for the root's). */
 export interface Received {
@@ -32,21 +32,37 @@ export interface Side {
 export const get = (value: unknown, name: string): unknown =>
   typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
 
-/** The pages compared: the parent on localhost, its iframe on 127.0.0.1, both with the probe, trusting each other. */
-export function linkedUrl(env: Env): string {
+/**
+ * The pages compared: the parent on localhost, its iframe on 127.0.0.1, both with the probe, trusting
+ * each other. With `nested`, the iframe has one of its own on THIRD_HOST, the same page, which it
+ * trusts both ways; the parent trusts that origin too, for the iframe to be pointed at it.
+ */
+export function linkedUrl(env: Env, { nested = false } = {}): string {
   const childUrl = new URL(fixtureUrl(env, 'frame-link-child.html', '127.0.0.1'));
-  childUrl.searchParams.set('parentOrigins', new URL(fixtureUrl(env, '')).origin);
+  const parentOrigin = new URL(fixtureUrl(env, '')).origin;
+  const thirdOrigin = new URL(fixtureUrl(env, '', THIRD_HOST)).origin;
+  childUrl.searchParams.set('parentOrigins', parentOrigin);
+  if (nested) {
+    const grandchildUrl = new URL(fixtureUrl(env, 'frame-link-child.html', THIRD_HOST));
+    grandchildUrl.searchParams.set('parentOrigins', childUrl.origin);
+    childUrl.searchParams.set('frameOrigins', thirdOrigin);
+    childUrl.searchParams.set('grandchild', grandchildUrl.href);
+  }
   const parentUrl = new URL(fixtureUrl(env, 'frame-link-parent.html'));
-  parentUrl.searchParams.set('frameOrigins', childUrl.origin);
+  parentUrl.searchParams.set('frameOrigins', nested ? `${childUrl.origin} ${thirdOrigin}` : childUrl.origin);
   parentUrl.searchParams.set('child', childUrl.href);
   return parentUrl.href;
 }
 
 /** Chrome, through OopifPage, which sets up the child as the frontend does. */
-export async function chromeSide(env: Env): Promise<Side> {
-  const page = await OopifPage.open(env, linkedUrl(env));
-  const child = await page.child('frame-link-child');
-  const childTarget = page.children.find(c => c.sessionId === child)?.targetId ?? '';
+export async function chromeSide(env: Env, options: { nested?: boolean } = {}): Promise<Side> {
+  const page = await OopifPage.open(env, linkedUrl(env, options));
+  await page.child('frame-link-child');
+  if (options.nested) await page.child(THIRD_HOST);
+  // The page's own iframe: the grandchild is the same page, on its session.
+  const own = page.children.find(c => c.parent === page.sessionId);
+  const child = own?.sessionId ?? '';
+  const childTarget = own?.targetId ?? '';
   await page.cdp.settle();
   return {
     root: page.targetId,
@@ -75,35 +91,43 @@ export async function chromeSide(env: Env): Promise<Side> {
 }
 
 /**
- * Our agent in the parent page, with a flatten client in the page, which sets up the child as the
- * frontend does: Page, Runtime, DOM and Network enabled on the child's session, auto-attach on it
- * too, then resumed.
+ * Our agent in the parent page, with a flatten client in the page, which sets up each target it
+ * is attached to as the frontend does: Page, Runtime, DOM and Network enabled on its session,
+ * auto-attach on it too, then resumed.
  */
-export async function oursSide(env: Env): Promise<Side> {
+export async function oursSide(env: Env, options: { nested?: boolean } = {}): Promise<Side> {
   const page: Page = await env.browser.newPage();
-  await page.goto(linkedUrl(env));
+  await page.goto(linkedUrl(env, options));
   await page.waitForFunction(() => 'DevtoolsAnywhere' in window);
-  await page.evaluate(() => {
+  await page.evaluate(enables => {
     const session = window.DevtoolsAnywhere.createCdpSession();
     const log: Record<string, unknown>[] = [];
     const pending = new Map<number, (reply: Record<string, unknown>) => void>();
     let seq = 0;
+    const send = (method: string, params: object = {}, sessionId = '') =>
+      new Promise<Record<string, unknown>>(resolve => {
+        const id = ++seq;
+        pending.set(id, resolve);
+        void session.dispatch(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+      });
+    const setUp = async (sessionId: string, waiting: boolean) => {
+      for (const method of enables) await send(method, {}, sessionId);
+      await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
+      if (waiting) await send('Runtime.runIfWaitingForDebugger', {}, sessionId);
+    };
     session.onMessage(message => {
       const parsed: Record<string, unknown> = { ...Object(JSON.parse(message)) };
       const id = parsed['id'];
-      if (typeof id === 'number') pending.get(id)?.(parsed);
-      else log.push(parsed);
+      if (typeof id === 'number') return pending.get(id)?.(parsed);
+      log.push(parsed);
+      // Each target as it comes, as the frontend sets one up (the page's own below).
+      const params: unknown = parsed['params'];
+      const child = typeof params === 'object' && params !== null ? Reflect.get(params, 'sessionId') : undefined;
+      if (parsed['method'] === 'Target.attachedToTarget' && typeof child === 'string')
+        void setUp(child, Reflect.get(Object(params), 'waitingForDebugger') === true);
     });
-    window.__client = {
-      log,
-      send: (method, params = {}, sessionId = '') =>
-        new Promise(resolve => {
-          const id = ++seq;
-          pending.set(id, resolve);
-          void session.dispatch(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-        }),
-    };
-  });
+    window.__client = { log, send };
+  }, FRONTEND_ENABLES);
   const send: Side['send'] = async (method, params = {}, sessionId = '') => {
     const reply = await page.evaluate((m, p, s) => window.__client?.send(m, p, s), method, params, sessionId);
     const error = get(reply, 'error');
@@ -124,9 +148,6 @@ export async function oursSide(env: Env): Promise<Side> {
     if (Date.now() - start > 5000) throw new Error('the iframe was not attached');
   }
   const child = String(attached.params['sessionId']);
-  for (const method of FRONTEND_ENABLES) await send(method, {}, child);
-  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, child);
-  if (attached.params['waitingForDebugger']) await send('Runtime.runIfWaitingForDebugger', {}, child);
   // Settled: no event for a while.
   for (let seen = -1, now = 0; seen !== now; await new Promise(r => setTimeout(r, 300))) {
     seen = now;

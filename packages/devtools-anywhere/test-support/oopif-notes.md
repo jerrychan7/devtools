@@ -184,6 +184,48 @@ root Page.frameDetached {frameId: id2, reason: "remove"}
 root Target.detachedFromTarget {sessionId: s1, targetId: id2}
 ```
 
+More, measured on the linked pages (`linkedUrl(env, {nested: true})`: frame-link-child.html nesting
+itself on THIRD_HOST), `domains/target/target-lifecycle.conformance.test.ts`:
+
+- A title change in the iframe (`document.title = …`) sends **no** `targetInfoChanged`, neither to the
+  session that attached it nor with `setDiscoverTargets` on: an iframe target's title stays what it was
+  announced with until it navigates.
+- The parent pointing the iframe at the grandchild's site: the grandchild, same-site with its parent
+  now, is a frame of the child's target (its console comes on s1), not a target.
+- `setDiscoverTargets` on the page session is browser-wide: `targetCreated` comes for the grandchild
+  too (and for the browser's own targets), not only for the page's own iframes.
+
+### Ours
+
+The iframe's document goes, and its link with it (pagehide); the next document's agent links again
+with the same frame id (the element's), within `RELINK_TIMEOUT` (10 s; 2 s once the iframe's `load`
+fired), and carries the target and its session on (`ChildTargets.addChild` with the previous link,
+`domains/target/target.ts` `relink`):
+
+- When the link closes: the old document's own children are detached on the child's session.
+- When the next one links: on the child's session `Runtime.executionContextsCleared`,
+  `Page.frameNavigated` (its main frame, from its agent's `getFrameTree`), on the parent's
+  `Target.targetInfoChanged`, then `DOM.documentUpdated` and `frameAttached` / `frameNavigated` for
+  the new document's same-origin frames (each only if the client enabled the domain on that session);
+  then the new agent gets every `enable` and the setup commands (`Target.setAutoAttach`,
+  `Overlay.setInspectMode`, …) the client sent on the session, under ids of the parent's own, and
+  reports contexts, console, scripts, grandchildren as it would to a new client. The client's
+  commands meanwhile wait for that; between the two documents, `enable`s and setup commands succeed
+  (and are kept) and the rest fail with "Inspected target navigated or closed", as the relay does
+  for a page between two instances.
+- Nothing links again in time (a page without the probe, or not trusting the parent): detached
+  then. The element removed or moved: detached at once, the old document's children first. Back on
+  the parent's origin: the frame registry gives the same-origin frame the element's frame id
+  (`childTargets.frameIdOf`, shared) and ends the target first, so the parent session gets
+  `detachedFromTarget`, `frameAttached`, `frameNavigated` with the same id, as in Chrome.
+- Differences: Chrome attaches at commit, so its `frameStartedNavigating` and the document request
+  on the parent are not there; Chrome's `Page.frameDetached` for the removed iframe (on the parent
+  session) and for the old document's out-of-process frames (on the child's) are not sent, as
+  neither page ever reported those frames; when the iframe comes back to the parent's origin ours
+  detaches the grandchild's session on the child's first, where Chrome drops it silently; breakpoints
+  set by URL are not set again in the next document (the new agent's breakpoint ids would not be the
+  ones the client knows).
+
 ## Nesting
 
 A grandchild OOPIF is attached on the **child's** session (the `attachedToTarget` event carries
