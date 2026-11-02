@@ -64,6 +64,9 @@ let hookingFrames = false;
 function hookFrames(probe: Probe) {
   if (hookingFrames) return;
   hookingFrames = true;
+  // Iframes in closed shadow trees too, and in shadow trees attached from now on.
+  frames.shadowRootOf = host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null;
+  probe.onShadowRoot(root => frames.watchShadowRoot(root));
   const hook = (frame: Frame) => {
     if (frame !== frames.top) probe.hookWindow(realmOf(frame.document));
   };
@@ -98,7 +101,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   const ctx: Context = {
     session: new CdpSession(),
     objects: new ObjectRegistry(),
-    nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null, frames),
+    nodes: new NodeRegistry(frames.shadowRootOf, frames),
     probe: viewProbe(probe),
     frames,
   };

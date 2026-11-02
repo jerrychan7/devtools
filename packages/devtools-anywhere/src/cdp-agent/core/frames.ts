@@ -1,6 +1,6 @@
 import { EXECUTION_CONTEXT_ID, FRAME_ID, LOADER_ID } from './context';
-import { closestOwn } from './nodes';
-import { type FrameOwner, documentOf, isElement, isFrameOwner, isNode } from './realm';
+import { closestOwn, isOwn } from './nodes';
+import { type FrameOwner, documentOf, isElement, isFrameOwner, isNode, isShadowRoot } from './realm';
 
 /** A document the agent exposes as a frame, with the execution context of its window. */
 export interface Frame {
@@ -35,9 +35,48 @@ function contentDocumentOf(owner: FrameOwner): Document | null {
   }
 }
 
-/** Whether DOM mutation records added or removed a frame owner, possibly within a subtree. */
-export function touchesFrames(records: MutationRecord[]): boolean {
-  const hasFrame = (n: Node) => isFrameOwner(n) || (isElement(n) && n.querySelector('iframe, frame') !== null);
+/** A shadow host's shadow root, if reachable: closed ones only through the probe's record. */
+export type ShadowRootOf = (host: Element) => ShadowRoot | null;
+
+const openShadowRoot: ShadowRootOf = host => host.shadowRoot;
+
+/**
+ * Calls `visit` with each frame owner in a tree, in tree order, going into the shadow trees of
+ * its hosts like Chrome, which gives an iframe in a shadow tree a frame too; and with each shadow
+ * root entered, first. devtools-anywhere's own elements are skipped, with their subtrees.
+ */
+export function walkFrameOwners(
+  root: Node,
+  shadowRootOf: ShadowRootOf,
+  visit: (node: FrameOwner | ShadowRoot) => void
+): void {
+  if (isElement(root) && isOwn(root)) return;
+  if (isElement(root) && isFrameOwner(root)) visit(root);
+  const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT, n =>
+    isOwn(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  );
+  const enter = (host: Node) => {
+    const shadow = isElement(host) ? shadowRootOf(host) : null;
+    if (!shadow) return;
+    visit(shadow);
+    walkFrameOwners(shadow, shadowRootOf, visit);
+  };
+  enter(root);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (isFrameOwner(n)) visit(n);
+    enter(n);
+  }
+}
+
+/** Whether DOM mutation records added or removed a frame owner, possibly within a subtree or shadow tree. */
+export function touchesFrames(records: MutationRecord[], shadowRootOf: ShadowRootOf = openShadowRoot): boolean {
+  const hasFrame = (n: Node) => {
+    if (isFrameOwner(n)) return true;
+    if (!isElement(n)) return false;
+    let found = false;
+    walkFrameOwners(n, shadowRootOf, node => (found ||= !isShadowRoot(node)));
+    return found;
+  };
   return records.some(
     r =>
       r.type === 'childList' && (Array.from(r.addedNodes).some(hasFrame) || Array.from(r.removedNodes).some(hasFrame))
@@ -48,7 +87,8 @@ export function touchesFrames(records: MutationRecord[]): boolean {
  * The page's frames: the top document and its same-origin iframes, which the agent can reach.
  * Cross-origin iframes are not registered (docs/roadmap.md, "iframes").
  *
- * Iframes are found by {@link sync}, which walks the documents; while anyone listens through
+ * Iframes are found by {@link sync}, which walks the documents and the shadow trees in them; while
+ * anyone listens through
  * {@link onChange}, the registry also watches for iframes being added, removed or loading another
  * document and syncs by itself. Domains look frames up here rather than using FRAME_ID and
  * EXECUTION_CONTEXT_ID.
@@ -64,6 +104,10 @@ export class FrameRegistry {
   #frameSeq = 0;
   #contextSeq = EXECUTION_CONTEXT_ID;
   #observer: MutationObserver | null = null;
+  /** Shadow roots watched like documents (load does not cross a shadow boundary). */
+  readonly #watchedRoots = new Set<ShadowRoot>();
+  /** Set by the agent to reach closed shadow roots too (the probe records them). */
+  shadowRootOf: ShadowRootOf = openShadowRoot;
   readonly #onLoad = (event: Event) => {
     if (isNode(event.target) && isFrameOwner(event.target)) this.sync();
   };
@@ -139,7 +183,7 @@ export class FrameRegistry {
     this.#listeners.add(listener);
     if (!this.#observer) {
       this.#observer = new MutationObserver(records => {
-        if (touchesFrames(records)) this.sync();
+        if (touchesFrames(records, this.shadowRootOf)) this.sync();
       });
       for (const frame of this) this.#watch(frame.document);
       this.sync();
@@ -150,14 +194,25 @@ export class FrameRegistry {
       this.#observer.disconnect();
       this.#observer = null;
       for (const frame of this) frame.document.removeEventListener('load', this.#onLoad, true);
+      for (const root of this.#watchedRoots) root.removeEventListener('load', this.#onLoad, true);
+      this.#watchedRoots.clear();
     };
   }
 
-  /** Observes a frame's document for iframes coming and going, and loading (load does not bubble). */
-  #watch(doc: Document): void {
+  /**
+   * Observes a frame's document, or a shadow root in it, for iframes coming and going, and loading
+   * (load does not bubble). A document's observer does not see into its shadow trees.
+   */
+  #watch(root: Document | ShadowRoot): void {
     if (!this.#observer) return;
-    this.#observer.observe(doc, { childList: true, subtree: true });
-    doc.addEventListener('load', this.#onLoad, true);
+    this.#observer.observe(root, { childList: true, subtree: true });
+    root.addEventListener('load', this.#onLoad, true);
+    if (isShadowRoot(root)) this.#watchedRoots.add(root);
+  }
+
+  /** Watches a shadow root just attached, which may get iframes before anything else changes. */
+  watchShadowRoot(root: ShadowRoot): void {
+    if (!closestOwn(root)) this.#watch(root);
   }
 
   #emit(type: FrameChange['type'], frame: Frame): void {
@@ -175,8 +230,12 @@ export class FrameRegistry {
 
   #syncChildren(parent: Frame): void {
     const found = new Set<Frame>();
-    for (const owner of Array.from(parent.document.querySelectorAll('iframe, frame'))) {
-      if (!isFrameOwner(owner) || closestOwn(owner)) continue;
+    const owners: FrameOwner[] = [];
+    walkFrameOwners(parent.document, this.shadowRootOf, node => {
+      if (isShadowRoot(node)) this.#watch(node);
+      else owners.push(node);
+    });
+    for (const owner of owners) {
       const doc = contentDocumentOf(owner);
       const win = owner.contentWindow;
       let frame = this.#byOwner.get(owner);

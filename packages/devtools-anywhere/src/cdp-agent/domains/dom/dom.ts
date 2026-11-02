@@ -421,7 +421,7 @@ export function registerDom(ctx: Context) {
   /** Reports DOM changes for the parts of the tree the client has received. */
   function onMutations(records: MutationRecord[]) {
     // Iframes added or removed are registered now, so that they are sent with their frame.
-    if (touchesFrames(records)) ctx.frames.sync();
+    if (touchesFrames(records, nodes.shadowRootOf)) ctx.frames.sync();
     reportMutations(records);
     // Attribute and tree changes can make selectors such as `.x::before` start or stop matching.
     // devtools-anywhere's own elements (the highlight layer, …) change nothing on the page.
