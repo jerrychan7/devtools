@@ -172,7 +172,11 @@ function observeResources(sink: NetworkSink, w: Realm, serviceWorkerUrl: string 
   const seen = new WeakSet<PerformanceEntry>();
   const record = (entry: PerformanceResourceTiming) => {
     if (seen.has(entry)) return;
-    if (entry.entryType === 'navigation') seen.add(entry);
+    if (entry.entryType === 'navigation') {
+      seen.add(entry);
+      // An iframe's about:blank or about:srcdoc document: Chrome reports no request for it.
+      if (!entry.name.startsWith('http')) return;
+    }
     // fetch() and XHR are hooked from then on, with more detail; DevTools' own fetches are unhooked.
     if ((entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') && entry.startTime >= hooked)
       return;
@@ -293,7 +297,8 @@ function hookFetch(track: Track, update: Update, probe: Probe, w: Realm) {
     let url: string;
     let requestHeaders: Headers;
     try {
-      url = new URL(req ? req.url : String(input), w.location.href).href;
+      // Against the document's base URL, as fetch() does: a srcdoc iframe's location is about:srcdoc.
+      url = new URL(req ? req.url : String(input), w.document.baseURI).href;
       requestHeaders = new Headers(headers);
     } catch {
       // An invalid URL or header: fetch itself rejects, without making a request.
@@ -432,7 +437,7 @@ function hookXhr(track: Track, update: Update, listen: Listen, probe: Probe, w: 
     }
     infos.set(this, {
       method: String(args[0]).toUpperCase(),
-      url: new URL(String(args[1]), w.location.href).href,
+      url: new URL(String(args[1]), w.document.baseURI).href,
       headers: {},
     });
     return Reflect.apply(origOpen, this, args);
