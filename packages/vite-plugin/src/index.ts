@@ -59,6 +59,19 @@ export interface DevtoolsAnywhereOptions {
    * with `idInQuery` (`data-id-in-query`). Default: false.
    */
   idInQuery?: boolean;
+  /**
+   * Origins of cross-origin iframes this page's DevTools may debug, when their page loads the
+   * probe too and trusts this one (`parentOrigins` there): exact origins such as
+   * `https://app.example.com`, or `https://*.example.com` for every subdomain of a host at any
+   * depth, not the host itself (`data-frame-origins`). Default: none.
+   */
+  frameOrigins?: string[];
+  /**
+   * Origins of the pages that may debug this page when it is in their iframe, in the same form as
+   * `frameOrigins`, which they must set too (`data-parent-origins`). While linked, the page's own
+   * F12 button and panel are hidden. Default: none.
+   */
+  parentOrigins?: string[];
 }
 
 const BASE = '/@devtools-anywhere/';
@@ -176,6 +189,8 @@ export default function devtoolsAnywhere(options: DevtoolsAnywhereOptions = {}):
         if (options.shellModeLocked) attrs['data-shell-mode-locked'] = true;
         if (options.noToggler) attrs['data-no-toggler'] = true;
         if (options.serviceWorker) attrs['data-service-worker'] = true;
+        if (options.frameOrigins?.length) attrs['data-frame-origins'] = options.frameOrigins.join(' ');
+        if (options.parentOrigins?.length) attrs['data-parent-origins'] = options.parentOrigins.join(' ');
         return [{ tag: 'script', attrs, injectTo: 'head-prepend' }];
       },
     },
