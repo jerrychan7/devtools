@@ -1,5 +1,6 @@
-// Same-origin iframes in the CSS domain: the style sheets of their documents, announced with
-// their frame and removed with it, against Chrome's.
+// Same-origin iframes in the CSS domain: the styles of their nodes, from the rules of their own
+// document in their own viewport, and the style sheets of their documents, announced with their
+// frame and removed with it, against Chrome's.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
@@ -28,7 +29,7 @@ before(async () => {
           },
           (f: HTMLIFrameElement) => {
             f.id = 'sd';
-            f.srcdoc = '<style>.sd { color: rgb(9, 9, 9) }</style><p class="sd">srcdoc</p>';
+            f.srcdoc = '<style>.sd { color: rgb(9, 9, 9) }</style><p class="sd" id="sd-p">srcdoc</p>';
           },
         ].map(
           init =>
@@ -99,6 +100,78 @@ async function compareAdded() {
 }
 
 const clear = () => Promise.all([t.ours.clear(), t.chrome.clear()]);
+
+async function nodeId(side: Side, id: string): Promise<number> {
+  const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+  const node = find(root, hasId(id));
+  assert.ok(node, `#${id}`);
+  return node.nodeId;
+}
+
+/** What both sides should agree on in a rule match. */
+const rules = (matches: Protocol.CSS.RuleMatch[] | undefined) =>
+  (matches ?? [])
+    .filter(m => m.rule.origin !== 'user-agent')
+    .map(({ rule }) => ({
+      selector: rule.selectorList.text,
+      origin: rule.origin,
+      media: (rule.media ?? []).map(m => ({ text: m.text, active: m.mediaList?.map(q => q.active) })),
+      containers: (rule.containerQueries ?? []).map(c => c.text),
+      declared: declared(rule.style),
+    }));
+
+/** The declarations written in a style. */
+const declared = (style: Protocol.CSS.CSSStyle | undefined) =>
+  (style?.cssProperties ?? []).filter(p => p.text).map(p => `${p.name}: ${p.value}`);
+
+async function matched(side: Side, id: string) {
+  const m = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, id) });
+  return {
+    matched: rules(m.matchedCSSRules),
+    inline: declared(m.inlineStyle),
+    inherited: (m.inherited ?? []).map(e => ({ matched: rules(e.matchedCSSRules), inline: declared(e.inlineStyle) })),
+  };
+}
+
+describe('styles of nodes in iframes', () => {
+  for (const id of ['inner', 'sd-p']) {
+    test(`getMatchedStylesForNode #${id}: the rules of its own document`, async () => {
+      const [ours, chrome] = await Promise.all([matched(t.ours, id), matched(t.chrome, id)]);
+      assert.deepEqual(ours, chrome);
+    });
+  }
+
+  test("media and container queries hold in the iframe's viewport", async () => {
+    const { matched: chrome } = await matched(t.chrome, 'inner');
+    const selectors = chrome.map(r => r.declared.join());
+    assert.ok(selectors.includes('margin-left: 7px'), 'the narrow @media rule matches');
+    assert.ok(selectors.includes('margin-right: 5px'), 'the @container rule matches');
+    assert.ok(!chrome.some(r => r.selector.includes('.note')), 'rules of the top page do not');
+  });
+
+  test('getComputedStyleForNode uses the window of the node', async () => {
+    const pick = async (side: Side) => {
+      const { computedStyle } = await side.send('CSS.getComputedStyleForNode', { nodeId: await nodeId(side, 'inner') });
+      const names = ['color', 'margin-left', 'margin-right', 'letter-spacing', 'font-weight', 'font-size', 'width'];
+      return computedStyle.filter(p => names.includes(p.name)).sort((a, b) => a.name.localeCompare(b.name));
+    };
+    const [ours, chrome] = await Promise.all([pick(t.ours), pick(t.chrome)]);
+    assert.deepEqual(ours, chrome);
+    assert.equal(chrome.length, 7);
+  });
+
+  test('getInlineStylesForNode and getBackgroundColors', async () => {
+    await t.page.evaluate(() => document.querySelector('#styled')?.scrollIntoView());
+    const pick = async (side: Side) => {
+      const id = await nodeId(side, 'inner');
+      const inline = await side.send('CSS.getInlineStylesForNode', { nodeId: id });
+      const bg = await side.send('CSS.getBackgroundColors', { nodeId: id });
+      return { inline: declared(inline.inlineStyle), bg };
+    };
+    const [ours, chrome] = await Promise.all([pick(t.ours), pick(t.chrome)]);
+    assert.deepEqual(ours, chrome);
+  });
+});
 
 describe('style sheets', () => {
   test('the sheets of iframe documents are announced with their frame', async () => {

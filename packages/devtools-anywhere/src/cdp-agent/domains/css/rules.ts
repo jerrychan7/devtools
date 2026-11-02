@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
-import { isCssom } from '../../core/realm';
+import { frames } from '../../core/frames';
+import { isCssom, realmOf } from '../../core/realm';
 import { splitTopLevel } from '../../core/selectors';
 
 /** A rule with declarations: a style rule, or declarations after rules nested in one. */
@@ -118,8 +119,10 @@ export function importedLayer(sheet: CSSStyleSheet): string[] {
  * supports() of its @import, up through the sheets that import it.
  */
 export function sheetApplies(sheet: CSSStyleSheet): boolean {
+  // Media queries hold or not in the sheet's own window: an iframe has a viewport of its own.
+  const realm = realmOfSheet(sheet);
   for (let s: CSSStyleSheet | null = sheet; s; s = s.ownerRule?.parentStyleSheet ?? null) {
-    if (s.media.mediaText && !matchMedia(s.media.mediaText).matches) return false;
+    if (s.media.mediaText && !realm.matchMedia(s.media.mediaText).matches) return false;
     const owner = s.ownerRule;
     if (isCssom(owner, 'CSSImportRule') && owner.supportsText && !CSS.supports(owner.supportsText)) {
       return false;
@@ -128,8 +131,11 @@ export function sheetApplies(sheet: CSSStyleSheet): boolean {
   return true;
 }
 
-/** Expressions of a media query list, as Chrome reports them in `mediaList`. */
-export function mediaList(text: string): Protocol.CSS.MediaQuery[] {
+/**
+ * Expressions of a media query list, as Chrome reports them in `mediaList`, active or not in
+ * `realm` (the window of the sheet they are in).
+ */
+export function mediaList(text: string, realm: Window): Protocol.CSS.MediaQuery[] {
   return splitTopLevel(text, ',').map(query => {
     const expressions: Protocol.CSS.MediaQueryExpression[] = [];
     for (const m of query.matchAll(/\(\s*([\w-]+)\s*:\s*(-?[\d.]+)([a-z%]*)\s*\)/gi)) {
@@ -145,6 +151,22 @@ export function mediaList(text: string): Protocol.CSS.MediaQuery[] {
         ...(scale !== null && { computedLength: value * scale }),
       });
     }
-    return { expressions, active: matchMedia(query.trim()).matches };
+    return { expressions, active: realm.matchMedia(query.trim()).matches };
   });
+}
+
+/**
+ * The window whose document the sheet (or the sheet importing it) belongs to: that of its owner
+ * node, or for a constructed sheet, the realm it was made in, whose trees alone can adopt it.
+ */
+export function realmOfSheet(sheet: CSSStyleSheet): Window & typeof globalThis {
+  let top = sheet;
+  while (top.ownerRule?.parentStyleSheet) top = top.ownerRule.parentStyleSheet;
+  if (top.ownerNode) return realmOf(top.ownerNode);
+  const proto: unknown = Object.getPrototypeOf(top);
+  for (const frame of frames) {
+    const realm = realmOf(frame.document);
+    if (proto === realm.CSSStyleSheet.prototype) return realm;
+  }
+  return realmOf(frames.top.document);
 }

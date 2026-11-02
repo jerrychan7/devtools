@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { isCssom } from '../../core/realm';
+import { documentOf, isCssom, isElement, isHtmlElement, isShadowRoot, isSvgElement } from '../../core/realm';
 import { containerMatches, parentOf } from '../../core/container-query';
 import type { NodeRegistry, PseudoType } from '../../core/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../../core/selectors';
@@ -128,7 +128,7 @@ export class Cascade {
   private scopeProximity(sheet: CSSStyleSheet, scope: CSSScopeRule, el: Element, test: (root: Element) => boolean) {
     const owner = sheet.ownerNode;
     // Without a prelude, the root is the parent of the <style>.
-    const implicitRoot = owner instanceof Element ? owner.parentElement : document.documentElement;
+    const implicitRoot = isElement(owner) ? owner.parentElement : documentOf(el).documentElement;
     const matches = (node: Element, selector: string) => {
       try {
         return node.matches(selector);
@@ -168,7 +168,8 @@ export class Cascade {
     const ownShadow = this.nodes.shadowRootOf(el);
     const elRoot = el.getRootNode();
     const groups: [Candidate[] | undefined, 'own' | 'host' | 'slotted', HTMLSlotElement | null, number][] = [
-      [byTree.get(elRoot instanceof ShadowRoot ? elRoot : document), 'own', null, 0],
+      // An element of an iframe's document matches the rules of that document only.
+      [byTree.get(isShadowRoot(elRoot) ? elRoot : documentOf(el)), 'own', null, 0],
     ];
     // A slot can itself be assigned to a slot further in: `::slotted()` of each of those trees
     // matches, the trees further in losing to those closer to the element, like in Chrome.
@@ -177,7 +178,7 @@ export class Cascade {
     let depth = 1;
     for (let slot = el.assignedSlot; slot; slot = slot.assignedSlot) {
       const slotTree = slot.getRootNode();
-      if (slotTree instanceof ShadowRoot) groups.push([byTree.get(slotTree), 'slotted', slot, -depth++]);
+      if (isShadowRoot(slotTree)) groups.push([byTree.get(slotTree), 'slotted', slot, -depth++]);
     }
     groups.push([ownShadow ? byTree.get(ownShadow) : undefined, 'host', null, -depth]);
     for (const [group, kind, slot, rank] of groups)
@@ -237,7 +238,7 @@ export class Cascade {
   }
 
   inlineStyle(el: Element): CSSStyle | undefined {
-    if (!(el instanceof HTMLElement || el instanceof SVGElement)) return undefined;
+    if (!(isHtmlElement(el) || isSvgElement(el))) return undefined;
     // Like Chrome, declarations in the order of the style attribute, which the CSSOM does not keep.
     const attribute = el.getAttribute('style');
     if (attribute !== null) sources.set(el.style, { text: attribute, applied: el.style.cssText });

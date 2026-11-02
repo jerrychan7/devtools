@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { documentOf, isCssom, isElement, isHtml, isNode } from '../../core/realm';
+import { documentOf, isCssom, isElement, isHtml, isNode, realmOf } from '../../core/realm';
 import { type Context } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
 import { parentOf } from '../../core/container-query';
@@ -236,6 +236,8 @@ export function registerCss(ctx: Context) {
     el: Element,
     pseudo: PseudoType | null
   ): Promise<Protocol.CSS.GetMatchedStylesForNodeResponse> {
+    // Without the DOM domain listening, an iframe loaded since may not be known yet.
+    if (!ctx.frames.ofDocument(documentOf(el))) ctx.frames.sync();
     // Adopted sheets change unseen: catch up before answering.
     if (enabled) await syncSheets();
     else await loadCopies();
@@ -336,7 +338,8 @@ export function registerCss(ctx: Context) {
 
     getComputedStyleForNode(params: Protocol.CSS.GetComputedStyleForNodeRequest): ComputedStyleResponse {
       const { el, pseudo } = target(params.nodeId);
-      const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
+      // The element's own window: in an iframe, its viewport and media queries.
+      const style = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null);
       return {
         computedStyle: Array.from(style, name => ({ name, value: style.getPropertyValue(name) })),
         extraFields: { isAppearanceBase: false, isTableSetVisuallyTable: false },
@@ -345,7 +348,7 @@ export function registerCss(ctx: Context) {
 
     getBackgroundColors(params: Protocol.CSS.GetBackgroundColorsRequest): Protocol.CSS.GetBackgroundColorsResponse {
       const { el, pseudo } = target(params.nodeId);
-      const style = getComputedStyle(el, pseudo ? `::${pseudo}` : null);
+      const style = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null);
       // Chrome reports no background for a pseudo-element.
       const backgroundColors = pseudo ? null : backgroundsBehind(el, style);
       return {

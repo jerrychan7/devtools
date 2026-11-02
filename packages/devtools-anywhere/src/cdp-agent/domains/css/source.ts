@@ -1,5 +1,5 @@
 import { splitTopLevel } from '../../core/selectors';
-import { isCssom } from '../../core/realm';
+import { isCssom, isElement, isHtml, isShadowRoot } from '../../core/realm';
 import { nestingParent } from './rules';
 
 /**
@@ -26,7 +26,7 @@ const blank = (m: string) => ' '.repeat(m.length);
 
 export function sourceOf(sheet: CSSStyleSheet): Source | null {
   const owner = sheet.ownerNode;
-  if (!(owner instanceof HTMLStyleElement) || owner.sheet !== sheet) return null;
+  if (!isHtml(owner, 'style') || owner.sheet !== sheet) return null;
   const raw = owner.textContent;
   if (lastSource?.raw !== raw) {
     const text = raw.replace(/\/\*[\s\S]*?\*\//g, blank);
@@ -140,7 +140,7 @@ export function parseHost(selector: string): ((host: Element) => boolean) | null
     for (let node: Element | null = host; node;) {
       if (node.matches(arg)) return true;
       const parent: Node | null = node.parentNode;
-      node = parent instanceof ShadowRoot ? parent.host : parent instanceof Element ? parent : null;
+      node = isShadowRoot(parent) ? parent.host : isElement(parent) ? parent : null;
     }
     return false;
   };

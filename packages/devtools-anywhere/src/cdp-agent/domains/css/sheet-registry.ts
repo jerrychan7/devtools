@@ -1,11 +1,11 @@
 import type { Protocol } from 'devtools-protocol';
-import { isCssom, isHtml, isShadowRoot, realmOf } from '../../core/realm';
+import { isCssom, isHtml, isShadowRoot } from '../../core/realm';
 import { frames } from '../../core/frames';
 import { isOwn } from '../../core/nodes';
 import { CdpError } from '../../core/session';
 import { adoptedOf } from '../../core/adopted';
 import { type TreeScope } from './forced-pseudo';
-import { type Entry, type StyleRule, importedLayer, layerKeys, selectorLabel } from './rules';
+import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from './rules';
 import { type StyleOrigin, buildStyle } from './style';
 
 /**
@@ -212,7 +212,7 @@ export class SheetRegistry {
           this.ruleId(sheet, rule);
           result.push({ rule, layer });
         } else if (isCssom(rule, 'CSSMediaRule')) {
-          if (onlyActive && !matchMedia(rule.conditionText).matches) continue;
+          if (onlyActive && !realmOfSheet(sheet).matchMedia(rule.conditionText).matches) continue;
           visit(this.rulesOf(rule), layer);
         } else if (isCssom(rule, 'CSSSupportsRule')) {
           if (onlyActive && !CSS.supports(rule.conditionText)) continue;
@@ -251,6 +251,11 @@ export class SheetRegistry {
       lines[id] = `${selectorLabel(rule)} { ${buildStyle('', rule.style, 0, 0).cssText} }`;
     }
     return lines.join('\n');
+  }
+
+  /** The URL the rules of a sheet come from: its own, or the base URL of its document. */
+  sourceURL(sheet: CSSStyleSheet): string {
+    return sheet.href ?? sheet.ownerNode?.baseURI ?? realmOfSheet(sheet).document.baseURI;
   }
 
   origin(sheet: CSSStyleSheet): StyleOrigin {
@@ -296,20 +301,4 @@ export function isConstructed(sheet: CSSStyleSheet): boolean {
   let top = sheet;
   while (top.ownerRule?.parentStyleSheet) top = top.ownerRule.parentStyleSheet;
   return !top.ownerNode && !top.ownerRule;
-}
-
-/**
- * The window whose document the sheet (or the sheet importing it) belongs to: that of its owner
- * node, or for a constructed sheet, the realm it was made in, whose trees alone can adopt it.
- */
-export function realmOfSheet(sheet: CSSStyleSheet): Window & typeof globalThis {
-  let top = sheet;
-  while (top.ownerRule?.parentStyleSheet) top = top.ownerRule.parentStyleSheet;
-  if (top.ownerNode) return realmOf(top.ownerNode);
-  const proto: unknown = Object.getPrototypeOf(top);
-  for (const frame of frames) {
-    const realm = realmOf(frame.document);
-    if (proto === realm.CSSStyleSheet.prototype) return realm;
-  }
-  return window;
 }
