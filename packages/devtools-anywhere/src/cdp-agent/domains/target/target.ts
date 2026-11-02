@@ -9,6 +9,8 @@ import { CdpError } from '../../core/session';
  * to an iframe's agent (core/child-targets.ts) is attached as a session of its own while
  * auto-attach is on, and the client's messages are routed to it by `sessionId`, flattened as
  * Chrome does: every session, the iframe's own children's too, talks over the one connection.
+ * Like Chrome's, a target and its session outlive the iframe's navigations: the next document's
+ * link carries them on (see `relink`).
  *
  * Unlike Chrome, where every client gets a session of its own with each target, a link carries
  * one session: it is attached to one CDP session at a time, and the others get it once that one

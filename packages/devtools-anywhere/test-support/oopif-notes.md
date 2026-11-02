@@ -235,6 +235,16 @@ fired), and carries the target and its session on (`ChildTargets.addChild` with 
   set by URL are not set again in the next document (the new agent's breakpoint ids would not be the
   ones the client knows).
 
+- A link carries one client session at a time: with several clients of the page (remote debugging
+  from two frontends, say), the first to auto-attach gets the iframe, and the next gets it once the
+  first lets it go. Chrome gives each client a session of its own with every target. Doing the same
+  would take a session per client in the iframe's agent, the link's messages tagged with it, and
+  each of those sessions carried across navigations on its own; not done.
+- A reloaded frontend is a new session, embedded, remote and in shell mode alike (the shell's relay
+  tells a new instance by its command ids starting again, as the frame's load comes after its first
+  commands): the page's session ends and resets, its child targets are let go, and the new
+  instance's auto-attach announces them again.
+
 ## Nesting
 
 A grandchild OOPIF is attached on the **child's** session (the `attachedToTarget` event carries
