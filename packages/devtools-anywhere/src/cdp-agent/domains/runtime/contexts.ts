@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { type Frame, type FrameChange, type FrameRegistry, awaitsFirstDocument } from '../../core/frames';
+import { isNode, realmOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 const uniqueIdOf = (contextId: number) => `devtools-anywhere-context-${contextId}`;
@@ -78,6 +79,24 @@ export function executionContexts(frames: FrameRegistry, emit: (method: string, 
       const frame = frames.byContext(contextId);
       if (!frame) throw new CdpError('Cannot find context with specified id');
       return frame;
+    },
+    /**
+     * The frame whose realm made `value`, as far as can be told: a node's document, a window
+     * itself, else the frame whose `Object.prototype` is in its prototype chain. The top one for
+     * primitives, objects without a prototype and objects of no known frame.
+     */
+    frameOfValue(value: unknown): Frame {
+      if (isNode(value)) return frames.ofNode(value);
+      if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return frames.top;
+      for (const frame of frames) {
+        if (value === frame.window) return frame;
+        try {
+          if (realmOf(frame.document).Object.prototype.isPrototypeOf(value)) return frame;
+        } catch {
+          // A proxy whose getPrototypeOf trap throws.
+        }
+      }
+      return frames.top;
     },
   };
 }

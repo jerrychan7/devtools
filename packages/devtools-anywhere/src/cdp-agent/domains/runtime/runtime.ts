@@ -1,23 +1,34 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import {
-  lastExpressionStatement,
-  topLevelLexicalDeclarations,
-  topLevelLexicalNames,
-  returnOutsideFunction,
-  topLevelVarNames,
-  tokenize,
-  type LexOptions,
-} from '../../core/lexer';
+import type { Frame } from '../../core/frames';
+import { returnOutsideFunction } from '../../core/lexer';
+import { realmOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
-import { refetch } from '../network/network';
 import { executionContexts } from './contexts';
+import { globalLexicalNames } from './lexical-names';
+import { replBindings, returnLast } from './repl';
 
 // Indirect eval runs in the global scope, like code typed into the console.
 // oxlint-disable-next-line no-eval -- evaluating console input is the point.
 const globalEval: (code: string) => unknown = eval;
+
+/** A realm's global code runner: indirect eval of its window. */
+type Evaluate = (code: string) => unknown;
+
+/** Indirect eval of `win`: runs code in its global scope. */
+function evaluateIn(win: Window & typeof globalThis): Evaluate {
+  return code => {
+    const evaluate: unknown = Reflect.get(win, 'eval');
+    if (typeof evaluate !== 'function') throw new CdpError('Cannot evaluate in this context');
+    return Reflect.apply(evaluate, undefined, [code]);
+  };
+}
+
+/** Whether `value` is an Error of the top realm or of `win`'s. */
+const isError = (value: unknown, win: Window & typeof globalThis): value is Error =>
+  value instanceof Error || value instanceof win.Error;
 
 const isThenable = (v: unknown): v is PromiseLike<unknown> =>
   v !== null && (typeof v === 'object' || typeof v === 'function') && typeof Reflect.get(v, 'then') === 'function';
@@ -28,24 +39,27 @@ const isThenable = (v: unknown): v is PromiseLike<unknown> =>
  * top-level await. Returns the value and whether it came from the async wrapper.
  */
 function run(
+  { win, evaluate }: Pick<Scope, 'win' | 'evaluate'>,
   expression: string,
   allowAwait: boolean,
   asyncBody = returnLast(expression)
 ): { value: unknown; isAsync: boolean } {
+  // The realm's own SyntaxError: the code is compiled there.
+  const isSyntaxError = (e: unknown) => e instanceof win.SyntaxError || e instanceof SyntaxError;
   try {
-    return { value: globalEval(expression), isAsync: false };
+    return { value: evaluate(expression), isAsync: false };
   } catch (e) {
-    if (!(e instanceof SyntaxError) || !allowAwait || !/\bawait\b/.test(expression)) throw e;
+    if (!isSyntaxError(e) || !allowAwait || !/\bawait\b/.test(expression)) throw e;
   }
   // A trailing `;` (`await foo();`) still leaves a single expression whose value is the result.
   const trimmed = expression.replace(/[\s;]+$/, '');
   try {
-    return { value: globalEval(`(async () => (${trimmed}\n))()`), isAsync: true };
+    return { value: evaluate(`(async () => (${trimmed}\n))()`), isAsync: true };
   } catch (e) {
-    if (!(e instanceof SyntaxError)) throw e;
+    if (!isSyntaxError(e)) throw e;
   }
   // Several statements: the last one's value is returned when it is an expression.
-  return { value: globalEval(`(async () => {${asyncBody}\n})()`), isAsync: true };
+  return { value: evaluate(`(async () => {${asyncBody}\n})()`), isAsync: true };
 }
 
 /**
@@ -72,18 +86,12 @@ function compiles(script: string, asyncBody?: string): boolean {
   );
 }
 
-/** `code` with its last statement returned when it is an expression statement. */
-function returnLast(code: string, options?: LexOptions): string {
-  const at = lastExpressionStatement(code, options);
-  return at === undefined ? code : `${code.slice(0, at)}return ${code.slice(at)}`;
-}
-
 /**
  * Removes the CDP agent's own frames from errors thrown by evaluated code, so the console
  * shows `at <anonymous>:1:7` like Chrome instead of the eval machinery underneath.
  */
-function hideEvalFrames(error: unknown) {
-  if (!(error instanceof Error) || typeof error.stack !== 'string') return;
+function hideEvalFrames(error: unknown, win: Window & typeof globalThis) {
+  if (!isError(error, win) || typeof error.stack !== 'string') return;
   const lines = error.stack.split('\n');
   const cut = lines.findIndex(line => /^\s*at eval \(<anonymous>\)$/.test(line));
   if (cut < 0) return;
@@ -118,14 +126,14 @@ function readSafely(target: unknown, key: string): { unsafe: boolean; done: bool
 }
 
 /** Whether reading a property path such as `a.b?.c[0]` could run a getter of the page. */
-function pathRunsCode(path: string): boolean {
+function pathRunsCode(path: string, { win, evaluate }: Pick<Scope, 'win' | 'evaluate'>): boolean {
   const [head = '', ...rest] = path.match(/[A-Za-z_$][\w$]*|\d+/g) ?? [];
-  let found = readSafely(globalThis, head);
+  let found = readSafely(win, head);
   if (found.unsafe) return true;
   if (found.done) {
     // Not a property of the global object: a top-level `let`/`const`, read without side effects.
     try {
-      found = { unsafe: false, done: false, value: globalEval(head) };
+      found = { unsafe: false, done: false, value: evaluate(head) };
     } catch {
       return false;
     }
@@ -147,7 +155,7 @@ const LITERALS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity
  * getters defined by the page, and operators applied to anything but literals (`a + ''` calls
  * `valueOf`/`toString`). Proxies cannot be told apart and are read as plain objects.
  */
-function mayHaveSideEffects(expression: string): boolean {
+function mayHaveSideEffects(expression: string, scope: Pick<Scope, 'win' | 'evaluate'>): boolean {
   const code = expression.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""');
   if (/[(`]|\+\+|--|(?<![=!<>])=(?!=)|\b(?:new|delete|await|yield|import)\b/.test(code)) return true;
   // Property paths with names or numeric indexes; other computed keys are refused.
@@ -157,7 +165,7 @@ function mayHaveSideEffects(expression: string): boolean {
   if (!paths.length) return false;
   const rest = code.replace(/(?<![\w$.])[A-Za-z_$][\w$]*(?:\s*\??\.\s*[A-Za-z_$][\w$]*|\s*\[\s*\d+\s*\])*/g, ' ');
   if (/[-+*/%<>&|^~?[]|[=!]=|\b(?:in|instanceof)\b/.test(rest)) return true;
-  return paths.some(pathRunsCode);
+  return paths.some(path => pathRunsCode(path, scope));
 }
 
 function parseUnserializable(value: string): unknown {
@@ -206,367 +214,36 @@ function fallbackCopy(text: string) {
   }
 }
 
-const IDENTIFIER = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*$/u;
-
-/** Global function the rewritten console input hands its declarations to. */
-const REPL_EXPORT = '__devtoolsAnywhereRepl__';
-
-/** A SyntaxError reported like V8's compile errors: no stack of its own. */
-function syntaxError(message: string) {
-  const error = new SyntaxError(message);
-  Object.defineProperty(error, 'stack', { value: `SyntaxError: ${message}`, configurable: true, writable: true });
-  return error;
-}
-
-type BindingState = 'tdz' | 'ready' | 'dead';
-
-interface ReplBinding {
-  kind: 'let' | 'const' | 'class';
-  value: unknown;
-  /** In its temporal dead zone (its command is running), initialized, or never initialized. */
-  state: BindingState;
-}
-
-/**
- * Top-level `let`, `const` and `class` of console input in REPL mode, kept across commands like
- * V8's REPL mode. Each is a global accessor property of window standing for the binding (so,
- * unlike V8, `'a' in window` is true): later commands, closures and page scripts all read and
- * write it, assigning a `const` throws, and a page script's `let` of the same name fails (the
- * property is not configurable).
- *
- * The input is rewritten without moving any line or column: `let` / `const` become `var` padded
- * to the same length, and a `var` of the global accessor assigns through it (and, being a
- * declaration, leaves the completion value alone). In the async wrapper for top-level await,
- * where a `var` would be the function's own, they become `0, ` padded instead: an assignment.
- * A class stays a declaration of the input's own; its value is handed over at the end, on a line
- * of its own. Like V8, the console may declare a name again, but not one a page script or `var`
- * declared. Input with a 'use strict' directive is run as it is (strict eval keeps its `var`s).
- */
-function replBindings() {
-  const bindings = new Map<string, ReplBinding>();
-  /** Every name a compiled command declared, initialized or not (V8 lists them all). */
-  const declared = new Set<string>();
-  /** Top-level `var`s of the console: eval makes them configurable, V8's REPL does not. */
-  const vars = new Set<string>();
-  let pending: string[] = [];
-  let pendingVars: string[] = [];
-  /** The bindings the running command declares, as they were before it. */
-  let saved = new Map<ReplBinding, { state: BindingState; value: unknown; kind: ReplBinding['kind'] }>();
-  let nextTemp = 0;
-
-  function referenceError(message: string, fn: () => unknown) {
-    const error = new ReferenceError(message);
-    // Thrown where the binding is used, not in the accessor.
-    const capture: unknown = Reflect.get(Error, 'captureStackTrace');
-    if (typeof capture === 'function') Reflect.apply(capture, Error, [error, fn]);
-    return error;
-  }
-
-  /** The binding for `name`, created in its dead zone; undefined when window has such a property. */
-  function bind(name: string, kind: ReplBinding['kind']): ReplBinding | undefined {
-    const known = bindings.get(name);
-    if (known) {
-      if (!saved.has(known)) saved.set(known, { state: known.state, value: known.value, kind: known.kind });
-      known.kind = kind;
-      return known;
-    }
-    // A property of the page's (a configurable one, like `name`) is left as it is.
-    if (Object.getOwnPropertyDescriptor(window, name)) return undefined;
-    const binding: ReplBinding = { kind, value: undefined, state: 'tdz' };
-    bindings.set(name, binding);
-    saved.set(binding, { state: 'dead', value: undefined, kind });
-    Object.defineProperty(window, name, {
-      configurable: false,
-      enumerable: false,
-      get: function get() {
-        // V8's REPL mode says so in the dead zone too.
-        if (binding.state !== 'ready') throw referenceError(`${name} is not defined`, get);
-        return binding.value;
-      },
-      set: function set(value: unknown) {
-        if (binding.state === 'ready' && binding.kind === 'const') {
-          const error = new TypeError('Assignment to constant variable.');
-          const capture: unknown = Reflect.get(Error, 'captureStackTrace');
-          if (typeof capture === 'function') Reflect.apply(capture, Error, [error, set]);
-          throw error;
-        }
-        // The declaration's initializer.
-        binding.value = value;
-        binding.state = 'ready';
-      },
-    });
-    return binding;
-  }
-
-  function hand(name: string, value: unknown) {
-    const binding = bindings.get(name);
-    if (!binding) return;
-    binding.value = value;
-    binding.state = 'ready';
-  }
-
-  /** Declared by a page script (a lexical binding, maybe in its dead zone) or `var`. */
-  function declaredByPage(name: string): boolean {
-    const own = Object.getOwnPropertyDescriptor(window, name);
-    if (own) return !own.configurable || vars.has(name);
-    if (name in window || !IDENTIFIER.test(name)) return false;
-    try {
-      globalEval(name);
-      return true;
-    } catch {
-      try {
-        globalEval(`typeof ${name}`);
-        return false;
-      } catch {
-        return true;
-      }
-    }
-  }
-
-  return {
-    names: () => [...declared],
-    /** The command ran (maybe throwing): its declarations count, the ones not reached are dead. */
-    compiled() {
-      for (const name of pending) {
-        declared.add(name);
-        const binding = bindings.get(name);
-        if (binding?.state === 'tdz') binding.state = 'dead';
-      }
-      for (const name of pendingVars) vars.add(name);
-      pending = [];
-      pendingVars = [];
-      saved = new Map();
-    },
-    /** The command did not compile: its bindings are as they were. */
-    failed() {
-      for (const [binding, before] of saved) Object.assign(binding, before);
-      pending = [];
-      pendingVars = [];
-      saved = new Map();
-    },
-    /**
-     * The input to evaluate as a script and as the body of the async wrapper; throws V8's
-     * SyntaxError for a name the page declared.
-     */
-    rewrite(expression: string): { script: string; body: string; commit: () => void } {
-      // Lexed once for every query below.
-      const lexed = { tokens: tokenize(expression) };
-      const declarations = topLevelLexicalDeclarations(expression, lexed);
-      pending = declarations.flatMap(declaration => declaration.names);
-      pendingVars = topLevelVarNames(expression, lexed);
-      const plain = () => ({ script: expression, body: returnLast(expression, lexed), commit: () => {} });
-      if (/^\s*(['"])use strict\1/.test(expression)) {
-        // Strict eval code keeps its declarations to itself: none is left to list.
-        pending = [];
-        pendingVars = [];
-        return plain();
-      }
-      if (!declarations.length) return plain();
-      for (const name of pending)
-        if (!bindings.has(name) && declaredByPage(name)) {
-          pending = [];
-          pendingVars = [];
-          throw syntaxError(`Identifier '${name}' has already been declared`);
-        }
-      /** What declaring takes, done by `commit` once the input is known to compile. */
-      const plan: (() => void)[] = [];
-      const canBind = (name: string) => bindings.has(name) || !Object.getOwnPropertyDescriptor(window, name);
-      const declare = (name: string, kind: ReplBinding['kind'], initialized: boolean) =>
-        plan.push(() => {
-          const binding = bind(name, kind);
-          if (!binding) return;
-          binding.state = 'tdz';
-          if (initialized) hand(name, undefined);
-        });
-      let script = expression;
-      let body = expression;
-      const classes: string[] = [];
-      /** Insertions into the async body, made last to first so the offsets hold. */
-      const inserts: { at: number; text: string }[] = [];
-      const splice = (code: string, at: number, length: number, by: string) =>
-        code.slice(0, at) + by.padEnd(length) + code.slice(at + length);
-      const handOver = (names: string[]) =>
-        `let __devtoolsAnywhereRepl${++nextTemp} = [${names
-          .map(name => `${REPL_EXPORT}(${JSON.stringify(name)}, ${name})`)
-          .join(', ')}];`;
-      for (const { kind, names, bare, start, end } of declarations) {
-        if (kind === 'class') {
-          // Before running: a class used before its declaration is in its dead zone.
-          const name = names[0];
-          if (name === undefined || !canBind(name)) continue;
-          declare(name, kind, false);
-          classes.push(name);
-          // In the async body, right after the class (its line moves on, as the wrapper's first does).
-          inserts.push({ at: end, text: `;${handOver([name])}` });
-          continue;
-        }
-        // A name that cannot be bound (a page property): the declaration stays the input's own.
-        if (!names.every(canBind)) continue;
-        for (const name of names) declare(name, kind, bare.includes(name));
-        script = splice(script, start, kind.length, 'var');
-        body = splice(body, start, kind.length, '0,');
-      }
-      // The completion value is the original's last expression statement, not a rewritten declaration.
-      const last = lastExpressionStatement(expression, lexed);
-      if (last !== undefined) inserts.push({ at: last, text: 'return ' });
-      for (const { at, text } of inserts.sort((x, y) => y.at - x.at)) body = body.slice(0, at) + text + body.slice(at);
-      // On a line of its own after the input: no column moves.
-      if (classes.length) script += `\n;${handOver(classes)}`;
-      const commit = () => {
-        if (!Object.getOwnPropertyDescriptor(window, REPL_EXPORT))
-          Object.defineProperty(window, REPL_EXPORT, { value: hand, configurable: true });
-        for (const step of plan) step();
-      };
-      return { script, body, commit };
-    },
-  };
-}
-
-/**
- * The names the page's classic scripts declared with top-level `let`, `const` and `class`
- * (Runtime.globalLexicalScopeNames). Page scripts cannot list the global lexical scope, so the
- * sources are lexed: inline `<script>`s and the external scripts the page loaded (fetched again,
- * from the HTTP cache), each once. Module scripts are left out: their declarations are not global.
- * Each name is then looked up, which drops the ones not declared (a script that did not compile, a
- * module's name). The console's declarations (see `replBindings`) are added by the caller.
- */
-function globalLexicalNames(probe: Context['probe']) {
-  /**
-   * Names per external script URL, and per inline script text. Each pass keeps only the entries it
-   * used, so scripts gone from the page and from `probe.requests` do not stay in memory.
-   */
-  let external = new Map<string, Promise<string[]>>();
-  let inline = new Map<string, string[]>();
-  let nextExternal = new Map<string, Promise<string[]>>();
-  let nextInline = new Map<string, string[]>();
-
-  const lex = (source: string) => {
-    try {
-      return topLevelLexicalNames(source);
-    } catch {
-      return [];
-    }
-  };
-  const isModule = (script: HTMLScriptElement) => script.type.trim().toLowerCase() === 'module';
-  const isClassic = (script: HTMLScriptElement) =>
-    !script.type || /^(?:text|application)\/(?:x-)?(?:java|ecma)script$/i.test(script.type.trim());
-
-  /**
-   * `cachedOnly`: a script no longer in the document (often JSONP, or a URL with a timestamp) is
-   * read only from the HTTP cache, and left out when it cannot be: fetching it again would hit the
-   * network and run the server's side effects again.
-   */
-  function fromUrl(url: string, cachedOnly = false): Promise<string[]> {
-    let names = nextExternal.get(url) ?? external.get(url);
-    if (!names) {
-      const res = cachedOnly
-        ? url.startsWith(`${location.origin}/`)
-          ? probe.fetch(url, { cache: 'only-if-cached', mode: 'same-origin' }).then(res => {
-              if (!res.ok) throw new Error(`${res.status}`);
-              return res;
-            })
-          : Promise.reject(new Error('cross-origin'))
-        : refetch(probe, url);
-      names = res.then(res => res.text()).then(lex, () => []);
-    }
-    nextExternal.set(url, names);
-    return names;
-  }
-
-  function declared(name: string): boolean {
-    if (!IDENTIFIER.test(name)) return false;
-    try {
-      // A ReferenceError: not declared, or declared but in its temporal dead zone.
-      globalEval(name);
-      return true;
-    } catch {
-      try {
-        // Like V8, a name in its temporal dead zone is listed: only there does `typeof` throw.
-        globalEval(`typeof ${name}`);
-        return false;
-      } catch {
-        return true;
-      }
-    }
-  }
-
-  /** The last result, until a script is added, removed or loaded. */
-  let cached: Promise<string[]> | undefined;
-  /** Stops watching the scripts, while watching. */
-  let unwatch: (() => void) | null = null;
-  const invalidate = () => {
-    cached = undefined;
-  };
-  const hasScript = (node: Node) =>
-    node instanceof HTMLScriptElement || (node instanceof Element && !!node.querySelector('script'));
-  function watch() {
-    if (unwatch) return;
-    const offRequest = probe.onRequest(rec => {
-      if (rec.type === 'Script' && rec.state === 'done') invalidate();
-    });
-    const observer = new MutationObserver(records => {
-      const inScript = (node: Node) =>
-        node instanceof HTMLScriptElement || node.parentNode instanceof HTMLScriptElement;
-      if (records.some(r => inScript(r.target) || [...r.addedNodes, ...r.removedNodes].some(hasScript))) invalidate();
-    });
-    observer.observe(document, { childList: true, subtree: true, characterData: true });
-    unwatch = () => {
-      offRequest();
-      observer.disconnect();
-    };
-  }
-
-  return {
-    /** Also the moment to look again: page code may have changed what is declared. */
-    invalidate,
-    list(): Promise<string[]> {
-      watch();
-      cached ??= compute();
-      return cached;
-    },
-    /** Stops watching the scripts (the session ended); the next list() looks again. */
-    stop() {
-      unwatch?.();
-      unwatch = null;
-      invalidate();
-    },
-  };
-
-  async function compute(): Promise<string[]> {
-    {
-      const lists: (string[] | Promise<string[]>)[] = [];
-      const modules = new Set<string>();
-      for (const script of document.querySelectorAll<HTMLScriptElement>('script')) {
-        if (script.src) {
-          if (isModule(script)) modules.add(script.src);
-          else if (isClassic(script) && /^https?:/.test(script.src) && !probe.ownUrls.has(script.src))
-            lists.push(fromUrl(script.src));
-        } else if (isClassic(script)) {
-          const text = script.text;
-          const names = nextInline.get(text) ?? inline.get(text) ?? lex(text);
-          nextInline.set(text, names);
-          lists.push(names);
-        }
-      }
-      // Scripts added and removed again, or loaded by other means.
-      for (const rec of probe.requests)
-        if (rec.type === 'Script' && rec.state === 'done' && !modules.has(rec.url) && !probe.ownUrls.has(rec.url))
-          lists.push(fromUrl(rec.url, true));
-      external = nextExternal;
-      inline = nextInline;
-      nextExternal = new Map();
-      nextInline = new Map();
-      const names = new Set<string>();
-      for (const list of await Promise.all(lists)) for (const name of list) names.add(name);
-      return [...names].filter(declared);
-    }
-  }
+/** What console input of a frame's document runs with: its realm, REPL bindings and global names. */
+interface Scope {
+  frame: Frame;
+  win: Window & typeof globalThis;
+  evaluate: Evaluate;
+  repl: ReturnType<typeof replBindings>;
+  lexicalNames: ReturnType<typeof globalLexicalNames>;
 }
 
 export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
   const topFrame = frames.top;
-  const lexicalNames = globalLexicalNames(probe);
-  const repl = replBindings();
+  /** Per document: a navigated frame's new document is a new realm, with bindings of its own. */
+  const scopes = new WeakMap<Document, Scope>();
+  function scopeOf(frame: Frame): Scope {
+    let scope = scopes.get(frame.document);
+    if (!scope) {
+      const win = realmOf(frame.document);
+      // The top page's eval as the agent found it, others' as they are now.
+      const evaluate = frame === topFrame ? globalEval : evaluateIn(win);
+      scope = {
+        frame,
+        win,
+        evaluate,
+        repl: replBindings(win, evaluate),
+        lexicalNames: globalLexicalNames(probe, frame.document, evaluate, frame === topFrame),
+      };
+      scopes.set(frame.document, scope);
+    }
+    return scope;
+  }
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
@@ -574,42 +251,50 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
   session.onReset(() => {
     contexts.disable();
     lastResult = undefined;
-    lexicalNames.stop();
+    for (const frame of frames) scopes.get(frame.document)?.lexicalNames.stop();
   });
 
   /** Console utilities, available only while console input is evaluated. */
-  function commandLineApi(): Record<string, unknown> {
+  function commandLineApi({ frame, win }: Scope): Record<string, unknown> {
     const inspected = Object.fromEntries(nodes.inspected.map((node, i) => [`$${i}`, node]));
+    const doc = frame.document;
     return {
       ...inspected,
       $_: lastResult,
-      $: (selector: string) => document.querySelector(selector),
-      $$: (selector: string) => Array.from(document.querySelectorAll(selector)),
+      $: (selector: string) => doc.querySelector(selector),
+      $$: (selector: string) => Array.from(doc.querySelectorAll(selector)),
       $x: (path: string) => {
-        const result = document.evaluate(path, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        const result = doc.evaluate(path, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
         return Array.from({ length: result.snapshotLength }, (_, i) => result.snapshotItem(i));
       },
       copy: copyToClipboard,
       keys: Object.keys,
       values: Object.values,
-      clear: () => console.clear(),
+      clear: () => win.console.clear(),
     };
   }
 
   /** Keeps the utilities until `fn` settles, so code after an `await` can use them too. */
-  async function withCommandLineApi<T>(fn: () => Promise<T>): Promise<T> {
-    const added = Object.entries(commandLineApi()).filter(([name]) => !(name in window));
-    for (const [name, value] of added) Reflect.set(window, name, value);
+  async function withCommandLineApi<T>(scope: Scope, fn: () => Promise<T>): Promise<T> {
+    const { win } = scope;
+    const added = Object.entries(commandLineApi(scope)).filter(([name]) => !(name in win));
+    for (const [name, value] of added) Reflect.set(win, name, value);
     try {
       return await fn();
     } finally {
-      for (const [name] of added) Reflect.deleteProperty(window, name);
+      for (const [name] of added) Reflect.deleteProperty(win, name);
     }
   }
 
-  function exceptionResult(error: unknown, group?: string, generatePreview = false, inPromise = false) {
-    hideEvalFrames(error);
-    const frames = error instanceof Error ? parseStack(error.stack) : [];
+  function exceptionResult(
+    { frame, win }: Pick<Scope, 'frame' | 'win'>,
+    error: unknown,
+    group?: string,
+    generatePreview = false,
+    inPromise = false
+  ) {
+    hideEvalFrames(error, win);
+    const callFrames = isError(error, win) ? parseStack(error.stack) : [];
     // One object for both places, like V8.
     const exception = objects.wrap(error, { generatePreview, group });
     return {
@@ -618,13 +303,13 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         exceptionId: ++exceptionId,
         // Like V8, a rejection names the error: "Uncaught (in promise) Error: no".
         text: inPromise
-          ? `Uncaught (in promise)${error instanceof Error ? ` ${error.name}: ${error.message}` : ''}`
+          ? `Uncaught (in promise)${isError(error, win) ? ` ${error.name}: ${error.message}` : ''}`
           : 'Uncaught',
         lineNumber: 0,
         columnNumber: 0,
         exception,
-        executionContextId: topFrame.executionContextId,
-        ...(frames.length ? { stackTrace: { callFrames: frames } } : {}),
+        executionContextId: frame.executionContextId,
+        ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
     };
   }
@@ -690,8 +375,16 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
 
     async evaluate(params: Protocol.Runtime.EvaluateRequest): Promise<Protocol.Runtime.EvaluateResponse> {
       const group = params.objectGroup;
-      if (params.throwOnSideEffect && mayHaveSideEffects(params.expression)) {
-        return exceptionResult(new EvalError('Possible side-effect in debug-evaluate'), group, params.generatePreview);
+      // Like Chrome, in the context asked for, else the top page's.
+      const scope = scopeOf(contexts.frameOf(params.contextId, params.uniqueContextId));
+      const { repl } = scope;
+      if (params.throwOnSideEffect && mayHaveSideEffects(params.expression, scope)) {
+        return exceptionResult(
+          scope,
+          new scope.win.EvalError('Possible side-effect in debug-evaluate'),
+          group,
+          params.generatePreview
+        );
       }
       // Whether the error is the rejection of a promise the expression returned.
       let inPromise = false;
@@ -707,7 +400,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
           if (compiled) rewritten.commit();
           let ran: ReturnType<typeof run>;
           try {
-            ran = run(script, allowAwait, body);
+            ran = run(scope, script, allowAwait, body);
           } catch (e) {
             // Whether it compiled, not the error's type: a SyntaxError is also thrown while running
             // (`let x = 1; JSON.parse('{')`), after the declarations were made.
@@ -723,7 +416,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
           inPromise = !isAsync;
           return await value;
         };
-        const value = params.includeCommandLineAPI ? await withCommandLineApi(evaluate) : await evaluate();
+        const value = params.includeCommandLineAPI ? await withCommandLineApi(scope, evaluate) : await evaluate();
         if (!params.silent) lastResult = value;
         return {
           result: objects.wrap(value, {
@@ -733,7 +426,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
           }),
         };
       } catch (e) {
-        return exceptionResult(e, group, params.generatePreview, inPromise);
+        return exceptionResult(scope, e, group, params.generatePreview, inPromise);
       }
     },
 
@@ -741,6 +434,12 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       params: Protocol.Runtime.CallFunctionOnRequest
     ): Promise<Protocol.Runtime.CallFunctionOnResponse> {
       const self = params.objectId ? objects.get(params.objectId) : undefined;
+      // Like Chrome, in the context asked for, else in the object's.
+      const scope = scopeOf(
+        params.executionContextId !== undefined || params.uniqueContextId !== undefined
+          ? contexts.frameOf(params.executionContextId, params.uniqueContextId)
+          : contexts.frameOfValue(self)
+      );
       const args = (params.arguments || []).map(arg => {
         if (arg.objectId) return objects.get(arg.objectId);
         if (arg.unserializableValue !== undefined) return parseUnserializable(arg.unserializableValue);
@@ -748,7 +447,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       });
       let inPromise = false;
       try {
-        const fn = globalEval(`(${params.functionDeclaration}\n)`);
+        const fn = scope.evaluate(`(${params.functionDeclaration}\n)`);
         // Same error as V8 for a declaration that is not a function, a response error.
         if (typeof fn !== 'function') throw new CdpError('Given expression does not evaluate to a function');
         let value: unknown = Reflect.apply(fn, self, args);
@@ -765,11 +464,13 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         };
       } catch (e) {
         if (e instanceof CdpError) throw e;
-        return exceptionResult(e, params.objectGroup, params.generatePreview, inPromise);
+        return exceptionResult(scope, e, params.objectGroup, params.generatePreview, inPromise);
       }
     },
 
     compileScript(params: Protocol.Runtime.CompileScriptRequest): Protocol.Runtime.CompileScriptResponse {
+      // Compiling is the same in every realm: only the context reported differs.
+      const frame = contexts.frameOf(params.executionContextId);
       // The console uses this to check whether the input is complete.
       try {
         new Function(params.expression);
@@ -791,7 +492,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
             text: 'Uncaught',
             lineNumber: 0,
             columnNumber: 0,
-            executionContextId: topFrame.executionContextId,
+            executionContextId: frame.executionContextId,
           },
         };
       }
@@ -806,9 +507,12 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       // Like V8, clearing the messages releases their 'console' handles.
       objects.releaseGroup('console');
     },
-    globalLexicalScopeNames: async (): Promise<Protocol.Runtime.GlobalLexicalScopeNamesResponse> => ({
-      names: [...new Set([...(await lexicalNames.list()), ...repl.names()])],
-    }),
+    async globalLexicalScopeNames(
+      params: Protocol.Runtime.GlobalLexicalScopeNamesRequest
+    ): Promise<Protocol.Runtime.GlobalLexicalScopeNamesResponse> {
+      const { lexicalNames, repl } = scopeOf(contexts.frameOf(params.executionContextId));
+      return { names: [...new Set([...(await lexicalNames.list()), ...repl.names()])] };
+    },
     getIsolateId: () => ({ id: 'devtools-anywhere' }),
     getHeapUsage: () => {
       // Chrome-only, non-standard.
