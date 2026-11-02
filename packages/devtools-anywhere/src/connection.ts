@@ -1,9 +1,11 @@
 import { END_SESSION_CALLS, FRAME_ID, LOADER_ID, type CdpSession } from './cdp-agent';
 import {
+  DETACH_METHOD,
   HELLO_METHOD,
   PING_METHOD,
   RelayCore,
   parse,
+  type DetachParams,
   type Frame,
   type HelloParams,
   type Session,
@@ -16,6 +18,8 @@ import {
 const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_ID } satisfies Partial<HelloParams> });
 /** Sent by the shell on startup, in case the page started listening first. */
 const PING = JSON.stringify({ method: PING_METHOD });
+/** The start of the shell's detach (the relay's own message): its frontend reloaded. */
+const DETACH_PREFIX = `{"method":"${DETACH_METHOD}"`;
 
 interface Link {
   /**
@@ -34,7 +38,13 @@ interface Link {
  * until the peer sends its first message: before that, its window may still be loading.
  * Incoming messages wait for `after`, if given.
  */
-function link(session: CdpSession, peer: () => Window | null | undefined, origin: string, after?: Promise<void>): Link {
+function link(
+  session: CdpSession,
+  peer: () => Window | null | undefined,
+  origin: string,
+  after?: Promise<void>,
+  onDetach?: () => void
+): Link {
   let ready = false;
   const queue: string[] = [];
   const post = (message: string) => peer()?.postMessage(message, origin);
@@ -46,6 +56,7 @@ function link(session: CdpSession, peer: () => Window | null | undefined, origin
   const onMessage = (event: MessageEvent) => {
     if (event.source !== peer() || event.origin !== origin || typeof event.data !== 'string') return;
     if (event.data === PING) return post(HELLO);
+    if (onDetach && event.data.startsWith(DETACH_PREFIX)) return onDetach();
     if (!ready) {
       ready = true;
       queue.splice(0).forEach(post);
@@ -114,9 +125,19 @@ export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, f
   };
 }
 
-/** Connects the CDP session of a page in shell mode to the shell (its parent window). */
+/**
+ * Connects the CDP session of a page in shell mode to the shell (its parent window). When the
+ * shell's frontend reloads (a new frontend instance), the shell says so and the session ends, as
+ * for an embedded frontend: the new instance's messages wait for its end.
+ */
 export function connectToShell(session: CdpSession): () => void {
-  const connection = link(session, () => window.parent, location.origin);
+  const connection = link(
+    session,
+    () => window.parent,
+    location.origin,
+    undefined,
+    () => connection.reset(endSession(session).then(() => session.reset()))
+  );
   window.parent.postMessage(HELLO, location.origin);
   return () => connection.disconnect();
 }
@@ -134,7 +155,9 @@ class ShellRelay extends RelayCore {
   /** Hellos without a loader id so far. */
   private unknownLoaders = 0;
   private readonly toFrontend: string[] = [];
-  private readonly session: Session;
+  private session: Session;
+  /** The highest command id the frontend sent: a new frontend instance numbers its commands from 1 again. */
+  private lastId = 0;
   private readonly page: HTMLIFrameElement;
   private readonly devtools: HTMLIFrameElement;
   private readonly frontendOrigin: string;
@@ -184,6 +207,20 @@ class ShellRelay extends RelayCore {
   private onPagehide = () => this.pagehide();
 
   /**
+   * A new frontend instance (the frontend frame reloaded) is a new session, as in Chrome: the page
+   * ends the last one's (what it enabled, its objects and node ids, its child targets), so that
+   * the new one's enables report everything again and its auto-attach announces the cross-origin
+   * iframes again.
+   */
+  private newFrontend() {
+    this.closeSession(this.session);
+    this.sendOwn(
+      JSON.stringify({ method: DETACH_METHOD, params: { session: this.session.id } satisfies DetachParams })
+    );
+    this.session = this.openSession({ send: message => this.postFrontend(message) });
+  }
+
+  /**
    * Device mode's page size is the shell's to set (shell-layout.ts): it answers
    * Emulation.setDeviceMetricsOverride and clearDeviceMetricsOverride itself, as Chrome's browser
    * does, rather than the page.
@@ -215,6 +252,11 @@ class ShellRelay extends RelayCore {
         this.frontendReady = true;
         this.toFrontend.splice(0).forEach(message => this.postFrontend(message));
       }
+      // The frame's load comes after the new instance's first commands, so it is told by these:
+      // its numbers start again.
+      const id = Number(/^\{"id":(\d+)/.exec(event.data)?.[1] ?? Number.NaN);
+      if (id <= this.lastId) this.newFrontend();
+      if (id > 0) this.lastId = id;
       if (!this.emulate(event.data)) this.clientMessage(this.session, event.data);
     } else if (event.source === this.page.contentWindow && event.origin === location.origin) {
       if (event.data.startsWith(`{"method":"${HELLO_METHOD}"`)) {
