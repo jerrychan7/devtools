@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { isCssom } from '../../core/realm';
 import { containerMatches, parentOf } from '../../core/container-query';
 import type { NodeRegistry, PseudoType } from '../../core/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../../core/selectors';
@@ -76,7 +77,7 @@ export class Cascade {
     // Layers are ranked once all of them are declared: a later sheet can declare an order.
     pending.forEach(({ sheet, tree, entry: { rule, layer } }, order) => {
       const ancestors = ancestorsOf(rule);
-      const parts = rule instanceof CSSStyleRule ? splitTopLevel(rule.selectorText, ',') : ['&'];
+      const parts = isCssom(rule, 'CSSStyleRule') ? splitTopLevel(rule.selectorText, ',') : ['&'];
       const selectors = parts.map((s, index) => {
         const selector = s.trim();
         const resolved = resolveSelector(selector, rule);
@@ -100,8 +101,8 @@ export class Cascade {
         rule,
         order,
         layer: layer.map((_, i) => layerOrder?.get(layer.slice(0, i + 1).join('\u0001')) ?? 0),
-        containers: ancestors.filter(a => a instanceof CSSContainerRule),
-        scope: ancestors.find(a => a instanceof CSSScopeRule) ?? null,
+        containers: ancestors.filter(a => isCssom(a, 'CSSContainerRule')),
+        scope: ancestors.find(a => isCssom(a, 'CSSScopeRule')) ?? null,
         selectors,
       });
     });

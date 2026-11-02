@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { isCssom } from '../../core/realm';
 import { type Context } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
 import { parentOf } from '../../core/container-query';
@@ -357,7 +358,7 @@ export function registerCss(ctx: Context) {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
       const rule = sheets.findRule(sheet, params.range.startLine);
-      if (!(rule instanceof CSSStyleRule)) throw new CdpError('No rule at given range');
+      if (!isCssom(rule, 'CSSStyleRule')) throw new CdpError('No rule at given range');
       const old = rule.selectorText;
       perform(
         () => (rule.selectorText = params.selector),
@@ -396,7 +397,7 @@ export function registerCss(ctx: Context) {
         // The group rule (not a style rule: addRule does not nest) the rule is in.
         let child: CSSRule = onLine;
         for (let p = child.parentRule; p; child = p, p = p.parentRule)
-          if (p instanceof CSSGroupingRule && !(p instanceof CSSStyleRule)) {
+          if (isCssom(p, 'CSSGroupingRule') && !isCssom(p, 'CSSStyleRule')) {
             parent = p;
             break;
           }
@@ -410,7 +411,7 @@ export function registerCss(ctx: Context) {
       const target = parent;
       const index = target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at);
       const rule = target.cssRules[index];
-      if (!(rule instanceof CSSStyleRule)) {
+      if (!isCssom(rule, 'CSSStyleRule')) {
         target.deleteRule(index);
         throw new CdpError('Failed to parse rule text');
       }
@@ -435,7 +436,7 @@ export function registerCss(ctx: Context) {
     collectClassNames(params: Protocol.CSS.CollectClassNamesRequest): Protocol.CSS.CollectClassNamesResponse {
       const names = new Set<string>();
       for (const { rule } of sheets.entries(sheets.get(params.styleSheetId))) {
-        if (!(rule instanceof CSSStyleRule)) continue;
+        if (!isCssom(rule, 'CSSStyleRule')) continue;
         for (const [, name] of rule.selectorText.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) if (name) names.add(name);
       }
       return { classNames: Array.from(names) };

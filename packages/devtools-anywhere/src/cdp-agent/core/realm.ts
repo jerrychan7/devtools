@@ -94,3 +94,33 @@ export function isSvg<K extends keyof SVGElementTagNameMap>(
 export function isMathMlElement(node: Node | null | undefined): node is MathMLElement {
   return isElement(node) && node.namespaceURI === MATHML_NS;
 }
+
+/** CSSOM interfaces {@link isCssom} tells apart. */
+type CssomName =
+  | 'CSSStyleSheet'
+  | 'CSSGroupingRule'
+  | 'CSSStyleRule'
+  | 'CSSNestedDeclarations'
+  | 'CSSImportRule'
+  | 'CSSMediaRule'
+  | 'CSSSupportsRule'
+  | 'CSSContainerRule'
+  | 'CSSScopeRule'
+  | 'CSSStartingStyleRule'
+  | 'CSSLayerBlockRule'
+  | 'CSSLayerStatementRule';
+
+/**
+ * Whether `value` implements the CSSOM interface `name` (or one inheriting from it) in any realm:
+ * the rules of an iframe's style sheets are not instances of the top page's `CSSStyleRule`, …
+ * Each interface prototype carries its name as `Symbol.toStringTag`, so the prototype chain
+ * names the interfaces an object implements.
+ */
+export function isCssom<K extends CssomName>(value: unknown, name: K): value is InstanceType<(typeof globalThis)[K]> {
+  if (typeof value !== 'object' || value === null) return false;
+  for (let proto: unknown = Object.getPrototypeOf(value); typeof proto === 'object' && proto !== null;) {
+    if (Object.getOwnPropertyDescriptor(proto, Symbol.toStringTag)?.value === name) return true;
+    proto = Object.getPrototypeOf(proto);
+  }
+  return false;
+}

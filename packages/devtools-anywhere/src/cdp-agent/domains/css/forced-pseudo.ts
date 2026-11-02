@@ -1,4 +1,5 @@
 import { quietly } from '../../core/adopted';
+import { isCssom } from '../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../core/nodes';
 
 /** A document or shadow root: what style sheets apply to. */
@@ -301,7 +302,7 @@ class SharedForcedPseudoClasses {
     if (!get || !set) return;
     const native = (): CSSStyleSheet[] => {
       const value: unknown = get.call(tree);
-      return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => s instanceof CSSStyleSheet) : [];
+      return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => isCssom(s, 'CSSStyleSheet')) : [];
     };
     // Our own reads and writes are not changes of the page's adopted sheets.
     quietly(() => {
@@ -440,7 +441,7 @@ class SharedForcedPseudoClasses {
       let out = '';
       let own = '';
       for (const rule of list) {
-        if (rule instanceof CSSStyleRule) {
+        if (isCssom(rule, 'CSSStyleRule')) {
           // Nested rules (`&:hover`) resolve `&` against the copy of their parent, which only
           // carries its own declarations once copying started.
           const rewritten = this.rewrite(rule.selectorText);
@@ -465,12 +466,12 @@ class SharedForcedPseudoClasses {
             out += text;
             own += text;
           }
-        } else if (rule instanceof CSSNestedDeclarations) {
+        } else if (isCssom(rule, 'CSSNestedDeclarations')) {
           if ((started || all) && rule.style.cssText) {
             out += `${rule.style.cssText}\n`;
             own += `${rule.style.cssText}\n`;
           }
-        } else if (rule instanceof CSSLayerBlockRule) {
+        } else if (isCssom(rule, 'CSSLayerBlockRule')) {
           const record = all ? enter(rule, layer, rule.name, conditions, live) : null;
           const sub = all ? (anonymousOf.get(rule) ?? layer) : layer;
           const [inner, innerOwn] = walk(this.rulesOf(rule), sub, [], live);
@@ -479,19 +480,19 @@ class SharedForcedPseudoClasses {
             // Copied at the end instead, see above.
             if (inner) copiedRules.add(rule);
           } else if (inner) out += wrap(inner, [prelude(rule)]);
-        } else if (rule instanceof CSSGroupingRule) {
+        } else if (isCssom(rule, 'CSSGroupingRule')) {
           const p = prelude(rule);
           let holds = live;
-          const query = rule instanceof CSSMediaRule ? rule.media.mediaText : '';
+          const query = isCssom(rule, 'CSSMediaRule') ? rule.media.mediaText : '';
           if (query) holds &&= media(query);
-          else if (rule instanceof CSSSupportsRule) holds &&= CSS.supports(rule.conditionText);
+          else if (isCssom(rule, 'CSSSupportsRule')) holds &&= CSS.supports(rule.conditionText);
           const [inner, innerOwn] = under(query, () => walk(this.rulesOf(rule), layer, [...conditions, p], holds));
           if (inner) out += wrap(inner, [p]);
           if (innerOwn) own += wrap(innerOwn, [p]);
-        } else if (rule instanceof CSSLayerStatementRule) {
+        } else if (isCssom(rule, 'CSSLayerStatementRule')) {
           if (all && live) for (const name of rule.nameList) enter(rule, layer, name, conditions, true);
           if (all) out += `${rule.cssText}\n`;
-        } else if (rule instanceof CSSImportRule && rule.styleSheet) {
+        } else if (isCssom(rule, 'CSSImportRule') && rule.styleSheet) {
           const wrappers: string[] = [];
           if (rule.supportsText) wrappers.push(`@supports ${rule.supportsText}`);
           if (rule.media.length) wrappers.push(`@media ${rule.media.mediaText}`);

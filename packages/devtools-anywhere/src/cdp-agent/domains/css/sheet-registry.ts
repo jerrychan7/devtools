@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { isCssom } from '../../core/realm';
 import { frames } from '../../core/frames';
 import { isOwn } from '../../core/nodes';
 import { CdpError } from '../../core/session';
@@ -111,7 +112,7 @@ export class SheetRegistry {
       const visit = (sheet: CSSStyleSheet) => {
         result.push({ sheet, tree });
         for (const rule of this.rulesOf(sheet))
-          if (rule instanceof CSSImportRule && rule.styleSheet) visit(rule.styleSheet);
+          if (isCssom(rule, 'CSSImportRule') && rule.styleSheet) visit(rule.styleSheet);
       };
       sheets.forEach(visit);
     }
@@ -135,7 +136,7 @@ export class SheetRegistry {
     try {
       return Array.from(sheet.cssRules);
     } catch {
-      const copy = sheet instanceof CSSStyleSheet ? this.copies.get(sheet) : null;
+      const copy = isCssom(sheet, 'CSSStyleSheet') ? this.copies.get(sheet) : null;
       return copy ? Array.from(copy.cssRules) : [];
     }
   }
@@ -202,28 +203,28 @@ export class SheetRegistry {
     };
     const visit = (rules: CSSRule[], layer: string[]) => {
       for (const rule of rules) {
-        if (rule instanceof CSSStyleRule) {
+        if (isCssom(rule, 'CSSStyleRule')) {
           this.ruleId(sheet, rule);
           result.push({ rule, layer });
           visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSNestedDeclarations) {
+        } else if (isCssom(rule, 'CSSNestedDeclarations')) {
           this.ruleId(sheet, rule);
           result.push({ rule, layer });
-        } else if (rule instanceof CSSMediaRule) {
+        } else if (isCssom(rule, 'CSSMediaRule')) {
           if (onlyActive && !matchMedia(rule.conditionText).matches) continue;
           visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSSupportsRule) {
+        } else if (isCssom(rule, 'CSSSupportsRule')) {
           if (onlyActive && !CSS.supports(rule.conditionText)) continue;
           visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSStartingStyleRule) {
+        } else if (isCssom(rule, 'CSSStartingStyleRule')) {
           if (!onlyActive) visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSLayerBlockRule) {
+        } else if (isCssom(rule, 'CSSLayerBlockRule')) {
           const path = [...layer, ...layerKeys(rule.name, rule)];
           declare(path);
           visit(this.rulesOf(rule), path);
-        } else if (rule instanceof CSSLayerStatementRule) {
+        } else if (isCssom(rule, 'CSSLayerStatementRule')) {
           for (const name of rule.nameList) declare([...layer, ...layerKeys(name, rule)]);
-        } else if (rule instanceof CSSGroupingRule) {
+        } else if (isCssom(rule, 'CSSGroupingRule')) {
           visit(this.rulesOf(rule), layer);
         }
       }

@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { isCssom } from '../../core/realm';
 import { splitTopLevel } from '../../core/selectors';
 
 /** A rule with declarations: a style rule, or declarations after rules nested in one. */
@@ -19,14 +20,14 @@ export function ancestorsOf(rule: CSSRule): CSSRule[] {
 
 /** The style rule or @scope that `&` refers to in `rule`. */
 export function nestingParent(rule: CSSRule): CSSStyleRule | CSSScopeRule | null {
-  return ancestorsOf(rule).find(r => r instanceof CSSStyleRule || r instanceof CSSScopeRule) ?? null;
+  return ancestorsOf(rule).find(r => isCssom(r, 'CSSStyleRule') || isCssom(r, 'CSSScopeRule')) ?? null;
 }
 
 /** The selector Chrome shows for a rule: nested declarations show that of their style rule. */
 export function selectorLabel(rule: StyleRule): string {
-  if (rule instanceof CSSStyleRule) return rule.selectorText;
+  if (isCssom(rule, 'CSSStyleRule')) return rule.selectorText;
   const parent = nestingParent(rule);
-  return parent instanceof CSSStyleRule ? parent.selectorText : '&';
+  return isCssom(parent, 'CSSStyleRule') ? parent.selectorText : '&';
 }
 
 /** Replaces `&` outside strings and escapes. */
@@ -58,13 +59,13 @@ export function replaceNesting(selector: string, replacement: string): string {
  */
 export function resolveSelector(selector: string, rule: CSSRule, forSpecificity = false): string {
   const parent = nestingParent(rule);
-  if (parent instanceof CSSStyleRule) {
+  if (isCssom(parent, 'CSSStyleRule')) {
     const list = splitTopLevel(parent.selectorText, ',')
       .map(s => resolveSelector(s.trim(), parent, forSpecificity))
       .join(', ');
     return replaceNesting(selector.includes('&') ? selector : `& ${selector}`, `:is(${list})`);
   }
-  if (parent instanceof CSSScopeRule) {
+  if (isCssom(parent, 'CSSScopeRule')) {
     const relative = !selector.includes('&') && !/:scope(?![\w-])/.test(selector);
     if (forSpecificity) return replaceNesting(selector, ':where(:scope)');
     return replaceNesting(relative ? `:scope ${selector}` : selector, ':scope');
@@ -74,13 +75,13 @@ export function resolveSelector(selector: string, rule: CSSRule, forSpecificity 
 
 /** The rule type Chrome reports for an at-rule (or style rule) around a rule. */
 export function ruleType(rule: CSSRule): Protocol.CSS.CSSRuleType | null {
-  if (rule instanceof CSSStyleRule) return 'StyleRule';
-  if (rule instanceof CSSMediaRule) return 'MediaRule';
-  if (rule instanceof CSSSupportsRule) return 'SupportsRule';
-  if (rule instanceof CSSContainerRule) return 'ContainerRule';
-  if (rule instanceof CSSLayerBlockRule) return 'LayerRule';
-  if (rule instanceof CSSScopeRule) return 'ScopeRule';
-  if (rule instanceof CSSStartingStyleRule) return 'StartingStyleRule';
+  if (isCssom(rule, 'CSSStyleRule')) return 'StyleRule';
+  if (isCssom(rule, 'CSSMediaRule')) return 'MediaRule';
+  if (isCssom(rule, 'CSSSupportsRule')) return 'SupportsRule';
+  if (isCssom(rule, 'CSSContainerRule')) return 'ContainerRule';
+  if (isCssom(rule, 'CSSLayerBlockRule')) return 'LayerRule';
+  if (isCssom(rule, 'CSSScopeRule')) return 'ScopeRule';
+  if (isCssom(rule, 'CSSStartingStyleRule')) return 'StartingStyleRule';
   return null;
 }
 
@@ -107,7 +108,7 @@ export function layerKeys(name: string | null, owner: CSSRule): string[] {
 /** The layer an @import-ed sheet is in, outermost first. */
 export function importedLayer(sheet: CSSStyleSheet): string[] {
   const owner = sheet.ownerRule;
-  if (!(owner instanceof CSSImportRule) || !owner.parentStyleSheet) return [];
+  if (!isCssom(owner, 'CSSImportRule') || !owner.parentStyleSheet) return [];
   const outer = importedLayer(owner.parentStyleSheet);
   return owner.layerName === null ? outer : [...outer, ...layerKeys(owner.layerName, owner)];
 }
@@ -120,7 +121,7 @@ export function sheetApplies(sheet: CSSStyleSheet): boolean {
   for (let s: CSSStyleSheet | null = sheet; s; s = s.ownerRule?.parentStyleSheet ?? null) {
     if (s.media.mediaText && !matchMedia(s.media.mediaText).matches) return false;
     const owner = s.ownerRule;
-    if (owner instanceof CSSImportRule && owner.supportsText && !CSS.supports(owner.supportsText)) {
+    if (isCssom(owner, 'CSSImportRule') && owner.supportsText && !CSS.supports(owner.supportsText)) {
       return false;
     }
   }

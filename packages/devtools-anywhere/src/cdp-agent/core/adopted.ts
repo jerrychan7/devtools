@@ -1,3 +1,5 @@
+import { isCssom } from './realm';
+
 /**
  * Notices changes to `adoptedStyleSheets` soon after they happen. Assigning goes through the
  * setter; changing the array in place (`push`, `splice`) needs the array, read through the
@@ -30,7 +32,7 @@ const protoOf = (tree: Tree) => (tree instanceof ShadowRoot ? ShadowRoot.prototy
 function read(tree: Tree): CSSStyleSheet[] {
   const get = natives.get(protoOf(tree))?.get;
   const value: unknown = get ? get.call(tree) : tree.adoptedStyleSheets;
-  return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => s instanceof CSSStyleSheet) : [];
+  return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => isCssom(s, 'CSSStyleSheet')) : [];
 }
 
 /** Whether a tree's sheets differ from those last seen; remembers them. */

@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { isCssom } from '../../core/realm';
 import { queriedAxes } from '../../core/container-query';
 import type { NodeRegistry } from '../../core/nodes';
 import { specificity, splitTopLevel } from '../../core/selectors';
@@ -25,7 +26,7 @@ export class RuleView {
 
   selectorList(sheet: CSSStyleSheet, rule: StyleRule): Protocol.CSS.SelectorList {
     // Like Chrome, nested declarations show their style rule's selectors, without selectors of their own.
-    if (!(rule instanceof CSSStyleRule)) return { selectors: [], text: selectorLabel(rule) };
+    if (!isCssom(rule, 'CSSStyleRule')) return { selectors: [], text: selectorLabel(rule) };
     const line = this.sheets.ruleId(sheet, rule);
     let column = 0;
     const parts = splitTopLevel(rule.selectorText, ',');
@@ -68,8 +69,8 @@ export class RuleView {
     for (const a of ancestors) {
       const type = ruleType(a);
       if (type) ruleTypes.push(type);
-      if (a instanceof CSSStyleRule) nestingSelectors.push(a.selectorText);
-      else if (a instanceof CSSMediaRule)
+      if (isCssom(a, 'CSSStyleRule')) nestingSelectors.push(a.selectorText);
+      else if (isCssom(a, 'CSSMediaRule'))
         media.push({
           text: a.conditionText,
           source: 'mediaRule',
@@ -77,9 +78,9 @@ export class RuleView {
           styleSheetId,
           mediaList: mediaList(a.conditionText),
         });
-      else if (a instanceof CSSSupportsRule)
+      else if (isCssom(a, 'CSSSupportsRule'))
         supports.push({ text: a.conditionText, active: CSS.supports(a.conditionText), styleSheetId });
-      else if (a instanceof CSSContainerRule)
+      else if (isCssom(a, 'CSSContainerRule'))
         containerQueries.push({
           text: a.containerQuery,
           styleSheetId,
@@ -88,8 +89,8 @@ export class RuleView {
           conditionText: a.conditionText,
         });
       // Chrome lists layers outermost first, unlike the other at-rules.
-      else if (a instanceof CSSLayerBlockRule) layers.unshift({ text: a.name, styleSheetId });
-      else if (a instanceof CSSScopeRule) scopes.push({ text: scopeText(a), styleSheetId });
+      else if (isCssom(a, 'CSSLayerBlockRule')) layers.unshift({ text: a.name, styleSheetId });
+      else if (isCssom(a, 'CSSScopeRule')) scopes.push({ text: scopeText(a), styleSheetId });
     }
     if (nestingSelectors.length) result.nestingSelectors = nestingSelectors;
     // Like Chrome, these are sent even when empty.
