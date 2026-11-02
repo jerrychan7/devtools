@@ -215,6 +215,112 @@ export function localToViewport(el: Element): DOMMatrix | null {
   }
 }
 
+/** The `<iframe>` or `<frame>` showing a document, if its parent is within reach (same origin). */
+function frameElementOf(doc: Document): Element | null {
+  try {
+    return doc.defaultView?.frameElement ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Maps the viewport of the document in a frame owner to the owner's viewport: to its content
+ * box, where the browser draws the document (already scrolled within it), transformed like the
+ * owner.
+ */
+function frameContentToViewport(owner: Element): DOMMatrix {
+  const style = styleOf(owner);
+  const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
+  const rect = owner.getBoundingClientRect();
+  const placed =
+    (hasTransformedAncestor(owner) && localToViewport(owner)) || new DOMMatrix().translate(rect.left, rect.top);
+  return placed.translate(owner.clientLeft + px('padding-left'), owner.clientTop + px('padding-top'));
+}
+
+/**
+ * Maps the viewport of a frame's document to the top one, through each `<iframe>` holding it.
+ * Null for the top document.
+ */
+export function frameToTop(doc: Document): DOMMatrix | null {
+  let m: DOMMatrix | null = null;
+  for (let owner = frameElementOf(doc); owner; owner = frameElementOf(owner.ownerDocument)) {
+    const step = frameContentToViewport(owner);
+    m = m ? step.multiply(m) : step;
+  }
+  return m;
+}
+
+/** A quad (or any list of x, y pairs) mapped through `m`. */
+export function mapPoints(m: DOMMatrixReadOnly, q: Quad): Quad {
+  const out: Quad = [];
+  for (let i = 0; i + 1 < q.length; i += 2) {
+    const p = m.transformPoint(new DOMPoint(q[i], q[i + 1]));
+    out.push(p.x / p.w, p.y / p.w);
+  }
+  return out;
+}
+
+/**
+ * How far to scroll along one axis to expose `lo`…`hi` in the visible `vlo`…`vhi`, like Blink's
+ * "center if needed": not at all when it is visible (or covers the visible part), to the nearest
+ * edge when partly visible, to the center when hidden.
+ */
+function exposeDelta(lo: number, hi: number, vlo: number, vhi: number): number {
+  if ((lo >= vlo && hi <= vhi) || (lo <= vlo && hi >= vhi)) return 0;
+  if (hi <= vlo || lo >= vhi) return (lo + hi) / 2 - (vlo + vhi) / 2;
+  return lo < vlo ? lo - vlo : hi - vhi;
+}
+
+/** Scrolls `scroller` by the amount exposing `rect` in `visible`; returns the box where `rect` is then. */
+function expose(scroller: Element | Window, rect: Box, visible: Box): Box {
+  const dx = exposeDelta(rect.left, rect.right, visible.left, visible.right);
+  const dy = exposeDelta(rect.top, rect.bottom, visible.top, visible.bottom);
+  if (!dx && !dy) return rect;
+  const position = () =>
+    'scrollX' in scroller ? [scroller.scrollX, scroller.scrollY] : [scroller.scrollLeft, scroller.scrollTop];
+  const [x0 = 0, y0 = 0] = position();
+  scroller.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+  const [x1 = 0, y1 = 0] = position();
+  return {
+    left: rect.left - x1 + x0,
+    top: rect.top - y1 + y0,
+    right: rect.right - x1 + x0,
+    bottom: rect.bottom - y1 + y0,
+  };
+}
+
+/**
+ * Scrolls an element into view like Chrome's DOM.scrollIntoViewIfNeeded: each scroll container
+ * holding it, the viewport of its document and then those of the documents of the iframes
+ * holding that one, from the inside out, each by itself "center if needed" ({@link exposeDelta}).
+ */
+export function scrollIntoViewIfNeeded(el: Element): void {
+  const r = el.getBoundingClientRect();
+  let rect: Box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  let doc = el.ownerDocument;
+  let from: Element | null = el.parentElement;
+  for (;;) {
+    for (let a = from; a && a !== doc.documentElement && a !== doc.body; a = a.parentElement) {
+      const style = styleOf(a);
+      const clips = (v: string) => v !== 'visible' && v !== 'clip';
+      if (!clips(style.overflowX) && !clips(style.overflowY)) continue;
+      const box = a.getBoundingClientRect();
+      const left = box.left + a.clientLeft;
+      const top = box.top + a.clientTop;
+      rect = expose(a, rect, { left, top, right: left + a.clientWidth, bottom: top + a.clientHeight });
+    }
+    const root = doc.documentElement;
+    const win = doc.defaultView;
+    if (win) rect = expose(win, rect, { left: 0, top: 0, right: root.clientWidth, bottom: root.clientHeight });
+    const owner = frameElementOf(doc);
+    if (!owner) return;
+    rect = boundsOf(mapPoints(frameContentToViewport(owner), rectQuad(rect)));
+    doc = owner.ownerDocument;
+    from = owner.parentElement;
+  }
+}
+
 /** The nearest HTML ancestor of an SVG element, which the SVG layout is placed in. */
 function htmlAncestor(el: Element): HTMLElement | null {
   let a: Element | null = el.parentElement;

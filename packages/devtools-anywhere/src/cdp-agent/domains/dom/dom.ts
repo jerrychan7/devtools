@@ -38,10 +38,13 @@ import {
   type Box,
   type Quad,
   hasTransformedAncestor,
+  frameToTop,
   isInlineBox,
   lineContentBoxes,
   localToViewport,
+  mapPoints,
   mapQuad,
+  scrollIntoViewIfNeeded,
   svgLayout,
   svgRootLayout,
   unmapRects,
@@ -115,10 +118,26 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
 }
 
 /**
- * Content, padding, border and margin boxes of an element, in viewport coordinates: transformed
- * quads like Chrome's, with the untransformed layout size as width and height.
+ * Content, padding, border and margin boxes of an element, in the top viewport: transformed quads
+ * like Chrome's, with the untransformed layout size as width and height. Like Chrome, those of a
+ * node in an iframe are placed where the iframe shows it.
  */
 export function boxModel(el: Element): Protocol.DOM.BoxModel {
+  const model = boxModelInFrame(el);
+  const m = frameToTop(el.ownerDocument);
+  if (!m) return model;
+  const { content, padding, border, margin } = model;
+  return {
+    ...model,
+    content: mapPoints(m, content),
+    padding: mapPoints(m, padding),
+    border: mapPoints(m, border),
+    margin: mapPoints(m, margin),
+  };
+}
+
+/** {@link boxModel} in the viewport of the element's own document. */
+function boxModelInFrame(el: Element): Protocol.DOM.BoxModel {
   const svg = svgLayout(el);
   if (svg) {
     const { quad: q, width, height } = svg;
@@ -169,7 +188,22 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
   };
 }
 
-/** Quads of an element for DOM.getContentQuads: its border box, or its line boxes; transformed when it is. */
+/**
+ * Quads of a node for DOM.getContentQuads, in the top viewport (through the iframes holding it):
+ * an element's border box or line boxes, transformed when it is, or a text node's line boxes.
+ */
+function contentQuads(node: Element | Text): Quad[] {
+  let quads: Quad[];
+  if (isText(node)) {
+    const range = documentOf(node).createRange();
+    range.selectNodeContents(node);
+    quads = Array.from(range.getClientRects()).map(quad);
+  } else quads = elementQuads(node);
+  const m = frameToTop(documentOf(node));
+  return m ? quads.map(q => mapPoints(m, q)) : quads;
+}
+
+/** Quads of an element in its document's viewport: its border box, or its line boxes; transformed when it is. */
 function elementQuads(el: Element): Quad[] {
   const svg = svgLayout(el);
   if (svg) return [svg.quad];
@@ -729,12 +763,7 @@ export function registerDom(ctx: Context) {
     getContentQuads(params: Protocol.DOM.GetContentQuadsRequest): Protocol.DOM.GetContentQuadsResponse {
       const node = resolveNode(ctx, params);
       // Chrome also reports the line boxes of a text node.
-      if (isText(node)) {
-        const range = documentOf(node).createRange();
-        range.selectNodeContents(node);
-        return { quads: Array.from(range.getClientRects()).map(quad) };
-      }
-      return { quads: elementQuads(element(params)) };
+      return { quads: contentQuads(isText(node) ? node : element(params)) };
     },
 
     getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
@@ -767,7 +796,7 @@ export function registerDom(ctx: Context) {
     },
 
     scrollIntoViewIfNeeded(params: Protocol.DOM.ScrollIntoViewIfNeededRequest) {
-      element(params).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      scrollIntoViewIfNeeded(element(params));
     },
 
     /** Elements whose computed style matches any of the given ones (e.g. the Layout pane's grids). */
