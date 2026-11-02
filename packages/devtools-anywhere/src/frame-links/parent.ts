@@ -54,8 +54,12 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
       close: end.close,
     };
     linked.set(owner, { id: hello.id, end });
-    // The iframe's page says bye when it goes, but not when its element does.
-    const unwatch = watchOwner(owner, () => end.close());
+    // The iframe's page says bye when it goes, but not when its element does; removed or moved,
+    // the element's next frame is a new one.
+    const unwatch = watchOwner(owner, () => {
+      end.close();
+      childTargets.forget(owner);
+    });
     end.onClose(() => {
       unwatch();
       if (linked.get(owner)?.end === end) linked.delete(owner);

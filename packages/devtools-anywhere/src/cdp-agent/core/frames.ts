@@ -1,3 +1,4 @@
+import { childTargets } from './child-targets';
 import { EXECUTION_CONTEXT_ID, FRAME_ID, LOADER_ID } from './context';
 import { closestOwn, isOwn } from './nodes';
 import {
@@ -35,13 +36,6 @@ export interface FrameChange {
   type: 'attached' | 'navigated' | 'detached';
   frame: Frame;
 }
-
-/**
- * Prefix of the ids of this page's iframes: random, so that they are unique across the pages
- * whose agents are linked (frame-links/), whose frames the frontend sees in one tree, as Chrome's
- * frame ids are unique in the browser.
- */
-const CHILD_FRAME_PREFIX = `${FRAME_ID}-${Math.random().toString(36).slice(2, 10)}`;
 
 /** Where the page, in a cross-origin iframe, is in its parent's frame tree once linked to it. */
 export interface ParentFrame {
@@ -122,7 +116,6 @@ export class FrameRegistry {
   readonly #byOwner = new WeakMap<Element, Frame>();
   readonly #children = new Map<Frame, Frame[]>();
   readonly #listeners = new Set<(change: FrameChange) => void>();
-  #frameSeq = 0;
   /**
    * When frame owners were inserted, as read from DOM mutation records: new frames are registered,
    * and listed among their siblings, in this order, as Chrome lists frames in the order it made them.
@@ -355,7 +348,9 @@ export class FrameRegistry {
     added.sort((a, b) => at(a.owner) - at(b.owner));
     for (const { owner, win, doc } of added) {
       const frame: Frame = {
-        id: `${CHILD_FRAME_PREFIX}-${++this.#frameSeq}`,
+        // The id of the owner's frame, the same whether it is same-origin (here) or cross-origin
+        // (a child target's), as Chrome keeps a frame's id when it changes process.
+        id: childTargets.frameIdOf(owner),
         loaderId: newLoaderId(),
         executionContextId: ++this.#contextSeq,
         window: win,
@@ -379,6 +374,9 @@ export class FrameRegistry {
     this.#byContext.delete(frame.executionContextId);
     if (this.#byWindow.get(frame.window) === frame) this.#byWindow.delete(frame.window);
     if (frame.owner && this.#byOwner.get(frame.owner) === frame) this.#byOwner.delete(frame.owner);
+    // Removed, or moved (another browsing context): like Chrome, the owner's next frame is a new one.
+    if (frame.owner && (!frame.owner.isConnected || contentWindowOf(frame.owner) !== frame.window))
+      childTargets.forget(frame.owner);
     if (frame.parent) {
       const siblings = this.#children.get(frame.parent);
       siblings?.splice(siblings.indexOf(frame), 1);

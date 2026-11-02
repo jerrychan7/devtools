@@ -99,18 +99,25 @@ export class ChildTargets {
   readonly #ids = new WeakMap<Element, string>();
 
   /**
-   * The frame id of a cross-origin iframe's element, the same for the handshake (which sends it
-   * to the iframe) and for the DOM and Target domains (which report it), and kept for the
-   * element's life: like Chrome, the target outlives the iframe's navigations.
+   * The frame id of a frame owner's element, the same for the handshake (which sends it to a
+   * cross-origin iframe), the DOM and Target domains (which report it) and the frame registry
+   * (which gives it to a same-origin iframe's frame): like Chrome's, a frame's id outlives its
+   * navigations, to another origin and back too, until the element is removed or moved
+   * ({@link forget}). Unique across pages: the frontend sees the frames of every linked page in
+   * one tree.
    */
   frameIdOf(owner: Element): string {
     let id = this.#ids.get(owner);
     if (id === undefined) {
-      // Unique across pages: the frontend sees the frames of every linked page in one tree.
       id = `${FRAME_ID}-${Math.random().toString(36).slice(2)}`;
       this.#ids.set(owner, id);
     }
     return id;
+  }
+
+  /** Forgets the frame id of an element removed or moved: its next frame is a new one, as in Chrome. */
+  forget(owner: Element): void {
+    this.#ids.delete(owner);
   }
 
   /** Called by the handshake when a cross-origin iframe is linked. */
