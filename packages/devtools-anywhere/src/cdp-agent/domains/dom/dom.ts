@@ -4,6 +4,7 @@ import {
   FORCE_ATTRIBUTE,
   PseudoElement,
   closestOwn,
+  isCrossOrigin,
   isOwn,
   truncateNodeValue,
   visibleAttributes,
@@ -34,7 +35,8 @@ import {
   sourceAttribute,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
-import { type Frame, type FrameChange, touchesFrames } from '../../core/frames';
+import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames';
+import { childTargets } from '../../core/child-targets';
 import { attachShadowHook } from './attach-shadow';
 import {
   type Box,
@@ -376,6 +378,25 @@ export function registerDom(ctx: Context) {
   ctx.refreshPseudoElements = refreshPseudoElements;
 
   /**
+   * The element holding a frame: a same-origin iframe's, or a cross-origin one's, whose frame id
+   * is its child target's (the frontend grafts the child target's document under it).
+   */
+  function frameOwner(frameId: string): Element {
+    const frame = ctx.frames.byId(frameId);
+    if (frame?.owner) return frame.owner;
+    if (frame) throw new CdpError('Frame with the given id does not belong to the target.');
+    let found: FrameOwner | undefined;
+    for (const { document: doc } of ctx.frames) {
+      walkFrameOwners(doc, ctx.frames.shadowRootOf, node => {
+        if (!found && isFrameOwner(node) && isCrossOrigin(node) && childTargets.frameIdOf(node) === frameId)
+          found = node;
+      });
+    }
+    if (!found) throw new CdpError('Frame with the given id was not found.');
+    return found;
+  }
+
+  /**
    * Sends an iframe the client knows again if its frame changed since it was sent: Chrome removes
    * and inserts it, with its new document (or none, once it is gone or out of reach). An initial
    * empty document about to be replaced by the iframe's `src` is not sent: the one loaded is.
@@ -587,7 +608,9 @@ export function registerDom(ctx: Context) {
       const node = resolveNode(ctx, params);
       const described = nodes.serialize(node, params.depth ?? 0, params.pierce);
       // describeNode does not push the node: report a 0 node id unless the client knows it.
-      return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId: ctx.frames.ofNode(node).id } };
+      // Like Chrome, the frame a node is in; for an iframe, the frame it holds.
+      const frameId = (isFrameOwner(node) && described.frameId) || ctx.frames.ofNode(node).id;
+      return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId } };
     },
 
     resolveNode(params: Protocol.DOM.ResolveNodeRequest): Protocol.DOM.ResolveNodeResponse {
@@ -596,6 +619,14 @@ export function registerDom(ctx: Context) {
 
     requestNode(params: Protocol.DOM.RequestNodeRequest): Protocol.DOM.RequestNodeResponse {
       return { nodeId: nodes.push(resolveNode(ctx, params), parent => emitChildren(parent)) };
+    },
+
+    getFrameOwner(params: Protocol.DOM.GetFrameOwnerRequest): Protocol.DOM.GetFrameOwnerResponse {
+      const owner = frameOwner(params.frameId);
+      const backendNodeId = nodes.backendIdOf(owner);
+      // Like Chrome, a node id only once the client has the document.
+      if (nodes.knownId(ctx.frames.top.document) === undefined) return { backendNodeId };
+      return { backendNodeId, nodeId: nodes.push(owner, parent => emitChildren(parent)) };
     },
 
     pushNodesByBackendIdsToFrontend(params: Protocol.DOM.PushNodesByBackendIdsToFrontendRequest) {
