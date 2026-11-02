@@ -55,6 +55,11 @@ export interface Session {
   readonly deferred: Set<string>;
   /** Ids of its Debugger.enable commands the page went away from: the next instance answers them. */
   readonly held: Set<string | number>;
+  /**
+   * The page's child targets (cross-origin iframes) attached for it, by session id, with their
+   * target ids: a new page instance has none of them, which the frontend is told.
+   */
+  readonly children: Map<string, string>;
 }
 
 /** The page's main frame, for the `Page.frameNavigated` a new instance is reported with. */
@@ -70,6 +75,8 @@ export interface Envelope {
   id?: unknown;
   method?: unknown;
   params?: unknown;
+  /** A child target's session, flattened as in Chrome: its messages pass through as they are. */
+  sessionId?: unknown;
 }
 
 export function parse(data: string): Envelope | undefined {
@@ -115,6 +122,7 @@ export abstract class RelayCore {
       pending: new Map(),
       deferred: new Set(),
       held: new Set(),
+      children: new Map(),
     };
     this.sessions.set(session.id, session);
     return session;
@@ -125,15 +133,20 @@ export abstract class RelayCore {
     // Nothing is answered to a frontend that is gone, not even a command dropped from the queue.
     session.pending.clear();
     session.held.clear();
+    session.children.clear();
   }
 
   /** A message from a frontend: CDP, as Chrome takes it. */
   protected clientMessage(session: Session, data: string) {
-    const { id, method, params } = parse(data) ?? {};
+    const { id, method, params, sessionId } = parse(data) ?? {};
     // Anything else is the page's CDP session's to answer (or reject).
     if (typeof method !== 'string') return this.send(session, data);
-    if (method.endsWith('.enable')) session.enabled.set(method, params ?? {});
-    else if (method.endsWith('.disable')) {
+    // A child target's (a cross-origin iframe's, flattened as in Chrome) are not replayed: a new
+    // page instance has none of its children. Its commands are pending like the page's own (the
+    // frontend numbers them all as one), under the session's id: none of them is ever held.
+    const child = typeof sessionId === 'string' && sessionId !== '' ? sessionId : undefined;
+    if (!child && method.endsWith('.enable')) session.enabled.set(method, params ?? {});
+    else if (!child && method.endsWith('.disable')) {
       const enable = method.replace(/disable$/, 'enable');
       session.enabled.delete(enable);
       // A held Debugger.enable the frontend disabled since is not sent to the next instance.
@@ -142,21 +155,37 @@ export abstract class RelayCore {
     if (!isId(id)) return this.send(session, data);
     // Between two page instances Chrome fails the command too, and the next may never come.
     if (this.loaderId && !this.pageReady) {
+      if (child) return session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
       // The same instance may come back from the back/forward cache: it gets them then.
       if (method.endsWith('.enable')) session.deferred.add(method);
       return this.abandon(session, id, method);
     }
-    session.pending.set(id, method);
+    session.pending.set(id, child ? `${child} ${method}` : method);
     this.send(session, data);
   }
 
   /** A message from the page for `session`: events go on, responses only while the frontend waits. */
   protected pageMessage(session: Session, body: string) {
+    if (body.startsWith('{"method":"Target.')) this.noteChild(session, body);
     if (!body.startsWith('{"method"')) {
       const id = parse(body)?.id;
       if (!isId(id) || !session.pending.delete(id)) return;
     }
     session.client.send(body);
+  }
+
+  /** Notes the page's own child targets (not theirs: those events carry a session id) coming and going. */
+  private noteChild(session: Session, body: string) {
+    const message = parse(body);
+    if (!message || message.sessionId !== undefined) return;
+    const field = (value: unknown, name: string): unknown =>
+      typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
+    const sessionId = field(message.params, 'sessionId');
+    if (typeof sessionId !== 'string') return;
+    if (message.method === 'Target.attachedToTarget') {
+      const targetId = field(field(message.params, 'targetInfo'), 'targetId');
+      session.children.set(sessionId, typeof targetId === 'string' ? targetId : '');
+    } else if (message.method === 'Target.detachedFromTarget') session.children.delete(sessionId);
   }
 
   /** Sends the page one of the relay's own messages, queued like the sessions' ones. */
@@ -221,10 +250,13 @@ export abstract class RelayCore {
 
   /**
    * Answers a frontend command the page will never answer. `enable` commands succeed: they are
-   * re-sent to the next page instance anyway. Debugger.enable waits for that instance's answer.
+   * re-sent to the next page instance anyway (not a child target's, which fail). Debugger.enable
+   * waits for that instance's answer.
    */
   private abandon(session: Session, id: string | number, method: string) {
-    if (method === HELD_ENABLE) session.held.add(id);
+    // A child target's (pending under its session's id) went with the page: it is not re-sent.
+    if (method.includes(' ')) session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
+    else if (method === HELD_ENABLE) session.held.add(id);
     else if (method.endsWith('.enable')) session.client.send(JSON.stringify({ id, result: {} }));
     else session.client.send(JSON.stringify({ id, error: NAVIGATED_ERROR }));
   }
@@ -285,6 +317,11 @@ export abstract class RelayCore {
     }
     // Events only of the domains the frontend enabled, as Chrome sends them.
     const { enabled, client } = session;
+    // The old instance's iframes went with it, and their child targets, as in Chrome.
+    for (const [sessionId, targetId] of session.children) {
+      client.send(JSON.stringify({ method: 'Target.detachedFromTarget', params: { sessionId, targetId } }));
+    }
+    session.children.clear();
     if (enabled.has('Runtime.enable')) {
       client.send(JSON.stringify({ method: 'Runtime.executionContextsCleared', params: {} }));
     }

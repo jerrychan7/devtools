@@ -4,6 +4,7 @@
 // types they do not export are derived from those they do.
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
 import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
+import type { Harness } from '../packages/devtools-anywhere/test-support/child-targets-harness.ts';
 
 type CdpSession = ReturnType<DevtoolsAnywhereApi['createCdpSession']>;
 
@@ -30,6 +31,8 @@ declare global {
     /** The harness's CDP session in the page, and the events it emitted. */
     __session: CdpSession;
     __ours: { method: string; params: unknown }[];
+    /** The page's agent with stand-in cross-origin iframe agents (target.test.ts). */
+    __harness?: Harness;
     /** More CDP sessions in the page (multi-session.test.ts). */
     __sessions?: CdpSession[];
     /** nodeHighlightRequested per session, and the page's moves (multi-session.test.ts). */

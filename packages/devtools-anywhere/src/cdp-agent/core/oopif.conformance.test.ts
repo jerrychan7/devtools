@@ -1,9 +1,9 @@
 // Chrome's side of cross-origin iframes as child targets: the reference our agent's child targets
-// are to follow (see test-support/oopif-notes.md). Only Chrome runs here for now; the agent's side
-// is a todo until it has child targets.
+// are to follow (see test-support/oopif-notes.md). Of the agent's side, the parent's view of the
+// iframe is checked here; its child targets' sequences are a todo until the handshake links them.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Env } from '../../../test-support/conformance.ts';
+import { CDP_BUNDLE, type Env } from '../../../test-support/conformance.ts';
 import {
   chromeSequence,
   fixtureUrl,
@@ -141,6 +141,58 @@ test('chrome: a frame that comes back to its parent site, or is removed, is deta
     'root Page.frameDetached',
     'root Target.detachedFromTarget',
   ]);
+});
+
+test('ours: the parent keeps the <iframe> element with a frame id but no document, as Chrome', async () => {
+  assert.ok(env);
+  const page = await env.browser.newPage();
+  try {
+    await page.goto(fixtureUrl(env, 'oopif-parent.html'));
+    // Cross-origin once the child has loaded: before, it holds an about:blank of the parent's.
+    await page.waitForFunction(() => {
+      try {
+        return document.querySelector('iframe')?.contentDocument === null;
+      } catch {
+        return true;
+      }
+    });
+    await page.addScriptTag({ path: CDP_BUNDLE });
+    const results = await page.evaluate(async () => {
+      const session = window.DevtoolsAnywhere.createCdpSession();
+      const call = (method: string, params: object = {}) =>
+        session.call(method, params).catch((e: unknown) => String(e instanceof Error ? e.message : e));
+      const get = (value: unknown, name: string): unknown =>
+        typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
+      const record = (value: unknown): Record<string, unknown> => ({ ...Object(value) });
+      const unknown = await call('DOM.getFrameOwner', { frameId: 'nope' });
+      await call('DOM.getDocument', { depth: -1 });
+      const nodeId = Number(get(await call('DOM.querySelector', { nodeId: 1, selector: 'iframe' }), 'nodeId'));
+      const described = get(await call('DOM.describeNode', { nodeId, depth: -1 }), 'node');
+      const frameId = String(get(described, 'frameId'));
+      return {
+        node: record(described),
+        frameId,
+        nodeId,
+        owner: record(await call('DOM.getFrameOwner', { frameId })),
+        unknown,
+        top: await call('DOM.getFrameOwner', { frameId: 'devtools-anywhere-frame' }),
+        tree: await call('Page.getFrameTree'),
+      };
+    });
+    // As Chrome reports it (the test above): a frame id, no children, no document.
+    assert.equal(results.node['childNodeCount'], 0);
+    assert.deepEqual(results.node['children'], []);
+    assert.equal(results.node['contentDocument'], undefined);
+    assert.ok(results.frameId.startsWith('devtools-anywhere-frame-'));
+    assert.equal(results.owner['nodeId'], results.nodeId);
+    assert.equal(typeof results.owner['backendNodeId'], 'number');
+    // Chrome's errors (measured): an unknown frame, and one that is not an iframe of the target.
+    assert.equal(results.unknown, 'Frame with the given id was not found.');
+    assert.equal(results.top, 'Frame with the given id does not belong to the target.');
+    assert.equal(Reflect.get(Object(Reflect.get(Object(results.tree), 'frameTree')), 'childFrames'), undefined);
+  } finally {
+    await page.close();
+  }
 });
 
 test.todo('ours: the same sequences from our agent, once it attaches cross-origin iframes as child targets');

@@ -1,6 +1,9 @@
 import type { Protocol } from 'devtools-protocol';
+import { childTargets } from './child-targets';
 import type { FrameRegistry } from './frames';
 import {
+  contentDocumentOf,
+  contentWindowOf,
   isDocument,
   isDocumentFragment,
   isDocumentType,
@@ -9,9 +12,14 @@ import {
   isHtml,
   isShadowRoot,
   realmOf,
+  type FrameOwner,
 } from './realm';
 
 type DomNode = Protocol.DOM.Node;
+
+/** Whether a frame owner holds a document out of reach: a cross-origin one. */
+export const isCrossOrigin = (owner: FrameOwner) =>
+  contentWindowOf(owner) !== null && contentDocumentOf(owner) === null;
 
 /**
  * Marks devtools-anywhere's own elements for CSS isolation only. Which nodes are ours is
@@ -327,11 +335,16 @@ export class NodeRegistry {
 
   /**
    * Adds an iframe's frame id and document. Like Chrome, the document is not one of the
-   * iframe's children (`childNodeCount` counts its fallback content) and has no parent id.
+   * iframe's children (`childNodeCount` counts its fallback content) and has no parent id. A
+   * cross-origin iframe has a frame id but no document, as Chrome reports an out-of-process one
+   * (its document is its own target's): the id its child target has, whether linked or not.
    */
-  private serializeFrame(owner: Element, result: DomNode, depth: number, pierce: boolean) {
+  private serializeFrame(owner: FrameOwner, result: DomNode, depth: number, pierce: boolean) {
     const frame = this.frames?.ofOwner(owner);
-    if (!frame) return;
+    if (!frame) {
+      if (isCrossOrigin(owner)) result.frameId = childTargets.frameIdOf(owner);
+      return;
+    }
     result.frameId = frame.id;
     result.contentDocument = this.serialize(frame.document, pierce ? depth : 0, pierce);
     this.contentDocuments.set(owner, frame.document);

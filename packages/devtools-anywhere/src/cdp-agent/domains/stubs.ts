@@ -68,7 +68,7 @@ const NOOPS = {
     'untrackIndexedDBForOrigin',
     'untrackIndexedDBForStorageKey',
   ],
-  Target: ['setAutoAttach', 'setDiscoverTargets', 'setRemoteLocations'],
+  Target: ['setRemoteLocations'],
 } satisfies CommandsByDomain;
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */

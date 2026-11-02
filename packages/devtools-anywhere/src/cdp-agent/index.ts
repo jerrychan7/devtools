@@ -20,11 +20,12 @@ import { registerScreencast } from './domains/page/screencast';
 import { registerScreenshot } from './domains/page/screenshot';
 import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
+import { registerTarget } from './domains/target/target';
 import { registerWebMcp } from './domains/webmcp/webmcp';
 import { installProbe, keep } from './probe';
 import type { Probe } from './probe/types';
 
-export { CdpSession, type Handler } from './core/session';
+export { CdpSession, END_SESSION_CALLS, type Handler } from './core/session';
 export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {
@@ -118,6 +119,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
     ctx.nodes.inspected = [];
   });
   registerStubs(ctx.session);
+  registerTarget(ctx);
   registerRuntime(ctx);
   registerNetwork(ctx);
   registerPage(ctx);
