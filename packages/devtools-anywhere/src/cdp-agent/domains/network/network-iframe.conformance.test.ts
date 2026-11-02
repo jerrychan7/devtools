@@ -167,6 +167,27 @@ describe('Network in same-origin iframes', () => {
     }
   });
 
+  test('the documents of an <object> and an <embed>: one request each, of their frame', async () => {
+    await t.page.evaluate(`new Promise(r => {
+      const o = document.createElement('object');
+      o.data = '${BASE}frame-child.html?n=object-doc';
+      const e = document.createElement('embed');
+      e.src = '${BASE}frame-child.html?n=embed-doc';
+      let loaded = 0;
+      o.onload = e.onload = () => ++loaded === 2 && r();
+      document.body.append(o, e);
+    })`);
+    await settle('n=object-doc', 'n=embed-doc');
+    for (const side of [t.ours, t.chrome]) {
+      const top = await one(side, 'n=top-ref');
+      for (const marker of ['n=object-doc', 'n=embed-doc']) {
+        const doc = await one(side, marker);
+        assert.equal(doc.type, 'Document', marker);
+        assert.notEqual(doc.frameId, top.frameId, marker);
+      }
+    }
+  });
+
   test('a WebSocket opened in an iframe', async () => {
     await inFrame('a', "new WebSocket(location.origin.replace('http', 'ws') + '/ws/echo?n=a-ws')");
     const start = Date.now();

@@ -26,14 +26,17 @@ export function hookFrameNetwork(probe: Pick<Probe, 'hookNetwork'>, frames: Fram
 }
 
 /**
- * Whether the record is a same-origin iframe's document as its parent's Resource Timing reports
+ * Whether the record is the document of a same-origin iframe (or `<object>`, `<embed>`) as its parent's Resource Timing reports
  * it. The iframe's own Resource Timing reports it too, as its navigation, which Chrome attributes
  * to the iframe's frame and new loader: that one is kept. Not when the probe cannot hook iframes.
  */
 export function isFrameDocument(probe: Context['probe'], rec: RequestRecord): boolean {
   return (
     !!probe.hookNetwork &&
-    (rec.initiatorType === 'iframe' || rec.initiatorType === 'frame') &&
+    (rec.initiatorType === 'iframe' ||
+      rec.initiatorType === 'frame' ||
+      // Not when they show an image or the like: then it is a request of the page, as in Chrome.
+      ((rec.initiatorType === 'object' || rec.initiatorType === 'embed') && rec.type === 'Document')) &&
     new URL(rec.url, location.href).origin === location.origin
   );
 }
