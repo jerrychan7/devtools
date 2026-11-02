@@ -3,7 +3,10 @@
 import type { ConsoleEntry, ConsoleType, LogEntry, Probe, ProbeLog, ProbeRequest, RequestRecord } from '../probe/types';
 
 /** The probe as the domains see it: log entries and request records in their final form. */
-export interface ProbeView extends Omit<Probe, 'logs' | 'requests' | 'onLog' | 'onRequest' | 'limits' | 'WebSocket'> {
+export interface ProbeView extends Omit<
+  Probe,
+  'logs' | 'requests' | 'onLog' | 'onRequest' | 'limits' | 'WebSocket' | 'hookWindow'
+> {
   readonly logs: LogEntry[];
   readonly requests: RequestRecord[];
   onLog(listener: (entry: LogEntry) => void): () => void;
@@ -50,6 +53,7 @@ function consoleEntry(call: Extract<ProbeLog, { kind: 'console' }>): Omit<Consol
     type,
     args: entryArgs,
     time,
+    inDocument: call.inDocument,
   });
   const warn = (text: string) => entry('warning', [text]);
   // Counters and timers: the probe put the label string first.

@@ -235,3 +235,102 @@ describe('evaluation in a frame', () => {
     assert.match(chrome, /Cannot find context with specified id/);
   });
 });
+
+describe('console messages and exceptions of a frame', () => {
+  /** The context of the frame `#logs`, ours and Chrome's. */
+  let logsContext: [number, number] = [0, 0];
+  before(async () => {
+    await t.page.evaluate(
+      () =>
+        new Promise(resolve => {
+          const frame = Object.assign(document.createElement('iframe'), { id: 'logs', onload: resolve });
+          frame.srcdoc = '<p>logs</p>';
+          document.body.append(frame);
+        })
+    );
+    // Its context is announced again, with the others.
+    await both(async side => {
+      await side.send('Runtime.disable');
+      await side.clear();
+      await side.send('Runtime.enable');
+    });
+    logsContext = await both(side => contextOf(side, 'logs'));
+  });
+
+  /**
+   * Runs `code` as a script of the frame `#logs`. Not through its eval: code evaluated by Puppeteer
+   * has muted errors, which the page is not told of.
+   */
+  const runInFrame = (code: string) =>
+    t.page.evaluate(code => {
+      const doc = document.querySelector<HTMLIFrameElement>('#logs')?.contentDocument;
+      if (!doc) throw new Error('no #logs');
+      doc.body.append(Object.assign(doc.createElement('script'), { text: code }));
+    }, code);
+
+  test("console calls are reported in the frame's context", async () => {
+    await runInFrame('console.log("from the frame", { a: 1 }); console.warn("careful")');
+    await waitForBoth(t, 'Runtime.consoleAPICalled', 2);
+    const [ours, chrome] = await both(side => side.events('Runtime.consoleAPICalled'));
+    assert.deepEqual(diffSubset(ours, chrome), []);
+    const [oursContext, chromeContext] = logsContext;
+    assert.deepEqual(
+      ours.map(e => e.executionContextId),
+      [oursContext, oursContext]
+    );
+    assert.deepEqual(
+      chrome.map(e => e.executionContextId),
+      [chromeContext, chromeContext]
+    );
+  });
+
+  test("uncaught errors and rejections are reported in the frame's context", async () => {
+    await both(side => side.clear());
+    await runInFrame('setTimeout(() => { throw new Error("boom"); }); Promise.reject(new Error("rej"));');
+    await waitForBoth(t, 'Runtime.exceptionThrown', 2);
+    const [ours, chrome] = await both(side => side.events('Runtime.exceptionThrown'));
+    const texts = (events: typeof ours) => events.map(e => e.exceptionDetails.exception?.description?.split('\n')[0]);
+    assert.deepEqual(texts(ours).sort(), texts(chrome).sort());
+    const [oursContext, chromeContext] = logsContext;
+    assert.deepEqual(
+      ours.map(e => e.exceptionDetails.executionContextId),
+      [oursContext, oursContext]
+    );
+    assert.deepEqual(
+      chrome.map(e => e.exceptionDetails.executionContextId),
+      [chromeContext, chromeContext]
+    );
+  });
+
+  test("a srcdoc document's own scripts are heard while it loads, after its context is created", async () => {
+    await both(side => side.clear());
+    await t.page.evaluate(
+      () =>
+        new Promise(resolve => {
+          const frame = Object.assign(document.createElement('iframe'), { id: 'early', onload: resolve });
+          frame.srcdoc = '<script>console.log("early")</script>';
+          document.body.append(frame);
+        })
+    );
+    await waitForBoth(t, 'Runtime.consoleAPICalled');
+    for (const side of [t.ours, t.chrome]) {
+      const [log] = await side.events('Runtime.consoleAPICalled');
+      const created = await side.events('Runtime.executionContextCreated');
+      assert.ok(created.some(e => e.context.id === log?.executionContextId && e.context.auxData?.['isDefault']));
+    }
+  });
+
+  test('messages of a frame that is gone are kept, in no context', async () => {
+    await t.page.evaluate(() => document.querySelector('#logs')?.remove());
+    await both(async side => {
+      await side.send('Runtime.disable');
+      await side.clear();
+      await side.send('Runtime.enable');
+    });
+    const [ours, chrome] = await both(async side =>
+      (await side.events('Runtime.consoleAPICalled')).filter(e => e.type === 'warning')
+    );
+    assert.equal(ours.at(-1)?.executionContextId, 0);
+    assert.equal(chrome.at(-1)?.executionContextId, 0);
+  });
+});

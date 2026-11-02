@@ -1,8 +1,9 @@
 import type { Context } from './core/context';
-import { frames } from './core/frames';
+import { type Frame, frames } from './core/frames';
 import { NodeRegistry } from './core/nodes';
 import { ObjectRegistry } from './core/objects';
 import { viewProbe } from './core/probe-view';
+import { realmOf } from './core/realm';
 import { CdpSession } from './core/session';
 import { registerCss } from './domains/css/css';
 import { registerDebugger } from './domains/debugger/debugger';
@@ -20,6 +21,7 @@ import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
 import { registerWebMcp } from './domains/webmcp/webmcp';
 import { installProbe, keep } from './probe';
+import type { Probe } from './probe/types';
 
 export { CdpSession, type Handler } from './core/session';
 export { installProbe } from './probe';
@@ -50,6 +52,27 @@ export interface CdpSessionOptions {
   loadSnapdom?: SnapdomLoader;
 }
 
+/** Whether the probe hooks the iframes the page's frame registry finds. */
+let hookingFrames = false;
+
+/**
+ * Has the probe capture the console calls and uncaught errors of each same-origin iframe document,
+ * from the moment the frame registry finds it (on load, for a document that replaced another):
+ * what a document logged before is not captured. For the page's lifetime, like the probe's hooks
+ * of the top page; the registry keeps watching the documents for iframes meanwhile.
+ */
+function hookFrames(probe: Probe) {
+  if (hookingFrames) return;
+  hookingFrames = true;
+  const hook = (frame: Frame) => {
+    if (frame !== frames.top) probe.hookWindow(realmOf(frame.document));
+  };
+  frames.onChange(({ type, frame }) => {
+    if (type !== 'detached') hook(frame);
+  });
+  for (const frame of frames) hook(frame);
+}
+
 /** How many console messages V8 keeps (V8ConsoleMessageStorage's limit). */
 const MAX_CONSOLE_MESSAGES = 1000;
 
@@ -71,6 +94,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
     socketEvents: Infinity,
   });
   keep(probe.logs, MAX_CONSOLE_MESSAGES);
+  hookFrames(probe);
   const ctx: Context = {
     session: new CdpSession(),
     objects: new ObjectRegistry(),

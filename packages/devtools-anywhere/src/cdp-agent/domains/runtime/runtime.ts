@@ -327,20 +327,33 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     return entry.args.map(arg => objects.wrap(arg, { generatePreview: true, group: 'console' }));
   }
 
+  /**
+   * The context an entry was logged in: its iframe document's, the top page's when it names none.
+   * Like V8 for messages of a context that is gone (a frame navigated or removed), 0.
+   */
+  function contextOfEntry(entry: LogEntry): number {
+    const doc = entry.inDocument;
+    if (!doc) return topFrame.executionContextId;
+    // A document still loading, which reused the window of the initial about:blank (and its
+    // hooks): the registry learns of it now rather than on load, and its context comes first.
+    if (!frames.ofDocument(doc) && doc.defaultView) frames.sync();
+    return frames.ofDocument(doc)?.executionContextId ?? 0;
+  }
+
   function emitLog(entry: LogEntry) {
     if (entry.kind === 'console') {
       session.emit('Runtime.consoleAPICalled', {
         type: entry.type,
         args: consoleArgs(entry),
-        executionContextId: topFrame.executionContextId,
+        executionContextId: contextOfEntry(entry),
         timestamp: entry.time,
         // Drop the probe's console wrapper frame.
         stackTrace: { callFrames: parseStack(entry.stack, 1) },
       } satisfies Protocol.Runtime.ConsoleAPICalledEvent);
       return;
     }
-    const frames = parseStack(entry.stack);
-    const top = frames[0];
+    const callFrames = parseStack(entry.stack);
+    const top = callFrames[0];
     const url = entry.url || top?.url;
     session.emit('Runtime.exceptionThrown', {
       timestamp: entry.time,
@@ -352,8 +365,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         ...(url ? { url } : {}),
         scriptId: '',
         exception: objects.wrap(entry.error, { generatePreview: true, group: 'console' }),
-        executionContextId: topFrame.executionContextId,
-        ...(frames.length ? { stackTrace: { callFrames: frames } } : {}),
+        executionContextId: contextOfEntry(entry),
+        ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
     } satisfies Protocol.Runtime.ExceptionThrownEvent);
   }
