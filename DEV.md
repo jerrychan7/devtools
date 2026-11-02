@@ -123,7 +123,7 @@ What two pieces of code must agree on is written once, where it is owned, and im
 |---|---|---|
 | Relay messages (hello, pagehide, detach, ping), hello's params, the replaced-page close code | `packages/relay-core/src/protocol.ts` | `remote.ts`, `connection.ts`, remote-server's `relay.ts` |
 | Frontend ↔ `<devtools-anywhere>`: requests, dock sides, hash parameters, our scripts' file names | `packages/devtools-anywhere/src/embedder.ts` | the element, the build; `anywhere_app` through a copy made by the frontend build |
-| Shell mode's messages between the page and its Service Worker | `packages/devtools-anywhere/src/shell-messages.ts`, and the agent's `probe/messages.ts` | `element.ts`, `probe.ts`, `service-worker.ts`, the probe |
+| Shell mode's messages between the page and its Service Worker | `packages/devtools-anywhere/src/shell-messages.ts`, and the agent's `probe/messages.ts` | `element/index.ts`, `probe.ts`, `service-worker.ts`, the probe |
 | `window.DevtoolsAnywhere`, the API the bundle exposes (`RemoteOptions` included) | `packages/devtools-anywhere/src/api.ts` | `iife.ts`, `probe.ts`, `tests/globals.d.ts` |
 | The probe script's `data-*` attributes | `packages/devtools-anywhere/src/probe-script.ts` (`ProbeScriptAttributes`, exported as `@public`) | `probe.ts`, the Vite plugin, remote-server |
 

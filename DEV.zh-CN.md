@@ -123,7 +123,7 @@ experiments/      验证记录
 |---|---|---|
 | 中继消息（hello、pagehide、detach、ping）、hello 的参数、页面被顶替时的关闭码 | `packages/relay-core/src/protocol.ts` | `remote.ts`、`connection.ts`、remote-server 的 `relay.ts` |
 | 前端 ↔ `<devtools-anywhere>`：请求、停靠位置、hash 参数、我们自己脚本的文件名 | `packages/devtools-anywhere/src/embedder.ts` | 元素、构建脚本；`anywhere_app` 通过前端构建时复制的副本使用 |
-| 外壳模式下页面与 Service Worker 之间的消息 | `packages/devtools-anywhere/src/shell-messages.ts`，以及 agent 的 `probe/messages.ts` | `element.ts`、`probe.ts`、`service-worker.ts`、探针 |
+| 外壳模式下页面与 Service Worker 之间的消息 | `packages/devtools-anywhere/src/shell-messages.ts`，以及 agent 的 `probe/messages.ts` | `element/index.ts`、`probe.ts`、`service-worker.ts`、探针 |
 | `window.DevtoolsAnywhere`，bundle 暴露的 API（含 `RemoteOptions`） | `packages/devtools-anywhere/src/api.ts` | `iife.ts`、`probe.ts`、`tests/globals.d.ts` |
 | 探针脚本的 `data-*` 属性 | `packages/devtools-anywhere/src/probe-script.ts`（`ProbeScriptAttributes`，以 `@public` 导出） | `probe.ts`、Vite 插件、remote-server |
 

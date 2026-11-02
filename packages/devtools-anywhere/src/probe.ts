@@ -180,7 +180,7 @@ const hasApi = <K extends 'connectRemote' | 'createGlobalElement'>(
 
 // In the shell's top window the probe has replaced the document with the shell already. The page in
 // the shell has the bundle from installProbe() already and only connects to the remote server: the shell
-// shows DevTools, and the elements the page places take the shell's frontend (see element.ts).
+// shows DevTools, and the elements the page places take the shell's frontend (see element/index.ts).
 if (script && bundle && (frontend || remoteUrl || shellPage) && !shellTop) {
   probe.ownUrls.add(bundle);
 
