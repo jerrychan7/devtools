@@ -220,7 +220,7 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 | `release/x.y.z` | The pull request that prepares release x.y.z (version and changelog) | Branched from `dev/x.y.0` (or from `main` for a patch), merged into `main`, then the tag goes on `main` |
 | `release/x.y` | Patches to an older minor, only when needed (see "Patching an older release") | Branched from the tag `vx.y.0`, kept while that minor is patched |
 
-A fix that should not wait for the next minor goes through a `fix/…` branch from `main` into `main` and is released as a patch from there; then `main` is merged into `dev/x.y.0`, so the fix is there too. Once x.y.0 is released, `dev/x.y.0` is deleted and `dev/x.(y+1).0` branched from `main`. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main` and `dev/**`: lint, typecheck, the frontend build and all the tests.
+A fix that should not wait for the next minor goes through a `fix/…` branch from `main` into `main` and is released as a patch from there; then `main` is merged into `dev/x.y.0`, so the fix is there too. Once x.y.0 is released, `dev/x.y.0` is deleted and `dev/x.(y+1).0` branched from `main`. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: lint, typecheck, the frontend build and all the tests. Pushes to `dev/x.y.0` are not checked, so that work in progress does not queue runs: the `release/x.y.0` pull request checks them, or run CI on the branch by hand (`gh workflow run ci.yml --ref dev/0.3.0`).
 
 ```bash
 git switch -c feat/my-change dev/0.3.0
