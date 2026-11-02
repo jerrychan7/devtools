@@ -42,6 +42,52 @@
 
 **状态**：只是方向，没有讨论具体方案。
 
+## iframe
+
+**现状**：agent 是按「一个页面只有一个文档」写的。全局只有一个 `FRAME_ID` 和一个 `EXECUTION_CONTEXT_ID`（`core/context.ts`），所有事件都写死这两个值；DOM 节点描述里没有 `contentDocument`，Elements 里的 iframe 展不开；console、网络捕获、错误监听只挂在主页面的 `window` 上。
+
+**Chrome 的模型**：同源 iframe 和主页面在同一个 target 里，是多个 frame 和执行上下文；只有跨域 iframe（进程外 iframe）才通过 `Target.setAutoAttach` 作为子 target 挂上来。
+
+**同源 iframe（先做）**：
+
+| 域 | 要做的 |
+|---|---|
+| DOM | iframe 节点带 `contentDocument` 和 `frameId`；每个文档各自用 MutationObserver 监听；iframe 导航后旧文档失效、推送新文档 |
+| Page | frame 表；`frameTree` 带 `childFrames`；`frameAttached`、`frameNavigated`、`frameDetached` 事件 |
+| Runtime | 每个 window 一个执行上下文；`evaluate`、`callFunctionOn` 按 `contextId` 在对应 window 里执行；console 和异常的捕获挂到每个 window 上 |
+| CSS | 样式表带 `frameId`；用节点所在 window 的 `getComputedStyle`；样式表登记和强制伪类区分文档 |
+| Network | 请求带 `frameId`；每个 window 都包装 fetch、XHR 等 |
+| Overlay、Input、几何计算 | 坐标加上 iframe 的偏移和内部滚动 |
+
+- **跨 realm**：iframe 里的元素不是主页面 `Element` 类的实例。agent 里约 166 处 `instanceof` 判断、约 180 处直接引用全局 `document`、`window`、`getComputedStyle` 等，都要改成用节点自己的 realm（`node.ownerDocument.defaultView`）或者按 `nodeType` 判断。
+- **做不到**：iframe 里的「最早日志」。探针没法先于 iframe 自己的脚本运行，只能在加载完成后挂上，要写进 usage 文档。
+- **工作量**：大，按域逐个迁移、各配 Chrome 对照测试，接近一个 minor 版本的主要工作。
+
+**跨域 iframe（之后再说）**：页面拿不到它的文档，只能由 iframe 自己也加载探针，再通过 postMessage 作为子 target 接上来（`Target.setAutoAttach`、`attachedToTarget`、带 `sessionId` 的消息转发）。前端本来就支持子 target，外壳模式的 relay 有类似机制。
+
+**第 0 步：越早越好**。每加一个功能，`instanceof` 和全局 `document` 的用法就多一些。先做一步不改变行为的铺垫，止住债务：
+
+1. Context 里引入 frame 注册表，`FRAME_ID`、`EXECUTION_CONTEXT_ID` 从常量改为按文档或 window 查询，暂时只登记主文档；
+2. 加 `realmOf(node)` 之类的辅助函数，再加 lint 规则：在 `cdp-agent` 里禁止直接用 `instanceof Element` 和全局 `document`，现有代码先豁免，逐步迁移。
+
+## 其他能在页面里补上的功能
+
+都能用页面里的标准 API 实现，结果能和 Chrome 对齐。按性价比排序，前三项工作量小。
+
+| 项目 | 现状 | 页面内的做法 |
+|---|---|---|
+| Animations 面板（`Animation` 域） | `enable` 是空操作 | `document.getAnimations()` 覆盖 CSS 动画、过渡和 Web Animations API；列出、暂停、调速、拖动进度都能对应上 |
+| 色觉缺陷模拟（`setEmulatedVisionDeficiency`） | 空操作 | 在 `<html>` 上加 SVG 滤镜，Chrome 用的也是颜色矩阵 |
+| 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`emulateNetworkConditions` 是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速只能近似，不做 |
+| 浏览器默认样式 | Styles 里不显示 | 附带一份 Chromium 的 `html.css`（开源），用到时加载，用来匹配出「user agent stylesheet」规则；每次升级 Chrome 都要同步 |
+| Grid / Flex / 容器查询 / scroll-snap 叠加层 | `Overlay.setShow*Overlays` 是空操作 | 在页面里画出来；`getComputedStyle` 返回 grid 解析后的轨道尺寸；和 `highlightNode` 共用叠加层 |
+| 模拟 `prefers-color-scheme`、print 等媒体特性 | `setEmulatedMedia` 是空操作 | 通过 CSSOM 改写 `@media` 条件；限制和强制 `:hover` 相同：对 `@import`、跨域样式表和 `matchMedia` 不生效 |
+| Application 面板自动刷新（`Storage.track*`） | 空操作，要手动刷新 | 包装 IDB 的写操作和 `caches.put`，发出 `indexedDBContentUpdated` 等事件 |
+| Service Workers 视图 | `ServiceWorker.enable` 是空操作 | 用 `navigator.serviceWorker.getRegistrations()` 列出、注销、更新；不能调试 |
+| 违规提示与长任务（`Log.startViolationsReport`） | 空操作 | `PerformanceObserver` 监听 `longtask`、`long-animation-frame`，在 Console 输出 |
+
+价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。
+
 ## Emulation 的缺口
 
 - `Emulation.setDeviceMetricsOverride` 没有实现。外壳模式下的设备模式由前端直接布局 iframe，没有走 CDP。通过 CDP 改视口的自动化工具因此改不了尺寸；在外壳模式下可以复用设备模式的 iframe 尺寸逻辑来补上。

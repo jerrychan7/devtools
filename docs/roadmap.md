@@ -42,6 +42,52 @@ What has been discussed and is not done yet, and why. Directions and known trade
 
 **Status**: a direction only; no design discussed yet.
 
+## iframes
+
+**Now**: the agent assumes one document per page. There is a single `FRAME_ID` and `EXECUTION_CONTEXT_ID` (`core/context.ts`) in every event; nodes have no `contentDocument`, so an iframe cannot be expanded in Elements; console, network capture and errors are hooked in the top `window` only.
+
+**Chrome's model**: a same-origin iframe is in the same target as its page, as more frames and execution contexts; only a cross-origin one (an out-of-process iframe) is a child target, through `Target.setAutoAttach`.
+
+**Same-origin iframes (first)**:
+
+| Domain | To do |
+|---|---|
+| DOM | iframe nodes with `contentDocument` and `frameId`; a MutationObserver per document; an iframe's navigation invalidates its old document and pushes the new one |
+| Page | A frame registry; `childFrames` in `frameTree`; `frameAttached`, `frameNavigated`, `frameDetached` |
+| Runtime | An execution context per window; `evaluate` and `callFunctionOn` run in the window of their `contextId`; console and exceptions captured in each window |
+| CSS | `frameId` on style sheets; `getComputedStyle` of the node's window; the sheet registry and forced pseudo-classes per document |
+| Network | `frameId` on requests; fetch, XHR, … wrapped in each window |
+| Overlay, Input, geometry | Coordinates offset by the iframe and its scrolling |
+
+- **Realms**: an iframe's elements are not instances of the top page's `Element`. About 166 `instanceof` checks and about 180 uses of the global `document`, `window`, `getComputedStyle`, … in the agent have to use the node's own realm (`node.ownerDocument.defaultView`) or `nodeType` instead.
+- **Not possible**: an iframe's earliest logs. The probe cannot run before the iframe's own scripts, only once it has loaded; usage.md has to say so.
+- **Size**: large; domain by domain, each with tests against Chrome, about the main work of a minor.
+
+**Cross-origin iframes (later)**: their document is out of reach; the iframe has to load the probe too and be attached as a child target over postMessage (`Target.setAutoAttach`, `attachedToTarget`, messages routed by `sessionId`). The frontend handles child targets already; shell mode's relay works similarly.
+
+**Step 0, the earlier the better**: every new feature adds `instanceof` checks and uses of the global `document`. A step that changes no behavior stops that:
+
+1. A frame registry in the Context: `FRAME_ID` and `EXECUTION_CONTEXT_ID` looked up by document or window instead of constants, with only the top document registered for now;
+2. A helper such as `realmOf(node)`, and a lint rule against `instanceof Element` and the global `document` in `cdp-agent`, the existing code exempted and migrated over time.
+
+## More that can be filled in the page
+
+All with standard page APIs, matching Chrome. By value for effort; the first three are small.
+
+| Item | Now | How, in the page |
+|---|---|---|
+| The Animations panel (`Animation` domain) | `enable` is a no-op | `document.getAnimations()` has CSS animations, transitions and Web Animations; listing, pausing, playback rate and seeking map onto it |
+| Vision deficiencies (`setEmulatedVisionDeficiency`) | No-op | An SVG filter on `<html>`; Chrome uses color matrices too |
+| Network: blocked URLs, cache disabled, extra headers, offline | `setBlockedURLs`, `setCacheDisabled`, `setExtraHTTPHeaders`, `emulateNetworkConditions` are no-ops | For the fetch and XHR already intercepted; in shell mode, images and scripts too through the Service Worker. Throttling could only be approximate: not done |
+| The browser's default styles | Not in Styles | A copy of Chromium's `html.css` (open source), loaded when used, matched to give the "user agent stylesheet" rules; to be kept in step with each Chrome |
+| Grid, flex, container query and scroll-snap overlays | `Overlay.setShow*Overlays` are no-ops | Drawn in the page: `getComputedStyle` gives a grid's resolved tracks; the same layer as `highlightNode` |
+| Emulated `prefers-color-scheme`, print and other media | `setEmulatedMedia` is a no-op | `@media` conditions rewritten through the CSSOM; the limits of forced `:hover`: not `@import`, cross-origin sheets or `matchMedia` |
+| Application panel updates (`Storage.track*`) | No-ops: refreshed by hand | IDB writes and `caches.put` wrapped to send `indexedDBContentUpdated`, … |
+| The Service Workers view | `ServiceWorker.enable` is a no-op | `navigator.serviceWorker.getRegistrations()`: listing, unregistering, updating; no debugging |
+| Violations and long tasks (`Log.startViolationsReport`) | No-op | `PerformanceObserver` on `longtask` and `long-animation-frame`, reported in the Console |
+
+Of little value: the performance monitor (`Performance.getMetrics`: only the DOM node count and Chrome's `performance.memory`); event listeners' source locations (a stack captured on each add, which slows pages down).
+
 ## Gaps in Emulation
 
 - `Emulation.setDeviceMetricsOverride` is not implemented: device mode in shell mode is laid out by the frontend, not through CDP, so tools that resize the viewport over CDP cannot. In shell mode it could reuse device mode's sizing of the page iframe.
