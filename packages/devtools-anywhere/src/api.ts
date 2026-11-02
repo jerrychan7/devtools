@@ -1,7 +1,7 @@
 // The API devtools-anywhere.iife.js exposes as `window.DevtoolsAnywhere`: the one definition the
 // bundle (which must satisfy it), the probe (probe.iife.js, built separately, which calls it) and
 // the tests share. Types only, and no source module imported, so that any of them can take it in.
-import type { CdpSession, createCdpSession } from './cdp-agent';
+import type { CdpSession, ChildTargets, createCdpSession } from './cdp-agent';
 
 /** How a page reaches a remote debugging server. */
 export interface RemoteOptions {
@@ -22,6 +22,22 @@ export interface DevtoolsAnywhereApi {
    * registered `devtools-anywhere` itself.
    */
   createGlobalElement(config: GlobalElementConfig): HTMLElement | null;
+  /**
+   * Links the page's agent with those of the cross-origin iframes it trusts, and of its parent
+   * when it is in one that it trusts (the probe's data-frame-origins and data-parent-origins).
+   * Returns a function that stops and closes the links.
+   */
+  linkFrames(options: FrameLinkOptions): () => void;
+  /** The page's links to cross-origin iframes, and to its parent. */
+  childTargets: ChildTargets;
+}
+
+/** The origins the page trusts across iframes: space-separated lists, as in the probe's attributes. */
+export interface FrameLinkOptions {
+  /** The iframes this page's DevTools may debug (`data-frame-origins`). */
+  frameOrigins?: string | null;
+  /** The pages that may debug this one in their iframe (`data-parent-origins`). */
+  parentOrigins?: string | null;
 }
 
 /** The probe's options for the global element (its `data-*` attributes). */
