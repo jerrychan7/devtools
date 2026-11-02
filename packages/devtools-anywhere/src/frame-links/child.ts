@@ -17,7 +17,7 @@ const newId = () => Math.random().toString(36).slice(2);
  */
 export function linkParent(patterns: readonly OriginPattern[], createSession: () => CdpSession): () => void {
   if (window.parent === window) return () => {};
-  const id = newId();
+  let id = newId();
   let link: ParentLink | undefined;
   let session: CdpSession | undefined;
 
@@ -62,10 +62,22 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     connect(port, welcome.frameId, welcome.parentFrameId);
   };
 
+  // Leaving, the page ends its link: a port has no close event. Back from the back/forward cache,
+  // it is another document to the parent, which links it again.
+  const onPagehide = () => link?.close();
+  const onPageshow = (event: PageTransitionEvent) => {
+    if (!event.persisted) return;
+    id = newId();
+    hello();
+  };
   addEventListener('message', onMessage);
+  addEventListener('pagehide', onPagehide);
+  addEventListener('pageshow', onPageshow);
   hello();
   return () => {
     removeEventListener('message', onMessage);
+    removeEventListener('pagehide', onPagehide);
+    removeEventListener('pageshow', onPageshow);
     link?.close();
   };
 }

@@ -52,6 +52,27 @@ async function childFrame(page: Page): Promise<Frame> {
   return frame;
 }
 
+/** Reloads the child page and returns its frame once the new document has its bundle. */
+async function reloadChild(page: Page, child: Frame): Promise<Frame> {
+  // Marks the old document, and reloads once the evaluation has returned.
+  await child.evaluate(() => {
+    window.__pageScriptRan = true;
+    setTimeout(() => location.reload());
+  });
+  const start = Date.now();
+  for (;;) {
+    for (const frame of page.frames()) {
+      if (!frame.url().split('?')[0]?.endsWith('frame-link-child.html')) continue;
+      const fresh = await frame
+        .evaluate(() => !window.__pageScriptRan && 'DevtoolsAnywhere' in window)
+        .catch(() => false);
+      if (fresh) return frame;
+    }
+    if (Date.now() - start > 5000) throw new Error('the child did not reload');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+}
+
 /** Has the parent record each link it gets in `__links`, and whether it has closed. */
 async function recordLinks(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -200,6 +221,56 @@ test('a hello from a window that is not an iframe of the page, or made up by a s
     await settle();
     assert.deepEqual(await links(page), []);
     await popup.close();
+  } finally {
+    await page.close();
+  }
+});
+
+test('the iframe reloaded links again, with the same frame id; the old link closes', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    await reloadChild(page, child);
+    await waitForLink(page, 2);
+    const [first, second] = await links(page);
+    assert.equal(first?.closed, true);
+    assert.equal(second?.closed, false);
+    assert.equal(second?.frameId, first?.frameId);
+    const result = await command(page, 'Runtime.evaluate', { expression: 'window.marker' });
+    assert.deepEqual(result, { result: { type: 'string', value: `child of ${originOf('127.0.0.1')}` } });
+  } finally {
+    await page.close();
+  }
+});
+
+test('removing the iframe closes its link, bye or not', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    // The page's bye on pagehide is not what the parent goes by.
+    await child.evaluate(() => (MessagePort.prototype.postMessage = () => {}));
+    await page.evaluate(() => document.getElementById('child')?.remove());
+    await page.waitForFunction(() => window.__links?.[0]?.closed === true, { timeout: 5000, polling: 50 });
+    assert.equal(await page.evaluate(() => [...window.DevtoolsAnywhere.childTargets.children()].length), 0);
+  } finally {
+    await page.close();
+  }
+});
+
+test('either end closing the link closes the other', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    await waitForChildLinked(child);
+    // The parent closes: the child hears its bye.
+    await page.evaluate(() => [...window.DevtoolsAnywhere.childTargets.children()][0]?.close());
+    await waitForChildLinked(child, false);
+    // Linked again by a reload, then the child closes: the parent hears its bye.
+    const reloaded = await reloadChild(page, child);
+    await waitForLink(page, 2);
+    await waitForChildLinked(reloaded);
+    await reloaded.evaluate(() => window.DevtoolsAnywhere.childTargets.parent?.close());
+    await page.waitForFunction(() => window.__links?.[1]?.closed === true, { timeout: 5000, polling: 50 });
   } finally {
     await page.close();
   }

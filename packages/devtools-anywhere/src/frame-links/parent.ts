@@ -1,6 +1,6 @@
 // The parent's side of the handshake (protocol.ts): links the cross-origin iframes whose origin
 // data-frame-origins names, as child targets of this page's agent.
-import { type ChildLink, childTargets, frameOwners, ownerOfWindow } from '../cdp-agent';
+import { type ChildLink, childTargets, frameOwners, ownerOfWindow, watchOwner } from '../cdp-agent';
 import { type OriginPattern, matchOrigin } from './origins';
 import { type PortEnd, openPort } from './port';
 import { FRAME_PING, FRAME_WELCOME, type FrameWelcome, postToTrusted, readHello } from './protocol';
@@ -47,7 +47,10 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
       close: end.close,
     };
     linked.set(owner, { id: hello.id, end });
+    // The iframe's page says bye when it goes, but not when its element does.
+    const unwatch = watchOwner(owner, () => end.close());
     end.onClose(() => {
+      unwatch();
       if (linked.get(owner)?.end === end) linked.delete(owner);
     });
     childTargets.addChild(link);
@@ -57,10 +60,19 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     for (const { window: target } of frameOwners()) if (target) postToTrusted(target, { type: FRAME_PING }, patterns);
   };
 
+  const closeAll = () => {
+    for (const { end } of linked.values()) end.close();
+  };
+  // Leaving, this page ends its links; back from the back/forward cache, its iframes link again.
+  const onPageshow = (event: PageTransitionEvent) => event.persisted && ping();
   addEventListener('message', onMessage);
+  addEventListener('pagehide', closeAll);
+  addEventListener('pageshow', onPageshow);
   ping();
   return () => {
     removeEventListener('message', onMessage);
-    for (const { end } of linked.values()) end.close();
+    removeEventListener('pagehide', closeAll);
+    removeEventListener('pageshow', onPageshow);
+    closeAll();
   };
 }
