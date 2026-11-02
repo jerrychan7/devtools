@@ -8,6 +8,7 @@ import {
   isElement,
   isFrameOwner,
   isNode,
+  isHtml,
   isShadowRoot,
   sourceAttribute,
 } from './realm';
@@ -103,6 +104,12 @@ export class FrameRegistry {
   readonly #children = new Map<Frame, Frame[]>();
   readonly #listeners = new Set<(change: FrameChange) => void>();
   #frameSeq = 0;
+  /**
+   * When frame owners were inserted, as read from DOM mutation records: new frames are registered,
+   * and listed among their siblings, in this order, as Chrome lists frames in the order it made them.
+   */
+  readonly #insertedAt = new WeakMap<FrameOwner, number>();
+  #insertionSeq = 0;
   #contextSeq = EXECUTION_CONTEXT_ID;
   #observer: MutationObserver | null = null;
   /** Shadow roots watched like documents (load does not cross a shadow boundary). */
@@ -162,7 +169,7 @@ export class FrameRegistry {
     return this.#byOwner.get(owner);
   }
 
-  /** The child frames of `frame`, in the order they were found. */
+  /** The child frames of `frame`, in the order they were registered, as Chrome lists them. */
   childrenOf(frame: Frame): readonly Frame[] {
     return this.#children.get(frame) ?? [];
   }
@@ -184,6 +191,7 @@ export class FrameRegistry {
     this.#listeners.add(listener);
     if (!this.#observer) {
       this.#observer = new MutationObserver(records => {
+        this.#noteInsertions(records);
         if (touchesFrames(records, this.shadowRootOf)) this.sync();
       });
       for (const frame of this) this.#watch(frame.document);
@@ -221,11 +229,45 @@ export class FrameRegistry {
   }
 
   /**
+   * Numbers the frame owners that mutation records inserted in the order Chrome gives them frames.
+   * An `<iframe>` or `<frame>` gets its frame as it is inserted; an `<object>` or `<embed>` only
+   * later (in Chrome, when the document next updates its plugins), but before one inserted after it
+   * does: inserting another `<object>` or `<embed>` gives the earlier ones theirs first. Chrome,
+   * from insertions in one task: `<object>`, `<iframe>`, `<iframe>` → iframe, iframe, object;
+   * `<object>`, `<embed>`, `<iframe>` → object, iframe, embed.
+   */
+  #noteInsertions(records: MutationRecord[]): void {
+    let pending: FrameOwner[] = [];
+    const flush = () => {
+      for (const owner of pending) this.#insertedAt.set(owner, ++this.#insertionSeq);
+      pending = [];
+    };
+    const insert = (owner: FrameOwner) => {
+      if (isHtml(owner, 'object') || isHtml(owner, 'embed')) {
+        flush();
+        pending.push(owner);
+      } else this.#insertedAt.set(owner, ++this.#insertionSeq);
+    };
+    for (const record of records) {
+      if (record.type !== 'childList') continue;
+      for (const node of Array.from(record.addedNodes)) {
+        if (!isElement(node)) continue;
+        walkFrameOwners(node, this.shadowRootOf, n => {
+          if (!isShadowRoot(n)) insert(n);
+        });
+      }
+    }
+    flush();
+  }
+
+  /**
    * Brings the registry up to date with the documents: registers same-origin iframes found in
    * them, gives a frame that loaded another document a new loader and execution context, and
    * unregisters frames whose iframe is gone or became cross-origin. Listeners hear of each change.
    */
   sync(): void {
+    // Insertions not yet delivered to the observer: another observer's callback may sync first.
+    if (this.#observer) this.#noteInsertions(this.#observer.takeRecords());
     this.#syncChildren(this.top);
   }
 
@@ -236,6 +278,7 @@ export class FrameRegistry {
       if (isShadowRoot(node)) this.#watch(node);
       else owners.push(node);
     });
+    const added: { owner: FrameOwner; win: Window; doc: Document }[] = [];
     for (const owner of owners) {
       const doc = contentDocumentOf(owner);
       const win = contentWindowOf(owner);
@@ -247,18 +290,10 @@ export class FrameRegistry {
       }
       if (!doc || !win) continue;
       if (!frame) {
-        frame = {
-          id: `${FRAME_ID}-${++this.#frameSeq}`,
-          loaderId: newLoaderId(),
-          executionContextId: ++this.#contextSeq,
-          window: win,
-          document: doc,
-          owner,
-          parent,
-        };
-        this.#add(frame);
-        this.#emit('attached', frame);
-      } else if (frame.document !== doc) {
+        added.push({ owner, win, doc });
+        continue;
+      }
+      if (frame.document !== doc) {
         this.#byContext.delete(frame.executionContextId);
         frame.document = doc;
         frame.loaderId = newLoaderId();
@@ -267,6 +302,25 @@ export class FrameRegistry {
         this.#watch(doc);
         this.#emit('navigated', frame);
       }
+      found.add(frame);
+      this.#syncChildren(frame);
+    }
+    // New frames come after the ones registered before, like Chrome's, in the order their owners
+    // were inserted; owners inserted when no one watched, in tree order.
+    const at = (owner: FrameOwner) => this.#insertedAt.get(owner) ?? Number.MAX_SAFE_INTEGER;
+    added.sort((a, b) => at(a.owner) - at(b.owner));
+    for (const { owner, win, doc } of added) {
+      const frame: Frame = {
+        id: `${FRAME_ID}-${++this.#frameSeq}`,
+        loaderId: newLoaderId(),
+        executionContextId: ++this.#contextSeq,
+        window: win,
+        document: doc,
+        owner,
+        parent,
+      };
+      this.#add(frame);
+      this.#emit('attached', frame);
       found.add(frame);
       this.#syncChildren(frame);
     }
