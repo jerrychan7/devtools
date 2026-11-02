@@ -2,44 +2,59 @@ import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
 import { isOwnRequest, refetch } from '../network/network';
+import { frameEvents, frameTree } from './frame-tree';
+
+/** Resource Timing initiators of documents: a frame's own, not resources of the page. */
+const DOCUMENT_INITIATORS = new Set(['navigation', 'iframe', 'frame']);
 
 export function registerPage({ session, probe, frames }: Context) {
-  session.register('Page', {
-    enable: () => {},
+  let stopFrames: (() => void) | null = null;
+  const disable = () => {
+    stopFrames?.();
+    stopFrames = null;
+  };
+  session.onReset(disable);
 
-    getResourceTree: (): Protocol.Page.GetResourceTreeResponse => ({
-      frameTree: {
-        frame: {
-          id: frames.top.id,
-          loaderId: frames.top.loaderId,
-          url: location.href,
-          domainAndRegistry: '',
-          securityOrigin: location.origin,
-          mimeType: 'text/html',
-          secureContextType: !isSecureContext
-            ? 'InsecureScheme'
-            : /^(.+\.)?localhost$|^127(\.\d+){3}$|^\[::1\]$/.test(location.hostname)
-              ? 'SecureLocalhost'
-              : 'Secure',
-          crossOriginIsolatedContextType: 'NotIsolated',
-          gatedAPIFeatures: [],
-        },
-        // The page's own resources, as far as Resource Timing knows them (Sources panel).
-        resources: probe.requests
-          .filter(
-            rec =>
-              rec.initiatorType &&
-              rec.initiatorType !== 'navigation' &&
-              rec.type !== 'Ping' &&
-              !isOwnRequest(probe, rec)
-          )
-          .map(rec => ({
-            url: rec.url,
-            type: rec.type,
-            mimeType: rec.mimeType || '',
-          })),
-      },
-    }),
+  session.register('Page', {
+    /** Like Chrome, frames attached, navigated and detached are reported from now on. */
+    enable() {
+      stopFrames ??= frames.onChange(frameEvents(session, frames));
+    },
+
+    disable,
+
+    getFrameTree(): Protocol.Page.GetFrameTreeResponse {
+      frames.sync();
+      return { frameTree: frameTree(frames, frames.top) };
+    },
+
+    getResourceTree(): Protocol.Page.GetResourceTreeResponse {
+      frames.sync();
+      // The top page's own resources, as far as Resource Timing knows them (Sources panel).
+      // Those of iframes are not known: the probe watches the top page's requests only.
+      const resources = probe.requests
+        .filter(
+          rec =>
+            rec.initiatorType &&
+            !DOCUMENT_INITIATORS.has(rec.initiatorType) &&
+            rec.type !== 'Ping' &&
+            !isOwnRequest(probe, rec)
+        )
+        .map(rec => ({
+          url: rec.url,
+          type: rec.type,
+          mimeType: rec.mimeType || '',
+        }));
+      const withResources = (
+        tree: Protocol.Page.FrameTree,
+        own: Protocol.Page.FrameResource[]
+      ): Protocol.Page.FrameResourceTree => ({
+        frame: tree.frame,
+        ...(tree.childFrames ? { childFrames: tree.childFrames.map(child => withResources(child, [])) } : {}),
+        resources: own,
+      });
+      return { frameTree: withResources(frameTree(frames, frames.top), resources) };
+    },
 
     /** Re-fetches the resource, from the HTTP cache when possible; not recorded by the probe. */
     async getResourceContent(
