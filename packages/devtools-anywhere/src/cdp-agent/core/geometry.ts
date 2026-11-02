@@ -1,3 +1,5 @@
+import { isHtmlElement, isSvg, isSvgElement, realmOf } from './realm';
+
 /** A CDP quad: x1 y1 … x4 y4, clockwise from the top left. */
 export type Quad = number[];
 
@@ -24,6 +26,15 @@ export function mapQuad(m: DOMMatrixReadOnly, box: Box): Quad {
   });
 }
 
+/** The computed style of an element, in its own realm. */
+const styleOf = (el: Element) => realmOf(el).getComputedStyle(el);
+
+/** An SVG element with a bounding box and screen CTM (`SVGGraphicsElement`), of any realm. */
+const isSvgGraphics = (el: Element): el is SVGGraphicsElement => isSvgElement(el) && 'getBBox' in el;
+
+/** An SVG shape (`SVGGeometryElement`), of any realm. */
+const isSvgGeometry = (el: Element): el is SVGGeometryElement => isSvgGraphics(el) && 'getTotalLength' in el;
+
 const isTransformed = (style: CSSStyleDeclaration) =>
   style.transform !== 'none' ||
   ['translate', 'rotate', 'scale'].some(p => {
@@ -33,7 +44,7 @@ const isTransformed = (style: CSSStyleDeclaration) =>
 
 /** Whether the element or an ancestor is transformed: a cheap check before following the layout. */
 export function hasTransformedAncestor(el: Element): boolean {
-  for (let a: Element | null = el; a; a = a.parentElement) if (isTransformed(getComputedStyle(a))) return true;
+  for (let a: Element | null = el; a; a = a.parentElement) if (isTransformed(styleOf(a))) return true;
   return false;
 }
 
@@ -67,7 +78,7 @@ function parts(v: string): string[] {
 }
 
 /** The element's own transform, about its transform origin, or null without one. */
-function ownTransform(el: Element, style = getComputedStyle(el)): DOMMatrix | null {
+function ownTransform(el: Element, style = styleOf(el)): DOMMatrix | null {
   const hasTransform = style.transform !== 'none';
   if (!isTransformed(style)) return null;
   // Composes translate, rotate, scale and transform in the order CSS applies them.
@@ -75,8 +86,8 @@ function ownTransform(el: Element, style = getComputedStyle(el)): DOMMatrix | nu
   const translate = style.getPropertyValue('translate');
   if (translate && translate !== 'none') {
     const [x = '0', y = '0', z = '0'] = parts(translate);
-    const w = el instanceof HTMLElement ? el.offsetWidth : 0;
-    const h = el instanceof HTMLElement ? el.offsetHeight : 0;
+    const w = isHtmlElement(el) ? el.offsetWidth : 0;
+    const h = isHtmlElement(el) ? el.offsetHeight : 0;
     m = m.translate(length(x, w), length(y, h), parseFloat(z) || 0);
   }
   const rotate = style.getPropertyValue('rotate');
@@ -135,7 +146,8 @@ function documentPosition(el: HTMLElement): { x: number; y: number } {
     dx = Math.min(...q.filter((_, i) => i % 2 === 0));
     dy = Math.min(...q.filter((_, i) => i % 2 === 1));
   }
-  return { x: rect.left - dx + scrollX, y: rect.top - dy + scrollY };
+  const win = realmOf(el);
+  return { x: rect.left - dx + win.scrollX, y: rect.top - dy + win.scrollY };
 }
 
 /**
@@ -146,11 +158,13 @@ function documentPosition(el: HTMLElement): { x: number; y: number } {
  * (SVG, …): callers fall back to the bounding rectangle.
  */
 export function localToViewport(el: Element): DOMMatrix | null {
-  if (!(el instanceof HTMLElement)) return null;
-  const scrolling = document.scrollingElement;
+  if (!isHtmlElement(el)) return null;
+  const doc = el.ownerDocument;
+  const win = realmOf(el);
+  const scrolling = doc.scrollingElement;
   let m = new DOMMatrix();
   // Each element's computed style is read once, as the node and then as the container.
-  for (let node: HTMLElement = el, style = getComputedStyle(el); ;) {
+  for (let node: HTMLElement = el, style = styleOf(el); ;) {
     const own = ownTransform(node, style);
     if (own) m = own.multiply(m);
     const container = node.offsetParent;
@@ -165,17 +179,17 @@ export function localToViewport(el: Element): DOMMatrix | null {
           x -= a.scrollLeft;
           y -= a.scrollTop;
         }
-    if (!(container instanceof HTMLElement)) {
+    if (!isHtmlElement(container)) {
       // The viewport, or the document for the root elements.
       if (position === 'fixed') return flatten(new DOMMatrix().translate(x, y).multiply(m));
-      if (node === document.body || node === document.documentElement) {
+      if (node === doc.body || node === doc.documentElement) {
         const origin = documentPosition(node);
-        return flatten(new DOMMatrix().translate(origin.x - scrollX, origin.y - scrollY).multiply(m));
+        return flatten(new DOMMatrix().translate(origin.x - win.scrollX, origin.y - win.scrollY).multiply(m));
       }
       return null;
     }
-    const containerStyle = getComputedStyle(container);
-    if (container === document.body || container === document.documentElement) {
+    const containerStyle = styleOf(container);
+    if (container === doc.body || container === doc.documentElement) {
       // Offsets from a static body are relative to the document, from a positioned one to its
       // border box (Chrome).
       if (containerStyle.position === 'static') {
@@ -204,7 +218,7 @@ export function localToViewport(el: Element): DOMMatrix | null {
 /** The nearest HTML ancestor of an SVG element, which the SVG layout is placed in. */
 function htmlAncestor(el: Element): HTMLElement | null {
   let a: Element | null = el.parentElement;
-  while (a && !(a instanceof HTMLElement)) a = a.parentElement;
+  while (a && !isHtmlElement(a)) a = a.parentElement;
   return a;
 }
 
@@ -244,23 +258,18 @@ function svgToViewport(
  * times √2 for square caps, or the miter limit for miter joins of paths and polylines.
  */
 function strokeOutset(el: SVGGraphicsElement): number {
-  if (!(el instanceof SVGGeometryElement)) return 0;
-  const style = getComputedStyle(el);
+  if (!isSvgGeometry(el)) return 0;
+  const style = styleOf(el);
   const width = parseFloat(style.strokeWidth) || 0;
   if (style.stroke === 'none' || width <= 0) return 0;
-  if (el instanceof SVGRectElement || el instanceof SVGCircleElement || el instanceof SVGEllipseElement)
-    return width / 2;
+  if (isSvg(el, 'rect') || isSvg(el, 'circle') || isSvg(el, 'ellipse')) return width / 2;
   let factor = style.strokeLinecap === 'square' ? Math.SQRT2 : 1;
-  if (!(el instanceof SVGLineElement) && style.strokeLinejoin === 'miter')
+  if (!isSvg(el, 'line') && style.strokeLinejoin === 'miter')
     factor = Math.max(factor, parseFloat(style.strokeMiterlimit) || 4);
   return (width / 2) * factor;
 }
 
-const isContainer = (el: Element) =>
-  el instanceof SVGGElement ||
-  el instanceof SVGSVGElement ||
-  el instanceof SVGAElement ||
-  el instanceof SVGSwitchElement;
+const isContainer = (el: Element) => isSvg(el, 'g') || isSvg(el, 'svg') || isSvg(el, 'a') || isSvg(el, 'switch');
 
 /** The bounds of the quad. */
 function boundsOf(q: Quad): Box {
@@ -277,7 +286,7 @@ function strokeBox(el: SVGGraphicsElement, svg: DOMMatrix, ancestors = new Map<E
     // A degenerate container (scale(0)) has no inverse: its children add nothing.
     const children = Number.isFinite(inverse.m11) ? Array.from(el.children) : [];
     for (const child of children) {
-      if (!(child instanceof SVGGraphicsElement) || getComputedStyle(child).display === 'none') continue;
+      if (!isSvgGraphics(child) || styleOf(child).display === 'none') continue;
       const mapping = svgToViewport(child, ancestors);
       // Like Chrome, a child under a non-invertible transform (scale(0)) adds nothing.
       if (!mapping || !Number.isFinite(mapping.svg.inverse().m11)) continue;
@@ -304,12 +313,12 @@ function strokeBox(el: SVGGraphicsElement, svg: DOMMatrix, ancestors = new Map<E
  * user space, rounded).
  */
 export function svgLayout(el: Element): { quad: Quad; width: number; height: number } | null {
-  if (!(el instanceof SVGGraphicsElement) || (el instanceof SVGSVGElement && !el.ownerSVGElement)) return null;
+  if (!isSvgGraphics(el) || (isSvg(el, 'svg') && !el.ownerSVGElement)) return null;
   const ancestors = new Map<Element, DOMMatrix | null>();
   const mapping = svgToViewport(el, ancestors);
   if (!mapping) return null;
   const q = mapQuad(mapping.m, strokeBox(el, mapping.svg, ancestors));
-  if (el instanceof SVGTextElement) {
+  if (isSvg(el, 'text')) {
     const b = el.getBBox();
     return { quad: q, width: Math.round(b.x + b.width), height: Math.round(b.y + b.height) };
   }
@@ -344,10 +353,10 @@ function viewBoxTransform(svg: SVGSVGElement, width: number, height: number): DO
 
 /** The border box mapping and size of an outermost <svg>, from its user space mapping. */
 export function svgRootLayout(el: Element): { m: DOMMatrix; width: number; height: number } | null {
-  if (!(el instanceof SVGSVGElement) || el.ownerSVGElement) return null;
+  if (!isSvg(el, 'svg') || el.ownerSVGElement) return null;
   const mapping = svgToViewport(el);
   if (!mapping) return null;
-  const style = getComputedStyle(el);
+  const style = styleOf(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const left = px('border-left-width') + px('padding-left');
   const top = px('border-top-width') + px('padding-top');
@@ -376,7 +385,7 @@ export function untransformedBoxes(el: Element): Box[] | null {
     // Switching the transforms off can shrink a scroller's scrollable overflow and clamp its
     // position, which queues a scroll event the page would see even if the position is put back.
     if ((a.scrollLeft || a.scrollTop) && !fillsScrollEnd(a, [el, ...animated])) return null;
-    if (isTransformed(getComputedStyle(a))) animated.push(a);
+    if (isTransformed(styleOf(a))) animated.push(a);
   }
   const animations = animated.map(a => {
     const animation = a.animate([off, off], { duration: 1, fill: 'both' });
@@ -384,7 +393,7 @@ export function untransformedBoxes(el: Element): Box[] | null {
     return animation;
   });
   try {
-    if (animated.some(a => getComputedStyle(a).transform !== 'matrix(1, 0, 0, 1, 0, 0)')) return null;
+    if (animated.some(a => styleOf(a).transform !== 'matrix(1, 0, 0, 1, 0, 0)')) return null;
     const origin = el.getBoundingClientRect();
     return Array.from(el.getClientRects(), r => ({
       left: r.left - origin.left,
@@ -459,28 +468,18 @@ export function unmapRects(m: DOMMatrix, rects: DOMRect[]): Box[] | null {
   });
 }
 
-const replaced = [
-  HTMLImageElement,
-  HTMLVideoElement,
-  HTMLCanvasElement,
-  HTMLIFrameElement,
-  HTMLEmbedElement,
-  HTMLObjectElement,
-  HTMLInputElement,
-  HTMLTextAreaElement,
-  HTMLSelectElement,
-];
+const replaced = new Set(['img', 'video', 'canvas', 'iframe', 'embed', 'object', 'input', 'textarea', 'select']);
 
 /** Whether the element lays out as line boxes: an inline, non-replaced element. */
 export const isInlineBox = (el: Element) =>
-  el instanceof HTMLElement && getComputedStyle(el).display === 'inline' && !replaced.some(type => el instanceof type);
+  isHtmlElement(el) && styleOf(el).display === 'inline' && !replaced.has(el.localName);
 
 /**
  * Chrome's quads of an inline element's line boxes leave out its padding and border: on both block
  * sides of every line, at the start of the first line and the end of the last.
  */
 export function lineContentBoxes(el: Element, boxes: Box[]): Box[] {
-  const style = getComputedStyle(el);
+  const style = styleOf(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const edge = (side: string) => px(`padding-${side}`) + px(`border-${side}-width`);
   const vertical = style.writingMode !== 'horizontal-tb';
