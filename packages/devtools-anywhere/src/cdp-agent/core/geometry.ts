@@ -1,4 +1,4 @@
-import { isHtmlElement, isSvg, isSvgElement, realmOf } from './realm';
+import { isFrameOwner, isHtmlElement, isSvg, isSvgElement, realmOf } from './realm';
 
 /** A CDP quad: x1 y1 … x4 y4, clockwise from the top left. */
 export type Quad = number[];
@@ -259,6 +259,51 @@ export function mapPoints(m: DOMMatrixReadOnly, q: Quad): Quad {
     out.push(p.x / p.w, p.y / p.w);
   }
   return out;
+}
+
+/** The point (x, y) mapped through the inverse of `m`. */
+function unmapPoint(m: DOMMatrix, x: number, y: number): { x: number; y: number } {
+  const [px = NaN, py = NaN] = mapPoints(m.inverse(), [x, y]);
+  return { x: px, y: py };
+}
+
+/** A point of the top viewport in the viewport of a frame's document. */
+export function pointInFrame(doc: Document, x: number, y: number): { x: number; y: number } {
+  const m = frameToTop(doc);
+  return m ? unmapPoint(m, x, y) : { x, y };
+}
+
+/** The document an `<iframe>` or `<frame>` shows, when within reach (same origin). */
+export function frameDocumentOf(el: Element): Document | null {
+  if (!isFrameOwner(el)) return null;
+  try {
+    return el.contentDocument;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The topmost element at a point of `doc`'s viewport that `accept` takes, looking into the
+ * documents of same-origin iframes like Chrome's hit testing: the element there in the iframe's
+ * document, at the point mapped into its viewport, or the iframe itself where its document has
+ * none (its border and padding). The point is returned in the viewport of the found element.
+ */
+export function hitTest(
+  doc: Document,
+  x: number,
+  y: number,
+  accept: (el: Element) => boolean = () => true
+): { el: Element; x: number; y: number } | null {
+  const el = doc.elementsFromPoint(x, y).find(accept);
+  if (!el) return null;
+  const inner = frameDocumentOf(el);
+  if (inner) {
+    const p = unmapPoint(frameContentToViewport(el), x, y);
+    const found = Number.isFinite(p.x) && Number.isFinite(p.y) ? hitTest(inner, p.x, p.y, accept) : null;
+    if (found) return found;
+  }
+  return { el, x, y };
 }
 
 /**

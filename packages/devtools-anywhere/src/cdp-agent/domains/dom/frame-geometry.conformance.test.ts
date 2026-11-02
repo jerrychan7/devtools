@@ -1,6 +1,6 @@
 // Geometry of nodes in same-origin iframes against Chrome's: box models, content quads and
 // scrolling in the top viewport (through the iframes' position, border, padding, scrolling and
-// transforms).
+// transforms), and hit testing into the iframes' documents.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
@@ -118,6 +118,57 @@ test('DOM.getContentQuads of a text node in an iframe', async () => {
   const [ours = [], chrome = []] = quads;
   assert.equal(ours.length, chrome.length);
   ours.forEach((q, i) => close(q, chrome[i] ?? [], `quads[${i}]`));
+});
+
+/**
+ * The id (or name) of the node at a point as one side reports it, and its frame: the index of the
+ * frame id among those this side reported so far.
+ */
+async function nodeAt(side: Side, x: number, y: number, frameIds: string[]) {
+  try {
+    const { backendNodeId, frameId } = await side.send('DOM.getNodeForLocation', { x, y });
+    const { node } = await side.send('DOM.describeNode', { backendNodeId });
+    const at = (node.attributes ?? []).indexOf('id');
+    if (frameId && !frameIds.includes(frameId)) frameIds.push(frameId);
+    return { node: at >= 0 ? node.attributes?.[at + 1] : node.nodeName, frame: frameIds.indexOf(frameId ?? '') };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message.replace(/^.*: /, '') : String(e) };
+  }
+}
+
+test('DOM.getNodeForLocation looks into iframes', async () => {
+  // Like Chrome's, the point is in the top document (scrolled by 30px), not in its viewport.
+  // Points on the plain iframe (in its document, its border and
+  // its padding, its iframe), on the transformed one and on the top page.
+  const points = await t.page.evaluate(() => {
+    const out: [number, number][] = [];
+    const center = (el: Element | null | undefined, frame?: Element) => {
+      const r = el?.getBoundingClientRect();
+      const f = frame?.getBoundingClientRect();
+      if (r)
+        out.push([
+          Math.round(r.left + r.width / 2 + (f ? f.left + 12 : 0)),
+          Math.round(r.top + r.height / 2 + (f ? f.top + 12 : 0)),
+        ]);
+    };
+    const frame = document.getElementById('fg-frame');
+    const doc = frame instanceof HTMLIFrameElement ? frame.contentDocument : null;
+    center(doc?.getElementById('fg-btn'), frame ?? undefined);
+    center(doc?.getElementById('fg-scrolled'), frame ?? undefined);
+    const r = frame?.getBoundingClientRect();
+    if (r)
+      out.push([Math.round(r.left + 2), Math.round(r.top + 100)], [Math.round(r.left + 9), Math.round(r.top + 100)]);
+    const inner = doc?.getElementById('fg-inner');
+    const ir = inner?.getBoundingClientRect();
+    if (r && ir) out.push([Math.round(r.left + 12 + ir.left + 20), Math.round(r.top + 12 + ir.top + 15)]);
+    out.push([560, 300], [500, 230], [5, 580]);
+    return out.map(([x, y]): [number, number] => [x + scrollX, y + scrollY]);
+  });
+  const frameIds: [string[], string[]] = [[], []];
+  for (const [x, y] of points) {
+    const [ours, chrome] = await Promise.all([nodeAt(t.ours, x, y, frameIds[0]), nodeAt(t.chrome, x, y, frameIds[1])]);
+    assert.deepEqual(ours, chrome, `at ${x}, ${y}`);
+  }
 });
 
 test('DOM.scrollIntoViewIfNeeded scrolls the iframes holding the node', async () => {

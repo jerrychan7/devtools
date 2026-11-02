@@ -39,6 +39,7 @@ import {
   type Quad,
   hasTransformedAncestor,
   frameToTop,
+  hitTest,
   isInlineBox,
   lineContentBoxes,
   localToViewport,
@@ -768,8 +769,12 @@ export function registerDom(ctx: Context) {
 
     getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
       // The page's element under devtools-anywhere's own UI, which the page tree does not have.
-      // Coordinates are the top page's (iframes are Overlay and geometry's to come).
-      const el = ctx.frames.top.document.elementsFromPoint(params.x, params.y).find(e => !closestOwn(e));
+      // Like Chrome, the point is in the top document, not its viewport, and a point on an iframe
+      // finds the node there in the iframe's document.
+      const top = ctx.frames.top.window;
+      const x = params.x - top.scrollX;
+      const y = params.y - top.scrollY;
+      const el = hitTest(ctx.frames.top.document, x, y, e => !closestOwn(e))?.el;
       if (!el) throw new CdpError('No node found at given location');
       const nodeId = nodes.knownId(el);
       return {
