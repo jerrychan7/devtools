@@ -3,22 +3,30 @@ import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
 import { isOwnRequest, refetch } from '../network/network';
 import { frameEvents, frameTree } from './frame-tree';
+import { sameDocumentNavigations } from './history-navigations';
 
 /** Resource Timing initiators of documents: a frame's own, not resources of the page. */
 const DOCUMENT_INITIATORS = new Set(['navigation', 'iframe', 'frame']);
 
 export function registerPage({ session, probe, frames }: Context) {
   let stopFrames: (() => void) | null = null;
+  let stopSameDocument: (() => void) | null = null;
   const disable = () => {
     stopFrames?.();
     stopFrames = null;
+    stopSameDocument?.();
+    stopSameDocument = null;
   };
   session.onReset(disable);
 
   session.register('Page', {
-    /** Like Chrome, frames attached, navigated and detached are reported from now on. */
+    /**
+     * Like Chrome, frames attached, navigated and detached are reported from now on, and the
+     * navigations within their documents.
+     */
     enable() {
       stopFrames ??= frames.onChange(frameEvents(session, frames));
+      stopSameDocument ??= sameDocumentNavigations(session, frames);
     },
 
     disable,
