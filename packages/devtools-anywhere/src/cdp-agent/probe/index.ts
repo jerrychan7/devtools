@@ -40,6 +40,7 @@ export function installProbe(): Probe {
   const socketListeners = new Set<(record: SocketRecord) => void>();
 
   const shadowRootListeners = new Set<(root: ShadowRoot) => void>();
+  const hooked = new WeakSet<Console>();
   const probe: Probe = {
     version: 1,
     logs,
@@ -59,6 +60,18 @@ export function installProbe(): Probe {
     },
     clearLogs() {
       logs.length = 0;
+    },
+    hookWindow(win) {
+      // Once per global object: the initial about:blank's is kept by the document replacing it.
+      const realm = win.console;
+      if (hooked.has(realm)) return;
+      hooked.add(realm);
+      // The document at the time, for the same reason. Not a copy: a console call's stack is a
+      // getter, formatted only when read.
+      const add = (entry: ProbeLog) => addLog(Object.assign(entry, { inDocument: win.document }));
+      hookConsole(add, win);
+      hookDebugger(add, win);
+      hookErrors(add, win);
     },
     shadowRoots: new WeakMap(),
     onShadowRoot(listener) {
@@ -137,8 +150,8 @@ export function installProbe(): Probe {
 const DEBUGGER_HOOK = '_$dbg';
 
 /** Statements cannot be paused at: the shell's Service Worker makes each `debugger` log a warning. */
-function hookDebugger(addLog: (entry: ProbeLog) => void) {
-  Object.defineProperty(window, DEBUGGER_HOOK, {
+function hookDebugger(addLog: (entry: ProbeLog) => void, w: Window = window) {
+  Object.defineProperty(w, DEBUGGER_HOOK, {
     value() {
       const error = new Error();
       addLog({
@@ -163,7 +176,8 @@ function hookDebugger(addLog: (entry: ProbeLog) => void) {
  * arguments except group, groupCollapsed, groupEnd and trace, and passing asserts), labels
  * (their toString runs once, at the call), and counter and timer state.
  */
-function hookConsole(addLog: (entry: ProbeLog) => void) {
+function hookConsole(addLog: (entry: ProbeLog) => void, w: Window & typeof globalThis = window) {
+  const console = w.console;
   const counts: Record<string, number> = {};
   const timers: Record<string, number> = {};
   const names =
@@ -367,9 +381,9 @@ function stackOf(value: unknown): string | undefined {
   }
 }
 
-function hookErrors(addLog: (entry: ProbeLog) => void) {
-  window.addEventListener('error', e => {
-    if (!(e instanceof ErrorEvent)) return;
+function hookErrors(addLog: (entry: ProbeLog) => void, w: Window & typeof globalThis = window) {
+  w.addEventListener('error', e => {
+    if (!(e instanceof w.ErrorEvent)) return;
     addLog({
       kind: 'exception',
       text: 'Uncaught',
@@ -381,7 +395,7 @@ function hookErrors(addLog: (entry: ProbeLog) => void) {
       column: e.colno,
     });
   });
-  window.addEventListener('unhandledrejection', e => {
+  w.addEventListener('unhandledrejection', e => {
     addLog({
       kind: 'exception',
       text: 'Uncaught (in promise)',

@@ -28,6 +28,8 @@ export interface ConsoleEntry {
   time: number;
   /** Raw `Error().stack` taken inside the console wrapper. */
   stack?: string | undefined;
+  /** The same-origin iframe document whose console or window it came from; none for the top page. */
+  inDocument?: Document | undefined;
 }
 
 export interface ExceptionEntry {
@@ -36,6 +38,8 @@ export interface ExceptionEntry {
   error: unknown;
   time: number;
   stack?: string | undefined;
+  /** The same-origin iframe document whose console or window it came from; none for the top page. */
+  inDocument?: Document | undefined;
   url?: string;
   line?: number;
   column?: number;
@@ -57,6 +61,8 @@ export interface ConsoleCall {
   time: number;
   /** Raw `Error().stack` taken inside the console wrapper. */
   stack?: string | undefined;
+  /** The same-origin iframe document whose console or window it came from; none for the top page. */
+  inDocument?: Document | undefined;
   /** count: the new count; timeLog and timeEnd: the timer's start, if it exists. */
   fact?: number | undefined;
 }
@@ -201,6 +207,12 @@ export interface Probe {
   /** Subscribes to WebSocket creation and every later change. */
   onSocket(listener: (record: SocketRecord) => void): () => void;
   clearLogs(): void;
+  /**
+   * Captures the console calls and uncaught errors of a same-origin iframe's document, as for the
+   * top page; entries name the document. Once per document: a frame that loads another one needs
+   * it again. What the document logged before is not captured.
+   */
+  hookWindow(win: Window & typeof globalThis): void;
   /** Every shadow root attached since the probe ran, including closed ones. */
   shadowRoots: WeakMap<Element, ShadowRoot>;
   /** Subscribes to shadow roots being attached. */

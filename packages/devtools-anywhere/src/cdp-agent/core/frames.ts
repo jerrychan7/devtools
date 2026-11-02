@@ -231,3 +231,16 @@ export class FrameRegistry {
 
 /** The page's frames, shared by all sessions: like frame ids, they belong to the page. */
 export const frames = new FrameRegistry(window);
+
+/**
+ * Whether a frame still shows the initial `about:blank` its `<iframe>` is about to leave for its
+ * `src` or `srcdoc`. Chrome reports no navigation and no execution context for that document:
+ * the frame navigates when the document of its `src` or `srcdoc` commits.
+ */
+export function awaitsFirstDocument(frame: Frame): boolean {
+  const { owner } = frame;
+  if (!owner || frame.document.URL !== 'about:blank') return false;
+  if (owner.hasAttribute('srcdoc')) return true;
+  const src = owner.getAttribute('src')?.trim();
+  return !!src && owner.src !== '' && owner.src !== 'about:blank';
+}

@@ -55,7 +55,7 @@ export function registerDebugger({ session, probe, frames }: Context) {
         enabled = true;
         // Every script is reported again: the frontend forgets them on disable.
         ids.clear();
-        for (const script of document.querySelectorAll<HTMLScriptElement>('script[src]'))
+        for (const script of frames.top.document.querySelectorAll<HTMLScriptElement>('script[src]'))
           report(script.src, script.type === 'module');
         for (const rec of probe.requests) if (isScript(rec)) report(rec.url, false);
         unsubscribe = probe.onRequest(rec => {
