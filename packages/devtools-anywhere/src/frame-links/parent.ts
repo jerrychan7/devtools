@@ -1,6 +1,6 @@
 // The parent's side of the handshake (protocol.ts): links the cross-origin iframes whose origin
 // data-frame-origins names, as child targets of this page's agent.
-import { type ChildLink, childTargets, frameOwners, ownerOfWindow, watchOwner } from '../cdp-agent';
+import { type ChildLink, childTargets, frameOwners, frames, ownerOfWindow, watchOwner } from '../cdp-agent';
 import { type OriginPattern, matchOrigin } from './origins';
 import { type PortEnd, openPort } from './port';
 import { FRAME_PING, FRAME_WELCOME, type FrameWelcome, postToTrusted, readHello } from './protocol';
@@ -34,7 +34,13 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
 
     const channel = new MessageChannel();
     const frameId = childTargets.frameIdOf(owner);
-    const welcome: FrameWelcome = { type: FRAME_WELCOME, id: hello.id, frameId, parentFrameId: frame.id };
+    const welcome: FrameWelcome = {
+      type: FRAME_WELCOME,
+      id: hello.id,
+      frameId,
+      parentFrameId: frame.id,
+      parentTargetId: frames.top.id,
+    };
     // To the origin the hello came from, which the list has: the port goes nowhere else.
     target?.postMessage(welcome, event.origin, [channel.port2]);
     const end = openPort(channel.port1);
@@ -43,6 +49,7 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
       frameId,
       send: end.send,
       onMessage: end.onMessage,
+      endSession: end.endSession,
       onClose: end.onClose,
       close: end.close,
     };
@@ -65,6 +72,12 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
   };
   // Leaving, this page ends its links; back from the back/forward cache, its iframes link again.
   const onPageshow = (event: PageTransitionEvent) => event.persisted && ping();
+  // Linked to its own parent, this page's top frame takes another id (FrameRegistry.link): its
+  // iframes link again, for their welcome to carry it.
+  const offParent = childTargets.onParent(() => {
+    closeAll();
+    ping();
+  });
   addEventListener('message', onMessage);
   addEventListener('pagehide', closeAll);
   addEventListener('pageshow', onPageshow);
@@ -73,6 +86,7 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     removeEventListener('message', onMessage);
     removeEventListener('pagehide', closeAll);
     removeEventListener('pageshow', onPageshow);
+    offParent();
     closeAll();
   };
 }

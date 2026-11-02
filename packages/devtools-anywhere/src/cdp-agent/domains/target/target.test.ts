@@ -184,9 +184,7 @@ test('turning auto-attach off detaches, as in Chrome; without flatten nothing is
   const detached = await message(m => m['method'] === 'Target.detachedFromTarget');
   assert.deepEqual(detached['params'], { sessionId, targetId: frameId });
   // Its session in the iframe's agent ends: what the client enabled there is disabled.
-  await waitFor(async () =>
-    (await received('child')).some(m => m['method'] === 'Runtime.disable') ? true : undefined
-  );
+  await waitFor(async () => ((await received('child')).some(m => m['endSession'] === true) ? true : undefined));
   send({ id: 3, method: 'Target.setAutoAttach', params: { ...AUTO_ATTACH, flatten: false } });
   await reply(3);
   await new Promise(r => setTimeout(r, 200));
@@ -297,9 +295,7 @@ test('remote debugging: messages with a session id go through the server both wa
     });
     // The frontend leaves: the page's session ends, and the iframe's is let go.
     socket.close();
-    await waitFor(async () =>
-      (await received('child')).some(m => m['method'] === 'Runtime.disable') ? true : undefined
-    );
+    await waitFor(async () => ((await received('child')).some(m => m['endSession'] === true) ? true : undefined));
   } finally {
     await remote.close();
   }

@@ -4,7 +4,7 @@ import { type CdpSession, type ParentLink, childTargets, frames } from '../cdp-a
 import { endSession } from '../connection';
 import { type OriginPattern, matchOrigin } from './origins';
 import { openPort } from './port';
-import { FRAME_HELLO, FRAME_PING, isMessage, postToTrusted, readWelcome } from './protocol';
+import { FRAME_HELLO, FRAME_PING, type FrameWelcome, isMessage, postToTrusted, readWelcome } from './protocol';
 
 /** A new id for this page's hellos. */
 const newId = () => Math.random().toString(36).slice(2);
@@ -25,13 +25,15 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     if (!link) postToTrusted(window.parent, { type: FRAME_HELLO, id }, patterns);
   };
 
-  const connect = (port: MessagePort, frameId: string, parentFrameId: string) => {
+  const connect = (port: MessagePort, { frameId, parentFrameId, parentTargetId }: FrameWelcome) => {
     const end = openPort(port);
     const linked: ParentLink = {
       frameId,
       parentFrameId,
+      parentTargetId,
       send: end.send,
       onMessage: end.onMessage,
+      onEndSession: end.onEndSession,
       onClose: end.onClose,
       close: end.close,
     };
@@ -40,11 +42,19 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     // for it, before the agent reports anything over the link.
     frames.link({ frameId, parentFrameId });
     const own = (session ??= createSession());
+    /** The end of the parent's client's last session: the next one's messages wait for it. */
+    let ended = Promise.resolve();
     const offSession = own.onMessage(message => linked.send(message));
     linked.onMessage(message => {
-      own.dispatch(message).catch(() => {
-        // Malformed message: there is no id to answer to.
-      });
+      void ended.then(() =>
+        own.dispatch(message).catch(() => {
+          // Malformed message: there is no id to answer to.
+        })
+      );
+    });
+    // Like a new Chrome session for the next client: the domains disabled, ids forgotten.
+    linked.onEndSession(() => {
+      ended = ended.then(() => endSession(own)).then(() => own.reset());
     });
     linked.onClose(() => {
       offSession();
@@ -53,7 +63,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
         frames.link(undefined);
       }
       // Nothing the parent's DevTools asked for outlives the link, as on a frontend's disconnect.
-      void endSession(own).then(() => own.reset());
+      void ended.then(() => endSession(own)).then(() => own.reset());
     });
     childTargets.setParent(linked);
   };
@@ -65,7 +75,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     const port = event.ports[0];
     // Only the welcome for this document's hello, once.
     if (!welcome || welcome.id !== id || !port || link) return;
-    connect(port, welcome.frameId, welcome.parentFrameId);
+    connect(port, welcome);
   };
 
   // Leaving, the page ends its link: a port has no close event. Back from the back/forward cache,

@@ -4,8 +4,9 @@
 //
 //   iframe → parent window   { type: FRAME_HELLO, id }       when its agent is ready, or pinged
 //   parent → iframe window   { type: FRAME_PING }            when the parent's agent is ready
-//   parent → iframe window   { type: FRAME_WELCOME, id, frameId, parentFrameId } + a MessagePort
+//   parent → iframe window   { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId } + a MessagePort
 //   either end → port        CDP messages, as strings; { type: FRAME_BYE } as the last
+//   parent → port            { type: FRAME_END_SESSION } when its client lets the iframe's target go
 //
 // `id` names the iframe's document: a hello the parent has answered already (it hears one per
 // ping) is not answered again, and a welcome for an earlier document is ignored. Neither hello
@@ -22,6 +23,12 @@ export const FRAME_PING = 'devtools-anywhere:frame-ping';
 export const FRAME_WELCOME = 'devtools-anywhere:frame-welcome';
 /** Posted on the port by the end that closes the link: a port has no close event. */
 export const FRAME_BYE = 'devtools-anywhere:frame-bye';
+/**
+ * Posted on the port by the parent when its client's session with the iframe's target ends (the
+ * target detached, the client gone) while the link stays: the iframe's agent ends that session
+ * and resets, as a new Chrome session starts clean.
+ */
+export const FRAME_END_SESSION = 'devtools-anywhere:frame-end-session';
 
 export interface FrameHello {
   type: typeof FRAME_HELLO;
@@ -34,6 +41,8 @@ export interface FrameWelcome {
   id: string;
   frameId: string;
   parentFrameId: string;
+  /** The parent page's target id. */
+  parentTargetId: string;
 }
 
 /** A property of a message, which may be anything. */
@@ -49,10 +58,13 @@ export function readHello(data: unknown): FrameHello | null {
 }
 
 export function readWelcome(data: unknown): FrameWelcome | null {
-  const [id, frameId, parentFrameId] = ['id', 'frameId', 'parentFrameId'].map(name => field(data, name));
+  const [id, frameId, parentFrameId, parentTargetId] = ['id', 'frameId', 'parentFrameId', 'parentTargetId'].map(name =>
+    field(data, name)
+  );
   if (!isMessage(data, FRAME_WELCOME) || typeof id !== 'string') return null;
-  if (typeof frameId !== 'string' || typeof parentFrameId !== 'string') return null;
-  return { type: FRAME_WELCOME, id, frameId, parentFrameId };
+  if (typeof frameId !== 'string' || typeof parentFrameId !== 'string' || typeof parentTargetId !== 'string')
+    return null;
+  return { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId };
 }
 
 /**

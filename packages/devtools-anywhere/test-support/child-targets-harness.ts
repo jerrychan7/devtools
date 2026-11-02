@@ -21,7 +21,7 @@ interface Agent {
 
 const parse = (message: string): Record<string, unknown> => ({ ...Object(JSON.parse(message)) });
 
-function newLink(owner: Element, frameId: string, agent: CdpSession): ChildLink {
+function newLink(owner: Element, frameId: string, agent: CdpSession, received: Record<string, unknown>[]): ChildLink {
   const listeners = new Set<(message: string) => void>();
   const closes = new Set<() => void>();
   let open = true;
@@ -38,6 +38,12 @@ function newLink(owner: Element, frameId: string, agent: CdpSession): ChildLink 
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    endSession() {
+      if (!open) return;
+      // Recorded among what the agent received, as a message of its own.
+      received.push({ endSession: true });
+      queueMicrotask(() => void endSession(agent).then(() => agent.reset()));
+    },
     onClose(listener) {
       closes.add(listener);
       return () => closes.delete(listener);
@@ -53,8 +59,10 @@ function newLink(owner: Element, frameId: string, agent: CdpSession): ChildLink 
 const parentLink = (frameId: string, parentFrameId: string): ParentLink => ({
   frameId,
   parentFrameId,
+  parentTargetId: parentFrameId,
   send() {},
   onMessage: () => () => {},
+  onEndSession: () => () => {},
   onClose: () => () => {},
   close() {},
 });
@@ -106,7 +114,7 @@ export class Harness {
       if (typeof message === 'string') received.push(parse(message));
       return dispatch(message);
     };
-    const link = newLink(owner, frameId, session);
+    const link = newLink(owner, frameId, session, received);
     this.agents.set(name, { session, targets, link, received });
     holder.addChild(link);
     return frameId;

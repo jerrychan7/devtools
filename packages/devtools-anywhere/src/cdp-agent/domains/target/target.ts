@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { type ChildLink, type ChildTargets, childTargets } from '../../core/child-targets';
 import type { Context } from '../../core/context';
-import { CdpError, END_SESSION_CALLS } from '../../core/session';
+import { CdpError } from '../../core/session';
 
 /**
  * The Target domain: the page's cross-origin iframes as child targets of type `iframe`
@@ -84,19 +84,6 @@ function srcOf(owner: Element): string {
   }
 }
 
-/** Ends what the client started in the iframe's agent, as a new Chrome session would start clean. */
-function endChildSession(link: ChildLink) {
-  // Its own children are let go too; it reports that to no one now.
-  link.send(
-    JSON.stringify({
-      id: `${OWN_ID_PREFIX}${++ownSeq}`,
-      method: 'Target.setAutoAttach',
-      params: { autoAttach: false, waitForDebuggerOnStart: false, flatten: true },
-    })
-  );
-  for (const method of END_SESSION_CALLS) link.send(JSON.stringify({ id: `${OWN_ID_PREFIX}${++ownSeq}`, method }));
-}
-
 /** A link attached as a session. */
 interface Attached {
   readonly sessionId: string;
@@ -128,8 +115,7 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
       canAccessOpener: false,
     };
     if (parent) {
-      // The parent page's target id is not known here: the frame holding the iframe stands in.
-      info.parentId = parent.parentFrameId;
+      info.parentId = parent.parentTargetId;
       info.parentFrameId = parent.parentFrameId;
     }
     return info;
@@ -212,7 +198,8 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     claims.delete(link);
     entry.offs.forEach(off => off());
     entry.nested.forEach(off => off());
-    if (open) endChildSession(link);
+    // What the client started there ends, its own children let go too, as a new Chrome session starts clean.
+    if (open) link.endSession();
     if (notify) {
       session.emit('Target.detachedFromTarget', {
         sessionId: entry.sessionId,

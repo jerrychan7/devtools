@@ -21,6 +21,12 @@ export interface ChildLink {
   send(message: string): void;
   /** Listens to the iframe agent's CDP messages: responses and events, without `sessionId`. */
   onMessage(listener: (message: string) => void): () => void;
+  /**
+   * Ends the session the iframe's agent has for the link's client, as a new Chrome session
+   * starts clean: what it enabled is disabled, and its node ids and remote objects are
+   * forgotten. Messages sent after it reach the new session.
+   */
+  endSession(): void;
   /** Listens to the link's end: the iframe navigated away, was removed, or closed it. */
   onClose(listener: () => void): () => void;
   close(): void;
@@ -32,8 +38,12 @@ export interface ParentLink {
   readonly frameId: string;
   /** The parent's frame that holds the iframe. */
   readonly parentFrameId: string;
+  /** The parent page's target id: the `parentId` of this page's target, as in Chrome. */
+  readonly parentTargetId: string;
   send(message: string): void;
   onMessage(listener: (message: string) => void): () => void;
+  /** Listens to the parent ending its client's session ({@link ChildLink.endSession}). */
+  onEndSession(listener: () => void): () => void;
   onClose(listener: () => void): () => void;
   close(): void;
 }
