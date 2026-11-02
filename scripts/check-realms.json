@@ -1,7 +1,7 @@
 {
   "core/history.ts": 1,
   "domains/css/style.ts": 1,
-  "domains/dom-debugger/dom-debugger.ts": 5,
+  "domains/dom-debugger/dom-debugger.ts": 3,
   "domains/network/network.ts": 3,
   "domains/overlay/overlay.ts": 8,
   "domains/page/render.ts": 4,

@@ -1,4 +1,4 @@
-import { isFrameOwner, isHtmlElement, isSvg, isSvgElement, realmOf } from './realm';
+import { contentDocumentOf, isFrameOwner, isHtmlElement, isSvg, isSvgElement, realmOf } from './realm';
 
 /** A CDP quad: x1 y1 … x4 y4, clockwise from the top left. */
 export type Quad = number[];
@@ -273,14 +273,9 @@ export function pointInFrame(doc: Document, x: number, y: number): { x: number; 
   return m ? unmapPoint(m, x, y) : { x, y };
 }
 
-/** The document an `<iframe>` or `<frame>` shows, when within reach (same origin). */
+/** The document a frame owner (`<iframe>`, `<object>`, …) shows, when within reach (same origin). */
 export function frameDocumentOf(el: Element): Document | null {
-  if (!isFrameOwner(el)) return null;
-  try {
-    return el.contentDocument;
-  } catch {
-    return null;
-  }
+  return isFrameOwner(el) ? contentDocumentOf(el) : null;
 }
 
 /**

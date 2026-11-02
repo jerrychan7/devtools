@@ -61,11 +61,45 @@ export function isNode(value: unknown): value is Node {
   }
 }
 
-/** An element that holds a frame: `<iframe>` or `<frame>`. */
-export type FrameOwner = HTMLIFrameElement | HTMLFrameElement;
+/**
+ * An element that can hold a frame: `<iframe>`, `<frame>`, and, like Chrome, which gives the
+ * document of an `<object>` or `<embed>` a frame too, those (not one showing an image or plugin).
+ */
+export type FrameOwner = HTMLIFrameElement | HTMLFrameElement | HTMLObjectElement | HTMLEmbedElement;
+
+const FRAME_OWNERS = new Set(['iframe', 'frame', 'object', 'embed']);
 
 export function isFrameOwner(node: Node | null | undefined): node is FrameOwner {
-  return isHtml(node, 'iframe') || (isHtmlElement(node) && node.localName === 'frame');
+  return isHtmlElement(node) && FRAME_OWNERS.has(node.localName);
+}
+
+/** The attribute naming the document a frame owner loads: `data` for `<object>`, else `src`. */
+export const sourceAttribute = (owner: FrameOwner) => (isHtml(owner, 'object') ? 'data' : 'src');
+
+/**
+ * The window of the frame an owner holds, if any. `<embed>` has no `contentWindow`: its window is
+ * the one among its document's child windows whose `frameElement` it is.
+ */
+export function contentWindowOf(owner: FrameOwner): Window | null {
+  if (!isHtml(owner, 'embed')) return owner.contentWindow;
+  const parent = owner.ownerDocument.defaultView;
+  for (let i = 0; parent && i < parent.length; i++) {
+    try {
+      if (parent[i]?.frameElement === owner) return parent[i] ?? null;
+    } catch {
+      // A cross-origin window: not this one's, which is out of reach anyway.
+    }
+  }
+  return null;
+}
+
+/** The document in a frame owner, null for a cross-origin one (out of reach) or none. */
+export function contentDocumentOf(owner: FrameOwner): Document | null {
+  try {
+    return isHtml(owner, 'embed') ? (contentWindowOf(owner)?.document ?? null) : owner.contentDocument;
+  } catch {
+    return null;
+  }
 }
 
 export function isDocumentType(node: Node | null | undefined): node is DocumentType {

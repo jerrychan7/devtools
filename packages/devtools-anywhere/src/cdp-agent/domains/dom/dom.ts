@@ -31,6 +31,7 @@ import {
   isSvgElement,
   isText,
   realmOf,
+  sourceAttribute,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import { type Frame, type FrameChange, touchesFrames } from '../../core/frames';
@@ -319,7 +320,7 @@ function outerHTML(node: Node): string {
 function loadsAnotherDocument(owner: FrameOwner, doc: Document): boolean {
   if (doc.URL !== 'about:blank') return false;
   if (owner.hasAttribute('srcdoc')) return true;
-  const src = owner.getAttribute('src')?.trim();
+  const src = owner.getAttribute(sourceAttribute(owner))?.trim();
   return !!src && new URL(src, owner.baseURI).href !== 'about:blank';
 }
 

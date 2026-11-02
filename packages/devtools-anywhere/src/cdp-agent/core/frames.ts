@@ -1,6 +1,16 @@
 import { EXECUTION_CONTEXT_ID, FRAME_ID, LOADER_ID } from './context';
 import { closestOwn, isOwn } from './nodes';
-import { type FrameOwner, documentOf, isElement, isFrameOwner, isNode, isShadowRoot } from './realm';
+import {
+  type FrameOwner,
+  contentDocumentOf,
+  contentWindowOf,
+  documentOf,
+  isElement,
+  isFrameOwner,
+  isNode,
+  isShadowRoot,
+  sourceAttribute,
+} from './realm';
 
 /** A document the agent exposes as a frame, with the execution context of its window. */
 export interface Frame {
@@ -13,7 +23,7 @@ export interface Frame {
   readonly window: Window;
   /** The document the frame shows now. */
   document: Document;
-  /** The `<iframe>` or `<frame>` holding the frame; none for the top one. */
+  /** The `<iframe>`, `<frame>`, `<object>` or `<embed>` holding the frame; none for the top one. */
   readonly owner?: FrameOwner;
   readonly parent?: Frame;
 }
@@ -25,15 +35,6 @@ export interface FrameChange {
 }
 
 const newLoaderId = () => `devtools-anywhere-loader-${Math.random().toString(36).slice(2)}`;
-
-/** The document in a frame owner, null for a cross-origin one (out of reach) or none. */
-function contentDocumentOf(owner: FrameOwner): Document | null {
-  try {
-    return owner.contentDocument;
-  } catch {
-    return null;
-  }
-}
 
 /** A shadow host's shadow root, if reachable: closed ones only through the probe's record. */
 export type ShadowRootOf = (host: Element) => ShadowRoot | null;
@@ -237,7 +238,7 @@ export class FrameRegistry {
     });
     for (const owner of owners) {
       const doc = contentDocumentOf(owner);
-      const win = owner.contentWindow;
+      const win = contentWindowOf(owner);
       let frame = this.#byOwner.get(owner);
       // A moved iframe gets a new browsing context: like Chrome, a new frame.
       if (frame && (frame.window !== win || !doc)) {
@@ -300,6 +301,11 @@ export function awaitsFirstDocument(frame: Frame): boolean {
   const { owner } = frame;
   if (!owner || frame.document.URL !== 'about:blank') return false;
   if (owner.hasAttribute('srcdoc')) return true;
-  const src = owner.getAttribute('src')?.trim();
-  return !!src && owner.src !== '' && owner.src !== 'about:blank';
+  const src = owner.getAttribute(sourceAttribute(owner))?.trim();
+  if (!src) return false;
+  try {
+    return new URL(src, owner.baseURI).href !== 'about:blank';
+  } catch {
+    return false;
+  }
 }
