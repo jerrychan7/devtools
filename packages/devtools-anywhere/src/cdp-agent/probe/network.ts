@@ -2,7 +2,7 @@
 // Resource Timing, for one window. Every global is taken from that window, so that the same hooks
 // work in a same-origin iframe, whose `fetch`, `XMLHttpRequest`, … are its own.
 import { RESPONSE_DETAILS } from './messages';
-import type { Probe, ProbeRequest, RequestType, SocketRecord } from './types';
+import type { FrameTag, Probe, ProbeRequest, RequestType, SocketRecord } from './types';
 
 /** `performance.now()`, written once: it is called in many places, and the probe is kept small. */
 export const now = () => performance.now();
@@ -30,24 +30,41 @@ export interface NetworkSink {
   requests: ProbeRequest[];
 }
 
+/** Marks a hooked window (its global object: a navigation may replace it), with what tags its requests. */
+const HOOKED = Symbol();
+
 /**
- * Hooks the network APIs of `w`. `listen` is the page's addEventListener before it was hooked:
- * the hooks' own listeners are not the page's. `serviceWorkerUrl` is shell mode's worker, which
- * reports what Resource Timing does not expose (the top window only).
+ * Hooks the network APIs of `w`, once per global object. `listen` is the page's addEventListener
+ * before it was hooked: the hooks' own listeners are not the page's. `frame` tags the requests
+ * of an iframe's window. `serviceWorkerUrl` is shell mode's worker, which reports what Resource
+ * Timing does not expose (the top window only).
  */
 export function hookNetwork(
   probe: Probe,
   sink: NetworkSink,
   w: Realm,
   listen: Listen,
+  frame?: () => FrameTag,
   serviceWorkerUrl?: string | undefined
 ): void {
+  const found: { frame?: (() => FrameTag) | undefined } | undefined = Reflect.get(w, HOOKED);
+  if (found) {
+    found.frame = frame;
+    return;
+  }
+  const state = { frame };
+  Object.defineProperty(w, HOOKED, { value: state });
+  const add = (rec: ProbeRequest) => {
+    const tag = state.frame?.();
+    if (tag) rec.frame = tag;
+    return sink.add(rec);
+  };
   const track: Track = record =>
-    sink.add({ ...record, requestId: '', startTime: now(), wallTime: Date.now(), state: 'pending' });
+    add({ ...record, requestId: '', startTime: now(), wallTime: Date.now(), state: 'pending' });
   hookWebSocket(probe, w, listen, sink.socket);
   hookFetch(track, sink.update, probe, w);
   hookXhr(track, sink.update, listen, probe, w);
-  observeResources(sink, w, serviceWorkerUrl);
+  observeResources({ ...sink, add }, w, serviceWorkerUrl);
 }
 
 // ---- other requests (Resource Timing) ----
@@ -55,6 +72,8 @@ export function hookNetwork(
 /** CDP resource type of a Resource Timing entry, from its MIME type or initiator. */
 function resourceType(entry: PerformanceResourceTiming, mimeType: string): RequestType {
   if (entry.entryType === 'navigation') return 'Document';
+  if (entry.initiatorType === 'fetch') return 'Fetch';
+  if (entry.initiatorType === 'xmlhttprequest') return 'XHR';
   if (/^text\/css\b/.test(mimeType)) return 'Stylesheet';
   if (/javascript|ecmascript/.test(mimeType)) return 'Script';
   if (mimeType.startsWith('image/')) return 'Image';
@@ -85,11 +104,15 @@ function resourceType(entry: PerformanceResourceTiming, mimeType: string): Reque
 /**
  * Records the requests that cannot be hooked (the document, style sheets, scripts, images,
  * fonts, …) from Resource Timing. Entries are only created once a request has finished, and
- * `buffered` also delivers those from before the probe ran, such as the document itself.
+ * `buffered` also delivers those from before the probe ran, such as the document itself and
+ * fetch() and XHR requests made before the hooks (in an iframe, those of its first scripts).
  */
 function observeResources(sink: NetworkSink, w: Realm, serviceWorkerUrl: string | undefined) {
   const { add, update, requests } = sink;
   if (typeof w.PerformanceObserver === 'undefined') return;
+  // An iframe's entries are timed from its own time origin; records from the top one's.
+  const shift = w.performance.timeOrigin - performance.timeOrigin;
+  const hooked = w.performance.now();
   // In shell mode with the Service Worker, it reports what Resource Timing does not expose
   // (headers, status text) of same-origin subresources, before the request's entry exists.
   // They are matched by URL; a late report still completes the record, but only one that was
@@ -150,8 +173,9 @@ function observeResources(sink: NetworkSink, w: Realm, serviceWorkerUrl: string 
   const record = (entry: PerformanceResourceTiming) => {
     if (seen.has(entry)) return;
     if (entry.entryType === 'navigation') seen.add(entry);
-    // fetch() and XHR are hooked, with more detail; DevTools' own fetches are unhooked.
-    if (entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') return;
+    // fetch() and XHR are hooked from then on, with more detail; DevTools' own fetches are unhooked.
+    if ((entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') && entry.startTime >= hooked)
+      return;
     // The browser's own favicon request is not the page's, and Chrome does not report it.
     if (entry.initiatorType === 'other' && (entry.name.split(/[?#]/)[0] ?? '').endsWith('/favicon.ico')) return;
     // Not in TypeScript's DOM types yet (Chrome 129+).
@@ -165,16 +189,16 @@ function observeResources(sink: NetworkSink, w: Realm, serviceWorkerUrl: string 
       method: 'GET',
       url: entry.name,
       requestHeaders: {},
-      startTime: entry.startTime,
+      startTime: entry.startTime + shift,
       wallTime: w.performance.timeOrigin + entry.startTime,
       state: 'done',
-      responseTime: entry.responseStart || entry.responseEnd,
+      responseTime: (entry.responseStart || entry.responseEnd) + shift,
       status,
       statusText: '',
       responseHeaders: {},
       mimeType,
       encodedDataLength: entry.transferSize,
-      endTime: entry.responseEnd,
+      endTime: entry.responseEnd + shift,
       ...patch,
     };
     if (!patch && isOurs(container?.controller)) awaiting.add(rec);

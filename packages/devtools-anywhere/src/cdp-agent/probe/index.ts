@@ -114,7 +114,8 @@ export function installProbe(): Probe {
     requests,
   };
   const shell = readShellConfig();
-  hookNetwork(probe, sink, w, listen, shell?.serviceWorker);
+  hookNetwork(probe, sink, w, listen, undefined, shell?.serviceWorker);
+  probe.hookNetwork = (win, frame) => hookNetwork(probe, sink, win, listen, frame);
 
   if (shell && window === top) {
     // When it refuses (a loop), the page loads on its own: probe.ts sees no config left.

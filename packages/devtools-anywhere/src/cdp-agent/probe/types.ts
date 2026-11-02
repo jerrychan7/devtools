@@ -137,6 +137,18 @@ export interface RequestRecord {
   errorText?: string;
   /** Whether a failed request was stopped by the page (abort), not by an error. */
   canceled?: boolean;
+  /** The same-origin iframe document that made the request; none for the top one's. */
+  frame?: FrameTag;
+}
+
+/**
+ * Which document of a same-origin iframe a request belongs to, as the CDP agent names it: taken
+ * when the request starts, so a request keeps the document that made it after a navigation.
+ */
+export interface FrameTag {
+  frameId: string;
+  loaderId: string;
+  documentURL: string;
 }
 
 /** Something that happened on a WebSocket after it was created. */
@@ -201,6 +213,13 @@ export interface Probe {
   fetch: typeof fetch;
   /** The page's WebSocket before it was hooked: DevTools' own connections are not recorded. */
   WebSocket: typeof WebSocket;
+  /**
+   * Hooks the network APIs of a same-origin iframe's window like the top one's: its requests are
+   * recorded here, tagged with what `frame` returns when each starts. Called again for a window
+   * already hooked (one kept across a navigation), it only replaces `frame`. Absent in probes
+   * from before 0.3.0.
+   */
+  hookNetwork?(win: Window & typeof globalThis, frame: () => FrameTag): void;
   /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
   tools: Map<string, ToolRecord>;
   /**
