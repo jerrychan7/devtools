@@ -114,7 +114,28 @@ s1   Page.frameAttached      {frameId: id5, parentFrameId: id2}        (grandchi
 `Input.dispatchMouseEvent` on the parent at a point over the OOPIF is hit-tested by the browser and
 delivered to the child: the iframe at (0, 100), a click at (50, 120) arrives in the child as
 `mousedown`/`click` at clientX/Y (50, 20). So the frontend's screencast/inspect clicks on the root work
-across OOPIFs; our agent would have to forward them, translated by the iframe's position.
+across OOPIFs; our agent forwards them, translated by the iframe's position.
+
+What each page gets (`domains/input/input-oopif.conformance.test.ts` compares ours with it):
+
+- Moving onto the iframe: nothing in the parent's document, not even an over/out for the `<iframe>`
+  element (its hovered element stays what it was); over/out in the iframe's document for its own
+  elements. Leaving the iframe: nothing in the iframe's document, and no over again on coming back
+  to the same element: each process keeps its own hover.
+- A press away from the last move moves the hover first (out/over, then down), in the iframe's
+  page as anywhere.
+- A press in the iframe and the release over the parent: the release goes to the parent's element,
+  no click anywhere.
+- A click on an `<input>` in the iframe: the parent's `activeElement` is the `<iframe>` (no focus
+  event on it), the iframe's the input. Keys and `insertText` on the parent session then go to the
+  input; the parent's page gets nothing.
+- Wheel over the iframe goes to the iframe's element under the point.
+- Touch emulated on the parent over the iframe (`setEmitTouchEventsForMouse`) got no answer in
+  headless Chrome.
+- `DOM.getNodeForLocation` on the parent over the iframe: the `<iframe>` element.
+- Inspect mode set on both targets (as the frontend does): moving and clicking over the iframe
+  gives `Overlay.nodeHighlightRequested` and `Overlay.inspectNodeRequested` on the **child**
+  session for its node, nothing on the parent's; the pages see none of the input.
 
 ## Lifecycle
 

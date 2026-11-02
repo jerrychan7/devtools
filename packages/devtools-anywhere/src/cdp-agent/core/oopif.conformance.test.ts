@@ -5,11 +5,10 @@
 // drives Chrome, and compared with Chrome on the same pages.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Page } from 'puppeteer-core';
 import { CDP_BUNDLE, type Env } from '../../../test-support/conformance.ts';
+import { chromeSide, get, oursSide, type Side } from '../../../test-support/oopif-sides.ts';
 import {
   chromeSequence,
-  FRONTEND_ENABLES,
   fixtureUrl,
   launchOopif,
   OopifPage,
@@ -199,134 +198,6 @@ test('ours: the parent keeps the <iframe> element with a frame id but no documen
   }
 });
 
-/** A message a client got: an event with the session it came on ('' for the root's). */
-interface Received {
-  sessionId: string;
-  method: string;
-  params: Record<string, unknown>;
-}
-
-/** One side of the comparison, set up as the frontend sets up a page and its iframe target. */
-interface Side {
-  /** A command's result, or its error's message. */
-  send(method: string, params?: object, sessionId?: string): Promise<Record<string, unknown> | string>;
-  events(): Promise<Received[]>;
-  /** The root's target id, the child's session and the child's target id. */
-  readonly root: string;
-  readonly child: string;
-  readonly childTarget: string;
-  close(): Promise<void> | void;
-}
-
-const get = (value: unknown, name: string): unknown =>
-  typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
-
-/** The pages compared: the parent on localhost, its iframe on 127.0.0.1, both with the probe, trusting each other. */
-function linkedUrl(): string {
-  assert.ok(env);
-  const childUrl = new URL(fixtureUrl(env, 'frame-link-child.html', '127.0.0.1'));
-  childUrl.searchParams.set('parentOrigins', new URL(fixtureUrl(env, '')).origin);
-  const parentUrl = new URL(fixtureUrl(env, 'frame-link-parent.html'));
-  parentUrl.searchParams.set('frameOrigins', childUrl.origin);
-  parentUrl.searchParams.set('child', childUrl.href);
-  return parentUrl.href;
-}
-
-/** Chrome, through OopifPage, which sets up the child as the frontend does. */
-async function chromeSide(): Promise<Side> {
-  assert.ok(env);
-  const page = await OopifPage.open(env, linkedUrl());
-  const child = await page.child('frame-link-child');
-  const childTarget = page.children.find(c => c.sessionId === child)?.targetId ?? '';
-  await page.cdp.settle();
-  return {
-    root: page.targetId,
-    child,
-    childTarget,
-    send: (method, params = {}, sessionId = page.sessionId) =>
-      // Any method: the comparison reads the replies loosely.
-      Reflect.apply(page.cdp.send, page.cdp, [method, params, sessionId]).then(
-        (result: unknown) => ({ ...Object(result) }),
-        (e: unknown) => String(e instanceof Error ? e.message : e).replace(`${method}: `, '')
-      ),
-    events: async () =>
-      page.cdp.log
-        .filter(e => e.sessionId !== '')
-        .map(e => ({ ...e, sessionId: e.sessionId === page.sessionId ? '' : e.sessionId })),
-    close: () => page.close(),
-  };
-}
-
-/**
- * Our agent in the parent page, with a flatten client in the page, which sets up the child as the
- * frontend does: Page, Runtime, DOM and Network enabled on the child's session, auto-attach on it
- * too, then resumed.
- */
-async function oursSide(): Promise<Side> {
-  assert.ok(env);
-  const page: Page = await env.browser.newPage();
-  await page.goto(linkedUrl());
-  await page.waitForFunction(() => 'DevtoolsAnywhere' in window);
-  await page.evaluate(() => {
-    const session = window.DevtoolsAnywhere.createCdpSession();
-    const log: Record<string, unknown>[] = [];
-    const pending = new Map<number, (reply: Record<string, unknown>) => void>();
-    let seq = 0;
-    session.onMessage(message => {
-      const parsed: Record<string, unknown> = { ...Object(JSON.parse(message)) };
-      const id = parsed['id'];
-      if (typeof id === 'number') pending.get(id)?.(parsed);
-      else log.push(parsed);
-    });
-    window.__client = {
-      log,
-      send: (method, params = {}, sessionId = '') =>
-        new Promise(resolve => {
-          const id = ++seq;
-          pending.set(id, resolve);
-          void session.dispatch(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-        }),
-    };
-  });
-  const send: Side['send'] = async (method, params = {}, sessionId = '') => {
-    const reply = await page.evaluate((m, p, s) => window.__client?.send(m, p, s), method, params, sessionId);
-    const error = get(reply, 'error');
-    return error === undefined ? { ...Object(get(reply, 'result')) } : String(get(error, 'message'));
-  };
-  const events = async (): Promise<Received[]> =>
-    (await page.evaluate(() => window.__client?.log ?? [])).map(m => ({
-      sessionId: String(m['sessionId'] ?? ''),
-      method: String(m['method']),
-      params: { ...Object(m['params']) },
-    }));
-  for (const method of FRONTEND_ENABLES) await send(method);
-  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
-  await send('Target.getTargetInfo');
-  let attached: Received | undefined;
-  for (const start = Date.now(); !attached; await new Promise(r => setTimeout(r, 20))) {
-    attached = (await events()).find(e => e.sessionId === '' && e.method === 'Target.attachedToTarget');
-    if (Date.now() - start > 5000) throw new Error('the iframe was not attached');
-  }
-  const child = String(attached.params['sessionId']);
-  for (const method of FRONTEND_ENABLES) await send(method, {}, child);
-  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, child);
-  if (attached.params['waitingForDebugger']) await send('Runtime.runIfWaitingForDebugger', {}, child);
-  // Settled: no event for a while.
-  for (let seen = -1, now = 0; seen !== now; await new Promise(r => setTimeout(r, 300))) {
-    seen = now;
-    now = (await events()).length;
-  }
-  const root = String(get(get(await send('Target.getTargetInfo'), 'targetInfo'), 'targetId'));
-  return {
-    root,
-    child,
-    childTarget: String(get(attached.params['targetInfo'], 'targetId')),
-    send,
-    events,
-    close: () => page.close(),
-  };
-}
-
 /**
  * What the frontend reads of the iframe's target, with ids named by what they are ('page' the
  * root's target and main frame, 'child' the child's) and fields that differ on every run dropped.
@@ -395,8 +266,9 @@ async function view(side: Side) {
 }
 
 test('ours: a linked cross-origin iframe is a child target as in Chrome, end to end', async () => {
-  const chrome = await chromeSide();
-  const ours = await oursSide();
+  assert.ok(env);
+  const chrome = await chromeSide(env);
+  const ours = await oursSide(env);
   try {
     const [expected, actual] = [await view(chrome), await view(ours)];
     // Left out, as timing ours cannot have: Chrome attaches the child paused before it commits
@@ -422,7 +294,8 @@ test('ours: a linked cross-origin iframe is a child target as in Chrome, end to 
 });
 
 test('ours: a detached iframe target starts clean when attached again, as a new Chrome session', async () => {
-  const ours = await oursSide();
+  assert.ok(env);
+  const ours = await oursSide(env);
   try {
     const first = get(await ours.send('DOM.getDocument', {}, ours.child), 'root');
     const evaluated = get(await ours.send('Runtime.evaluate', { expression: 'document.body' }, ours.child), 'result');
