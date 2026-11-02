@@ -275,3 +275,44 @@ test('either end closing the link closes the other', async () => {
     await page.close();
   }
 });
+
+/** Whether the child page shows its F12 button: its global element's, hidden or not with it. */
+const f12Shown = (child: Frame) =>
+  child.evaluate(() => {
+    const button = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
+    return button instanceof HTMLElement && button.checkVisibility();
+  });
+
+/** Waits for the child page to show its F12 button, or hide it. */
+const waitForF12 = (child: Frame, shown: boolean) =>
+  child.waitForFunction(
+    shown => {
+      const button = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.toggler');
+      return button instanceof HTMLElement && button.checkVisibility() === shown;
+    },
+    { timeout: 5000, polling: 50 },
+    shown
+  );
+
+test("the iframe's own F12 button is hidden while linked, and back once the link closes", async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForChildLinked(child);
+    await waitForF12(child, false);
+    await page.evaluate(() => [...window.DevtoolsAnywhere.childTargets.children()][0]?.close());
+    await waitForF12(child, true);
+  } finally {
+    await page.close();
+  }
+});
+
+test('an iframe that trusts no parent keeps its F12 button', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), null);
+  try {
+    await waitForF12(child, true);
+    await settle();
+    assert.equal(await f12Shown(child), true);
+  } finally {
+    await page.close();
+  }
+});
