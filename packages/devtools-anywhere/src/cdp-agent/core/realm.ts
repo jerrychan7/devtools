@@ -14,7 +14,7 @@ export function isElement(node: Node | null | undefined): node is Element {
 }
 
 export function isHtmlElement(node: Node | null | undefined): node is HTMLElement {
-  return isElement(node) && node.namespaceURI === 'http://www.w3.org/1999/xhtml';
+  return isElement(node) && node.namespaceURI === HTML_NS;
 }
 
 export function isText(node: Node | null | undefined): node is Text {
@@ -33,4 +33,37 @@ export function documentOf(node: Node): Document {
 /** The window of a node's document: its realm's globals (`getComputedStyle`, `Element`, …). */
 export function realmOf(node: Node): Window & typeof globalThis {
   return documentOf(node).defaultView ?? window;
+}
+
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+
+/** Whether `node` is the HTML element `<name>`, e.g. `isHtml(node, 'template')`. */
+export function isHtml<K extends keyof HTMLElementTagNameMap>(
+  node: Node | null | undefined,
+  name: K
+): node is HTMLElementTagNameMap[K] {
+  return isElement(node) && node.namespaceURI === HTML_NS && node.localName === name;
+}
+
+const nodeTypeGetter = Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType')?.get;
+
+/**
+ * Whether `value` is a DOM node of any realm. The top page's `Node.prototype.nodeType` getter
+ * accepts nodes of every window (Web IDL checks the interface, not the realm).
+ */
+export function isNode(value: unknown): value is Node {
+  if (typeof value !== 'object' || value === null || !nodeTypeGetter) return false;
+  try {
+    nodeTypeGetter.call(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** An element that holds a frame: `<iframe>` or `<frame>`. */
+export type FrameOwner = HTMLIFrameElement | HTMLFrameElement;
+
+export function isFrameOwner(node: Node | null | undefined): node is FrameOwner {
+  return isHtml(node, 'iframe') || (isHtmlElement(node) && node.localName === 'frame');
 }
