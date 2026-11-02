@@ -79,6 +79,9 @@ function consoleEntry(call: Extract<ProbeLog, { kind: 'console' }>): Omit<Consol
   }
 }
 
+/** Whether `value` is a Headers object of any realm: a same-origin iframe's fetch() gives its own. */
+const isHeaders = (value: object): value is Headers => Object.prototype.toString.call(value) === '[object Headers]';
+
 function headersToObject(headers: Record<string, string> | Headers | string): Record<string, string> {
   const obj: Record<string, string> = {};
   if (typeof headers === 'string') {
@@ -86,7 +89,7 @@ function headersToObject(headers: Record<string, string> | Headers | string): Re
       const i = line.indexOf(':');
       if (i > 0) obj[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
     }
-  } else if (headers instanceof Headers) headers.forEach((v, k) => (obj[k] = v));
+  } else if (isHeaders(headers)) headers.forEach((v, k) => (obj[k] = v));
   else Object.assign(obj, headers);
   return obj;
 }
@@ -278,6 +281,7 @@ export function viewProbe(probe: Probe): ProbeView {
     listeners: probe.listeners,
     ownUrls: probe.ownUrls,
     fetch: probe.fetch,
+    ...(probe.hookNetwork ? { hookNetwork: probe.hookNetwork } : {}),
     tools: probe.tools,
     bodyLimits(totalSize, resourceSize) {
       maxTotal = totalSize;
