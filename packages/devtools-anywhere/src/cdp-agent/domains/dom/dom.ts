@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { FRAME_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import {
   FORCE_ATTRIBUTE,
   PseudoElement,
@@ -474,7 +474,7 @@ export function registerDom(ctx: Context) {
       const node = resolveNode(ctx, params);
       const described = nodes.serialize(node, params.depth ?? 0, params.pierce);
       // describeNode does not push the node: report a 0 node id unless the client knows it.
-      return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId: FRAME_ID } };
+      return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId: ctx.frames.ofNode(node).id } };
     },
 
     resolveNode(params: Protocol.DOM.ResolveNodeRequest): Protocol.DOM.ResolveNodeResponse {
@@ -649,7 +649,11 @@ export function registerDom(ctx: Context) {
       const el = document.elementsFromPoint(params.x, params.y).find(e => !closestOwn(e));
       if (!el) throw new CdpError('No node found at given location');
       const nodeId = nodes.knownId(el);
-      return { backendNodeId: nodes.backendIdOf(el), frameId: FRAME_ID, ...(nodeId !== undefined && { nodeId }) };
+      return {
+        backendNodeId: nodes.backendIdOf(el),
+        frameId: ctx.frames.ofNode(el).id,
+        ...(nodeId !== undefined && { nodeId }),
+      };
     },
 
     collectClassNamesFromSubtree(params: Protocol.DOM.CollectClassNamesFromSubtreeRequest) {

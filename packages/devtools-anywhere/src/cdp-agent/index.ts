@@ -1,4 +1,5 @@
 import type { Context } from './core/context';
+import { frames } from './core/frames';
 import { NodeRegistry } from './core/nodes';
 import { ObjectRegistry } from './core/objects';
 import { viewProbe } from './core/probe-view';
@@ -75,6 +76,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
     objects: new ObjectRegistry(),
     nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
     probe: viewProbe(probe),
+    frames,
   };
   ctx.session.onReset(() => {
     ctx.probe.close();

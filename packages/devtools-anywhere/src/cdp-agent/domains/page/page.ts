@@ -1,17 +1,17 @@
 import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
-import { FRAME_ID, LOADER_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import { isOwnRequest, refetch } from '../network/network';
 
-export function registerPage({ session, probe }: Context) {
+export function registerPage({ session, probe, frames }: Context) {
   session.register('Page', {
     enable: () => {},
 
     getResourceTree: (): Protocol.Page.GetResourceTreeResponse => ({
       frameTree: {
         frame: {
-          id: FRAME_ID,
-          loaderId: LOADER_ID,
+          id: frames.top.id,
+          loaderId: frames.top.loaderId,
           url: location.href,
           domainAndRegistry: '',
           securityOrigin: location.origin,
@@ -111,7 +111,7 @@ export function registerPage({ session, probe }: Context) {
 
     navigate(params: Protocol.Page.NavigateRequest): Protocol.Page.NavigateResponse {
       location.href = params.url;
-      return { frameId: FRAME_ID, loaderId: LOADER_ID };
+      return { frameId: frames.top.id, loaderId: frames.top.loaderId };
     },
 
     addScriptToEvaluateOnNewDocument: (): Protocol.Page.AddScriptToEvaluateOnNewDocumentResponse => ({

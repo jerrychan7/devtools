@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { FRAME_ID, LOADER_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import { base64, readBody } from '../../core/body';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
@@ -102,7 +102,7 @@ async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.W
   return { opcode: 2, mask, payloadData };
 }
 
-export function registerNetwork({ session, probe }: Context) {
+export function registerNetwork({ session, probe, frames }: Context) {
   let unsubscribe: (() => void) | null = null;
   let unsubscribeSockets: (() => void) | null = null;
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
@@ -160,7 +160,7 @@ export function registerNetwork({ session, probe }: Context) {
       const callFrames = parseStack(rec.stack, 1);
       session.emit('Network.requestWillBeSent', {
         requestId: rec.requestId,
-        loaderId: LOADER_ID,
+        loaderId: frames.top.loaderId,
         documentURL: location.href,
         request,
         timestamp: rec.startTime / 1000,
@@ -169,7 +169,7 @@ export function registerNetwork({ session, probe }: Context) {
         initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
         redirectHasExtraInfo: false,
         type: rec.type,
-        frameId: FRAME_ID,
+        frameId: frames.top.id,
       } satisfies Protocol.Network.RequestWillBeSentEvent);
     }
 
@@ -177,7 +177,7 @@ export function registerNetwork({ session, probe }: Context) {
       done.add('response');
       session.emit('Network.responseReceived', {
         requestId: rec.requestId,
-        loaderId: LOADER_ID,
+        loaderId: frames.top.loaderId,
         timestamp: (rec.responseTime ?? performance.now()) / 1000,
         type: rec.type,
         response: {
@@ -193,7 +193,7 @@ export function registerNetwork({ session, probe }: Context) {
           securityState: 'unknown',
         },
         hasExtraInfo: false,
-        frameId: FRAME_ID,
+        frameId: frames.top.id,
       } satisfies Protocol.Network.ResponseReceivedEvent);
     }
 

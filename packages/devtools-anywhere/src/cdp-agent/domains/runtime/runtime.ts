@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { EXECUTION_CONTEXT_ID, FRAME_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import {
   lastExpressionStatement,
   topLevelLexicalDeclarations,
@@ -562,7 +562,7 @@ function globalLexicalNames(probe: Context['probe']) {
   }
 }
 
-export function registerRuntime({ session, objects, nodes, probe }: Context) {
+export function registerRuntime({ session, objects, nodes, probe, frames: { top: topFrame } }: Context) {
   const lexicalNames = globalLexicalNames(probe);
   const repl = replBindings();
   let unsubscribe: (() => void) | null = null;
@@ -619,7 +619,7 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
         lineNumber: 0,
         columnNumber: 0,
         exception,
-        executionContextId: EXECUTION_CONTEXT_ID,
+        executionContextId: topFrame.executionContextId,
         ...(frames.length ? { stackTrace: { callFrames: frames } } : {}),
       },
     };
@@ -643,7 +643,7 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
       session.emit('Runtime.consoleAPICalled', {
         type: entry.type,
         args: consoleArgs(entry),
-        executionContextId: EXECUTION_CONTEXT_ID,
+        executionContextId: topFrame.executionContextId,
         timestamp: entry.time,
         // Drop the probe's console wrapper frame.
         stackTrace: { callFrames: parseStack(entry.stack, 1) },
@@ -663,7 +663,7 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
         ...(url ? { url } : {}),
         scriptId: '',
         exception: objects.wrap(entry.error, { generatePreview: true, group: 'console' }),
-        executionContextId: EXECUTION_CONTEXT_ID,
+        executionContextId: topFrame.executionContextId,
         ...(frames.length ? { stackTrace: { callFrames: frames } } : {}),
       },
     } satisfies Protocol.Runtime.ExceptionThrownEvent);
@@ -674,11 +674,11 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
       if (unsubscribe) return;
       session.emit('Runtime.executionContextCreated', {
         context: {
-          id: EXECUTION_CONTEXT_ID,
+          id: topFrame.executionContextId,
           origin: location.origin,
           name: '',
           uniqueId: 'devtools-anywhere',
-          auxData: { isDefault: true, type: 'default', frameId: FRAME_ID },
+          auxData: { isDefault: true, type: 'default', frameId: topFrame.id },
         },
       } satisfies Protocol.Runtime.ExecutionContextCreatedEvent);
       // Like V8, report everything logged before the client connected.
@@ -794,7 +794,7 @@ export function registerRuntime({ session, objects, nodes, probe }: Context) {
             text: 'Uncaught',
             lineNumber: 0,
             columnNumber: 0,
-            executionContextId: EXECUTION_CONTEXT_ID,
+            executionContextId: topFrame.executionContextId,
           },
         };
       }

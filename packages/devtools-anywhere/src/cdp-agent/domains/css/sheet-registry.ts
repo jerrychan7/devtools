@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { FRAME_ID } from '../../core/context';
+import { frames } from '../../core/frames';
 import { isOwn } from '../../core/nodes';
 import { CdpError } from '../../core/session';
 import { adoptedOf } from '../../core/adopted';
@@ -269,7 +269,7 @@ export class SheetRegistry {
       (owner instanceof HTMLStyleElement && !this.fromParser(owner));
     return {
       styleSheetId: this.idOf(sheet),
-      frameId: FRAME_ID,
+      frameId: frames.ofNode(owner).id,
       sourceURL: sheet.href ?? (isInspector || local ? '' : location.href),
       origin: this.origin(sheet),
       title: sheet.title ?? '',

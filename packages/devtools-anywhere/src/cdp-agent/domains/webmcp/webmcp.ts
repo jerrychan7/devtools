@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../../core/session';
-import { FRAME_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import { parseStack } from '../../core/stack';
 import type { ToolOutcome, ToolRecord } from '../../probe/types';
 
@@ -124,7 +124,7 @@ const newInvocationId = () =>
  * derives their input schema like Chrome does, fills them in and submits them.
  */
 export function registerWebMcp(ctx: Context) {
-  const { session, nodes, objects, probe } = ctx;
+  const { session, nodes, objects, probe, frames } = ctx;
   const tools = new Map<string, Tool>();
   const invocations = new Map<string, AbortController>();
   let stop: (() => void) | null = null;
@@ -145,7 +145,7 @@ export function registerWebMcp(ctx: Context) {
     for (const tool of added) tools.set(tool.info.name, tool);
     if (removed.length)
       session.emit('WebMCP.toolsRemoved', {
-        tools: removed.map(name => ({ name, frameId: FRAME_ID })),
+        tools: removed.map(name => ({ name, frameId: frames.top.id })),
       } satisfies Protocol.WebMCP.ToolsRemovedEvent);
     if (added.length)
       session.emit('WebMCP.toolsAdded', {
@@ -189,7 +189,7 @@ export function registerWebMcp(ctx: Context) {
         description: tool.description,
         ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
         ...(annotations ? { annotations } : {}),
-        frameId: FRAME_ID,
+        frameId: frames.top.id,
         ...(form ? { backendNodeId: nodes.backendIdOf(form) } : {}),
         ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
@@ -265,7 +265,7 @@ export function registerWebMcp(ctx: Context) {
         description,
         inputSchema: formSchema(form),
         ...(autosubmit ? { annotations: { autosubmit: true } } : {}),
-        frameId: FRAME_ID,
+        frameId: frames.top.id,
         backendNodeId: nodes.backendIdOf(form),
       },
       invoke: (input, signal) => submitForm(form, input, autosubmit, signal),
@@ -292,7 +292,7 @@ export function registerWebMcp(ctx: Context) {
 
     invokeTool(params: Protocol.WebMCP.InvokeToolRequest): Protocol.WebMCP.InvokeToolResponse {
       if (!stop) throw new CdpError('WebMCP domain is not enabled');
-      const tool = params.frameId === FRAME_ID ? tools.get(params.toolName) : undefined;
+      const tool = params.frameId === frames.top.id ? tools.get(params.toolName) : undefined;
       if (!tool) throw new CdpError('Tool not found');
       const invocationId = newInvocationId();
       const controller = new AbortController();
@@ -302,7 +302,7 @@ export function registerWebMcp(ctx: Context) {
       queueMicrotask(async () => {
         session.emit('WebMCP.toolInvoked', {
           toolName: params.toolName,
-          frameId: FRAME_ID,
+          frameId: frames.top.id,
           invocationId,
           input: sortedJson(input),
         } satisfies Protocol.WebMCP.ToolInvokedEvent);

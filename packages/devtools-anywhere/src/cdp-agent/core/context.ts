@@ -1,3 +1,4 @@
+import type { FrameRegistry } from './frames';
 import type { NodeRegistry } from './nodes';
 import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
@@ -9,11 +10,12 @@ export interface Context {
   objects: ObjectRegistry;
   nodes: NodeRegistry;
   probe: ProbeView;
+  frames: FrameRegistry;
   /** Re-checks which pseudo-elements exist, e.g. after a style edit. Set by the DOM domain. */
   refreshPseudoElements?: (roots?: Node[]) => void;
 }
 
-/** The page is exposed as a single frame with a single execution context. @internal */
+/** The top frame's id; its execution context is EXECUTION_CONTEXT_ID (core/frames.ts). @internal */
 export const FRAME_ID = 'devtools-anywhere-frame';
 /**
  * Like Chrome, every document gets its own loader id: each page load evaluates this module

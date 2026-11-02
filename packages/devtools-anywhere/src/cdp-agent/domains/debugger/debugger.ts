@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../../core/session';
-import { EXECUTION_CONTEXT_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import type { RequestRecord } from '../../probe/types';
 import { refetch } from '../network/network';
 
@@ -13,7 +13,7 @@ import { refetch } from '../network/network';
  * page uses and show in stack traces. The frontend ignore-lists them.
  * There are no breakpoints: the breakpoint commands are accepted and resolve to nothing.
  */
-export function registerDebugger({ session, probe }: Context) {
+export function registerDebugger({ session, probe, frames }: Context) {
   /** Script id per URL, stable for the page's lifetime. */
   const ids = new Map<string, string>();
   const sources = new Map<string, Promise<string>>();
@@ -36,7 +36,7 @@ export function registerDebugger({ session, probe }: Context) {
       // Unknown until the source is loaded; the frontend reads the real extent from the source.
       endLine: 0,
       endColumn: 0,
-      executionContextId: EXECUTION_CONTEXT_ID,
+      executionContextId: frames.top.executionContextId,
       hash: '',
       buildId: '',
       isModule,
