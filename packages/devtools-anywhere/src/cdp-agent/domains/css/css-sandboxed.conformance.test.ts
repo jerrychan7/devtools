@@ -2,8 +2,7 @@
 // (core/merged-frames.ts), in the CSS domain, against Chrome, which keeps it in the page's
 // target: its style sheets announced on the page's session with its frame id, the styles of its
 // nodes, and the editing of its rules. The sandboxed node is reached through Runtime (its
-// context) and DOM.requestNode, whose routes are this test's own until those domains register
-// theirs.
+// context) and DOM.requestNode.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
@@ -19,10 +18,7 @@ const RULE = '#target { color: rgb(1, 2, 3); }';
 before(async () => {
   env = await launchOopif();
   chrome = await chromeSide(env);
-  ours = await oursSide(env, {
-    Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-    DOM: { routeBy: { 'DOM.requestNode': ['objectId'] } },
-  });
+  ours = await oursSide(env);
 });
 after(async () => {
   await ours?.close();

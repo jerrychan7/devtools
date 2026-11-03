@@ -15,11 +15,7 @@ let chrome: MergedSide | undefined;
 before(async () => {
   env = await launchOopif();
   chrome = await chromeSide(env);
-  // Runtime's routes are this test's own until the Runtime domain registers its table: the
-  // sandboxed frame's execution context is reported on Runtime.enable.
-  ours = await oursSide(env, {
-    Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-  });
+  ours = await oursSide(env);
   for (const side of [chrome, ours]) await side.send('Debugger.enable');
 });
 after(async () => {

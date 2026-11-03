@@ -2,8 +2,7 @@
 // against Chrome: the same commands on the same pages (test-support/merged-sides.ts). Chrome keeps
 // the iframe in the page's process and target, and routes the input into it; our page's agent
 // forwards it over the merged link to the iframe's. The iframe's page is read in its own execution
-// context, on the page's session: Runtime's routes are this test's own until the Runtime domain
-// registers its table.
+// context, on the page's session.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
@@ -16,10 +15,6 @@ before(async () => {
   env = await launchOopif();
 });
 after(() => env?.close());
-
-const ROUTES = {
-  Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-};
 
 /** Records the input events of a document, named by their targets. */
 const RECORD = `(() => {
@@ -139,7 +134,7 @@ async function run(open: (env: Env) => Promise<MergedSide>) {
 
 test('mouse, keys, wheel and touch over a sandboxed iframe reach its page as in Chrome', async () => {
   const expected = await run(chromeSide);
-  const actual = await run(e => oursSide(e, ROUTES));
+  const actual = await run(oursSide);
   assert.deepEqual(actual, expected);
   // One process: unlike a cross-origin iframe's, the iframe's element is hovered in the page too.
   assert.deepEqual(get(expected['into the iframe'], 'root'), [['pointerover', 'child', 5, 75]]);

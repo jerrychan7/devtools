@@ -5,7 +5,6 @@
 // the page's target, with no child target: so does the merge. In the style of oopif-sides.ts.
 import type { Page } from 'puppeteer-core';
 import type { Env } from '../../../tests/support/browser.ts';
-import type { RouteTable } from '../src/cdp-agent/core/merged-frames.ts';
 import { FRONTEND_ENABLES, fixtureUrl, OopifPage } from './oopif.ts';
 import { get, type Received } from './oopif-sides.ts';
 
@@ -53,10 +52,9 @@ export async function chromeSide(env: Env): Promise<MergedSide> {
 
 /**
  * Our agent in the parent page, with a flatten client in the page set up as the frontend sets up
- * a page, once the sandboxed iframe is merged. `routes` are registered first, by domain: the
- * domains' own tables, for the tests that run before those exist.
+ * a page, once the sandboxed iframe is merged.
  */
-export async function oursSide(env: Env, routes: Record<string, RouteTable> = {}): Promise<MergedSide> {
+export async function oursSide(env: Env): Promise<MergedSide> {
   const page: Page = await env.browser.newPage();
   await page.goto(mergedUrl(env));
   await page.waitForFunction(() => 'DevtoolsAnywhere' in window);
@@ -64,9 +62,7 @@ export async function oursSide(env: Env, routes: Record<string, RouteTable> = {}
     timeout: 5000,
     polling: 50,
   });
-  await page.evaluate(routes => {
-    const { mergedFrames } = window.__devtoolsAnywhereTest;
-    for (const [domain, table] of Object.entries(routes)) mergedFrames.registerRoutes(domain, table);
+  await page.evaluate(() => {
     const session = window.DevtoolsAnywhere.createCdpSession();
     const log: Record<string, unknown>[] = [];
     const pending = new Map<number, (reply: Record<string, unknown>) => void>();
@@ -84,7 +80,7 @@ export async function oursSide(env: Env, routes: Record<string, RouteTable> = {}
       log.push(parsed);
     });
     window.__client = { log, send };
-  }, routes);
+  });
   const send: MergedSide['send'] = async (method, params = {}) => {
     const reply = await page.evaluate((m, p) => window.__client?.send(m, p), method, params);
     const error = get(reply, 'error');

@@ -2,8 +2,7 @@
 // page's agent (core/merged-frames.ts), against Chrome, which keeps the iframe in the page's
 // target: its fetch, XHR and WebSocket on the page's session, each once, of the iframe's frame and
 // document loader; its document request once, by the page; bodies asked by request id; cookies the
-// page's. Ids differ between the two sides: they are compared by how they relate. Runtime's
-// routes are this test's own until the Runtime domain registers its table.
+// page's. Ids differ between the two sides: they are compared by how they relate.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
@@ -42,9 +41,7 @@ async function runInFrame(side: MergedSide, frameId: string, expression: string)
 before(async () => {
   env = await launchOopif();
   const chrome = await chromeSide(env);
-  const ours = await oursSide(env, {
-    Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-  });
+  const ours = await oursSide(env);
   for (const [name, side] of [
     ['chrome', chrome],
     ['ours', ours],

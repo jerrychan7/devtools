@@ -2,8 +2,7 @@
 // Chrome (test-support/merged-sides.ts): a node of the iframe highlighted on the page where Chrome
 // places it, and inspect mode picking the node under the mouse in the iframe. The iframe's nodes are
 // reached by objects of its execution context (Runtime.evaluate there), not through DOM.getDocument,
-// whose graft of the iframe's document is the DOM domain's; Runtime's and DOM's routes are this
-// test's own until those domains register their tables.
+// whose graft of the iframe's document is the DOM domain's.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
@@ -16,11 +15,6 @@ before(async () => {
   env = await launchOopif();
 });
 after(() => env?.close());
-
-const ROUTES = {
-  Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-  DOM: { routeBy: { 'DOM.describeNode': ['backendNodeId', 'objectId'] } },
-};
 
 const DRAWN = 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))';
 
@@ -49,7 +43,7 @@ async function run<T>(open: (env: Env) => Promise<MergedSide>, act: (side: Merge
   }
 }
 
-const ours = (e: Env) => oursSide(e, ROUTES);
+const ours = oursSide;
 
 /** The object of the iframe's #target, in its context. */
 async function targetObject(side: MergedSide): Promise<string> {

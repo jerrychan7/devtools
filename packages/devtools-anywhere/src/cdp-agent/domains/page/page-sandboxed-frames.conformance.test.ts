@@ -146,10 +146,7 @@ describe('a sandboxed iframe merged into the page', () => {
   before(async () => {
     oopif = await launchOopif();
     sides.chrome = await chromeSide(oopif);
-    // Runtime's routes, to run scripts in the iframe, until the Runtime domain registers its own.
-    sides.ours = await oursSide(oopif, {
-      Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-    });
+    sides.ours = await oursSide(oopif);
   });
   after(async () => {
     await sides.ours?.close();

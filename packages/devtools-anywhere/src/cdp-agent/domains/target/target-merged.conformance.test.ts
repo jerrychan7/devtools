@@ -1,7 +1,6 @@
 // A sandboxed iframe without allow-same-origin, on the page's origin, merged into the page's agent
 // (core/merged-frames.ts), against Chrome, which keeps it in the page's target: no child target,
-// and its execution context on the page's session. Runtime's routes are this test's own until the
-// Runtime domain registers its table.
+// and its execution context on the page's session.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
@@ -15,9 +14,7 @@ let chrome: MergedSide | undefined;
 before(async () => {
   env = await launchOopif();
   chrome = await chromeSide(env);
-  ours = await oursSide(env, {
-    Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
-  });
+  ours = await oursSide(env);
 });
 after(async () => {
   await ours?.close();
