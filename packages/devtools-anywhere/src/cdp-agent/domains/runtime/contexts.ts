@@ -1,9 +1,24 @@
 import type { Protocol } from 'devtools-protocol';
 import { type Frame, type FrameChange, type FrameRegistry, awaitsFirstDocument } from '../../core/frames';
+import { NS_STRIDE, nsPrefix } from '../../core/merged-frames';
 import { isNode, realmOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
-const uniqueIdOf = (contextId: number) => `devtools-anywhere-context-${contextId}`;
+/**
+ * A context's uniqueId: in a merged frame's agent (core/merged-frames.ts), whose context ids are
+ * in its namespace, prefixed with it, so that the page's agent routes uniqueContextId by it too.
+ */
+function uniqueIdOf(contextId: number): string {
+  const ns = Math.floor(contextId / NS_STRIDE);
+  return `${ns > 0 ? nsPrefix(ns) : ''}devtools-anywhere-context-${contextId}`;
+}
+
+/**
+ * The origin Chrome reports for a frame's context: the document's, inherited by about:blank and
+ * about:srcdoc; for an opaque one (a sandboxed iframe without allow-same-origin) Chrome writes
+ * '://', not 'null'.
+ */
+const originOf = (frame: Frame) => (frame.window.origin === 'null' ? '://' : frame.window.origin);
 
 /**
  * The execution contexts the client knows of: the default one of each frame's document (no
@@ -25,7 +40,7 @@ export function executionContexts(frames: FrameRegistry, emit: (method: string, 
       context: {
         id,
         // The document's origin, inherited by about:blank and about:srcdoc.
-        origin: frame.window.origin,
+        origin: originOf(frame),
         name: '',
         uniqueId: uniqueIdOf(id),
         auxData: { isDefault: true, type: 'default', frameId: frame.id },
