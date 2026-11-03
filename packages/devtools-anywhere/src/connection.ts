@@ -174,11 +174,14 @@ const REMOTE_CLIENT = 'remote:';
 /** Clients named after the remote session they serve, for the shell to know them across reloads. */
 const metricsNames = new WeakMap<CdpSession, string>();
 
-/** Tells the shell, in shell mode, that `session`'s client (a remote one) attached now. */
-export function announceRemoteClient(session: CdpSession) {
+/**
+ * Tells the shell, in shell mode, that `session`'s client (a remote one) attached now, or that its
+ * session ended (`attach` false).
+ */
+export function announceRemoteClient(session: CdpSession, attach = true) {
   const client = metricsNames.get(session);
   if (!isShellPage() || client === undefined) return;
-  const params: MetricsParams = { id: 0, client, metrics: null, attach: true };
+  const params: MetricsParams = { id: 0, client, metrics: null, attach };
   window.parent.postMessage(JSON.stringify({ method: METRICS_METHOD, params }), location.origin);
 }
 
@@ -381,7 +384,6 @@ class ShellRelay extends RelayCore {
 
   /** Sets `client`'s override to `params` (Emulation.setDeviceMetricsOverride's), or clears it (null). */
   private setMetrics(client: string, params: unknown) {
-    if (!this.attached.has(client)) this.attached.set(client, ++this.attachSeq);
     const own = this.overrides.get(client);
     if (params === null) {
       if (!this.overrides.delete(client)) return;
@@ -390,6 +392,7 @@ class ShellRelay extends RelayCore {
     }
     // A new page instance's re-sent one: applied in attach order once all are back, or not at all
     // when a client set or cleared one since.
+    if (!this.attached.has(client)) this.attached.set(client, ++this.attachSeq);
     if (own?.pending) {
       own.params = params;
       own.pending = false;
@@ -439,8 +442,11 @@ class ShellRelay extends RelayCore {
     let lastSeq = 0;
     for (const [client, override] of this.overrides) {
       const seq = this.attached.get(client) ?? 0;
-      if (override.pending) this.overrides.delete(client);
-      else if (seq > lastSeq) [last, lastSeq] = [override, seq];
+      if (override.pending) {
+        // Its session ended meanwhile (its end went to the instance before this one, or none).
+        this.overrides.delete(client);
+        this.attached.delete(client);
+      } else if (seq > lastSeq) [last, lastSeq] = [override, seq];
     }
     this.apply(last ? last.params : null);
   }
@@ -486,10 +492,12 @@ class ShellRelay extends RelayCore {
         const id = field('id');
         const metrics = field('metrics');
         const client = String(field('client'));
-        if (field('attach') === true) {
-          // Not answered: the client does not wait.
+        const attach = field('attach');
+        // Not answered: the client does not wait.
+        if (typeof attach === 'boolean') {
           this.attached.delete(client);
-          return void this.attached.set(client, ++this.attachSeq);
+          if (attach) this.attached.set(client, ++this.attachSeq);
+          return;
         }
         this.setMetrics(client, typeof metrics === 'object' ? metrics : null);
         const answer = { method: METRICS_METHOD, params: { id } };

@@ -133,6 +133,8 @@ export function connectRemote(
     const { cdp } = found;
     void endSession(cdp).then(() => {
       cdp.reset();
+      // After its override's clear (on reset): the shell forgets when it attached.
+      announceRemoteClient(cdp, false);
       idle.push(cdp);
     });
   }

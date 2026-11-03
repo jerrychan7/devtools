@@ -52,6 +52,9 @@ export interface MetricsParams {
   /** The client, unique across the page's instances. */
   client: string;
   metrics: object | null;
-  /** The client only attached: the shell notes when, and leaves its override as it is. */
+  /**
+   * The client only attached (true: the shell notes when) or its session ended (false: the shell
+   * forgets it, its override cleared before), and leaves overrides as they are.
+   */
   attach?: boolean;
 }
