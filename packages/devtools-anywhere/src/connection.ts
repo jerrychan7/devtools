@@ -174,6 +174,14 @@ const REMOTE_CLIENT = 'remote:';
 /** Clients named after the remote session they serve, for the shell to know them across reloads. */
 const metricsNames = new WeakMap<CdpSession, string>();
 
+/** Tells the shell, in shell mode, that `session`'s client (a remote one) attached now. */
+export function announceRemoteClient(session: CdpSession) {
+  const client = metricsNames.get(session);
+  if (!isShellPage() || client === undefined) return;
+  const params: MetricsParams = { id: 0, client, metrics: null, attach: true };
+  window.parent.postMessage(JSON.stringify({ method: METRICS_METHOD, params }), location.origin);
+}
+
 /** Names `session`'s client after the remote server's session `id` it now serves (remote.ts). */
 export function nameRemoteClient(session: CdpSession, id: string) {
   metricsNames.set(session, REMOTE_CLIENT + id);
@@ -258,8 +266,9 @@ class ShellRelay extends RelayCore {
    */
   private readonly overrides = new Map<string, Override>();
   /**
-   * The clients in the order they attached (as first seen): after a reload Chrome applies the
-   * overrides again in that order, so the last-attached client's holds.
+   * The clients in the order they attached: the frontend when its instance started, a remote
+   * client when its session did (announceRemoteClient), others when first seen. After a reload
+   * Chrome applies the overrides again in that order, so the last-attached client's holds.
    */
   private readonly attached = new Map<string, number>();
   private attachSeq = 0;
@@ -476,7 +485,13 @@ class ShellRelay extends RelayCore {
           typeof params === 'object' && params !== null ? Reflect.get(params, name) : undefined;
         const id = field('id');
         const metrics = field('metrics');
-        this.setMetrics(String(field('client')), typeof metrics === 'object' ? metrics : null);
+        const client = String(field('client'));
+        if (field('attach') === true) {
+          // Not answered: the client does not wait.
+          this.attached.delete(client);
+          return void this.attached.set(client, ++this.attachSeq);
+        }
+        this.setMetrics(client, typeof metrics === 'object' ? metrics : null);
         const answer = { method: METRICS_METHOD, params: { id } };
         return this.page.contentWindow?.postMessage(JSON.stringify(answer), location.origin);
       }

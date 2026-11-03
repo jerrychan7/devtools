@@ -1,5 +1,6 @@
 import { LOADER_ID, frames, installProbe, type CdpSession } from './cdp-agent';
 import {
+  ATTACH_METHOD,
   DETACH_METHOD,
   HELLO_METHOD,
   PAGEHIDE_METHOD,
@@ -8,7 +9,7 @@ import {
   type HelloParams,
 } from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
-import { endSession, nameRemoteClient } from './connection';
+import { announceRemoteClient, endSession, nameRemoteClient } from './connection';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -143,12 +144,17 @@ export function connectRemote(
       } catch {
         return;
       }
-      if (typeof message !== 'object' || !message || !('method' in message) || message.method !== DETACH_METHOD) return;
+      if (typeof message !== 'object' || !message || !('method' in message)) return;
+      const attach = message.method === ATTACH_METHOD;
+      if (!attach && message.method !== DETACH_METHOD) return;
       const params = 'params' in message ? message.params : undefined;
       if (typeof params !== 'object' || !params) return;
       const field = (name: keyof DetachParams): unknown => Reflect.get(params, name);
       const session = field('session');
-      if (session !== undefined) detach(String(session));
+      if (session === undefined) return;
+      // A session's start is its attach time, which a device metrics override's order needs.
+      if (attach) announceRemoteClient(cdpOf(String(session)));
+      else detach(String(session));
       return;
     }
     const colon = data.indexOf(':');

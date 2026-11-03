@@ -16,6 +16,7 @@
 // the target was forgotten) are detached.
 
 import {
+  ATTACH_METHOD,
   DETACH_METHOD,
   HELLO_METHOD,
   PAGEHIDE_METHOD,
@@ -93,7 +94,9 @@ export class Target extends RelayCore {
 
   /** A DevTools frontend connected: a session of its own. */
   attachClient(client: Peer) {
-    this.byClient.set(client, this.openSession(client));
+    const session = this.openSession(client);
+    this.byClient.set(client, session);
+    this.sendOwn(JSON.stringify({ method: ATTACH_METHOD, params: { session: session.id } satisfies DetachParams }));
   }
 
   detachClient(client: Peer) {

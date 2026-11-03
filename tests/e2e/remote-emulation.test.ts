@@ -270,20 +270,42 @@ test("in shell mode, after a reload the shell frontend's override and remote cli
   assert.equal(await pageSize(), '400x600', 'the later-attached client wins after the reload');
   // A new frontend instance attaches after A: its override holds after the reload.
   await fromFrontend('Emulation.clearDeviceMetricsOverride');
-  await shell.evaluate(() => {
-    const frame = [...document.querySelectorAll('iframe')].find(f => /fake-frontend/.test(f.src));
-    frame?.contentWindow?.location.reload();
-  });
-  await pause();
-  frontendSeq = 1000;
+  await reloadFrontend();
   await fromFrontend('Emulation.setDeviceMetricsOverride', metrics(500, 500));
   await a.call('Emulation.setDeviceMetricsOverride', metrics(450, 650));
   assert.equal(await pageSize(), '450x650');
   await reloadPage();
   assert.equal(await pageSize(), '500x500', 'the frontend attached later: its override wins');
+  // C connects before a new frontend instance, but sets its override only after the frontend's:
+  // it attached when it connected, so the frontend's holds after the reload.
+  await fromFrontend('Emulation.clearDeviceMetricsOverride');
+  await a.call('Emulation.clearDeviceMetricsOverride');
+  const c = await connect();
+  await pause();
+  await reloadFrontend();
+  await fromFrontend('Emulation.setDeviceMetricsOverride', metrics(500, 500));
+  await c.call('Emulation.setDeviceMetricsOverride', metrics(350, 250));
+  assert.equal(await pageSize(), '350x250');
+  await reloadPage();
+  assert.equal(await pageSize(), '500x500', 'C attached before the frontend, though it set its override later');
+  c.socket.close();
   a.socket.close();
   await shell.close();
 });
+
+/** Reloads the shell's frontend frame: a new frontend instance, once it has sent its first commands. */
+async function reloadFrontend() {
+  const frame = await shell.waitForFrame(frame => /fake-frontend/.test(frame.url()));
+  const before = await frame.evaluate(() => performance.timeOrigin);
+  await frame.evaluate(() => location.reload()).catch(() => {});
+  await waitFor(async () => {
+    const now = await shell.waitForFrame(frame => /fake-frontend/.test(frame.url()));
+    return now.evaluate(
+      before => performance.timeOrigin !== before && Number(Reflect.get(window, 'received')?.length) >= 3,
+      before
+    );
+  });
+}
 
 /** Starts recording the page iframe's sizes that are its own (as laid out, `natural`). */
 function watchSizes() {

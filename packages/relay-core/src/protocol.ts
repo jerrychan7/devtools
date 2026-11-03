@@ -7,6 +7,11 @@ export const HELLO_METHOD = 'DevtoolsAnywhere.hello';
 export const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
 /** Sent to the page when a session ends: its CDP session stops (its domains are disabled). */
 export const DETACH_METHOD = 'DevtoolsAnywhere.detach';
+/**
+ * Sent to the page when a session starts (the remote server's): a client's attach time, which
+ * orders device metrics overrides after a reload as in Chrome.
+ */
+export const ATTACH_METHOD = 'DevtoolsAnywhere.attach';
 /** Sent by the shell on startup, in case the page started listening first: the page says hello. */
 export const PING_METHOD = 'DevtoolsAnywhere.ping';
 /**
@@ -33,7 +38,10 @@ export interface HelloParams {
   sessions: string[];
 }
 
-/** A detach's params: the session that ended, as the relay or the page's hello named it. */
+/**
+ * An attach's or a detach's params: the session that started or ended, as the relay or the page's
+ * hello named it.
+ */
 export interface DetachParams {
   session: number | string;
 }
@@ -44,4 +52,6 @@ export interface MetricsParams {
   /** The client, unique across the page's instances. */
   client: string;
   metrics: object | null;
+  /** The client only attached: the shell notes when, and leaves its override as it is. */
+  attach?: boolean;
 }
