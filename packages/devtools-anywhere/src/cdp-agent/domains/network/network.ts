@@ -5,7 +5,8 @@ import { CdpError } from '../../core/session';
 import { toTag } from '../../core/objects';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
-import { isFrameDocument } from './frames';
+import { childTargets } from '../../core/child-targets';
+import { isFrameDocument, opaqueFrameOf } from './frames';
 
 export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return [];
@@ -140,6 +141,9 @@ export function registerNetwork(ctx: Context) {
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
     if (isOwnRequest(probe, rec) || isFrameDocument(rec)) return;
+    // The document of a sandboxed iframe: of that frame, as in Chrome.
+    const opaque = rec.frame ? undefined : opaqueFrameOf(rec);
+    const frameId = rec.frame?.frameId ?? (opaque ? childTargets.frameIdOf(opaque) : frames.top.id);
     prune(sent, probe.requests, 'end');
     let done = sent.get(rec.requestId);
     if (!done) sent.set(rec.requestId, (done = new Set()));
@@ -168,7 +172,7 @@ export function registerNetwork(ctx: Context) {
       session.emit('Network.requestWillBeSent', {
         requestId: rec.requestId,
         loaderId: rec.frame?.loaderId ?? frames.top.loaderId,
-        documentURL: rec.frame?.documentURL ?? location.href,
+        documentURL: rec.frame?.documentURL ?? (opaque ? rec.url : location.href),
         request,
         timestamp: rec.startTime / 1000,
         wallTime: rec.wallTime / 1000,
@@ -176,7 +180,7 @@ export function registerNetwork(ctx: Context) {
         initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
         redirectHasExtraInfo: false,
         type: rec.type,
-        frameId: rec.frame?.frameId ?? frames.top.id,
+        frameId,
       } satisfies Protocol.Network.RequestWillBeSentEvent);
     }
 
@@ -200,7 +204,7 @@ export function registerNetwork(ctx: Context) {
           securityState: 'unknown',
         },
         hasExtraInfo: false,
-        frameId: rec.frame?.frameId ?? frames.top.id,
+        frameId,
       } satisfies Protocol.Network.ResponseReceivedEvent);
     }
 

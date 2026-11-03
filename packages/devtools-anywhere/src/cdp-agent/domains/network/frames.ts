@@ -37,10 +37,34 @@ export function isChildDocument(rec: Pick<RequestRecord, 'initiatorType' | 'type
 }
 
 /**
+ * The `<iframe>` or `<frame>` in `doc` (or a same-origin frame within it) that loads `url` into a
+ * document the page cannot reach: a sandbox without allow-same-origin makes it opaque. The probe
+ * never hooks such a frame, so its document request is only seen in its parent's Resource Timing.
+ */
+function opaqueOwner(doc: Document, url: string): Element | undefined {
+  for (const el of doc.querySelectorAll<HTMLIFrameElement | HTMLFrameElement>('iframe,frame')) {
+    const inner = el.contentDocument;
+    const found = inner ? opaqueOwner(inner, url) : el.src === url ? el : undefined;
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The owner of the opaque (sandboxed) same-origin frame whose document the record is, as its
+ * parent's Resource Timing reports it: Chrome attributes that request to the frame.
+ */
+export function opaqueFrameOf(rec: RequestRecord): Element | undefined {
+  const url = new URL(rec.url, location.href);
+  return isChildDocument(rec) && url.origin === location.origin ? opaqueOwner(document, url.href) : undefined;
+}
+
+/**
  * Whether the record is the document of a same-origin iframe (or `<object>`, `<embed>`) as its
  * parent's Resource Timing reports it. The iframe's own Resource Timing reports it too, as its
  * navigation, which Chrome attributes to the iframe's frame and new loader: that one is kept.
+ * Not for a sandboxed iframe whose document is opaque: it has no navigation entry of its own.
  */
 export function isFrameDocument(rec: RequestRecord): boolean {
-  return isChildDocument(rec) && new URL(rec.url, location.href).origin === location.origin;
+  return isChildDocument(rec) && new URL(rec.url, location.href).origin === location.origin && !opaqueFrameOf(rec);
 }

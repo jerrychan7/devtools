@@ -169,6 +169,21 @@ describe('Network in same-origin iframes', () => {
     }
   });
 
+  test('a sandboxed same-origin iframe (opaque document): its document request is shown once', async () => {
+    await addFrame('sb', `f.sandbox = 'allow-scripts'; f.src = '${BASE}frame-child.html?n=sb-doc'`);
+    await settle('n=sb-doc');
+    for (const side of [t.ours, t.chrome]) {
+      const doc = await one(side, 'n=sb-doc');
+      assert.equal(doc.type, 'Document');
+      assert.equal(relative(doc.request.url), `${BASE}frame-child.html?n=sb-doc`);
+      // Of the iframe's own frame: the one DOM gives its owner.
+      assert.notEqual(doc.frameId, (await one(side, 'n=top-ref')).frameId);
+      const { result } = await side.send('Runtime.evaluate', { expression: "document.getElementById('sb')" });
+      const { node } = await side.send('DOM.describeNode', { objectId: result.objectId });
+      assert.equal(doc.frameId, node.frameId);
+    }
+  });
+
   test('the documents of an <object> and an <embed>: one request each, of their frame', async () => {
     await t.page.evaluate(`new Promise(r => {
       const o = document.createElement('object');
