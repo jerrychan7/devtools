@@ -229,6 +229,15 @@ test("a cross-origin iframe's own is a target on its session, end to end, as in 
   assert.deepEqual(actual?.console, ['grandchild']);
 });
 
+// Flaky history (2026-11): under full-suite load this test failed twice, without the s2 lines.
+// - On our side: the iframe linked to its parent pings the grandchild after closing its link; the
+//   ping (window.postMessage) could be handled before the bye (the link's port), so the grandchild
+//   ignored it and never linked again. A product bug, fixed in 939259c (frame-links/child.ts).
+// - On Chrome's side, once: never reproduced. The likely cause is this test's timing: s2 was read
+//   right after a timed settle, possibly before Chrome had attached and set up the grandchild.
+//   grandchildSession now waits for its context instead. That is an inference, not proven.
+// If the s2 lines go missing again, on either side, the cause is something else: start from the
+// events of the run (which session got what) rather than from these two.
 test('same-origin iframes in the iframe and in its own are frames of their targets, as in Chrome', async () => {
   assert.ok(env);
   const seen = [];
