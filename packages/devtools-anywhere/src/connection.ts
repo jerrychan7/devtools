@@ -36,16 +36,20 @@ interface Link {
  * Only messages whose source is the peer window and whose origin is `origin` are accepted,
  * and outgoing messages are addressed to that origin only. Outgoing messages are queued
  * until the peer sends its first message: before that, its window may still be loading.
- * Incoming messages wait for `after`, if given.
+ * Incoming messages wait for `after`, if given. `onNewInstance`, if given, is called before the
+ * first message of a new instance of the peer, told by its command ids starting again.
  */
 function link(
   session: CdpSession,
   peer: () => Window | null | undefined,
   origin: string,
   after?: Promise<void>,
-  onDetach?: () => void
+  onDetach?: () => void,
+  onNewInstance?: () => void
 ): Link {
   let ready = false;
+  /** The highest command id the peer sent: a new instance numbers its commands from 1 again. */
+  let lastId = 0;
   const queue: string[] = [];
   const post = (message: string) => peer()?.postMessage(message, origin);
 
@@ -57,6 +61,11 @@ function link(
     if (event.source !== peer() || event.origin !== origin || typeof event.data !== 'string') return;
     if (event.data === PING) return post(HELLO);
     if (onDetach && event.data.startsWith(DETACH_PREFIX)) return onDetach();
+    if (onNewInstance) {
+      const id = Number(/^\{"id":(\d+)/.exec(event.data)?.[1] ?? Number.NaN);
+      if (id <= lastId) onNewInstance();
+      if (id > 0) lastId = id;
+    }
     if (!ready) {
       ready = true;
       queue.splice(0).forEach(post);
@@ -98,24 +107,27 @@ const ending = new WeakMap<CdpSession, Promise<void>>();
 /**
  * Connects a CDP session to a DevTools frontend running in `frame`. When the frame reloads
  * (a new frontend instance), the domains are disabled so that the new instance's `enable`
- * calls replay everything captured so far. Returns a function that disconnects, and undoes what
+ * calls replay everything captured so far. The new instance is told by its command ids starting
+ * again, as in shell mode: the frame's load event comes after its first commands. Returns a function that disconnects, and undoes what
  * the frontend did to the page.
  */
 export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, frontendOrigin: string): () => void {
   // The previous frontend's session ends (and resets) before this one's first message.
-  const connection = link(session, () => frame.contentWindow, frontendOrigin, ending.get(session));
-  let loads = 0;
-  const onLoad = () => {
-    if (loads++ === 0) return;
-    // A new session, as on disconnect: the new instance's messages wait for its end.
-    const ended = endSession(session).then(() => session.reset());
-    ending.set(session, ended);
-    connection.reset(ended);
-  };
-  frame.addEventListener('load', onLoad);
+  const connection: Link = link(
+    session,
+    () => frame.contentWindow,
+    frontendOrigin,
+    ending.get(session),
+    undefined,
+    () => {
+      // A new session, as on disconnect: the new instance's messages wait for its end.
+      const ended = endSession(session).then(() => session.reset());
+      ending.set(session, ended);
+      connection.reset(ended);
+    }
+  );
   return () => {
     connection.disconnect();
-    frame.removeEventListener('load', onLoad);
     // Nothing the frontend asked for outlives it: inspect mode, highlights, forced states, the
     // screencast. What the probe captured stays, for the next frontend.
     ending.set(

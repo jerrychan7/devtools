@@ -72,5 +72,4 @@ The two gaps noted in DEV.md, "Patching an older release": CI does not run on `r
 ## Shelved
 
 - **Dragging the divider in shell mode**: Chrome keeps mouse events in the frame where the button was pressed, so a fast drag loses the divider. It does not reproduce headless, and the earlier attempts were reverted.
-- **A reloaded frontend when embedded**: like shell mode before it was fixed, `connectFrontend` takes the frontend iframe's load event as the new instance's start, which may come after its first commands. Not seen to fail; shell mode now tells by the command ids starting again.
 - **Touch screens**: many small things to improve; low priority.

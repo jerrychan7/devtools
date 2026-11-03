@@ -11,6 +11,7 @@ All packages share one version and are released together (see DEV.md, "Releasing
 - Requests the page made before the probe ran are reported from Resource Timing (without stack, headers or body), as Chrome reports them too.
 - `DOM.requestChildNodes` no longer sends children the client already has, as in Chrome: the frontend asking twice emptied an expanded iframe.
 - In shell mode, a reloaded frontend starts a new session, as in Chrome.
+- An embedded frontend that reloads is told by its command ids starting again, not by its frame's load event, which comes after its first commands: what it enabled at once is no longer ended by the load.
 - `CSS.createStyleSheet` fails with "Frame not found" for an unknown `frameId`, as in Chrome.
 
 ## 0.2.0

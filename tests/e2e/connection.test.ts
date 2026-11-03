@@ -163,6 +163,21 @@ test("a reloaded frontend is a new session: the previous instance's objects are 
   assert.ok(answer && 'error' in answer, JSON.stringify(answer));
 });
 
+test('a new frontend instance is told by its command ids starting again, not by the load event', async () => {
+  // The frame's load comes after a new instance's first commands: no load here at all.
+  await send({ id: 400, method: 'Runtime.evaluate', params: { expression: '({ b: 1 })' } });
+  const evaluated = (await waitFor(m => m.some(message => message.id === 400))).find(m => m.id === 400);
+  const objectId = (evaluated?.result as Protocol.Runtime.EvaluateResponse | undefined)?.result.objectId;
+  assert.ok(objectId);
+  await send({ id: 1, method: 'Runtime.evaluate', params: { expression: '1 + 1' } });
+  await send({ id: 2, method: 'Runtime.getProperties', params: { objectId, ownProperties: true } });
+  const messages = await waitFor(m => m.some(message => message.id === 2));
+  const first = messages.findLast(m => m.id === 1);
+  assert.equal((first?.result as Protocol.Runtime.EvaluateResponse | undefined)?.result.value, 2);
+  const answer = messages.find(m => m.id === 2);
+  assert.ok(answer && 'error' in answer, JSON.stringify(answer));
+});
+
 test("a new frontend's first messages wait until the previous one's session has ended", async () => {
   const result = await page.evaluate(
     () =>

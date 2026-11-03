@@ -11,6 +11,7 @@
 - 探针运行之前页面发出的请求，改为从 Resource Timing 补报（没有调用栈、请求头和请求体），Chrome 同样会报这些请求。
 - `DOM.requestChildNodes` 不再重复发送客户端已有的子节点，与 Chrome 一致：前端请求两次时，展开的 iframe 会变成空白。
 - 外壳模式下重新加载的前端开始一个新会话，与 Chrome 一致。
+- 直接嵌入的前端重新加载后，改为按命令 id 重新从 1 开始来判断，不再看 iframe 的 load 事件：load 晚于新前端的第一批命令，会把它刚启用的东西又关掉。
 - `CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错「Frame not found」，与 Chrome 一致。
 
 ## 0.2.0
