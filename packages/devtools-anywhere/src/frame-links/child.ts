@@ -21,6 +21,11 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
   let id = newId();
   let link: ParentLink | undefined;
   let session: CdpSession | undefined;
+  /**
+   * Clients' sessions that ended, reset, for the next client: a session's domains listen to the
+   * page for good, so they are not made anew for each attach.
+   */
+  const idle: CdpSession[] = [];
 
   const hello = () => {
     if (!link) postToTrusted(window.parent, { type: FRAME_HELLO, id }, patterns);
@@ -53,14 +58,18 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     // Each of the parent's clients that attaches this target gets a session of its own, as in
     // Chrome; it ends as on a frontend's disconnect, the domains disabled and ids forgotten.
     linked.onSession(channel => {
-      const client = createSession();
+      const client = idle.pop() ?? createSession();
       const off = client.onMessage(message => channel.send(message));
       channel.onMessage(message => {
-        client.dispatch(message).catch(() => {});
+        client.dispatch(message).catch(() => {
+          // Malformed message: there is no id to answer to.
+        });
       });
       channel.onClose(() => {
         off();
-        void endSession(client).then(() => client.reset());
+        void endSession(client)
+          .then(() => client.reset())
+          .then(() => idle.push(client));
       });
     });
     linked.onClose(() => {
