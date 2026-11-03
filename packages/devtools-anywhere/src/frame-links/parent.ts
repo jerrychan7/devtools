@@ -64,7 +64,9 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     });
     if (refused || !found || !owner || !opaque) return;
     const ns = mergedFrames.nsFor(owner);
-    accept(hello, found, ns, (welcome, port) => opaque.window.postMessage(welcome, '*', [port]));
+    // The document that said hello is the one requested last: its loader, as Network reports it.
+    const loaderId = frames.opaqueLoaderId(owner, Date.now());
+    accept(hello, found, ns, (welcome, port) => opaque.window.postMessage({ ...welcome, loaderId }, '*', [port]));
   };
 
   const onMessage = (event: MessageEvent) => {

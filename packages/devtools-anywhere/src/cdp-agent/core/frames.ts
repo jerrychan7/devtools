@@ -43,6 +43,8 @@ export interface ParentFrame {
   frameId: string;
   /** The parent's frame that holds the iframe. */
   parentFrameId: string;
+  /** The loader id the parent gives the document, if it does (a merged sandboxed iframe's). */
+  loaderId?: string;
 }
 
 /**
@@ -217,6 +219,7 @@ export class FrameRegistry {
    */
   link(parent: ParentFrame | undefined): void {
     this.#parent = parent && { ...parent };
+    if (parent?.loaderId !== undefined) this.#top.loaderId = parent.loaderId;
     if (!parent || parent.frameId === this.#top.id) return;
     this.#byId.delete(this.#top.id);
     this.#top.id = parent.frameId;
