@@ -82,8 +82,8 @@ async function recordLinks(page: Page): Promise<void> {
       links.push(entry);
       link.onClose(() => (entry.closed = true));
     };
-    for (const link of window.DevtoolsAnywhere.childTargets.children()) record(link);
-    window.DevtoolsAnywhere.childTargets.onChild(record);
+    for (const link of window.__devtoolsAnywhereTest.childTargets.children()) record(link);
+    window.__devtoolsAnywhereTest.childTargets.onChild(record);
   });
 }
 
@@ -95,12 +95,13 @@ const waitForLink = (page: Page, count = 1) =>
   page.waitForFunction(count => (window.__links?.length ?? 0) >= count, { timeout: 5000, polling: 50 }, count);
 
 /** Whether the child page is linked to its parent. */
-const childLinked = (child: Frame) => child.evaluate(() => window.DevtoolsAnywhere.childTargets.parent !== undefined);
+const childLinked = (child: Frame) =>
+  child.evaluate(() => window.__devtoolsAnywhereTest.childTargets.parent !== undefined);
 
 /** Waits for the child page to be linked to its parent, or unlinked. */
 const waitForChildLinked = (child: Frame, linked = true) =>
   child.waitForFunction(
-    linked => (window.DevtoolsAnywhere.childTargets.parent !== undefined) === linked,
+    linked => (window.__devtoolsAnywhereTest.childTargets.parent !== undefined) === linked,
     { timeout: 5000, polling: 50 },
     linked
   );
@@ -110,7 +111,7 @@ const command = (page: Page, method: string, params: object = {}) =>
   page.evaluate(
     (method, params) =>
       new Promise<unknown>((resolve, reject) => {
-        const link = [...window.DevtoolsAnywhere.childTargets.children()][0];
+        const link = [...window.__devtoolsAnywhereTest.childTargets.children()][0];
         if (!link) return reject(new Error('no link'));
         const id = Math.floor(Math.random() * 1e9);
         const off = link.onMessage(message => {
@@ -137,7 +138,7 @@ test('linked when each trusts the other: the parent runs Runtime.evaluate in the
     await waitForChildLinked(child);
     // The child knows itself by the id the parent gave it, held in the parent's top frame.
     const ids = await child.evaluate(() => {
-      const parent = window.DevtoolsAnywhere.childTargets.parent;
+      const parent = window.__devtoolsAnywhereTest.childTargets.parent;
       return { frameId: parent?.frameId, parentFrameId: parent?.parentFrameId };
     });
     assert.equal(ids.frameId, link?.frameId);
@@ -251,7 +252,7 @@ test('removing the iframe closes its link, bye or not', async () => {
     await child.evaluate(() => (MessagePort.prototype.postMessage = () => {}));
     await page.evaluate(() => document.getElementById('child')?.remove());
     await page.waitForFunction(() => window.__links?.[0]?.closed === true, { timeout: 5000, polling: 50 });
-    assert.equal(await page.evaluate(() => [...window.DevtoolsAnywhere.childTargets.children()].length), 0);
+    assert.equal(await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()].length), 0);
   } finally {
     await page.close();
   }
@@ -263,13 +264,13 @@ test('either end closing the link closes the other', async () => {
     await waitForLink(page);
     await waitForChildLinked(child);
     // The parent closes: the child hears its bye.
-    await page.evaluate(() => [...window.DevtoolsAnywhere.childTargets.children()][0]?.close());
+    await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()][0]?.close());
     await waitForChildLinked(child, false);
     // Linked again by a reload, then the child closes: the parent hears its bye.
     const reloaded = await reloadChild(page, child);
     await waitForLink(page, 2);
     await waitForChildLinked(reloaded);
-    await reloaded.evaluate(() => window.DevtoolsAnywhere.childTargets.parent?.close());
+    await reloaded.evaluate(() => window.__devtoolsAnywhereTest.childTargets.parent?.close());
     await page.waitForFunction(() => window.__links?.[1]?.closed === true, { timeout: 5000, polling: 50 });
   } finally {
     await page.close();
@@ -299,7 +300,7 @@ test("the iframe's own F12 button is hidden while linked, and back once the link
   try {
     await waitForChildLinked(child);
     await waitForF12(child, false);
-    await page.evaluate(() => [...window.DevtoolsAnywhere.childTargets.children()][0]?.close());
+    await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()][0]?.close());
     await waitForF12(child, true);
   } finally {
     await page.close();

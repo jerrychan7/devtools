@@ -9,7 +9,7 @@
       const origins = query.get('parentOrigins');
       const frameOrigins = query.get('frameOrigins');
       document.write(
-        '<script src="/packages/devtools-anywhere/dist/probe.iife.js"' +
+        '<script src="/packages/devtools-anywhere/dist-test/probe.iife.js"' +
           ' data-devtools-frontend-url="/tests/e2e/frontends/fake-frontend.html"' +
           (origins === null ? '' : ` data-parent-origins="${origins}"`) +
           (frameOrigins === null ? '' : ` data-frame-origins="${frameOrigins}"`) +

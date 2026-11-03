@@ -8,7 +8,7 @@
       const query = new URLSearchParams(location.search);
       const origins = query.get('frameOrigins');
       document.write(
-        '<script src="/packages/devtools-anywhere/dist/probe.iife.js" data-no-panel' +
+        '<script src="/packages/devtools-anywhere/dist-test/probe.iife.js" data-no-panel' +
           (origins === null ? '' : ` data-frame-origins="${origins}"`) +
           '></' +
           'script>'

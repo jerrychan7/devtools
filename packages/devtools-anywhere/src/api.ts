@@ -1,7 +1,7 @@
 // The API devtools-anywhere.iife.js exposes as `window.DevtoolsAnywhere`: the one definition the
 // bundle (which must satisfy it), the probe (probe.iife.js, built separately, which calls it) and
 // the tests share. Types only, and no source module imported, so that any of them can take it in.
-import type { CdpSession, ChildTargets, createCdpSession } from './cdp-agent';
+import type { CdpSession, createCdpSession } from './cdp-agent';
 
 /** How a page reaches a remote debugging server. */
 export interface RemoteOptions {
@@ -28,8 +28,6 @@ export interface DevtoolsAnywhereApi {
    * Returns a function that stops and closes the links.
    */
   linkFrames(options: FrameLinkOptions): () => void;
-  /** The page's links to cross-origin iframes, and to its parent. */
-  childTargets: ChildTargets;
 }
 
 /** The origins the page trusts across iframes: space-separated lists, as in the probe's attributes. */

@@ -3,6 +3,7 @@
 // no build is needed. Those modules export only what the other code uses, not what the tests would like:
 // types they do not export are derived from those they do.
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
+import type { ChildTargets } from '../packages/devtools-anywhere/src/cdp-agent/core/child-targets.ts';
 import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
 import type { Harness } from '../packages/devtools-anywhere/test-support/child-targets-harness.ts';
 
@@ -67,6 +68,8 @@ declare global {
     __clicks?: number;
     __devtools?: DevtoolsAnywhereElement;
     resourceLoaded?: boolean;
+    /** Internals the tests' bundle (dist-test/) exposes. */
+    __devtoolsAnywhereTest: { childTargets: ChildTargets };
     /** The links frame-links.test.ts has seen, and how many of them have closed. */
     __links?: { frameId: string; closed: boolean }[];
     /** A flatten client of the page's agent: its events, and its commands' replies (oopif.conformance.test.ts). */

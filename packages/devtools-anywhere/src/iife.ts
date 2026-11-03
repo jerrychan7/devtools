@@ -16,6 +16,9 @@ import { SNAPDOM_SCRIPT } from './embedder';
 import { linkFrames } from './frame-links';
 import { connectRemote } from './remote';
 
+/** Set by the build: true in the tests' bundle (dist-test/) alone. */
+declare const DEVTOOLS_ANYWHERE_TEST: boolean;
+
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
 // again itself: only the first copy runs.
 if (!('DevtoolsAnywhere' in window)) {
@@ -41,7 +44,8 @@ if (!('DevtoolsAnywhere' in window)) {
     createCdpSession,
     createGlobalElement,
     linkFrames: options => linkFrames(options, createPageSession),
-    childTargets,
   };
   Object.assign(window, { DevtoolsAnywhere: api });
+  // What the tests read in the page; not in the published bundle.
+  if (DEVTOOLS_ANYWHERE_TEST) Object.assign(window, { __devtoolsAnywhereTest: { childTargets } });
 }
