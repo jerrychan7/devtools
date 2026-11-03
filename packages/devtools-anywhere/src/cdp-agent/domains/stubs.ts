@@ -16,6 +16,8 @@ type CommandsByDomain = { [D in DomainOf<Command>]?: MethodOf<Command, D>[] };
  */
 const NOOPS = {
   Accessibility: ['enable'],
+  // Some issues are the page's to find (docs/roadmap.md, the Issues panel).
+  Audits: ['enable'],
   Animation: ['enable'],
   CSS: ['trackComputedStyleUpdatesForNode'],
   // Device mode's size is the shell's (shell-layout.ts).
@@ -68,7 +70,6 @@ const UNDECLARED_NOOPS: Record<string, string[]> = {
  * frontend does not log a server error (-32000) and none of these callers checks it.
  */
 const UNSUPPORTED: Record<string, Record<string, string>> = {
-  Audits: { enable: 'issues are found by the browser' },
   Autofill: { enable: 'the browser fills forms', setAddresses: 'the browser fills forms' },
   BackgroundService: { startObserving: 'the browser records background service events' },
   // WebSQL is gone from browsers; the frontend still enables it.

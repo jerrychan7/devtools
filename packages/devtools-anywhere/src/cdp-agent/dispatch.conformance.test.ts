@@ -90,7 +90,6 @@ test('a command the page cannot carry out fails with why; one not yet done succe
   assert.match(await reply('Target.setRemoteLocations'), /^Not supported in the page: /);
   assert.match(await reply('BackgroundService.startObserving'), /^Not supported in the page: /);
   for (const method of [
-    'Audits.enable',
     'Autofill.enable',
     'Database.enable',
     'HeapProfiler.enable',
@@ -117,6 +116,7 @@ test('a command the page cannot carry out fails with why; one not yet done succe
     'Emulation.setSafeAreaInsetsOverride',
     'Network.setBlockedURLs',
     'Overlay.setPausedInDebuggerMessage',
+    'Audits.enable',
     'Accessibility.enable',
     'Animation.enable',
     'Inspector.enable',
