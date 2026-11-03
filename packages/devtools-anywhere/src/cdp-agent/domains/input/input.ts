@@ -111,9 +111,13 @@ export function registerInput({ session, frames }: Context) {
 
   const innermost = (path: Target[]): Target => path[path.length - 1] ?? top.document;
 
-  /** The link of the cross-origin iframe `target` is, if it is one. */
+  /**
+   * The link of the iframe `target` is, if its document is another agent's: a cross-origin
+   * iframe's (a child target) or a sandboxed one's merged into this page's (core/merged-frames.ts),
+   * whose input Chrome routes into it alike.
+   */
   const linkOf = (target: Target | null): ChildLink | undefined =>
-    target && isElement(target) ? childTargets.childOf(target) : undefined;
+    target && isElement(target) ? childTargets.linkOf(target)?.link : undefined;
 
   /**
    * The touch going on in a cross-origin iframe: the iframe's agent has it till it ends, or till
@@ -252,7 +256,13 @@ export function registerInput({ session, frames }: Context) {
     const path = hitAt(p.x, p.y);
     const target = innermost(path);
     const link = linkOf(target);
-    if (link && isElement(target)) return await mouseInto(link, target, p);
+    if (link && isElement(target)) {
+      // A merged sandboxed iframe is of this page's process in Chrome: its element is hovered in
+      // this page's document too, as a same-origin iframe's is.
+      if (p.type !== 'mouseWheel' && childTargets.linkOf(target)?.merged)
+        hover(path, p, buttonsOf(p) ?? (p.type === 'mousePressed' ? BUTTONS[p.button ?? 'none'] : 0));
+      return await mouseInto(link, target, p);
+    }
     const button = p.button ?? 'none';
     switch (p.type) {
       case 'mouseMoved': {
