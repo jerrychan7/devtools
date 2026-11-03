@@ -76,6 +76,15 @@ A page cannot reach into a cross-origin iframe, so an iframe whose page loads th
 - **Child targets and sessions.** The parent's Target domain announces the link as an `iframe` target (`Target.setAutoAttach`) and routes messages by `sessionId`. Each client that attaches it gets a session of its own with the iframe's agent, over a port of its own, as Chrome gives each client its own session; ending the session disables what that client enabled there.
 - **Relinking.** When a link closes and its element is gone, the target ends at once. Otherwise the target is kept for the iframe's next document: 10 seconds, or 2 seconds after the iframe's next load, so a navigation keeps the target while an iframe left without the probe (or no longer trusted) does not keep a dead one.
 
+### 5. Sandboxed iframes (merged)
+
+An iframe sandboxed without `allow-same-origin` (with a `src` of the page's origin, `about:blank` or `srcdoc`) is in the page's own target in Chrome, so its agent links as a cross-origin iframe's does but is merged into the parent's target instead of becoming a child one (`src/frame-links/`, `src/cdp-agent/core/merged-frames.ts`).
+
+- **Trust.** Off unless the parent's `data-frame-origins` lists `sandboxed`; no origin or wildcard matches `null`. The parent takes a hello from the `null` origin only when it is trusted, comes from the owner element's own `contentWindow`, and that owner is an opaque sandboxed frame of the page (cross-site `src` refused). The welcome cannot be sent to an opaque origin, so it goes to `*`, but only to that window, carrying the hello's nonce, and only if the frame's document (its loader id) has not changed since the hello. It says `merge`, with an id namespace and the document's loader id; the iframe accepts a merge only when its own origin is `null`.
+- **Ids.** The iframe's agent allocates its ids in its namespace: node, backend node and execution context ids from `ns × 2^32`, object, style sheet, script, request and loader ids with an `m{ns}.` prefix. The owner of an id is read off it, with no table to keep.
+- **Routing.** Each domain registers a table with `mergedFrames.registerRoutes`: the commands to route by the ids in their parameters, sent as they are to the owning frame's agent, on a session of that client's own; and the commands to fan out (`enable`, `disable`, id-less settings), run by the page and then by every merged frame, replayed to a frame that links again. The frames' events are posted to the client as the page's own, as they are. No `Target.attachedToTarget` is sent.
+- **Grafts.** A few results are assembled by the page: `DOM.getDocument` and `describeNode` graft the frame's document under the iframe as `contentDocument`; `performSearch` merges the frames' parts; points and quads are mapped through the iframe's content box (getNodeForLocation, getBoxModel, highlightNode, Input); Page keeps the frame the page's opaque one, taking its URL from the iframe's agent.
+
 ## Packaging
 
 Why the packages listed in the [usage guide](usage.md#packages) are split this way:

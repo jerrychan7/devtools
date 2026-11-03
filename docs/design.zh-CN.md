@@ -76,6 +76,15 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 - **子 target 与会话。** 父页面的 Target 域把链接公布为 `iframe` target（`Target.setAutoAttach`），按 `sessionId` 路由消息。每个附加它的客户端都通过自己的端口与 iframe 的 agent 建立独立会话，和 Chrome 给每个客户端独立会话一样；会话结束时停用该客户端在那里启用的内容。
 - **重新链接。** 链接关闭时如果元素已移除，target 立即结束；否则保留 target 等待 iframe 的下一个文档：10 秒，或 iframe 再次加载后 2 秒。这样导航时 target 得以保留，而换成没有探针（或不再受信任）的页面时不会留下失效的 target。
 
+### 5. 沙箱 iframe（并入）
+
+没有 `allow-same-origin` 的沙箱 iframe（`src` 与页面同源、`about:blank` 或 `srcdoc`）在 Chrome 里属于页面自己的 target，所以它的 agent 像跨域 iframe 那样建立链接，但并入父页面的 target，而不是成为子 target（`src/frame-links/`、`src/cdp-agent/core/merged-frames.ts`）。
+
+- **信任。** 父页面的 `data-frame-origins` 写了 `sandboxed` 才开启；任何源和通配符都不匹配 `null`。父页面只接受满足以下条件的 `null` 源 hello：消息受信任，来自 owner 元素自己的 `contentWindow`，并且该 owner 是页面里的不透明沙箱 frame（`src` 跨站的拒绝）。welcome 没法发往不透明源，只能发往 `*`，但只投递给那个 window，带上 hello 的 nonce，并且要确认 hello 之后 frame 的文档（它的 loader id）没变。welcome 写明 `merge`，带上 id 号段和文档的 loader id；iframe 只有自己的源是 `null` 时才接受 merge。
+- **id。** iframe 的 agent 在自己的号段里分配 id：节点、backend 节点和执行上下文 id 从 `ns × 2^32` 起，对象、样式表、脚本、请求和 loader 的 id 加 `m{ns}.` 前缀。id 的归属直接从 id 上读出，不用维护映射表。
+- **路由。** 每个域用 `mergedFrames.registerRoutes` 注册一张表：哪些命令按参数里的 id 路由，原样发给所属 frame 的 agent，走该客户端自己的会话；哪些命令扇出（`enable`、`disable`、不带 id 的设置），父页面先执行，再发给每个并入的 frame，frame 重新链接时重放。frame 的事件原样转发给客户端，就像父页面自己的。不发 `Target.attachedToTarget`。
+- **嫁接。** 少数结果由父页面拼装：`DOM.getDocument` 和 `describeNode` 把 frame 的文档作为 `contentDocument` 接到 iframe 下；`performSearch` 合并各 frame 的结果；点和四边形按 iframe 的内容框换算（getNodeForLocation、getBoxModel、highlightNode、Input）；Page 里 frame 仍是父页面的不透明 frame，URL 取自 iframe 的 agent。
+
 ## 拆包
 
 [使用指南](usage.zh-CN.md#包)里列出的包为什么这样拆：

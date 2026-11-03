@@ -48,7 +48,8 @@
 
 | 项目 | 现状 | 页面内的做法 |
 |---|---|---|
-| 沙箱 iframe 的内容（没有 `allow-same-origin`） | 只显示为元素，没有它的文档、执行上下文和 console | 沙箱文档里加载的探针像跨域 iframe 那样用 postMessage 连上（它的源是 `"null"`，改为核对消息来源是否为该 iframe 的 `contentWindow`），但不报成单独的目标：和 Chrome 一样，它的 DOM 接在 iframe 节点下，执行上下文和 console 并进父页面的会话，各域经链接代理 |
+| `src` 跨站的沙箱 iframe | 拒绝连接，只显示为元素 | Chrome 里是进程外 iframe，所以按子 target 接入：按 `null` 源加上它的 `src` 本该有的源（前驱源）判定信任，Chrome 也是这样区分的 |
+| 并入的沙箱 iframe：起初 about:blank 的执行上下文、导航的 `loaderId`、`pushState` 后的 URL | 执行上下文没有；`frameNavigated` 的 `loaderId` 不变；URL 要到下次 `getFrameTree` 才刷新 | 父页面看得到 iframe 起初的 about:blank，可以报出它的执行上下文；沙箱的 agent 可以给出每个新文档的 loader id，并像 Page.navigatedWithinDocument 那样把 `pushState` 告诉父页面 |
 | Animations 面板（`Animation` 域） | `enable` 是空操作 | `document.getAnimations()` 覆盖 CSS 动画、过渡和 Web Animations API；列出、暂停、调速、拖动进度都能对应上 |
 | 色觉缺陷模拟（`setEmulatedVisionDeficiency`） | 空操作 | 在 `<html>` 上加 SVG 滤镜，Chrome 用的也是颜色矩阵 |
 | 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`overrideNetworkState` 和 `emulateNetworkConditions` 的离线是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速返回错误：页面没法让请求变慢 |
