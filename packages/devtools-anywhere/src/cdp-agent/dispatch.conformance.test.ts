@@ -70,3 +70,23 @@ test('a malformed message is answered with an invalid request error', async () =
     assert.equal(replies[0]?.error?.message, text, message);
   }
 });
+
+test('a command the page cannot carry out fails with why; one not yet done succeeds', async () => {
+  const reply = (method: string) =>
+    t.page.evaluate(
+      m =>
+        window.__session.call(m).then(
+          () => 'resolved',
+          (e: Error) => e.message
+        ),
+      method
+    );
+  assert.equal(
+    await reply('Emulation.setSafeAreaInsetsOverride'),
+    'Not supported in the page: env(safe-area-inset-*) cannot be set'
+  );
+  assert.match(await reply('Target.setRemoteLocations'), /^Not supported in the page: /);
+  for (const method of ['Emulation.setEmulatedMedia', 'Network.setBlockedURLs', 'Animation.enable', 'Log.clear']) {
+    assert.equal(await reply(method), 'resolved', method);
+  }
+});

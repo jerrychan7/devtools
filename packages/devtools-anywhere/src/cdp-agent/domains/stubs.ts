@@ -9,29 +9,21 @@ type MethodOf<C, D extends string> = C extends `${D}.${infer M}` ? M : never;
 type CommandsByDomain = { [D in DomainOf<Command>]?: MethodOf<Command, D>[] };
 
 /**
- * Commands the frontend sends at startup that have no in-page equivalent (or are not
- * implemented yet). Answering them with an empty result keeps the frontend happy.
+ * Commands that succeed without effect. Enabling a domain whose events never come is what Chrome
+ * answers too, so every `enable` here is kept. The rest can be done in the page but are not yet
+ * (docs/roadmap.md), so the frontend and scripts are not told they cannot.
  */
 const NOOPS = {
   Accessibility: ['enable'],
   Animation: ['enable'],
   Audits: ['enable'],
-  Autofill: ['enable', 'setAddresses'],
-  BackgroundService: ['startObserving'],
+  Autofill: ['enable'],
   CSS: ['trackComputedStyleUpdatesForNode'],
-  // Device mode's size is the shell's (shell-layout.ts); the rest a page cannot change: the user
-  // agent, safe areas, a hinge or cutout, the pinch zoom.
-  Emulation: [
-    'setEmulatedMedia',
-    'setAutoDarkModeOverride',
-    'setEmulatedVisionDeficiency',
-    'setFocusEmulationEnabled',
-    'setSafeAreaInsetsOverride',
-    'resetPageScaleFactor',
-    'setUserAgentOverride',
-  ],
+  // Device mode's size is the shell's (shell-layout.ts).
+  Emulation: ['setEmulatedMedia', 'setEmulatedVisionDeficiency', 'setUserAgentOverride'],
   HeapProfiler: ['enable'],
   Inspector: ['enable'],
+  // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear', 'startViolationsReport'],
   Overlay: [
     'highlightFrame',
@@ -50,7 +42,6 @@ const NOOPS = {
     'setCacheDisabled',
     'setAttachDebugStack',
     'emulateNetworkConditions',
-    'setBypassServiceWorker',
     'setExtraHTTPHeaders',
     'setBlockedURLs',
     'setUserAgentOverride',
@@ -68,19 +59,53 @@ const NOOPS = {
     'untrackIndexedDBForOrigin',
     'untrackIndexedDBForStorageKey',
   ],
-  Target: ['setRemoteLocations'],
 } satisfies CommandsByDomain;
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */
 const UNDECLARED_NOOPS: Record<string, string[]> = {
   Database: ['enable'],
+  // No encodings override can be set, so clearing one is done.
   Network: ['clearAcceptedEncodingsOverride'],
-  Storage: ['setInterestGroupTracking', 'setSharedStorageTracking'],
+};
+
+/**
+ * Commands a page cannot carry out, with why. They fail rather than succeed without effect; the
+ * frontend does not log a server error (-32000) and none of these callers checks it.
+ */
+const UNSUPPORTED: Record<string, Record<string, string>> = {
+  Autofill: { setAddresses: 'the browser fills forms' },
+  BackgroundService: { startObserving: 'the browser records background service events' },
+  Emulation: {
+    setAutoDarkModeOverride: 'auto dark mode is applied by the browser',
+    setFocusEmulationEnabled: 'focus is given by the browser',
+    setSafeAreaInsetsOverride: 'env(safe-area-inset-*) cannot be set',
+    resetPageScaleFactor: 'the pinch zoom cannot be changed',
+  },
+  Network: { setBypassServiceWorker: "the page's requests go through its service worker" },
+  Storage: {
+    getSharedStorageMetadata: 'shared storage metadata is not readable',
+    setInterestGroupTracking: 'interest groups are kept by the browser',
+    setSharedStorageTracking: 'shared storage access is seen by the browser only',
+  },
+  Target: { setRemoteLocations: 'the browser discovers remote targets' },
 };
 
 export function registerStubs(session: CdpSession) {
   for (const [domain, methods] of [...Object.entries(NOOPS), ...Object.entries(UNDECLARED_NOOPS)]) {
     session.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])));
+  }
+  for (const [domain, methods] of Object.entries(UNSUPPORTED)) {
+    session.register(
+      domain,
+      Object.fromEntries(
+        Object.entries(methods).map(([method, why]) => [
+          method,
+          () => {
+            throw new CdpError(`Not supported in the page: ${why}`);
+          },
+        ])
+      )
+    );
   }
   session.register('Network', {
     // Throttling cannot be emulated in the page: the rules are accepted but never applied.
@@ -93,12 +118,6 @@ export function registerStubs(session: CdpSession) {
   // Feature flags of the browser are not readable from the page: report them as off.
   session.register('SystemInfo', {
     getFeatureState: (): Protocol.SystemInfo.GetFeatureStateResponse => ({ featureEnabled: false }),
-  });
-  // The page cannot read its shared storage's metadata: an error rather than made-up numbers.
-  session.register('Storage', {
-    getSharedStorageMetadata() {
-      throw new CdpError('Shared storage metadata is not available to the page');
-    },
   });
   // env() values are not readable from the page.
   session.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
