@@ -50,19 +50,23 @@ All with standard page APIs, matching Chrome. By value for effort; the first thr
 |---|---|---|
 | The Animations panel (`Animation` domain) | `enable` is a no-op | `document.getAnimations()` has CSS animations, transitions and Web Animations; listing, pausing, playback rate and seeking map onto it |
 | Vision deficiencies (`setEmulatedVisionDeficiency`) | No-op | An SVG filter on `<html>`; Chrome uses color matrices too |
-| Network: blocked URLs, cache disabled, extra headers, offline | `setBlockedURLs`, `setCacheDisabled`, `setExtraHTTPHeaders`, `emulateNetworkConditions` are no-ops | For the fetch and XHR already intercepted; in shell mode, images and scripts too through the Service Worker. Throttling could only be approximate: not done |
+| Network: blocked URLs, cache disabled, extra headers, offline | `setBlockedURLs`, `setCacheDisabled`, `setExtraHTTPHeaders`, `emulateNetworkConditions`, `overrideNetworkState` are no-ops | For the fetch and XHR already intercepted; in shell mode, images and scripts too through the Service Worker. Throttling could only be approximate: not done |
 | The browser's default styles | Not in Styles | A copy of Chromium's `html.css` (open source), loaded when used, matched to give the "user agent stylesheet" rules; to be kept in step with each Chrome |
 | Grid, flex, container query and scroll-snap overlays | `Overlay.setShow*Overlays` are no-ops | Drawn in the page: `getComputedStyle` gives a grid's resolved tracks; the same layer as `highlightNode` |
 | Emulated `prefers-color-scheme`, print and other media | `setEmulatedMedia` is a no-op | `@media` conditions rewritten through the CSSOM; the limits of forced `:hover`: not `@import`, cross-origin sheets or `matchMedia` |
-| Application panel updates (`Storage.track*`) | No-ops: refreshed by hand | IDB writes and `caches.put` wrapped to send `indexedDBContentUpdated`, … |
+| Application panel updates (`Storage.track*`, `setStorageBucketTracking`) | No-ops: refreshed by hand | IDB writes and `caches.put` wrapped to send `indexedDBContentUpdated`, … |
 | The Service Workers view | `ServiceWorker.enable` is a no-op | `navigator.serviceWorker.getRegistrations()`: listing, unregistering, updating; no debugging |
 | Violations and long tasks (`Log.startViolationsReport`) | No-op | `PerformanceObserver` on `longtask` and `long-animation-frame`, reported in the Console |
+| User agent override (`Emulation` / `Network.setUserAgentOverride`) | No-op | `navigator.userAgent`, `platform` and `userAgentData` redefined, and the header set on the intercepted fetch and XHR; not on the document's own request or other subresources |
+| Computed style updates (`CSS.trackComputedStyleUpdatesForNode`) | No-op | A `MutationObserver` and `getComputedStyle` on the tracked nodes, sending `computedStyleUpdated` |
+| Frame, isolated element, hinge and cutout overlays, the "Paused in debugger" message | `Overlay.highlightFrame`, `setShowIsolatedElements`, `setShowHinge`, `setShowDisplayCutout`, `setPausedInDebuggerMessage` are no-ops | Drawn on the same layer as `highlightNode`; the message only matters once the page can pause |
+| Reporting API and request initiators | `Network.enableReportingApi`, `setAttachDebugStack` are no-ops | A `ReportingObserver` for the reports the page sees; a stack captured in the intercepted fetch and XHR |
 
 Of little value: the performance monitor (`Performance.getMetrics`: only the DOM node count and Chrome's `performance.memory`); event listeners' source locations (a stack captured on each add, which slows pages down).
 
-## Gaps in Emulation
+## Commands without effect
 
-- `setEmulatedMedia`, `setUserAgentOverride` and others are no-ops that succeed. That is fine for the DevTools frontend but misleading for scripts, which take them as done. Whether they should fail instead depends on whether the frontend relies on them succeeding.
+Settled: a command the page cannot carry out fails with a server error (-32000), "Not supported in the page: <why>" (`cdp-agent/domains/stubs.ts`): Autofill's addresses, background service recording, auto dark mode, focus emulation, safe-area insets, resetting the pinch zoom, bypassing the service worker, interest group and shared storage tracking, remote target locations. The frontend does not log server errors and does not check these replies. A command that can be done in the page but is not yet still succeeds and is listed in the table above; enabling a domain whose events never come succeeds, as in Chrome.
 
 ## Patches from an older release line
 

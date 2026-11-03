@@ -50,19 +50,23 @@
 |---|---|---|
 | Animations 面板（`Animation` 域） | `enable` 是空操作 | `document.getAnimations()` 覆盖 CSS 动画、过渡和 Web Animations API；列出、暂停、调速、拖动进度都能对应上 |
 | 色觉缺陷模拟（`setEmulatedVisionDeficiency`） | 空操作 | 在 `<html>` 上加 SVG 滤镜，Chrome 用的也是颜色矩阵 |
-| 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`emulateNetworkConditions` 是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速只能近似，不做 |
+| 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`emulateNetworkConditions`、`overrideNetworkState` 是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速只能近似，不做 |
 | 浏览器默认样式 | Styles 里不显示 | 附带一份 Chromium 的 `html.css`（开源），用到时加载，用来匹配出「user agent stylesheet」规则；每次升级 Chrome 都要同步 |
 | Grid / Flex / 容器查询 / scroll-snap 叠加层 | `Overlay.setShow*Overlays` 是空操作 | 在页面里画出来；`getComputedStyle` 返回 grid 解析后的轨道尺寸；和 `highlightNode` 共用叠加层 |
 | 模拟 `prefers-color-scheme`、print 等媒体特性 | `setEmulatedMedia` 是空操作 | 通过 CSSOM 改写 `@media` 条件；限制和强制 `:hover` 相同：对 `@import`、跨域样式表和 `matchMedia` 不生效 |
-| Application 面板自动刷新（`Storage.track*`） | 空操作，要手动刷新 | 包装 IDB 的写操作和 `caches.put`，发出 `indexedDBContentUpdated` 等事件 |
+| Application 面板自动刷新（`Storage.track*`、`setStorageBucketTracking`） | 空操作，要手动刷新 | 包装 IDB 的写操作和 `caches.put`，发出 `indexedDBContentUpdated` 等事件 |
 | Service Workers 视图 | `ServiceWorker.enable` 是空操作 | 用 `navigator.serviceWorker.getRegistrations()` 列出、注销、更新；不能调试 |
 | 违规提示与长任务（`Log.startViolationsReport`） | 空操作 | `PerformanceObserver` 监听 `longtask`、`long-animation-frame`，在 Console 输出 |
+| 覆盖 user agent（`Emulation` / `Network.setUserAgentOverride`） | 空操作 | 重新定义 `navigator.userAgent`、`platform`、`userAgentData`，并给已经拦截的 fetch、XHR 设置请求头；文档本身的请求和其他子资源改不了 |
+| 计算样式更新（`CSS.trackComputedStyleUpdatesForNode`） | 空操作 | 对被跟踪的节点用 `MutationObserver` 加 `getComputedStyle`，发出 `computedStyleUpdated` |
+| 框架、隔离元素、铰链、刘海叠加层，以及「已在调试程序中暂停」提示 | `Overlay.highlightFrame`、`setShowIsolatedElements`、`setShowHinge`、`setShowDisplayCutout`、`setPausedInDebuggerMessage` 是空操作 | 和 `highlightNode` 画在同一层；暂停提示要等页面能暂停时才有用 |
+| Reporting API 和请求发起位置 | `Network.enableReportingApi`、`setAttachDebugStack` 是空操作 | 用 `ReportingObserver` 收集页面能看到的报告；在拦截的 fetch、XHR 里记录调用栈 |
 
 价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。
 
-## Emulation 的缺口
+## 没有效果的命令
 
-- `setEmulatedMedia`、`setUserAgentOverride` 等是空操作：返回成功，但实际没有效果。对 DevTools 前端来说没问题，对自动化脚本却有误导，因为它会以为已经设置好了。要不要改成返回错误，需要权衡前端是否依赖它们成功返回。
+已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、焦点模拟、安全区域边距、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址。前端不记录服务器错误，也不检查这些命令的返回。能在页面里做但还没做的命令仍返回成功，列在上面的表里；启用一个永远不会有事件的域也返回成功，和 Chrome 一样。
 
 ## 从旧版本线发布补丁
 
