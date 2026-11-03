@@ -77,25 +77,49 @@ describe('DOM', () => {
   });
 
   test('requestChildNodes again: children the client has are not sent again, unless deeper', async () => {
-    const html = (r: DomNode) => r.children?.find(n => n.nodeName === 'HTML')?.nodeId ?? 0;
+    // Set up on its own so the counts below do not depend on what earlier tests left behind.
+    [{ root: ourRoot }, { root: chromeRoot }] = await both('DOM.getDocument', { depth: 1 });
+    const html = (r: DomNode) => {
+      const node = r.children?.find(n => n.nodeName === 'HTML');
+      assert.ok(node);
+      return node.nodeId;
+    };
+    const request = (params: Omit<Protocol.DOM.RequestChildNodesRequest, 'nodeId'> = {}) =>
+      Promise.all([
+        t.ours.send('DOM.requestChildNodes', { nodeId: html(ourRoot), ...params }),
+        t.chrome.send('DOM.requestChildNodes', { nodeId: html(chromeRoot), ...params }),
+      ]);
     const counts = async () =>
       Promise.all([t.ours.events('DOM.setChildNodes'), t.chrome.events('DOM.setChildNodes')]).then(([o, c]) => [
         o.length,
         c.length,
       ]);
-    // The frontend asks again while its first request is pending: Chrome sends them once.
-    await Promise.all([
-      t.ours.send('DOM.requestChildNodes', { nodeId: html(ourRoot) }),
-      t.chrome.send('DOM.requestChildNodes', { nodeId: html(chromeRoot) }),
-    ]);
+    await t.chrome.clear();
+    await t.ours.clear();
+    await request();
+    await waitForBoth(t, 'DOM.setChildNodes');
+    // The frontend asks again once it has them: Chrome sends nothing new.
+    await t.chrome.clear();
+    await t.ours.clear();
+    await request();
     await new Promise(r => setTimeout(r, 200));
-    assert.deepEqual(await counts(), [1, 1]);
-    await Promise.all([
-      t.ours.send('DOM.requestChildNodes', { nodeId: html(ourRoot), depth: 2 }),
-      t.chrome.send('DOM.requestChildNodes', { nodeId: html(chromeRoot), depth: 2 }),
+    assert.deepEqual(await counts(), [0, 0]);
+    // Deeper: the grandchildren are sent. Chrome sends one event per parent (head, body) with its
+    // children; ours sends html's children again with theirs, in one event. Compare the grandchildren.
+    await request({ depth: 2 });
+    await waitForBoth(t, 'DOM.setChildNodes');
+    await new Promise(r => setTimeout(r, 200));
+    const [ours, chrome] = await Promise.all([
+      t.ours.events('DOM.setChildNodes'),
+      t.chrome.events('DOM.setChildNodes'),
     ]);
-    // Sent then (Chrome splits them by parent, which is not compared here).
-    await waitForBoth(t, 'DOM.setChildNodes', 2);
+    assert.deepEqual(
+      diffSubset(
+        ours.flatMap(e => e.nodes).flatMap(n => n.children ?? []),
+        chrome.flatMap(e => e.nodes)
+      ),
+      []
+    );
   });
 
   describe('mutations', () => {

@@ -75,14 +75,19 @@ const call = (index: number, method: string, params: object = {}) =>
     params
   );
 
-/** The page iframe's size, once it has followed the override. */
-async function pageSize() {
+/** The page iframe's size, once it is `expected` (or a timeout has passed) and has stayed so for a while. */
+async function pageSize(expected: string) {
+  const read = () =>
+    page.evaluate(() => {
+      const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+      if (!view) throw new Error('no page window');
+      return `${view.innerWidth}x${view.innerHeight}`;
+    });
+  for (const start = Date.now(); (await read()) !== expected && Date.now() - start < 5000;) {
+    await new Promise(r => setTimeout(r, 100));
+  }
   await new Promise(r => setTimeout(r, 300));
-  return page.evaluate(() => {
-    const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
-    if (!view) throw new Error('no page window');
-    return `${view.innerWidth}x${view.innerHeight}`;
-  });
+  return read();
 }
 
 test("in shell mode, the page's other clients set and clear its size as in Chrome", async () => {
@@ -97,17 +102,17 @@ test("in shell mode, the page's other clients set and clear its size as in Chrom
   });
   // Where the shell's frontend lays out the page: only then does the shell size it.
   await frontendRequest(page, { type: 'page-bounds', x: 0, y: 0, width: 300, height: 200 });
-  natural = await pageSize();
+  natural = await pageSize('300x200');
   assert.equal(natural, '300x200');
   assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', metrics(400, 600)), 'ok');
-  assert.equal(await pageSize(), '400x600');
+  assert.equal(await pageSize('400x600'), '400x600');
   assert.equal(await call(1, 'Emulation.setDeviceMetricsOverride', metrics(700, 300)), 'ok');
-  assert.equal(await pageSize(), '700x300');
+  assert.equal(await pageSize('700x300'), '700x300');
   assert.equal(await call(0, 'Emulation.clearDeviceMetricsOverride'), 'ok');
-  assert.equal(await pageSize(), natural, "A's clear ends B's override too");
+  assert.equal(await pageSize(natural), natural, "A's clear ends B's override too");
   assert.equal(await call(1, 'Emulation.setDeviceMetricsOverride', metrics(700, 300)), 'ok');
   assert.equal(await call(0, 'Emulation.clearDeviceMetricsOverride'), 'ok');
-  assert.equal(await pageSize(), '700x300', 'a client without an override clears nothing');
+  assert.equal(await pageSize('700x300'), '700x300', 'a client without an override clears nothing');
 });
 
 test("in shell mode, a client's session ending ends its override", async () => {
@@ -116,7 +121,7 @@ test("in shell mode, a client's session ending ends its override", async () => {
     const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
     view?.__sessions?.[1]?.reset();
   });
-  assert.equal(await pageSize(), natural);
+  assert.equal(await pageSize(natural), natural);
 });
 
 const base = metrics(400, 600);
@@ -225,7 +230,7 @@ test("in shell mode, the page's clients check device metrics as Chrome does", as
     return received.filter((_, index) => index % 2 === 0).map(message => Reflect.get(Object(message), 'error'));
   }, checked);
   assert.deepEqual(actual.map(errorOf), expected);
-  assert.equal(await pageSize(), natural);
+  assert.equal(await pageSize(natural), natural);
 });
 
 test("in shell mode, setting the same override again does nothing, the same as Chrome's", async () => {
@@ -253,7 +258,7 @@ test("in shell mode, setting the same override again does nothing, the same as C
       assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', base), 'ok');
       assert.equal(await call(1, 'Emulation.setDeviceMetricsOverride', metrics(700, 300)), 'ok');
       assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', variant), 'ok');
-      assert.equal(await pageSize(), size, JSON.stringify(variant));
+      assert.equal(await pageSize(size), size, JSON.stringify(variant));
       await call(0, 'Emulation.clearDeviceMetricsOverride');
       await call(1, 'Emulation.clearDeviceMetricsOverride');
     }
@@ -284,7 +289,11 @@ test('in shell mode, nested fields are the same to Chrome by their known fields,
     assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', { ...base, ...first }), 'ok');
     assert.equal(await call(1, 'Emulation.setDeviceMetricsOverride', metrics(700, 300)), 'ok');
     assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', { ...base, ...again }), 'ok');
-    assert.equal(await pageSize(), same ? '700x300' : '400x600', JSON.stringify([first, again]));
+    assert.equal(
+      await pageSize(same ? '700x300' : '400x600'),
+      same ? '700x300' : '400x600',
+      JSON.stringify([first, again])
+    );
     await call(0, 'Emulation.clearDeviceMetricsOverride');
     await call(1, 'Emulation.clearDeviceMetricsOverride');
   }

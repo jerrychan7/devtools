@@ -70,3 +70,61 @@ test('an iframe in a closed shadow root attached in an iframe gets a frame', asy
   const deep = ours.frameTree.childFrames?.[0]?.childFrames?.[0] satisfies Protocol.Page.FrameTree | undefined;
   assert.equal(deep?.frame.name, 'deep');
 });
+
+/**
+ * Disables DOM on both sides, runs `whileOff` in the iframe, then follows the tree again; events are
+ * cleared first, so whatever the disabled spell pushed is counted.
+ */
+const offAndOn = async (whileOff: (win: Window) => void) => {
+  await both(side => side.clear());
+  await both(side => side.send('DOM.disable'));
+  await inFrame(whileOff);
+  await both(side => side.send('DOM.getDocument', { depth: -1, pierce: true }));
+};
+
+test('after DOM.disable the iframe attachShadow is native again and pushes nothing, until getDocument', async () => {
+  // The probe's own hook (which records closed roots) stays under ours for good, so "native" here
+  // means: no longer the method DOM installed while on.
+  await inFrame(win => {
+    const w = win as Window & { Element: typeof Element; whileOn?: unknown };
+    w.whileOn = w.Element.prototype.attachShadow;
+  });
+  await offAndOn(win => {
+    const doc = win.document;
+    const off = Object.assign(doc.createElement('div'), { id: 'off-host' });
+    const later = Object.assign(doc.createElement('div'), { id: 'later-host' });
+    doc.body.append(off, later);
+    const shadowable = win as Window & { Element: typeof Element; whileOn?: unknown };
+    if (shadowable.Element.prototype.attachShadow === shadowable.whileOn) throw new Error('not restored');
+    off.attachShadow({ mode: 'open' });
+  });
+  await inFrame(win => win.document.querySelector('#later-host')?.attachShadow({ mode: 'open' }));
+  const [ours, chrome] = await waitForBoth(t, 'DOM.shadowRootPushed');
+  assert.deepEqual(diffSubset(ours, chrome), []);
+  assert.equal(ours.length, 1);
+  assert.equal(chrome.length, 1);
+});
+
+test('a page wrapper over ours survives disable and getDocument, and each attachment is pushed once', async () => {
+  await inFrame(win => {
+    const proto = (win as Window & { Element: typeof Element }).Element.prototype;
+    const ours = proto.attachShadow;
+    proto.attachShadow = function (this: Element, init: ShadowRootInit) {
+      return ours.call(this, init);
+    };
+    (win as Window & { pageWrapper?: unknown }).pageWrapper = proto.attachShadow;
+  });
+  await offAndOn(win => {
+    const doc = win.document;
+    doc.body.append(Object.assign(doc.createElement('div'), { id: 'wrapped-host' }));
+  });
+  await inFrame(win => {
+    const w = win as Window & { Element: typeof Element; pageWrapper?: unknown };
+    if (w.Element.prototype.attachShadow !== w.pageWrapper) throw new Error('page wrapper lost');
+    win.document.querySelector('#wrapped-host')?.attachShadow({ mode: 'open' });
+  });
+  const [ours, chrome] = await waitForBoth(t, 'DOM.shadowRootPushed');
+  assert.deepEqual(diffSubset(ours, chrome), []);
+  assert.equal(ours.length, 1);
+  assert.equal(chrome.length, 1);
+});

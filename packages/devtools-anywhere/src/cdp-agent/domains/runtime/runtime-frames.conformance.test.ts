@@ -52,6 +52,21 @@ async function lifecycle(side: Side, frameName: (frameId: string) => Promise<str
   };
 }
 
+/** A context created or destroyed, as it came. */
+type Seen = { created: number; isDefault: boolean } | { destroyed: number };
+
+/**
+ * What happened to default contexts, in order: one destroyed is one created before (`known`, if
+ * created before these) as a default context, so Puppeteer's isolated worlds are left out.
+ */
+function navigationOrder(seen: Seen[], known: Seen[] = []) {
+  const defaults = new Set([...known, ...seen].flatMap(e => ('created' in e && e.isDefault ? [e.created] : [])));
+  return seen.flatMap(e => {
+    if ('destroyed' in e) return defaults.has(e.destroyed) ? ['destroyed'] : [];
+    return e.isDefault ? ['created'] : [];
+  });
+}
+
 /** Names frames by the id of their `<iframe>`, from each side's frame tree. */
 function namer(side: Side) {
   return async (frameId: string) => {
@@ -94,7 +109,17 @@ describe('execution contexts', () => {
       ['a']
     );
 
-    // The old context is destroyed before the new one is created.
+    // The old context is destroyed before the new one is created: in the order they came, from a
+    // session of Chrome's own (the sides keep each event apart) and from ours.
+    const chromeOrder = await t.page.createCDPSession();
+    const chromeSeen: Seen[] = [];
+    chromeOrder.on('Runtime.executionContextCreated', e =>
+      chromeSeen.push({ created: e.context.id, isDefault: !!e.context.auxData?.['isDefault'] })
+    );
+    chromeOrder.on('Runtime.executionContextDestroyed', e => chromeSeen.push({ destroyed: e.executionContextId }));
+    await chromeOrder.send('Runtime.enable');
+    const oursFrom = await t.page.evaluate(() => window.__ours.length);
+    const chromeFrom = chromeSeen.length;
     await t.page.evaluate(
       src =>
         new Promise(resolve => {
@@ -109,6 +134,25 @@ describe('execution contexts', () => {
     [ours, chrome] = await both(side => lifecycle(side, namer(side)));
     assert.deepEqual(diffSubset(ours, chrome), []);
     assert.equal(ours.destroyed, 1);
+    const oursAll = await t.page.evaluate(() =>
+      window.__ours.flatMap((e): Seen[] => {
+        if (e.method === 'Runtime.executionContextCreated') {
+          const { context } = e.params as Protocol.Runtime.ExecutionContextCreatedEvent;
+          return [{ created: context.id, isDefault: !!context.auxData?.['isDefault'] }];
+        }
+        if (e.method === 'Runtime.executionContextDestroyed') {
+          const { executionContextId } = e.params as Protocol.Runtime.ExecutionContextDestroyedEvent;
+          return [{ destroyed: executionContextId }];
+        }
+        return [];
+      })
+    );
+    await chromeOrder.detach();
+    assert.deepEqual(navigationOrder(oursAll.slice(oursFrom), oursAll.slice(0, oursFrom)), ['destroyed', 'created']);
+    assert.deepEqual(navigationOrder(chromeSeen.slice(chromeFrom), chromeSeen.slice(0, chromeFrom)), [
+      'destroyed',
+      'created',
+    ]);
   });
 
   test('removing an iframe destroys its context', async () => {
@@ -224,6 +268,58 @@ describe('evaluation in a frame', () => {
     assert.ok(!top.names.includes('lexical'));
   });
 
+  test('uniqueContextId picks the context too', async () => {
+    const [ours, chrome] = await both(async side => {
+      const id = await contextOf(side, 'pre');
+      const created = (await side.events('Runtime.executionContextCreated')).find(e => e.context.id === id);
+      const uniqueContextId = created?.context.uniqueId;
+      assert.ok(uniqueContextId);
+      const evaluated = await side.send('Runtime.evaluate', {
+        expression: 'where',
+        uniqueContextId,
+        returnByValue: true,
+      });
+      const called = await side.send('Runtime.callFunctionOn', {
+        uniqueContextId,
+        functionDeclaration: 'function () { return where; }',
+        returnByValue: true,
+      });
+      const missing = await side.send('Runtime.evaluate', { expression: '1', uniqueContextId: '1.2' }).then(
+        () => 'resolved',
+        (e: unknown) => String(e instanceof Error ? e.message : e)
+      );
+      return [evaluated.result.value, called.result.value, missing];
+    });
+    assert.deepEqual(ours.slice(0, 2), ['pre', 'pre']);
+    assert.deepEqual(ours.slice(0, 2), chrome.slice(0, 2));
+    assert.match(String(ours[2]), /uniqueContextId not found/);
+    assert.match(String(chrome[2]), /uniqueContextId not found/);
+  });
+
+  test('callFunctionOn takes exactly one of objectId, executionContextId and uniqueContextId', async () => {
+    const [ours, chrome] = await inFrame('pre', async (side, executionContextId) => {
+      const { result } = await side.send('Runtime.evaluate', {
+        expression: 'document.body',
+        contextId: executionContextId,
+      });
+      const { objectId } = result;
+      assert.ok(objectId);
+      const error = (params: Omit<Protocol.Runtime.CallFunctionOnRequest, 'functionDeclaration'>) =>
+        side.send('Runtime.callFunctionOn', { ...params, functionDeclaration: 'function () {}' }).then(
+          () => 'resolved',
+          (e: unknown) => String(e instanceof Error ? e.message : e)
+        );
+      return [await error({ objectId, executionContextId }), await error({})];
+    });
+    for (const side of [ours, chrome]) {
+      assert.match(
+        String(side[0]),
+        /ObjectId, executionContextId and uniqueContextId must mutually exclude each other/
+      );
+      assert.match(String(side[1]), /Either objectId or executionContextId or uniqueContextId must be specified/);
+    }
+  });
+
   test('a context that is gone is an error, like in Chrome', async () => {
     const [ours, chrome] = await both(side =>
       side.send('Runtime.evaluate', { expression: '1', contextId: 9999 }).then(
@@ -233,6 +329,46 @@ describe('evaluation in a frame', () => {
     );
     assert.match(ours, /Cannot find context with specified id/);
     assert.match(chrome, /Cannot find context with specified id/);
+  });
+
+  test('the context of a document its frame navigated away from is gone, Runtime enabled or not', async () => {
+    await both(side => side.clear());
+    await t.page.evaluate(
+      () =>
+        new Promise(resolve => {
+          const frame = Object.assign(document.createElement('iframe'), { id: 'stale', onload: resolve });
+          frame.srcdoc = '<p>old</p>';
+          document.body.append(frame);
+        })
+    );
+    await waitForBoth(t, 'Runtime.executionContextCreated');
+    const ids = await both(side => contextOf(side, 'stale'));
+    // Nothing follows the frames: the registry is looked at again when the context is asked for.
+    await both(side => side.send('Runtime.disable'));
+    await t.page.evaluate(
+      () =>
+        new Promise(resolve => {
+          const frame = document.querySelector<HTMLIFrameElement>('#stale');
+          if (!frame) return resolve(null);
+          frame.onload = resolve;
+          frame.srcdoc = '<p>new</p>';
+        })
+    );
+    const [ours, chrome] = await Promise.all(
+      [t.ours, t.chrome].map((side, i) =>
+        side.send('Runtime.evaluate', { expression: '1', contextId: ids[i] }).then(
+          () => 'resolved',
+          (e: unknown) => String(e instanceof Error ? e.message : e)
+        )
+      )
+    );
+    await t.page.evaluate(() => document.querySelector('#stale')?.remove());
+    await both(async side => {
+      await side.clear();
+      await side.send('Runtime.enable');
+    });
+    assert.match(String(ours), /Cannot find context with specified id/);
+    assert.match(String(chrome), /Cannot find context with specified id/);
   });
 });
 

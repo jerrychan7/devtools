@@ -96,3 +96,19 @@ test('the top page', async () => {
     ['top', 'fixture.html?top', 'historyApi'],
   ]);
 });
+
+test('Page.disable stops the navigations, and enabling again reports each one once', async () => {
+  await both(side => side.send('Page.disable'));
+  await both(side => side.clear());
+  await t.page.evaluate(`document.querySelector('#f').contentWindow.location.hash = 'off';`);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  // Nothing is reported while disabled.
+  assert.deepEqual(await both(side => side.events('Page.navigatedWithinDocument')), [[], []]);
+  for (const side of [t.ours, t.chrome]) {
+    await side.send('Page.enable');
+    await side.send('Page.enable');
+  }
+  // The navigation made while disabled is not reported late, nor the next one twice.
+  const ours = await inFrame(`win.location.hash = 'on';`, 1);
+  assert.deepEqual(ours, [['f', 'frame-child.html#on', 'fragment']]);
+});

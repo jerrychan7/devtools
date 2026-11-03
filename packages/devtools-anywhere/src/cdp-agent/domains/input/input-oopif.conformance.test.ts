@@ -185,9 +185,13 @@ test('ours: mouse and keys over a cross-origin iframe go to its page as in Chrom
   }
 });
 
-/** Wheels over the iframe scrolled to its end, then to its start: where each page is then. */
-async function chain(side: Side) {
+/**
+ * Wheels over the iframe scrolled to its end, then to its start: where each page is then. With
+ * `touch`, the wheels are sent as Chrome's touch emulation for the mouse sends them.
+ */
+async function chain(side: Side, touch = false) {
   await setUp(side);
+  if (touch) await side.send('Emulation.setEmitTouchEventsForMouse', { enabled: true });
   await evaluate(side, "document.body.style.height = '3000px'; scrollTo(0, 0)");
   await evaluate(side, "document.body.style.height = '1000px'; scrollTo(0, 99999)", side.child);
   await drawn(side);
@@ -213,6 +217,15 @@ test('ours: a wheel over a cross-origin iframe that cannot scroll further scroll
   // As measured: at its end the iframe passes the scroll to the parent, at its start it scrolls itself.
   assert.equal(expected.atEnd[0], 120);
   assert.deepEqual(expected.atStart, [120, 120]);
+});
+
+test('ours: under touch emulation, a wheel over a cross-origin iframe chains to its parent as the mouse wheel does', async () => {
+  // Not compared with Chrome: headless Chrome does not answer touch emulated on the parent over an iframe.
+  const mouseWheel = await run(oursSide, side => chain(side));
+  const touchWheel = await run(oursSide, side => chain(side, true));
+  assert.deepEqual(touchWheel, mouseWheel);
+  assert.equal(touchWheel.atEnd[0], 120);
+  assert.deepEqual(touchWheel.atStart, [120, 120]);
 });
 
 /** Hit testing over the iframe, a highlight in it and inspect mode across both pages. */
@@ -311,14 +324,28 @@ test('ours: a touch that starts over a cross-origin iframe stays with its page t
       const reply = await side.send('Input.emulateTouchFromMouseEvent', { type, x, y, button: 'left' });
       assert.equal(typeof reply, 'object', String(reply));
     }
-    return { ...(await take(side)), target };
+    // The iframe's content box in the parent's viewport, past its border.
+    const content = JSON.parse(
+      String(
+        await evaluate(
+          side,
+          "(f => { const r = f.getBoundingClientRect(); return JSON.stringify({ left: r.left + f.clientLeft, top: r.top + f.clientTop }); })(document.getElementById('child'))"
+        )
+      )
+    );
+    return { ...(await take(side)), target, parent, content };
   });
   assert.deepEqual(steps.root, []);
   const touches = steps.child.filter((e: unknown[]) => String(e[0]).startsWith('touch'));
   // At the points in the iframe's viewport, the release too, off the iframe.
+  const { target, parent, content } = steps;
+  const inner = (x: number, y: number) => [Math.round(x - content.left), Math.round(y - content.top)];
   assert.deepEqual(
-    touches.map((e: unknown[]) => e[0]),
-    ['touchstart', 'touchend']
+    touches.map((e: unknown[]) => [e[0], e[3], e[4]]),
+    [
+      ['touchstart', ...inner(target.x, target.y)],
+      ['touchend', ...inner(parent.left + 5, parent.bottom + 5)],
+    ]
   );
   assert.equal(touches[0][1], 'target');
 });

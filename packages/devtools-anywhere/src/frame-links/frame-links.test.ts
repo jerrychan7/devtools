@@ -277,6 +277,35 @@ test('either end closing the link closes the other', async () => {
   }
 });
 
+test("stopping the links ends the targets kept for their iframe's next document too", async () => {
+  // The probe links nothing; the test links with a stop function of its own.
+  const { page, child } = await open(originOf(THIRD_HOST), originOf('localhost'));
+  try {
+    const gone = await page.evaluate(
+      origin =>
+        new Promise<number>((resolve, reject) => {
+          const { childTargets } = window.__devtoolsAnywhereTest;
+          const stop = window.DevtoolsAnywhere.linkFrames({ frameOrigins: origin });
+          let ended = 0;
+          childTargets.onGone(() => ended++);
+          const timeout = setTimeout(() => reject(new Error('not linked')), 5000);
+          childTargets.onChild(link => {
+            clearTimeout(timeout);
+            // Closed with its element still there: kept for the iframe's next document.
+            link.close();
+            stop();
+            resolve(ended);
+          });
+        }),
+      originOf('127.0.0.1')
+    );
+    assert.equal(gone, 1);
+    await waitForChildLinked(child, false);
+  } finally {
+    await page.close();
+  }
+});
+
 /** Whether the child page shows its F12 button: its global element's, hidden or not with it. */
 const f12Shown = (child: Frame) =>
   child.evaluate(() => {
@@ -313,6 +342,96 @@ test('an iframe that trusts no parent keeps its F12 button', async () => {
     await waitForF12(child, true);
     await settle();
     assert.equal(await f12Shown(child), true);
+  } finally {
+    await page.close();
+  }
+});
+
+/** Waits for the parent's `index`th link to close. */
+const waitForClosed = (page: Page, index: number) =>
+  page.waitForFunction(index => window.__links?.[index]?.closed === true, { timeout: 5000, polling: 50 }, index);
+
+/** How many links the parent has open. */
+const openLinks = (page: Page) =>
+  page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()].length);
+
+test('moving the iframe closes its link; the document it loads there links again', async () => {
+  const { page } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    // Moved, the iframe loads its document again, in another window.
+    await page.evaluate(() => {
+      const iframe = document.getElementById('child');
+      if (iframe) document.body.prepend(iframe);
+    });
+    await waitForClosed(page, 0);
+    await waitForLink(page, 2);
+    assert.equal((await links(page))[1]?.closed, false);
+    assert.equal(await openLinks(page), 1);
+  } finally {
+    await page.close();
+  }
+});
+
+test("removing the shadow host an iframe is in closes the iframe's link", async () => {
+  const { page } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.id = 'host';
+      document.body.append(host);
+      const iframe = document.getElementById('child');
+      if (iframe) host.attachShadow({ mode: 'open' }).append(iframe);
+    });
+    // Its document linked again from the shadow tree.
+    await waitForClosed(page, 0);
+    await waitForLink(page, 2);
+    await page.evaluate(() => document.getElementById('host')?.remove());
+    await waitForClosed(page, 1);
+    assert.equal(await openLinks(page), 0);
+  } finally {
+    await page.close();
+  }
+});
+
+// Puppeteer turns the back/forward cache off, so these play the events a page restored from it
+// gets: pagehide as it is left, then pageshow with persisted.
+const backForward = () => {
+  dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+  dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+};
+
+test('the parent back from the back/forward cache links its iframe again', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    await waitForChildLinked(child);
+    await page.evaluate(backForward);
+    await waitForClosed(page, 0);
+    await waitForLink(page, 2);
+    const [first, second] = await links(page);
+    assert.equal(second?.closed, false);
+    assert.equal(second?.frameId, first?.frameId);
+    const result = await command(page, 'Runtime.evaluate', { expression: 'window.marker' });
+    assert.deepEqual(result, { result: { type: 'string', value: `child of ${originOf('127.0.0.1')}` } });
+  } finally {
+    await page.close();
+  }
+});
+
+test('the iframe back from the back/forward cache links again, as another document', async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForLink(page);
+    await waitForChildLinked(child);
+    await child.evaluate(backForward);
+    await waitForClosed(page, 0);
+    await waitForLink(page, 2);
+    await waitForChildLinked(child);
+    assert.equal((await links(page))[1]?.closed, false);
+    const result = await command(page, 'Runtime.evaluate', { expression: 'window.marker' });
+    assert.deepEqual(result, { result: { type: 'string', value: `child of ${originOf('127.0.0.1')}` } });
   } finally {
     await page.close();
   }

@@ -109,8 +109,18 @@ test('inspect mode picks the node under the mouse in an iframe, like Chrome', as
   });
   assert.ok(point);
   const picked: string[] = [];
+  const seen: string[] = [];
   for (const side of [t.chrome, t.ours]) {
     await side.clear();
+    // Counted at the iframe's document: the inspector listens at its window, before it.
+    await t.page.evaluate(() => {
+      const frame = document.getElementById('ov-frame');
+      const doc = frame instanceof HTMLIFrameElement ? frame.contentDocument : null;
+      const counts: string[] = [];
+      Reflect.set(window, '__ovSeen', counts);
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'mouseover'])
+        doc?.addEventListener(type, () => counts.push(type), true);
+    });
     await side.send('Overlay.setInspectMode', { mode: 'searchForNode', highlightConfig: {} });
     await t.page.mouse.move(point.x, point.y);
     await t.page.mouse.click(point.x, point.y);
@@ -119,6 +129,7 @@ test('inspect mode picks the node under the mouse in an iframe, like Chrome', as
       await new Promise(r => setTimeout(r, 25));
       requested = await side.events('Overlay.inspectNodeRequested');
     }
+    seen.push(...(await t.page.evaluate(() => String(Reflect.get(window, '__ovSeen')))).split(',').filter(Boolean));
     await side.send('Overlay.setInspectMode', { mode: 'none', highlightConfig: {} });
     const backendNodeId = requested[0]?.backendNodeId;
     assert.ok(backendNodeId, 'requested');
@@ -126,10 +137,48 @@ test('inspect mode picks the node under the mouse in an iframe, like Chrome', as
     picked.push(`${node.localName}#${node.attributes?.[node.attributes.indexOf('id') + 1] ?? ''}`);
   }
   assert.deepEqual(picked, ['button#fg-btn', 'button#fg-btn']);
-  // The click was the inspector's: the iframe's page did not see it.
+  // The click was the inspector's: the iframe's page saw none of its events, in Chrome or ours.
+  assert.deepEqual(seen, []);
   const clicked = await t.page.evaluate(() => {
     const frame = document.getElementById('ov-frame');
     return frame instanceof HTMLIFrameElement ? frame.contentDocument?.activeElement?.id : null;
   });
   assert.notEqual(clicked, 'fg-btn');
+});
+
+test('inspect mode picks nodes in an iframe added after it started, like Chrome', async () => {
+  const picked: string[] = [];
+  for (const side of [t.chrome, t.ours]) {
+    await side.clear();
+    await side.send('Overlay.setInspectMode', { mode: 'searchForNode', highlightConfig: {} });
+    const point = await t.page.evaluate(
+      () =>
+        new Promise<{ x: number; y: number }>(resolve => {
+          const frame = document.createElement('iframe');
+          frame.style.cssText = 'position:absolute;z-index:20;left:20px;top:20px;width:200px;height:100px;border:0';
+          frame.onload = () => {
+            const r = frame.contentDocument?.getElementById('late-btn')?.getBoundingClientRect();
+            resolve({ x: 20 + (r ? r.left + r.width / 2 : 0), y: 20 + (r ? r.top + r.height / 2 : 0) });
+          };
+          frame.srcdoc =
+            '<body style="margin:0"><button id="late-btn" style="margin:20px;width:100px;height:40px">late</button>';
+          frame.dataset.late = '';
+          document.body.append(frame);
+        })
+    );
+    await t.page.mouse.move(point.x, point.y);
+    await t.page.mouse.click(point.x, point.y);
+    let requested: Protocol.Overlay.InspectNodeRequestedEvent[] = [];
+    for (let i = 0; i < 40 && !requested.length; i++) {
+      await new Promise(r => setTimeout(r, 25));
+      requested = await side.events('Overlay.inspectNodeRequested');
+    }
+    await side.send('Overlay.setInspectMode', { mode: 'none', highlightConfig: {} });
+    await t.page.evaluate(() => document.querySelector('iframe[data-late]')?.remove());
+    const backendNodeId = requested[0]?.backendNodeId;
+    assert.ok(backendNodeId, 'requested');
+    const { node } = await side.send('DOM.describeNode', { backendNodeId });
+    picked.push(`${node.localName}#${node.attributes?.[node.attributes.indexOf('id') + 1] ?? ''}`);
+  }
+  assert.deepEqual(picked, ['button#late-btn', 'button#late-btn']);
 });

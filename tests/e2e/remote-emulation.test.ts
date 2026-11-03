@@ -6,7 +6,7 @@
 // the next reload applies it again; a cleared one is not. During a reload the new document never
 // has the page's own size. A session setting its own override again while the page has one does
 // nothing (A sets 400x600, B 700x300, A 400x600 again: 700x300), but does once the page has none
-// (another's clear lifted it). A set Chrome rejects (a negative width) is not kept. The first test checks this
+// (another's clear lifted it). A set Chrome rejects (a negative width) is not kept, and a session's own override stays. The first test checks this
 // in Chrome; the next ones, the relay re-sending each client's override to the new page instance.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,6 +72,13 @@ test("Chrome: overrides survive a reload, re-applied in the sessions' attach ord
   await chrome.reload();
   assert.equal(await chrome.evaluate(() => Reflect.get(window, '__early')), '400x600', 'never the own size');
   assert.equal(await size(), '400x600', 'the override survives the reload');
+  const rejectedOwn = await a.send('Emulation.setDeviceMetricsOverride', metrics(-5, 300)).then(
+    () => 'ok',
+    () => 'rejected'
+  );
+  assert.equal(rejectedOwn, 'rejected');
+  await chrome.reload();
+  assert.equal(await size(), '400x600', "a rejected set keeps the session's override");
   const rejected = await b.send('Emulation.setDeviceMetricsOverride', metrics(-5, 300)).then(
     () => 'ok',
     () => 'rejected'
@@ -137,14 +144,20 @@ class Client {
 let shell: Page;
 let natural = '';
 
-/** The page iframe's size, once it has followed the override. */
-async function pageSize() {
+/**
+ * The page iframe's size, once it is `expected` (or a timeout has passed) and has stayed so for a
+ * while: overrides go through the remote server and the shell, and are re-sent after a reload.
+ */
+async function pageSize(expected: string) {
+  const read = () =>
+    shell.evaluate(() => {
+      const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+      if (!view) throw new Error('no page window');
+      return `${view.innerWidth}x${view.innerHeight}`;
+    });
+  await waitFor(async () => (await read()) === expected, 5000).catch(() => {});
   await pause();
-  return shell.evaluate(() => {
-    const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
-    if (!view) throw new Error('no page window');
-    return `${view.innerWidth}x${view.innerHeight}`;
-  });
+  return read();
 }
 
 /** Reloads the page in the shell's iframe, and waits for the new instance's probe. */
@@ -185,7 +198,7 @@ test("in shell mode, a remote client's override survives the page's reloads, as 
   shell = await env.browser.newPage();
   const at = new URL(remote.url).origin;
   await shell.goto(
-    `${env.baseUrl}/tests/e2e/pages/remote-page.html?local&panel&remote-emulation&remote=${encodeURIComponent(at + '/')}`
+    `${env.baseUrl}/tests/e2e/pages/remote-page.html?local&testBuild&panel&remote-emulation&remote=${encodeURIComponent(at + '/')}`
   );
   await shell.waitForFunction(
     () => !!document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow?.DevtoolsAnywhere
@@ -198,49 +211,52 @@ test("in shell mode, a remote client's override survives the page's reloads, as 
     width: 300,
     height: 200,
   });
-  natural = await pageSize();
+  natural = await pageSize('300x200');
   assert.equal(natural, '300x200');
   const a = await connect();
   await a.call('Runtime.enable');
   await a.call('Emulation.setDeviceMetricsOverride', metrics(400, 600));
-  assert.equal(await pageSize(), '400x600');
+  assert.equal(await pageSize('400x600'), '400x600');
   await watchSizes();
   await reloadPage();
-  assert.equal(await pageSize(), '400x600', 'the override survives the reload');
+  assert.equal(await pageSize('400x600'), '400x600', 'the override survives the reload');
   assert.deepEqual(await watchedSizes(), [], 'never the own size during the reload');
   assert.match(JSON.stringify(await a.call('Emulation.setDeviceMetricsOverride', metrics(-5, 300))), /"error"/);
   await reloadPage();
-  assert.equal(await pageSize(), '400x600', 'a rejected set is not kept');
+  assert.equal(await pageSize('400x600'), '400x600', "a rejected set keeps the client's override");
   const b = await connect();
+  assert.match(JSON.stringify(await b.call('Emulation.setDeviceMetricsOverride', metrics(-5, 300))), /"error"/);
+  await reloadPage();
+  assert.equal(await pageSize('400x600'), '400x600', 'a rejected set is not kept');
   await b.call('Emulation.setDeviceMetricsOverride', metrics(700, 300));
   await a.call('Emulation.setDeviceMetricsOverride', metrics(450, 650));
-  assert.equal(await pageSize(), '450x650');
+  assert.equal(await pageSize('450x650'), '450x650');
   await reloadPage();
-  assert.equal(await pageSize(), '700x300', 'the later-connected client wins after the reload');
+  assert.equal(await pageSize('700x300'), '700x300', 'the later-connected client wins after the reload');
   await a.call('Emulation.clearDeviceMetricsOverride');
-  assert.equal(await pageSize(), natural, "A's clear ends B's override too");
+  assert.equal(await pageSize(natural), natural, "A's clear ends B's override too");
   await reloadPage();
-  assert.equal(await pageSize(), '700x300', "but B's own is still on: it is re-sent");
+  assert.equal(await pageSize('700x300'), '700x300', "but B's own is still on: it is re-sent");
   await b.call('Emulation.clearDeviceMetricsOverride');
   await reloadPage();
-  assert.equal(await pageSize(), natural, 'a cleared override is not');
+  assert.equal(await pageSize(natural), natural, 'a cleared override is not');
   await b.call('Emulation.setDeviceMetricsOverride', metrics(700, 300));
   await reloadPage();
-  assert.equal(await pageSize(), '700x300');
+  assert.equal(await pageSize('700x300'), '700x300');
   await b.call('Emulation.clearDeviceMetricsOverride');
   await a.call('Emulation.setDeviceMetricsOverride', metrics(400, 600));
   await b.call('Emulation.setDeviceMetricsOverride', metrics(700, 300));
   await a.call('Emulation.setDeviceMetricsOverride', metrics(400, 600));
-  assert.equal(await pageSize(), '700x300', 'setting its own again does nothing while the page has one');
+  assert.equal(await pageSize('700x300'), '700x300', 'setting its own again does nothing while the page has one');
   await b.call('Emulation.clearDeviceMetricsOverride');
   await a.call('Emulation.setDeviceMetricsOverride', metrics(400, 600));
-  assert.equal(await pageSize(), '400x600', 'but does once the page has none');
+  assert.equal(await pageSize('400x600'), '400x600', 'but does once the page has none');
   await a.call('Emulation.clearDeviceMetricsOverride');
   await b.call('Emulation.setDeviceMetricsOverride', metrics(700, 300));
   b.socket.close();
-  assert.equal(await pageSize(), natural, "a client's disconnect lifts its override");
+  assert.equal(await pageSize(natural), natural, "a client's disconnect lifts its override");
   await reloadPage();
-  assert.equal(await pageSize(), natural, "nor is a gone client's re-sent");
+  assert.equal(await pageSize(natural), natural, "nor is a gone client's re-sent");
   remotes.push(a);
 });
 
@@ -265,29 +281,39 @@ test("in shell mode, after a reload the shell frontend's override and remote cli
   await fromFrontend('Emulation.setDeviceMetricsOverride', metrics(500, 500));
   await a.call('Emulation.setDeviceMetricsOverride', metrics(400, 600));
   await fromFrontend('Emulation.setDeviceMetricsOverride', metrics(550, 550));
-  assert.equal(await pageSize(), '550x550');
+  assert.equal(await pageSize('550x550'), '550x550');
   await reloadPage();
-  assert.equal(await pageSize(), '400x600', 'the later-attached client wins after the reload');
+  assert.equal(await pageSize('400x600'), '400x600', 'the later-attached client wins after the reload');
   // A new frontend instance attaches after A: its override holds after the reload.
   await fromFrontend('Emulation.clearDeviceMetricsOverride');
   await reloadFrontend();
   await fromFrontend('Emulation.setDeviceMetricsOverride', metrics(500, 500));
   await a.call('Emulation.setDeviceMetricsOverride', metrics(450, 650));
-  assert.equal(await pageSize(), '450x650');
+  assert.equal(await pageSize('450x650'), '450x650');
   await reloadPage();
-  assert.equal(await pageSize(), '500x500', 'the frontend attached later: its override wins');
+  assert.equal(await pageSize('500x500'), '500x500', 'the frontend attached later: its override wins');
   // C connects before a new frontend instance, but sets its override only after the frontend's:
   // it attached when it connected, so the frontend's holds after the reload.
   await fromFrontend('Emulation.clearDeviceMetricsOverride');
   await a.call('Emulation.clearDeviceMetricsOverride');
+  const remoteClients = async () =>
+    (await shell.evaluate(() => window.__devtoolsAnywhereTest.shellClients())).filter(client =>
+      client.startsWith('remote:')
+    ).length;
+  const attachedBefore = await remoteClients();
   const c = await connect();
-  await pause();
+  // The shell has C's attach time before the new frontend instance attaches.
+  await waitFor(async () => (await remoteClients()) > attachedBefore);
   await reloadFrontend();
   await fromFrontend('Emulation.setDeviceMetricsOverride', metrics(500, 500));
   await c.call('Emulation.setDeviceMetricsOverride', metrics(350, 250));
-  assert.equal(await pageSize(), '350x250');
+  assert.equal(await pageSize('350x250'), '350x250');
   await reloadPage();
-  assert.equal(await pageSize(), '500x500', 'C attached before the frontend, though it set its override later');
+  assert.equal(
+    await pageSize('500x500'),
+    '500x500',
+    'C attached before the frontend, though it set its override later'
+  );
   c.socket.close();
   a.socket.close();
   await shell.close();
@@ -355,7 +381,7 @@ test("the shell forgets a client's attach time when its session ends, whichever 
   });
   await waitFor(async () => (await clients()).length === 1);
   assert.deepEqual(await clients(), ['frontend']);
-  assert.equal(await pageSize(), '300x200');
+  assert.equal(await pageSize('300x200'), '300x200');
   // A remote client that disconnects at once.
   const a = await connect('remote-forget');
   await waitFor(async () => (await remoteClients()).length === 1);
@@ -365,6 +391,15 @@ test("the shell forgets a client's attach time when its session ends, whichever 
   // next instance, which never served it. Without an override, nothing else would drop it.
   const b = await connect('remote-forget');
   await waitFor(async () => (await remoteClients()).length === 1);
+  // The new instance's probe is held back until B is gone: no page instance serves B when its
+  // session ends, so its end can only reach the new one.
+  let releaseProbe = () => {};
+  const probeHeld = new Promise<void>(resolve => (releaseProbe = resolve));
+  await shell.setRequestInterception(true);
+  shell.on('request', request => {
+    if (!request.url().includes('probe.iife.js')) return void request.continue();
+    void probeHeld.then(() => request.continue());
+  });
   await shell.evaluate(() => {
     const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
     view?.addEventListener('pagehide', () => Reflect.set(top ?? window, '__left', true));
@@ -372,6 +407,15 @@ test("the shell forgets a client's attach time when its session ends, whichever 
   });
   await shell.waitForFunction(() => Reflect.get(window, '__left') === true);
   b.socket.close();
+  await pause();
+  assert.equal(
+    await shell.evaluate(
+      () => !!document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow?.DevtoolsAnywhere
+    ),
+    false,
+    'no page instance while B ends'
+  );
+  releaseProbe();
   await waitFor(async () => (await remoteClients()).length === 0);
   await shell.close();
 });

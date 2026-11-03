@@ -316,12 +316,28 @@ describe('editing styles in iframes', () => {
     });
     assert.equal(styles[0]?.cssProperties.find(p => p.name === 'color')?.value, 'rgb(4, 5, 6)');
     assert.equal(await innerStyle('color'), 'rgb(4, 5, 6)');
+    // A selector #inner no longer matches: the rule stops applying in the iframe, and is back with the old one.
     const { selectorList: list } = await t.ours.send('CSS.setRuleSelector', {
       styleSheetId,
       range: selectorRange,
-      selector: '#inner.narrow',
+      selector: '#inner.none',
     });
-    assert.equal(list.text, '#inner.narrow');
+    assert.equal(list.text, '#inner.none');
+    // The iframe's rules are of its own realm: `instanceof CSSStyleRule` of the top page fails on them.
+    const selectors = () =>
+      t.page.evaluate(() =>
+        [...(document.querySelector<HTMLIFrameElement>('#styled')?.contentDocument?.styleSheets ?? [])].flatMap(sheet =>
+          [...sheet.cssRules].flatMap(r =>
+            'selectorText' in r && typeof r.selectorText === 'string' ? [r.selectorText] : []
+          )
+        )
+      );
+    assert.ok((await selectors()).includes('#inner.none'));
+    assert.notEqual(await innerStyle('color'), 'rgb(4, 5, 6)');
+    const range = list.selectors[0]?.range;
+    assert.ok(range);
+    await t.ours.send('CSS.setRuleSelector', { styleSheetId, range, selector: '#inner' });
+    assert.ok(!(await selectors()).includes('#inner.none'));
     assert.equal(await innerStyle('color'), 'rgb(4, 5, 6)');
   });
 
@@ -376,6 +392,47 @@ describe('forced pseudo-classes in iframes', () => {
     const chrome = await forced(t.chrome, []);
     assert.deepEqual(ours, chrome);
     assert.equal(chrome.decoration, 'none');
+  });
+
+  // The layer order hangs on a media query that holds in the narrow iframe only, not in the top
+  // page; widening the iframe while forced flips it, which the forced rules must follow.
+  test('the layer order of forced rules follows the media queries of the iframe', async () => {
+    await t.page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('#styled')?.contentDocument;
+      if (!doc) throw new Error('no iframe');
+      const style = doc.createElement('style');
+      style.textContent =
+        '@media (max-width: 400px) { @layer wide, narrow; } @layer narrow { #inner:focus { column-gap: 1px } } ' +
+        '@layer wide { #inner:focus { column-gap: 2px } }';
+      doc.head.append(style);
+    });
+    const width = (px: string) =>
+      t.page.evaluate(px => {
+        const frame = document.querySelector<HTMLIFrameElement>('#styled');
+        if (!frame?.contentWindow) throw new Error('no iframe');
+        const win = frame.contentWindow;
+        return new Promise<void>(resolve => {
+          win.addEventListener('resize', () => requestAnimationFrame(() => resolve()), { once: true });
+          frame.style.width = px;
+        });
+      }, px);
+    const run = async (side: Side) => {
+      const id = await nodeId(side, 'inner');
+      await side.send('CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: ['focus'] });
+      try {
+        const narrow = await innerStyle('column-gap');
+        await width('500px');
+        const wide = await innerStyle('column-gap');
+        return { narrow, wide };
+      } finally {
+        await side.send('CSS.forcePseudoState', { nodeId: id, forcedPseudoClasses: [] });
+        await width('300px');
+      }
+    };
+    const ours = await run(t.ours);
+    const chrome = await run(t.chrome);
+    assert.deepEqual(ours, chrome);
+    assert.deepEqual(chrome, { narrow: '1px', wide: '2px' });
   });
 
   test('removing the iframe un-forces its elements', async () => {

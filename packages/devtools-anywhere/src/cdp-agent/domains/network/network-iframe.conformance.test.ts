@@ -21,6 +21,8 @@ before(async () => {
     'Network.responseReceived',
     'Network.loadingFinished',
     'Network.webSocketCreated',
+    'Network.webSocketFrameSent',
+    'Network.webSocketFrameReceived',
   ]);
   await t.chrome.send('Network.enable');
   await t.ours.send('Network.enable');
@@ -188,17 +190,62 @@ describe('Network in same-origin iframes', () => {
     }
   });
 
-  test('a WebSocket opened in an iframe', async () => {
-    await inFrame('a', "new WebSocket(location.origin.replace('http', 'ws') + '/ws/echo?n=a-ws')");
+  test('an <object> and an <embed> showing an image: a request of the page', async () => {
+    await t.page.evaluate(`(() => {
+      const o = document.createElement('object');
+      o.data = '${BASE}assets/pixel.png?n=object-img';
+      const e = document.createElement('embed');
+      e.src = '${BASE}assets/pixel.png?n=embed-img';
+      document.body.append(o, e);
+    })()`);
+    await settle('n=object-img', 'n=embed-img');
+    for (const side of [t.ours, t.chrome]) {
+      const top = await one(side, 'n=top-ref');
+      for (const marker of ['n=object-img', 'n=embed-img']) {
+        const image = await one(side, marker);
+        assert.equal(image.frameId, top.frameId, marker);
+      }
+    }
+    for (const marker of ['n=object-img', 'n=embed-img']) {
+      assert.equal((await one(t.ours, marker)).type, (await one(t.chrome, marker)).type, marker);
+    }
+  });
+
+  test('a WebSocket opened in an iframe, its binary frames from that realm', async () => {
+    // The ArrayBuffer and Blob sent, and the Blob echoed, are the iframe's, not the top page's.
+    await inFrame(
+      'a',
+      `const ws = new WebSocket(location.origin.replace('http', 'ws') + '/ws/echo?n=a-ws');
+       ws.onopen = () => { ws.send(new Uint8Array([1, 2, 250]).buffer); ws.send(new Blob(['blob'])); };`
+    );
     const start = Date.now();
-    const created = async (side: Side) =>
-      (await side.events('Network.webSocketCreated')).filter(e => e.url.includes('n=a-ws'));
-    while ((await created(t.ours)).length < 1 || (await created(t.chrome)).length < 1) {
-      if (Date.now() - start > 5000) throw new Error('timed out waiting for webSocketCreated');
+    const socket = async (side: Side) => {
+      const created = (await side.events('Network.webSocketCreated')).filter(e => e.url.includes('n=a-ws'));
+      const ofSocket = (e: { requestId: string }) => e.requestId === created[0]?.requestId;
+      const frames = (list: Protocol.Network.WebSocketFrameSentEvent[]) =>
+        list.filter(ofSocket).map(({ response: { opcode, payloadData } }) => ({ opcode, payloadData }));
+      return {
+        created,
+        sent: frames(await side.events('Network.webSocketFrameSent')),
+        received: frames(await side.events('Network.webSocketFrameReceived')),
+      };
+    };
+    const ready = async (side: Side) => (await socket(side)).received.length >= 2;
+    while (!((await ready(t.ours)) && (await ready(t.chrome)))) {
+      if (Date.now() - start > 5000) throw new Error('timed out waiting for the echoed frames');
       await new Promise(r => setTimeout(r, 20));
     }
-    const [[ours], [chrome]] = [await created(t.ours), await created(t.chrome)];
-    assert.equal(ours?.url, chrome?.url);
-    assert.equal(ours?.initiator?.type, chrome?.initiator?.type);
+    const [ours, chrome] = [await socket(t.ours), await socket(t.chrome)];
+    assert.equal(ours.created.length, 1);
+    assert.equal(ours.created[0]?.url, chrome.created[0]?.url);
+    assert.equal(ours.created[0]?.initiator?.type, chrome.created[0]?.initiator?.type);
+    assert.deepEqual(ours.sent, chrome.sent);
+    assert.deepEqual(ours.received, chrome.received);
+    // Binary frames; as in Chrome, the Blob sent is reported without its payload, the buffer with it.
+    assert.deepEqual(
+      ours.sent.map(f => f.opcode),
+      [2, 2]
+    );
+    assert.equal(ours.sent[0]?.payloadData, 'AQL6');
   });
 });
