@@ -12,33 +12,66 @@ const INVALID_PARAMS = -32602;
 const field = (params: unknown, name: string): unknown =>
   typeof params === 'object' && params !== null ? Reflect.get(params, name) : undefined;
 
+/** A field's type as Chrome deserializes it; `!` marks a mandatory one. An object is a nested schema. */
+type Schema = { readonly [name: string]: string | Schema };
+
+const PARAMS: Schema = {
+  'width!': 'int32',
+  'height!': 'int32',
+  'deviceScaleFactor!': 'double',
+  'mobile!': 'bool',
+  scale: 'double',
+  screenWidth: 'int32',
+  screenHeight: 'int32',
+  positionX: 'int32',
+  positionY: 'int32',
+  dontSetVisibleSize: 'bool',
+  screenOrientation: { 'type!': 'string', 'angle!': 'int32' },
+  viewport: { 'x!': 'double', 'y!': 'double', 'width!': 'double', 'height!': 'double', 'scale!': 'double' },
+  displayFeature: { 'orientation!': 'string', 'offset!': 'int32', 'maskLength!': 'int32' },
+  devicePosture: { 'type!': 'string' },
+  scrollbarType: 'string',
+};
+
+/**
+ * Throws Chrome's error for what it fails to deserialize: the fields in the order given (unknown
+ * ones ignored), each object's missing mandatory fields after its given ones, by name.
+ */
+function deserialize(value: object, schema: Schema, path: string) {
+  const bad = (name: string, why: string): never => {
+    throw new CdpError('Invalid parameters', INVALID_PARAMS, `Failed to deserialize ${path}${name} - ${why}`);
+  };
+  const types = new Map(Object.entries(schema).map(([key, type]) => [key.replace(/!$/, ''), type]));
+  for (const [name, given] of Object.entries(value)) {
+    const type = types.get(name);
+    if (type === undefined) continue;
+    if (typeof type === 'object') {
+      if (typeof given !== 'object' || given === null || Array.isArray(given)) bad(name, 'CBOR: map start expected');
+      else deserialize(given, type, `${path}${name}.`);
+      continue;
+    }
+    const ok =
+      type === 'bool'
+        ? typeof given === 'boolean'
+        : type === 'string'
+          ? typeof given === 'string'
+          : typeof given === 'number' &&
+            (type === 'double' || (Number.isInteger(given) && given >= -(2 ** 31) && given < 2 ** 31));
+    if (!ok) bad(name, `BINDINGS: ${type} value expected`);
+  }
+  const missing = Object.keys(schema)
+    .filter(key => key.endsWith('!') && field(value, key.slice(0, -1)) === undefined)
+    .map(key => key.slice(0, -1))
+    .sort()[0];
+  if (missing !== undefined) bad(missing, 'BINDINGS: mandatory field missing');
+}
+
 /** Throws Chrome's error for `params` it would reject. */
 export function checkMetrics(params: object) {
   const fail = (message: string): never => {
     throw new CdpError(message, INVALID_PARAMS);
   };
-  // What Chrome fails to deserialize, field by field.
-  const typed = (name: string, type: 'int32' | 'double' | 'bool', mandatory: boolean) => {
-    const value = field(params, name);
-    if (value === undefined) {
-      if (mandatory) bad(name, 'mandatory field missing');
-      return;
-    }
-    const ok =
-      type === 'bool'
-        ? typeof value === 'boolean'
-        : typeof value === 'number' && (type === 'double' || (Number.isInteger(value) && Math.abs(value) < 2 ** 31));
-    if (!ok) bad(name, `${type === 'bool' ? 'bool' : type} value expected`);
-  };
-  const bad = (name: string, why: string): never => {
-    throw new CdpError('Invalid parameters', INVALID_PARAMS, `Failed to deserialize params.${name} - BINDINGS: ${why}`);
-  };
-  typed('width', 'int32', true);
-  typed('height', 'int32', true);
-  typed('deviceScaleFactor', 'double', true);
-  typed('mobile', 'bool', true);
-  typed('scale', 'double', false);
-  for (const name of ['screenWidth', 'screenHeight', 'positionX', 'positionY']) typed(name, 'int32', false);
+  deserialize(params, PARAMS, 'params.');
   const number = (name: string, fallback: number) => {
     const value = field(params, name);
     return typeof value === 'number' ? value : fallback;
@@ -80,7 +113,8 @@ export function checkMetrics(params: object) {
 /**
  * Whether two overrides are the same to Chrome, which then does nothing: the fields it keeps,
  * omitted ones as their defaults (a view position only when both coordinates are given), in any
- * order. A screen orientation, viewport or display feature given differs from none.
+ * order. A screen orientation, viewport or display feature given differs from none, and is
+ * compared by the fields Chrome knows of it; no device posture is a continuous one.
  */
 export function sameMetrics(a: unknown, b: unknown): boolean {
   if (a === null || b === null) return a === b;
@@ -90,9 +124,10 @@ export function sameMetrics(a: unknown, b: unknown): boolean {
       ? `${String(field(params, 'positionX'))},${String(field(params, 'positionY'))}`
       : undefined;
   const nested = (params: unknown, name: string) => {
-    const object = field(params, name);
-    if (typeof object !== 'object' || object === null) return undefined;
-    return JSON.stringify(Object.entries(object).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)));
+    const object = field(params, name) ?? (name === 'devicePosture' ? { type: 'continuous' } : undefined);
+    const schema = PARAMS[name];
+    if (object === undefined || typeof schema !== 'object') return undefined;
+    return JSON.stringify(Object.keys(schema).map(key => field(object, key.replace(/!$/, ''))));
   };
   const flat: [string, unknown][] = [
     ['width', 0],

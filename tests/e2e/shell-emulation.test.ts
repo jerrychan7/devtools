@@ -145,6 +145,31 @@ const checked: object[] = [
   { ...base, displayFeature: { orientation: 'bogus', offset: 1, maskLength: 1 } },
   { ...base, displayFeature: { orientation: 'vertical', offset: 399, maskLength: 2 } },
   { ...base, displayFeature: { orientation: 'horizontal', offset: 10, maskLength: 2 } },
+  { ...base, displayFeature: { orientation: 'horizontal', offset: 599, maskLength: 2 } },
+  { ...base, width: 0, displayFeature: { orientation: 'vertical', offset: 1, maskLength: 1 } },
+  { ...base, displayFeature: { orientation: 'vertical', offset: 1 } },
+  { ...base, displayFeature: { orientation: 'vertical', offset: 1.5, maskLength: 1 } },
+  { ...base, displayFeature: { orientation: 1, offset: 1, maskLength: 1 } },
+  { ...base, screenOrientation: { type: 'portraitPrimary' } },
+  { ...base, screenOrientation: { angle: 0 } },
+  { ...base, screenOrientation: { type: 'portraitPrimary', angle: 1.5 } },
+  { ...base, screenOrientation: { type: 5, angle: 0 } },
+  { ...base, screenOrientation: { type: 'bogus' } },
+  { ...base, screenOrientation: 5 },
+  { ...base, screenOrientation: null },
+  { ...base, viewport: { x: 0, y: 0, width: 10, height: 10 } },
+  { ...base, viewport: { width: 'a', x: 'b', y: 0, height: 1, scale: 1 } },
+  { ...base, viewport: { x: 'b' } },
+  { ...base, viewport: { y: 0 } },
+  { ...base, viewport: { x: -1.5, y: -1, width: -10, height: 10, scale: -1, zoom: 'a' } },
+  { ...base, viewport: 1 },
+  { ...base, screenOrientation: { type: 5 }, viewport: { x: 'b' } },
+  { ...base, devicePosture: { type: 'folded' } },
+  { ...base, devicePosture: {} },
+  { ...base, devicePosture: { type: 1 } },
+  { ...base, dontSetVisibleSize: 'x' },
+  { ...base, scrollbarType: 'bogus' },
+  { ...base, scrollbarType: 1 },
 ];
 /** An error as compared: Chrome's deserialization details end with a position, which is left out. */
 interface Response {
@@ -213,6 +238,7 @@ test("in shell mode, setting the same override again does nothing, the same as C
     { ...base, screenWidth: 0, screenHeight: 0 },
     { ...base, screenWidth: 0, positionX: 0 },
     { ...base, dontSetVisibleSize: true },
+    { ...base, devicePosture: { type: 'continuous' } },
   ];
   const different: object[] = [
     { ...base, positionX: 0, positionY: 0, screenWidth: 0, screenHeight: 0 },
@@ -231,6 +257,36 @@ test("in shell mode, setting the same override again does nothing, the same as C
       await call(0, 'Emulation.clearDeviceMetricsOverride');
       await call(1, 'Emulation.clearDeviceMetricsOverride');
     }
+  }
+});
+
+test('in shell mode, nested fields are the same to Chrome by their known fields, in any order', async () => {
+  // Measured in Chrome, set twice by A while B's override is on: the same (a no-op) or not.
+  const viewport = { x: 0, y: 0, width: 400, height: 600, scale: 1 };
+  const pairs: [object, object, boolean][] = [
+    [{ viewport }, { viewport: { scale: 1, height: 600, width: 400, y: 0, x: 0 } }, true],
+    [{ viewport }, { viewport: { ...viewport, zoom: 2 } }, true],
+    [{ viewport }, { viewport: { ...viewport, x: 1 } }, false],
+    [
+      { screenOrientation: { type: 'portraitPrimary', angle: 0 } },
+      { screenOrientation: { angle: 0, type: 'portraitPrimary' } },
+      true,
+    ],
+    [
+      { displayFeature: { orientation: 'vertical', offset: 1, maskLength: 1 } },
+      { displayFeature: { maskLength: 1, offset: 1, orientation: 'vertical' } },
+      true,
+    ],
+    [{}, { devicePosture: { type: 'continuous' } }, true],
+    [{}, { devicePosture: { type: 'folded' } }, false],
+  ];
+  for (const [first, again, same] of pairs) {
+    assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', { ...base, ...first }), 'ok');
+    assert.equal(await call(1, 'Emulation.setDeviceMetricsOverride', metrics(700, 300)), 'ok');
+    assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', { ...base, ...again }), 'ok');
+    assert.equal(await pageSize(), same ? '700x300' : '400x600', JSON.stringify([first, again]));
+    await call(0, 'Emulation.clearDeviceMetricsOverride');
+    await call(1, 'Emulation.clearDeviceMetricsOverride');
   }
 });
 
