@@ -72,21 +72,31 @@ test('a malformed message is answered with an invalid request error', async () =
 });
 
 test('a command the page cannot carry out fails with why; one not yet done succeeds', async () => {
-  const reply = (method: string) =>
+  const reply = (method: string, params: object = {}) =>
     t.page.evaluate(
-      m =>
-        window.__session.call(m).then(
+      (m, p) =>
+        window.__session.call(m, p).then(
           () => 'resolved',
           (e: Error) => e.message
         ),
-      method
+      method,
+      params
     );
   assert.equal(
-    await reply('Emulation.setSafeAreaInsetsOverride'),
-    'Not supported in the page: env(safe-area-inset-*) cannot be set'
+    await reply('Emulation.setFocusEmulationEnabled', { enabled: true }),
+    'Not supported in the page: focus is given by the browser'
   );
+  assert.equal(await reply('Emulation.setFocusEmulationEnabled', { enabled: false }), 'resolved');
   assert.match(await reply('Target.setRemoteLocations'), /^Not supported in the page: /);
-  for (const method of ['Emulation.setEmulatedMedia', 'Network.setBlockedURLs', 'Animation.enable', 'Log.clear']) {
+  assert.match(await reply('BackgroundService.startObserving'), /^Not supported in the page: /);
+  for (const method of [
+    'Emulation.setEmulatedMedia',
+    'Emulation.setSafeAreaInsetsOverride',
+    'Network.setBlockedURLs',
+    'Overlay.setPausedInDebuggerMessage',
+    'Animation.enable',
+    'Log.clear',
+  ]) {
     assert.equal(await reply(method), 'resolved', method);
   }
 });

@@ -59,14 +59,15 @@
 | 违规提示与长任务（`Log.startViolationsReport`） | 空操作 | `PerformanceObserver` 监听 `longtask`、`long-animation-frame`，在 Console 输出 |
 | 覆盖 user agent（`Emulation` / `Network.setUserAgentOverride`） | 空操作 | 重新定义 `navigator.userAgent`、`platform`、`userAgentData`，并给已经拦截的 fetch、XHR 设置请求头；文档本身的请求和其他子资源改不了 |
 | 计算样式更新（`CSS.trackComputedStyleUpdatesForNode`） | 空操作 | 对被跟踪的节点用 `MutationObserver` 加 `getComputedStyle`，发出 `computedStyleUpdated` |
-| 框架、隔离元素、铰链、刘海叠加层，以及「已在调试程序中暂停」提示 | `Overlay.highlightFrame`、`setShowIsolatedElements`、`setShowHinge`、`setShowDisplayCutout`、`setPausedInDebuggerMessage` 是空操作 | 和 `highlightNode` 画在同一层；暂停提示要等页面能暂停时才有用 |
+| 框架、隔离元素、铰链、刘海叠加层 | `Overlay.highlightFrame`、`setShowIsolatedElements`、`setShowHinge`、`setShowDisplayCutout` 是空操作 | 和 `highlightNode` 画在同一层 |
+| 模拟安全区（safe area） | `Emulation.setSafeAreaInsetsOverride` 是空操作 | 通过 CSSOM 把样式表里的 `env(safe-area-inset-*)` 替换成指定值；限制和模拟媒体特性相同：对 `@import`、跨域样式表不生效 |
 | Reporting API 和请求发起位置 | `Network.enableReportingApi`、`setAttachDebugStack` 是空操作 | 用 `ReportingObserver` 收集页面能看到的报告；在拦截的 fetch、XHR 里记录调用栈 |
 
 价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。
 
 ## 没有效果的命令
 
-已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、焦点模拟、安全区域边距、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址。前端不记录服务器错误，也不检查这些命令的返回。能在页面里做但还没做的命令仍返回成功，列在上面的表里；启用一个永远不会有事件的域也返回成功，和 Chrome 一样。
+已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址。前端不记录服务器错误，也不检查这些命令的返回。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；启用一个永远不会有事件的域也返回成功，和 Chrome 一样。
 
 ## 从旧版本线发布补丁
 

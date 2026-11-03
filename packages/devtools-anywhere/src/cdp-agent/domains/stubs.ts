@@ -20,13 +20,14 @@ const NOOPS = {
   Autofill: ['enable'],
   CSS: ['trackComputedStyleUpdatesForNode'],
   // Device mode's size is the shell's (shell-layout.ts).
-  Emulation: ['setEmulatedMedia', 'setEmulatedVisionDeficiency', 'setUserAgentOverride'],
+  Emulation: ['setEmulatedMedia', 'setEmulatedVisionDeficiency', 'setSafeAreaInsetsOverride', 'setUserAgentOverride'],
   HeapProfiler: ['enable'],
   Inspector: ['enable'],
   // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear', 'startViolationsReport'],
   Overlay: [
     'highlightFrame',
+    // The page never pauses in a debugger, so there is no message to show.
     'setPausedInDebuggerMessage',
     'setShowGridOverlays',
     'setShowFlexOverlays',
@@ -77,8 +78,6 @@ const UNSUPPORTED: Record<string, Record<string, string>> = {
   BackgroundService: { startObserving: 'the browser records background service events' },
   Emulation: {
     setAutoDarkModeOverride: 'auto dark mode is applied by the browser',
-    setFocusEmulationEnabled: 'focus is given by the browser',
-    setSafeAreaInsetsOverride: 'env(safe-area-inset-*) cannot be set',
     resetPageScaleFactor: 'the pinch zoom cannot be changed',
   },
   Network: { setBypassServiceWorker: "the page's requests go through its service worker" },
@@ -107,6 +106,13 @@ export function registerStubs(session: CdpSession) {
       )
     );
   }
+  session.register('Emulation', {
+    // Not emulating is what the page does already; a page using DevTools in it loses focus to it,
+    // and its :focus styles go, which nothing in the page can undo.
+    setFocusEmulationEnabled: ({ enabled }: Protocol.Emulation.SetFocusEmulationEnabledRequest) => {
+      if (enabled) throw new CdpError('Not supported in the page: focus is given by the browser');
+    },
+  });
   session.register('Network', {
     // Throttling cannot be emulated in the page: the rules are accepted but never applied.
     emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({

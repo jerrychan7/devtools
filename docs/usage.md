@@ -257,6 +257,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Screenshots | ⚠️ | See [below](#screenshots) |
 | Device mode | ⚠️ | Shell mode only. Sets the size only: no pixel ratio, user agent or touch; its screenshots are snapDOM's, at the page's pixel ratio. `Emulation.setDeviceMetricsOverride` works there from any client (a remote agent too), the last one set applying, as in Chrome; elsewhere it fails. Remote clients' overrides survive page reloads, as in Chrome; a remote client that disconnects during a reload keeps its override up to 3 s longer |
 | Fullscreen pages | ⚠️ | While an element is fullscreen, DevTools cannot be used, in shell mode too. Esc leaves fullscreen |
+| Rendering panel emulation | ⚠️ | "Emulate a focused page" cannot be done: using DevTools in the page really takes focus from its elements, and their `:focus` styles go; turning it on fails. Auto dark mode and resetting the pinch zoom cannot be done either and fail. Every command the page cannot carry out fails with "Not supported in the page: <why>"; those that could be done but are not yet are in the [roadmap](roadmap.md) |
 | Frontend on the page's origin | ⚠️ | DevTools' settings share the page's `localStorage`: host it on another origin |
 | Browsers | ⚠️ | Page side: any modern browser. DevTools UI: verified in Chrome only; newer frontends may need compatibility patches |
 

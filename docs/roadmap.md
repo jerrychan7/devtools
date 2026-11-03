@@ -59,14 +59,15 @@ All with standard page APIs, matching Chrome. By value for effort; the first thr
 | Violations and long tasks (`Log.startViolationsReport`) | No-op | `PerformanceObserver` on `longtask` and `long-animation-frame`, reported in the Console |
 | User agent override (`Emulation` / `Network.setUserAgentOverride`) | No-op | `navigator.userAgent`, `platform` and `userAgentData` redefined, and the header set on the intercepted fetch and XHR; not on the document's own request or other subresources |
 | Computed style updates (`CSS.trackComputedStyleUpdatesForNode`) | No-op | A `MutationObserver` and `getComputedStyle` on the tracked nodes, sending `computedStyleUpdated` |
-| Frame, isolated element, hinge and cutout overlays, the "Paused in debugger" message | `Overlay.highlightFrame`, `setShowIsolatedElements`, `setShowHinge`, `setShowDisplayCutout`, `setPausedInDebuggerMessage` are no-ops | Drawn on the same layer as `highlightNode`; the message only matters once the page can pause |
+| Frame, isolated element, hinge and cutout overlays | `Overlay.highlightFrame`, `setShowIsolatedElements`, `setShowHinge`, `setShowDisplayCutout` are no-ops | Drawn on the same layer as `highlightNode` |
+| Emulated safe area insets | `Emulation.setSafeAreaInsetsOverride` is a no-op | `env(safe-area-inset-*)` replaced with the given values through the CSSOM; the limits of emulated media: not `@import` or cross-origin sheets |
 | Reporting API and request initiators | `Network.enableReportingApi`, `setAttachDebugStack` are no-ops | A `ReportingObserver` for the reports the page sees; a stack captured in the intercepted fetch and XHR |
 
 Of little value: the performance monitor (`Performance.getMetrics`: only the DOM node count and Chrome's `performance.memory`); event listeners' source locations (a stack captured on each add, which slows pages down).
 
 ## Commands without effect
 
-Settled: a command the page cannot carry out fails with a server error (-32000), "Not supported in the page: <why>" (`cdp-agent/domains/stubs.ts`): Autofill's addresses, background service recording, auto dark mode, focus emulation, safe-area insets, resetting the pinch zoom, bypassing the service worker, interest group and shared storage tracking, remote target locations. The frontend does not log server errors and does not check these replies. A command that can be done in the page but is not yet still succeeds and is listed in the table above; enabling a domain whose events never come succeeds, as in Chrome.
+Settled: a command the page cannot carry out fails with a server error (-32000), "Not supported in the page: <why>" (`cdp-agent/domains/stubs.ts`): Autofill's addresses, background service recording, auto dark mode, turning focus emulation on (turning it off succeeds), resetting the pinch zoom, bypassing the service worker, interest group and shared storage tracking, remote target locations. The frontend does not log server errors and does not check these replies. A command the page can only partly carry out is judged by its core effect: without it, the command cannot be carried out (focus emulation cannot keep `:focus` styles); with it, it is not done yet (a user agent override cannot change the document's own request, but scripts and later requests see it). A command that can be done in the page but is not yet still succeeds and is listed in the table above; enabling a domain whose events never come succeeds, as in Chrome.
 
 ## Patches from an older release line
 
