@@ -179,7 +179,10 @@ describe('Network in same-origin iframes', () => {
       // Of the iframe's own frame: the one DOM gives its owner.
       assert.notEqual(doc.frameId, (await one(side, 'n=top-ref')).frameId);
       const { result } = await side.send('Runtime.evaluate', { expression: "document.getElementById('sb')" });
-      const { node } = await side.send('DOM.describeNode', { objectId: result.objectId });
+      const { node } = await side.send(
+        'DOM.describeNode',
+        result.objectId === undefined ? {} : { objectId: result.objectId }
+      );
       assert.equal(doc.frameId, node.frameId);
     }
   });

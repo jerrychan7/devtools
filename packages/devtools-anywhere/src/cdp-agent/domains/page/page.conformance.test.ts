@@ -378,7 +378,7 @@ test('Page.navigate with a frameId navigates that frame, not the page', async ()
   );
   assert.deepEqual([ours, chrome], [true, true]);
   await t.page.waitForFunction(
-    other => document.querySelector('iframe#navigated')?.contentDocument?.URL.endsWith(other),
+    other => document.querySelector<HTMLIFrameElement>('iframe#navigated')?.contentDocument?.URL.endsWith(other),
     {},
     OTHER
   );

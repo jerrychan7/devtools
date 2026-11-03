@@ -54,6 +54,7 @@ function opaqueOwner(doc: Document, url: string): Element | undefined {
  * The owner of the opaque (sandboxed) same-origin frame whose document the record is, as its
  * parent's Resource Timing reports it: Chrome attributes that request to the frame.
  */
+// The top page's document and location are meant: opaqueOwner searches every frame from the top.
 export function opaqueFrameOf(rec: RequestRecord): Element | undefined {
   const url = new URL(rec.url, location.href);
   return isChildDocument(rec) && url.origin === location.origin ? opaqueOwner(document, url.href) : undefined;

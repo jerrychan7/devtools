@@ -162,7 +162,7 @@ test('inspect mode picks nodes in an iframe added after it started, like Chrome'
           };
           frame.srcdoc =
             '<body style="margin:0"><button id="late-btn" style="margin:20px;width:100px;height:40px">late</button>';
-          frame.dataset.late = '';
+          frame.dataset['late'] = '';
           document.body.append(frame);
         })
     );

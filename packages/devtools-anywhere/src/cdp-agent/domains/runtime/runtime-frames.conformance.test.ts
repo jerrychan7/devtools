@@ -356,7 +356,7 @@ describe('evaluation in a frame', () => {
     );
     const [ours, chrome] = await Promise.all(
       [t.ours, t.chrome].map((side, i) =>
-        side.send('Runtime.evaluate', { expression: '1', contextId: ids[i] }).then(
+        side.send('Runtime.evaluate', { expression: '1', ...(ids[i] === undefined ? {} : { contextId: ids[i] }) }).then(
           () => 'resolved',
           (e: unknown) => String(e instanceof Error ? e.message : e)
         )

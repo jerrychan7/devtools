@@ -9,6 +9,11 @@ import {
 } from '../../core/frames';
 import type { CdpSession } from '../../core/session';
 
+/** Whether the frame is a sandboxed iframe's opaque one: it has no document or context of ours. */
+function isOpaqueFrame(frame: Frame | OpaqueFrame): frame is OpaqueFrame {
+  return !('executionContextId' in frame);
+}
+
 const LOCALHOST = /^(.+\.)?localhost$|^127(\.\d+){3}$|^\[::1\]$/;
 
 /** The hostname of a serialized origin, empty for an opaque one ("null"). */
@@ -29,7 +34,7 @@ function hostnameOf(origin: string): string {
  * `parentId`, and an empty `name` (the parent's view has the iframe's name).
  */
 export function describeFrame(frames: FrameRegistry, frame: Frame | OpaqueFrame): Protocol.Page.Frame {
-  if (!('document' in frame)) return describeOpaqueFrame(frame);
+  if (isOpaqueFrame(frame)) return describeOpaqueFrame(frame);
   const win = frame.window;
   const linked = frame === frames.top ? frames.parent : undefined;
   const href = frame.document.URL;
@@ -83,7 +88,7 @@ function describeOpaqueFrame(frame: OpaqueFrame): Protocol.Page.Frame {
 
 /** The frame tree under `frame`, the children in the order they were registered. */
 export function frameTree(frames: FrameRegistry, frame: Frame | OpaqueFrame): Protocol.Page.FrameTree {
-  const children = 'document' in frame ? frames.treeChildrenOf(frame) : [];
+  const children = !isOpaqueFrame(frame) ? frames.treeChildrenOf(frame) : [];
   return {
     frame: describeFrame(frames, frame),
     ...(children.length ? { childFrames: children.map(child => frameTree(frames, child)) } : {}),
@@ -118,7 +123,7 @@ export function frameEvents(
         parentFrameId: frame.parent?.id ?? frames.top.id,
       } satisfies Protocol.Page.FrameAttachedEvent);
       // An opaque frame's document is not known until its iframe's load.
-      if (!('document' in frame) || awaitsFirstDocument(frame)) {
+      if (isOpaqueFrame(frame) || awaitsFirstDocument(frame)) {
         loading.add(frame);
         session.emit('Page.frameStartedLoading', { frameId });
         return;
