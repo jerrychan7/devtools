@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping';
+import { mergedFrames } from '../core/merged-frames';
 import { CdpError, type CdpSession } from '../core/session';
 
 type Command = keyof ProtocolMapping.Commands;
@@ -96,6 +97,13 @@ const UNSUPPORTED: Record<string, Record<string, string>> = {
   SystemInfo: { getFeatureState: 'feature flags of the browser are not readable' },
   Target: { setRemoteLocations: 'the browser discovers remote targets' },
 };
+
+// What emulation applies to the page's documents applies to its merged sandboxed iframes' too, as
+// in Chrome, where they are in the page's target: their agents get it as well. The device metrics
+// are the page's alone (its viewport), as the shell's size is.
+mergedFrames.registerRoutes('Emulation', {
+  fanOut: ['Emulation.setEmulatedMedia', 'Emulation.setTouchEmulationEnabled', 'Emulation.setEmitTouchEventsForMouse'],
+});
 
 const NO_THROTTLING = 'Not supported in the page: requests are throttled by the browser';
 
