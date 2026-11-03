@@ -2,6 +2,10 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 import { contentDocumentOf, isFrameOwner } from '../../core/realm';
+import { mergedFrames } from '../../core/merged-frames';
+
+/** A merged sandboxed iframe's object (core/merged-frames.ts) is its agent's to list. */
+mergedFrames.registerRoutes('DOMDebugger', { routeBy: { 'DOMDebugger.getEventListeners': ['objectId'] } });
 
 type EventListener = Protocol.DOMDebugger.EventListener;
 

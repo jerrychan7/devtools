@@ -3,6 +3,25 @@ import { CdpError } from '../../core/session';
 import type { Context } from '../../core/context';
 import type { RequestRecord } from '../../probe/types';
 import { refetch } from '../network/network';
+import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+
+/**
+ * Merged sandboxed iframes (core/merged-frames.ts): the settings go to every frame's agent, so that
+ * each reports its scripts on enable. Debugger.getScriptSource is the page's handler's (see there).
+ * There are no breakpoints to merge: each agent resolves them to nothing, so the page's answers.
+ */
+mergedFrames.registerRoutes('Debugger', {
+  routeBy: { 'Debugger.getPossibleBreakpoints': ['start.scriptId'] },
+  fanOut: [
+    'Debugger.enable',
+    'Debugger.disable',
+    'Debugger.setAsyncCallStackDepth',
+    'Debugger.setBlackboxPatterns',
+    'Debugger.setPauseOnExceptions',
+    'Debugger.setBreakpointsActive',
+    'Debugger.setSkipAllPauses',
+  ],
+});
 
 /**
  * What every script id starts with: '' or `m{ns}.` in a page whose agent is merged into its
@@ -69,6 +88,16 @@ export function registerDebugger({ session, probe, frames }: Context) {
     throw new CdpError(`No script for id: ${scriptId}`);
   }
 
+  function sourceOf(url: string): Promise<string> {
+    let source = sources.get(url);
+    if (!source) {
+      source = refetch(probe, url).then(res => res.text());
+      sources.set(url, source);
+      source.catch(() => sources.delete(url));
+    }
+    return source;
+  }
+
   session.register('Debugger', {
     enable(): Protocol.Debugger.EnableResponse {
       if (!enabled) {
@@ -94,18 +123,35 @@ export function registerDebugger({ session, probe, frames }: Context) {
       sources.clear();
     },
 
-    /** Re-fetches the script, from the HTTP cache when possible. */
+    /**
+     * Re-fetches the script, from the HTTP cache when possible. A merged sandboxed iframe's script
+     * is its agent's, but an opaque origin cannot fetch it (no CORS on the page's own scripts): the
+     * page, of the origin the iframe's document comes from, fetches it then, by the URL that
+     * agent's error gives.
+     */
     async getScriptSource(
       params: Protocol.Debugger.GetScriptSourceRequest
     ): Promise<Protocol.Debugger.GetScriptSourceResponse> {
-      const url = urlOf(params.scriptId);
-      let source = sources.get(url);
-      if (!source) {
-        source = refetch(probe, url).then(res => res.text());
-        sources.set(url, source);
-        source.catch(() => sources.delete(url));
+      const ns = urls.has(params.scriptId) ? undefined : ownerOfId(params.scriptId);
+      if (ns !== undefined) {
+        try {
+          const reply = await mergedFrames.forSession(session).ask(ns, 'Debugger.getScriptSource', params);
+          const scriptSource = typeof reply === 'object' && reply ? Reflect.get(reply, 'scriptSource') : undefined;
+          if (typeof scriptSource === 'string') return { scriptSource };
+          throw new CdpError(`No script for id: ${params.scriptId}`);
+        } catch (e) {
+          if (!(e instanceof CdpError) || e.data === undefined || !/^https?:/.test(e.data)) throw e;
+          return { scriptSource: await sourceOf(e.data) };
+        }
       }
-      return { scriptSource: await source };
+      const url = urlOf(params.scriptId);
+      try {
+        return { scriptSource: await sourceOf(url) };
+      } catch (e) {
+        // Merged into the page's agent: the URL, for the page to fetch.
+        if (idPrefix) throw new CdpError(e instanceof Error ? e.message : String(e), -32000, url);
+        throw e;
+      }
     },
 
     getPossibleBreakpoints: (): Protocol.Debugger.GetPossibleBreakpointsResponse => ({ locations: [] }),
