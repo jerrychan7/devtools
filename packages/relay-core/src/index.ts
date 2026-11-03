@@ -9,7 +9,8 @@
 //
 // The page says hello with its loader id: a new loader id is a new page instance (a reload or a
 // navigation), which every frontend is told about, and every `enable` command each one sent so
-// far is re-sent to the new page, which then replays its own captured output. The same loader id
+// far is re-sent to the new page, which then replays its own captured output, and so is each
+// one's device metrics override still on (Chrome keeps it across reloads). The same loader id
 // after pagehide is the same instance back from the back/forward cache: it gets the `enable`s
 // answered while it was away. The same loader id while the page is ready only flushes what was
 // queued (a dropped connection, a repeated hello).
@@ -60,6 +61,8 @@ export interface Session {
    * target ids: a new page instance has none of them, which the frontend is told.
    */
   readonly children: Map<string, string>;
+  /** The params of its last Emulation.setDeviceMetricsOverride not cleared since, to re-send. */
+  metrics?: unknown;
 }
 
 /** The page's main frame, for the `Page.frameNavigated` a new instance is reported with. */
@@ -134,6 +137,7 @@ export abstract class RelayCore {
     session.pending.clear();
     session.held.clear();
     session.children.clear();
+    session.metrics = undefined;
   }
 
   /** A message from a frontend: CDP, as Chrome takes it. */
@@ -151,7 +155,8 @@ export abstract class RelayCore {
       session.enabled.delete(enable);
       // A held Debugger.enable the frontend disabled since is not sent to the next instance.
       if (enable === HELD_ENABLE) this.release(session);
-    }
+    } else if (!child && method === 'Emulation.setDeviceMetricsOverride') session.metrics = params ?? {};
+    else if (!child && method === 'Emulation.clearDeviceMetricsOverride') session.metrics = undefined;
     if (!isId(id)) return this.send(session, data);
     // Between two page instances Chrome fails the command too, and the next may never come.
     if (this.loaderId && !this.pageReady) {
@@ -350,6 +355,9 @@ export abstract class RelayCore {
       if (held && method === HELD_ENABLE) continue;
       this.command(session, method, params);
     }
+    // Chrome applies its sessions' overrides again in the order they attached: the last one's
+    // holds, whoever set theirs last (the sessions are in that order here).
+    if (session.metrics !== undefined) this.command(session, 'Emulation.setDeviceMetricsOverride', session.metrics);
     // The Elements panel requests the new page's document.
     if (enabled.has('DOM.enable')) client.send(JSON.stringify({ method: 'DOM.documentUpdated', params: {} }));
   }
