@@ -157,6 +157,10 @@ export class ChildTargets {
   readonly #between = new Map<string, { link: ChildLink; stop: () => void }>();
   readonly #goneListeners = new Set<Listener<ChildLink>>();
   #parent: ParentLink | undefined;
+  /** Whether the link to the parent merges this page's agent into the parent's (merged-frames.ts). */
+  #parentMerged = false;
+  /** The links of sandboxed iframes merged into this page's agent (merged-frames.ts), no targets. */
+  readonly #merged = new Set<ChildLink>();
   readonly #parentListeners = new Set<Listener<ParentLink>>();
   readonly #ids = new WeakMap<Element, string>();
 
@@ -253,6 +257,27 @@ export class ChildTargets {
   }
 
   /**
+   * Called by core/merged-frames.ts for the link of a sandboxed iframe merged into this page's
+   * agent: no target, so neither in {@link children} nor told to {@link onChild}'s listeners, but
+   * found by {@link linkOf}, till it closes.
+   */
+  addMerged(link: ChildLink): void {
+    this.#merged.add(link);
+    link.onClose(() => this.#merged.delete(link));
+  }
+
+  /**
+   * The link of a frame owner's element, whichever it is: a child target's or a merged frame's
+   * (`merged`).
+   */
+  linkOf(owner: Element): { link: ChildLink; merged: boolean } | undefined {
+    const child = this.childOf(owner);
+    if (child) return { link: child, merged: false };
+    for (const link of this.#merged) if (link.owner === owner) return { link, merged: true };
+    return undefined;
+  }
+
+  /**
    * Listens to new links; returns its removal. `previous` is the closed link whose target the new
    * one carries on (the iframe's previous document's), if any.
    */
@@ -261,17 +286,29 @@ export class ChildTargets {
     return () => this.#listeners.delete(listener);
   }
 
-  /** Called by the handshake when this page, in a cross-origin iframe, is linked to its parent. */
-  setParent(link: ParentLink): void {
+  /**
+   * Called by the handshake when this page, in a cross-origin iframe, is linked to its parent;
+   * `merged` when this page is a sandboxed iframe's, merged into the parent's agent (no target of
+   * its own: it is announced by none).
+   */
+  setParent(link: ParentLink, { merged = false }: { merged?: boolean } = {}): void {
     this.#parent = link;
+    this.#parentMerged = merged;
     link.onClose(() => {
-      if (this.#parent === link) this.#parent = undefined;
+      if (this.#parent !== link) return;
+      this.#parent = undefined;
+      this.#parentMerged = false;
     });
     this.#parentListeners.forEach(listener => listener(link));
   }
 
   get parent(): ParentLink | undefined {
     return this.#parent;
+  }
+
+  /** Whether the link to the parent merges this page's agent into the parent's ({@link setParent}). */
+  get parentMerged(): boolean {
+    return this.#parentMerged;
   }
 
   onParent(listener: Listener<ParentLink>): () => void {

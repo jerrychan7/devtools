@@ -5,6 +5,17 @@ import type { RequestRecord } from '../../probe/types';
 import { refetch } from '../network/network';
 
 /**
+ * What every script id starts with: '' or `m{ns}.` in a page whose agent is merged into its
+ * parent's (core/merged-frames.ts).
+ */
+let idPrefix = '';
+
+/** Sets what the script ids of every session start with (see {@link idPrefix}). */
+export function setScriptIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
+
+/**
  * Lists the page's script files in the Sources panel. Page scripts cannot see the scripts
  * V8 compiled, so this reports the external scripts the page loaded: `<script src>`
  * elements and the scripts Resource Timing recorded (modules, dynamically added scripts).
@@ -33,7 +44,7 @@ export function registerDebugger({ session, probe, frames }: Context) {
   function report(url: string, isModule: boolean, executionContextId: number) {
     const key = `${executionContextId} ${url}`;
     if (!/^https?:/.test(url) || ids.has(key)) return;
-    const scriptId = String(ids.size + 1);
+    const scriptId = idPrefix + String(ids.size + 1);
     ids.set(key, scriptId);
     urls.set(scriptId, url);
     session.emit('Debugger.scriptParsed', {

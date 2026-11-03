@@ -2,7 +2,14 @@
 // earlier), registers <devtools-anywhere>, and exposes the API as `window.DevtoolsAnywhere`.
 // Inside the page iframe of shell mode, it connects the page's CDP session to the shell and shows
 // the shell element's F12 button in the page.
-import { childTargets, createCdpSession, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
+import {
+  childTargets,
+  createCdpSession,
+  installProbe,
+  isShellPage,
+  mergedFrames,
+  setShellScriptUrl,
+} from './cdp-agent';
 import { connectFrontend, connectToShell, emulateInShell, shellClients } from './connection';
 import {
   createGlobalElement,
@@ -47,5 +54,6 @@ if (!('DevtoolsAnywhere' in window)) {
   };
   Object.assign(window, { DevtoolsAnywhere: api });
   // What the tests read in the page; not in the published bundle.
-  if (DEVTOOLS_ANYWHERE_TEST) Object.assign(window, { __devtoolsAnywhereTest: { childTargets, shellClients } });
+  if (DEVTOOLS_ANYWHERE_TEST)
+    Object.assign(window, { __devtoolsAnywhereTest: { childTargets, mergedFrames, shellClients } });
 }

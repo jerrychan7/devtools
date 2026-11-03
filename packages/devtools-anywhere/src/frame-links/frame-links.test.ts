@@ -475,12 +475,104 @@ test('a sandboxed iframe (no allow-same-origin) loads the probe without errors, 
     const sandboxed = page.frames().find(f => f.url().includes('n=sandboxed'));
     assert.equal(await sandboxed?.evaluate(() => 'DevtoolsAnywhere' in window), true);
     // Its own panel opens too.
-    await sandboxed?.evaluate(() => document.querySelector('devtools-anywhere')?.setOpen(true));
+    await sandboxed?.evaluate(() => {
+      // setOpen is private to the element's class; call it as the shell's toggle would.
+      const el = document.querySelector('devtools-anywhere');
+      const setOpen: unknown = el && Reflect.get(el, 'setOpen');
+      if (typeof setOpen === 'function') setOpen.call(el, true);
+    });
     await page.waitForFrame(f => f.url().includes('fake-frontend.html'), { timeout: 5000 });
     await settle();
     assert.deepEqual(errors, []);
   } finally {
     await session.detach();
+    await page.close();
+  }
+});
+
+/**
+ * Opens the parent page trusting `frameOrigins`, its iframe sandboxed (allow-scripts, no
+ * allow-same-origin) showing sandboxed-child.html on `childHost`, which trusts the parent; returns
+ * once both bundles are there.
+ */
+async function openSandboxed(frameOrigins: string, childHost = 'localhost'): Promise<{ page: Page; child: Frame }> {
+  assert.ok(env);
+  const childUrl = new URL(fixtureUrl(env, 'sandboxed-child.html', childHost));
+  childUrl.searchParams.set('parentOrigins', originOf('localhost'));
+  const parentUrl = new URL(fixtureUrl(env, 'frame-link-parent.html'));
+  parentUrl.searchParams.set('frameOrigins', frameOrigins);
+  parentUrl.searchParams.set('sandbox', 'allow-scripts');
+  parentUrl.searchParams.set('child', childUrl.href);
+  const page = await env.browser.newPage();
+  await page.goto(parentUrl.href);
+  const child = await page.waitForFrame(f => f.url().split('?')[0]?.endsWith('sandboxed-child.html') === true);
+  await child.waitForFunction(() => 'DevtoolsAnywhere' in window);
+  await page.waitForFunction(() => 'DevtoolsAnywhere' in window);
+  return { page, child };
+}
+
+/** The parent's merged frames: their namespaces and frame ids. */
+const mergedOf = (page: Page) =>
+  page.evaluate(() =>
+    [...window.__devtoolsAnywhereTest.mergedFrames.frames()].map(([ns, link]) => ({ ns, frameId: link.frameId }))
+  );
+
+test('a sandboxed iframe of the page origin is merged when data-frame-origins names sandboxed', async () => {
+  const { page, child } = await openSandboxed(`${originOf('127.0.0.1')} sandboxed`);
+  try {
+    await page.waitForFunction(() => [...window.__devtoolsAnywhereTest.mergedFrames.frames()].length > 0, {
+      timeout: 5000,
+      polling: 50,
+    });
+    const [merged] = await mergedOf(page);
+    assert.equal(merged?.ns, 1);
+    // No child target: merged into the page's.
+    assert.equal(await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()].length), 0);
+    await child.waitForFunction(() => window.__devtoolsAnywhereTest.childTargets.parentMerged, {
+      timeout: 5000,
+      polling: 50,
+    });
+    // Its frame id is the one the parent gave its element; its ids are in the namespace.
+    const own = await child.evaluate(() => window.__devtoolsAnywhereTest.childTargets.parent?.frameId);
+    assert.equal(own, merged?.frameId);
+    const result = await page.evaluate(
+      () =>
+        new Promise<unknown>((resolve, reject) => {
+          const [, link] = [...window.__devtoolsAnywhereTest.mergedFrames.frames()][0] ?? [];
+          if (!link) return reject(new Error('no link'));
+          const off = link.onMessage(message => {
+            const reply: { id?: number; result?: unknown } = JSON.parse(message);
+            if (reply.id !== 7) return;
+            off();
+            resolve(reply.result);
+          });
+          link.send(JSON.stringify({ id: 7, method: 'Runtime.evaluate', params: { expression: 'window.marker' } }));
+        })
+    );
+    assert.deepEqual(result, { result: { type: 'string', value: 'sandboxed child of null' } });
+  } finally {
+    await page.close();
+  }
+});
+
+test('a sandboxed iframe is not merged unless data-frame-origins names sandboxed', async () => {
+  const { page, child } = await openSandboxed(originOf('127.0.0.1'));
+  try {
+    await settle();
+    assert.deepEqual(await mergedOf(page), []);
+    assert.equal(await childLinked(child), false);
+  } finally {
+    await page.close();
+  }
+});
+
+test('a sandboxed iframe of another site is not merged: Chrome gives it a target of its own', async () => {
+  const { page, child } = await openSandboxed('sandboxed', '127.0.0.1');
+  try {
+    await settle();
+    assert.deepEqual(await mergedOf(page), []);
+    assert.equal(await childLinked(child), false);
+  } finally {
     await page.close();
   }
 });

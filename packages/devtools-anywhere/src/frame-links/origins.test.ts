@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { matchOrigin, parseOrigins } from './origins.ts';
+import { type OpaqueHello, refuseOpaqueHello } from './protocol.ts';
 
 /** Whether a list trusts `origin`. */
 const trusts = (list: string, origin: string) => matchOrigin(parseOrigins(list), origin);
@@ -73,5 +74,55 @@ describe('invalid entries', () => {
 
   test('a path is not an origin', () => {
     assert.ok(!trusts('https://a.example/app', 'https://a.example'));
+  });
+});
+
+describe('sandboxed iframes (opaque origins)', () => {
+  test('trusted only when the list names sandboxed', () => {
+    assert.ok(trusts('sandboxed', 'null'));
+    assert.ok(trusts('https://a.example sandboxed', 'null'));
+    assert.ok(!trusts('https://a.example', 'null'));
+    assert.ok(!trusts('https://*.example', 'null'));
+    // Nor does it trust any other origin.
+    assert.ok(!trusts('sandboxed', 'https://a.example'));
+  });
+
+  const frame = {};
+  const hello: OpaqueHello = {
+    isTrusted: true,
+    origin: 'null',
+    source: frame,
+    ownerWindow: frame,
+    opaque: true,
+    loaderIdAtHello: 'L1',
+    loaderIdNow: 'L1',
+  };
+  const sandboxed = parseOrigins('sandboxed');
+
+  test("a hello is welcomed from an opaque frame of the page's own element", () => {
+    assert.equal(refuseOpaqueHello(sandboxed, hello), undefined);
+  });
+
+  test('refused unless the list names sandboxed', () => {
+    assert.match(refuseOpaqueHello(parseOrigins('https://a.example'), hello) ?? '', /not trusted/);
+  });
+
+  test("refused from a window that is not the element's, or from no element", () => {
+    assert.match(refuseOpaqueHello(sandboxed, { ...hello, ownerWindow: {} }) ?? '', /not a frame/);
+    assert.match(refuseOpaqueHello(sandboxed, { ...hello, ownerWindow: undefined }) ?? '', /not a frame/);
+  });
+
+  test('refused from a frame that is not opaque (another site, allow-same-origin)', () => {
+    assert.match(refuseOpaqueHello(sandboxed, { ...hello, opaque: false }) ?? '', /not a sandboxed frame/);
+  });
+
+  test('refused when the document changed since the hello (its loader id)', () => {
+    assert.match(refuseOpaqueHello(sandboxed, { ...hello, loaderIdNow: 'L2' }) ?? '', /another document/);
+    assert.match(refuseOpaqueHello(sandboxed, { ...hello, loaderIdAtHello: undefined }) ?? '', /another document/);
+  });
+
+  test('refused when synthetic, or not of an opaque origin', () => {
+    assert.ok(refuseOpaqueHello(sandboxed, { ...hello, isTrusted: false }));
+    assert.ok(refuseOpaqueHello(sandboxed, { ...hello, origin: 'http://localhost' }));
   });
 });

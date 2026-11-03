@@ -94,6 +94,24 @@ export function hasPseudoElement(host: Element, type: PseudoType): boolean {
  * ids are stable for the node's lifetime. The registry also remembers whose children the
  * client has received, which decides how DOM mutations are reported.
  */
+/**
+ * Where node ids and backend node ids start: 0, or `ns * 2^32` in a page whose agent is merged
+ * into its parent's (core/merged-frames.ts), which tells the frames' ids apart by it. Set when the
+ * merge link is made, before the link carries anything.
+ */
+let idBase = 0;
+
+/** Sets where the node ids of every session start (see {@link idBase}). */
+export function setNodeIdBase(base: number): void {
+  idBase = base;
+}
+
+/** An id of a page's own: below the first namespace's (core/merged-frames.ts, NS_STRIDE). */
+function checked(id: number): number {
+  if (!idBase && id >= 2 ** 32) throw new Error('devtools-anywhere: node ids ran into the namespaces of merged frames');
+  return id;
+}
+
 export class NodeRegistry {
   private ids = new Map<Inspectable, number>();
   private nodes = new Map<number, Inspectable>();
@@ -152,7 +170,7 @@ export class NodeRegistry {
   idOf(node: Inspectable): number {
     let id = this.ids.get(node);
     if (!id) {
-      id = ++this.seq;
+      id = checked(idBase + ++this.seq);
       this.ids.set(node, id);
       this.nodes.set(id, node);
     }
@@ -171,7 +189,7 @@ export class NodeRegistry {
   backendIdOf(node: Inspectable): number {
     let id = this.backendIds.get(node);
     if (!id) {
-      id = ++this.backendSeq;
+      id = checked(idBase + ++this.backendSeq);
       this.backendIds.set(node, id);
       this.byBackendId.set(id, new WeakRef(node));
       this.collected.register(node, id);

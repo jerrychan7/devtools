@@ -1,6 +1,6 @@
 // The iframe's side of the handshake (protocol.ts): links this page's agent to its parent's, when
 // the parent's origin is one data-parent-origins names.
-import { type CdpSession, type ParentLink, childTargets, frames } from '../cdp-agent';
+import { type CdpSession, type ParentLink, childTargets, frames, setIdNamespace } from '../cdp-agent';
 import { endSession } from '../connection';
 import { type OriginPattern, matchOrigin } from './origins';
 import { type Channel, openPort } from './port';
@@ -54,7 +54,11 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     if (!link) postToTrusted(window.parent, { type: FRAME_HELLO, id }, patterns);
   };
 
-  const connect = (port: MessagePort, { frameId, parentFrameId, parentTargetId }: FrameWelcome) => {
+  const connect = (port: MessagePort, { frameId, parentFrameId, parentTargetId, mode, ns }: FrameWelcome) => {
+    const merged = mode === 'merge';
+    // Merged into the parent's agent, this page's ids are in the namespace it gave, before any
+    // session makes one for the link.
+    if (merged) setIdNamespace(ns);
     const end = openPort(port);
     const linked: ParentLink = {
       frameId,
@@ -94,7 +98,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
       // Nothing the parent's agent asked for outlives the link.
       ending = endSession(own).then(() => own.reset());
     });
-    childTargets.setParent(linked);
+    childTargets.setParent(linked, { merged });
   };
 
   const onMessage = (event: MessageEvent) => {
@@ -109,8 +113,10 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     }
     const welcome = readWelcome(event.data);
     const port = event.ports[0];
-    // Only the welcome for this document's hello, once.
+    // Only the welcome for this document's hello, once; merged into the parent's agent only in a
+    // sandboxed iframe (an opaque origin), which Chrome keeps in its parent's target.
     if (!welcome || welcome.id !== id || !port || link) return;
+    if ((welcome.mode === 'merge') !== (self.origin === 'null')) return;
     connect(port, welcome);
   };
 

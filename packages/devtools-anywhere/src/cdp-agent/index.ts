@@ -1,17 +1,19 @@
 import type { Context } from './core/context';
 import { type Frame, frames } from './core/frames';
-import { NodeRegistry } from './core/nodes';
-import { ObjectRegistry } from './core/objects';
+import { mergedFrames, NS_STRIDE, nsPrefix } from './core/merged-frames';
+import { NodeRegistry, setNodeIdBase } from './core/nodes';
+import { ObjectRegistry, setObjectIdPrefix } from './core/objects';
+import { setSheetIdPrefix } from './domains/css/sheet-registry';
 import { viewProbe } from './core/probe-view';
 import { realmOf } from './core/realm';
 import { CdpSession } from './core/session';
 import { registerCss } from './domains/css/css';
-import { registerDebugger } from './domains/debugger/debugger';
+import { registerDebugger, setScriptIdPrefix } from './domains/debugger/debugger';
 import { registerDom } from './domains/dom/dom';
 import { registerDomDebugger } from './domains/dom-debugger/dom-debugger';
 import { registerInput } from './domains/input/input';
 import { hookFrameNetwork } from './domains/network/frames';
-import { registerNetwork } from './domains/network/network';
+import { registerNetwork, setRequestIdPrefix } from './domains/network/network';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
 import { registerRuntime } from './domains/runtime/runtime';
@@ -51,6 +53,24 @@ export {
   type ParentLink,
 } from './core/child-targets';
 export { frameOwners, ownerOfWindow, watchOwner } from './frame-owners';
+export { mergedFrames, type MergedFrames, type RouteTable } from './core/merged-frames';
+
+/**
+ * Puts the ids this page's agent makes from now on in namespace `ns` (core/merged-frames.ts):
+ * called by the handshake when the page, a sandboxed iframe's, is merged into its parent's agent,
+ * before the link carries anything.
+ *
+ * @internal
+ */
+export function setIdNamespace(ns: number): void {
+  setNodeIdBase(ns * NS_STRIDE);
+  frames.setContextIdBase(ns * NS_STRIDE);
+  const prefix = ns ? nsPrefix(ns) : '';
+  setObjectIdPrefix(prefix);
+  setSheetIdPrefix(prefix);
+  setScriptIdPrefix(prefix);
+  setRequestIdPrefix(prefix);
+}
 export type { SnapdomLoader } from './domains/page/render';
 
 /** @internal */
@@ -119,6 +139,8 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
     probe: viewProbe(probe),
     frames,
   };
+  // Commands for the sandboxed iframes merged into this page's agent go to theirs.
+  mergedFrames.attach(ctx.session);
   ctx.session.onReset(() => {
     ctx.probe.close();
     ctx.objects.reset();

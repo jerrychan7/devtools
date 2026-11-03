@@ -15,6 +15,12 @@
 // nor ping carries anything of the page, so that they may go to every origin (`*`) when a list
 // has a wildcard, which postMessage cannot address; the welcome, with the port, goes to the
 // iframe's exact origin, as read from its hello, and the iframe checks the welcome's origin.
+//
+// A sandboxed iframe's (opaque origin, `null`, when data-frame-origins names `sandboxed`) welcome
+// can only go to `*`, which no origin check backs: it goes to that iframe's window alone, once its
+// element is known to show an opaque frame of this page (core/frames.ts, OpaqueFrame) whose
+// document has not changed since the hello (its loader id), and carries the hello's id, the only
+// one the iframe accepts; the iframe takes a `merge` welcome only when its own origin is opaque.
 import type { OriginPattern } from './origins';
 
 /** Posted by an iframe's page to its parent window: it asks for a link. */
@@ -49,7 +55,18 @@ export interface FrameWelcome {
   parentFrameId: string;
   /** The parent page's target id. */
   parentTargetId: string;
+  /**
+   * `target`: the iframe is a child target of the parent's. `merge`: an opaque-origin (sandboxed)
+   * iframe, which Chrome keeps in the parent's target: its agent is merged into the parent's
+   * (cdp-agent/core/merged-frames.ts), its ids in namespace `ns`.
+   */
+  mode: 'target' | 'merge';
+  /** The namespace of the merged iframe's ids (1 or more); 0 for a child target. */
+  ns: number;
 }
+
+/** The highest namespace: `ns * 2^32` plus an agent's own ids stays a safe integer. */
+export const MAX_NS = 2 ** 20;
 
 /** A property of a message, which may be anything. */
 const field = (data: unknown, name: string): unknown =>
@@ -70,7 +87,14 @@ export function readWelcome(data: unknown): FrameWelcome | null {
   if (!isMessage(data, FRAME_WELCOME) || typeof id !== 'string') return null;
   if (typeof frameId !== 'string' || typeof parentFrameId !== 'string' || typeof parentTargetId !== 'string')
     return null;
-  return { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId };
+  const mode = field(data, 'mode');
+  const ns = field(data, 'ns');
+  if (typeof ns !== 'number' || !Number.isInteger(ns)) return null;
+  if (mode === 'target' && ns === 0)
+    return { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId, mode, ns };
+  if (mode === 'merge' && ns >= 1 && ns <= MAX_NS)
+    return { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId, mode, ns };
+  return null;
 }
 
 /**
@@ -79,6 +103,35 @@ export function readWelcome(data: unknown): FrameWelcome | null {
  * cannot address. The answer's origin is what is checked.
  */
 export function postToTrusted(target: Window, message: object, patterns: readonly OriginPattern[]): void {
-  if (patterns.some(pattern => !('origin' in pattern))) return target.postMessage(message, '*');
+  if (patterns.some(pattern => 'suffix' in pattern)) return target.postMessage(message, '*');
   for (const pattern of patterns) if ('origin' in pattern) target.postMessage(message, pattern.origin);
+}
+
+/** What a sandboxed (opaque-origin) iframe's hello is checked against before it is welcomed. */
+export interface OpaqueHello {
+  /** The hello event's. */
+  isTrusted: boolean;
+  origin: string;
+  source: unknown;
+  /** The window of the element `source` was found to be a frame of (ownerOfWindow), if any. */
+  ownerWindow: unknown;
+  /** Whether the element shows an opaque frame of this page (FrameRegistry.opaqueOf). */
+  opaque: boolean;
+  /** The opaque frame's loader id when the hello came, and once the frames were synced since. */
+  loaderIdAtHello: string | undefined;
+  loaderIdNow: string | undefined;
+}
+
+/**
+ * Why a sandboxed iframe's hello is not welcomed, or undefined when it is: the list names
+ * `sandboxed`, the event is the browser's, from the very window of one of this page's elements
+ * that shows an opaque frame, whose document is the one that said hello.
+ */
+export function refuseOpaqueHello(patterns: readonly OriginPattern[], hello: OpaqueHello): string | undefined {
+  if (!hello.isTrusted || hello.origin !== 'null') return 'not an opaque origin';
+  if (!patterns.some(pattern => 'opaque' in pattern)) return 'sandboxed iframes are not trusted';
+  if (hello.ownerWindow === undefined || hello.ownerWindow !== hello.source) return 'not a frame of this page';
+  if (!hello.opaque) return 'not a sandboxed frame of this page';
+  if (hello.loaderIdAtHello === undefined || hello.loaderIdAtHello !== hello.loaderIdNow) return 'another document';
+  return undefined;
 }

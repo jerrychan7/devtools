@@ -6,7 +6,15 @@
  * One entry of a list: an exact origin, or every subdomain of a host, at any depth
  * (`https://*.example.com`, not `https://example.com` itself), with the same scheme and port.
  */
-export type OriginPattern = { origin: string } | { protocol: string; suffix: string; port: string };
+export type OriginPattern = { origin: string } | { protocol: string; suffix: string; port: string } | { opaque: true };
+
+/**
+ * The reserved entry of data-frame-origins that trusts this page's sandboxed iframes (no
+ * allow-same-origin) showing a document of this page's origin, about:blank or about:srcdoc:
+ * opaque (`null`) origins, which Chrome keeps in the page's own target, and so are merged into
+ * this page's agent (core/merged-frames.ts). Off unless named.
+ */
+export const SANDBOXED = 'sandboxed';
 
 /** Entries already warned about: once each, whichever list they are in. */
 const warned = new Set<string>();
@@ -25,6 +33,7 @@ function originOf(entry: string): string | null {
 
 /** One entry, or null when it is not one: `*` alone, or anywhere but before a host's first dot. */
 function parseEntry(entry: string): OriginPattern | null {
+  if (entry === SANDBOXED) return { opaque: true };
   const wildcard = /^([a-z][a-z\d+.-]*:\/\/)\*\.([^*]+)$/i.exec(entry);
   if (!wildcard) {
     const origin = entry.includes('*') ? null : originOf(entry);
@@ -51,7 +60,7 @@ export function parseOrigins(list: string | null | undefined): OriginPattern[] {
     else if (!warned.has(entry)) {
       warned.add(entry);
       console.warn(
-        `devtools-anywhere: "${entry}" is not an origin, nor one with a subdomain wildcard such as https://*.example.com; ignored`
+        `devtools-anywhere: "${entry}" is not an origin, nor one with a subdomain wildcard such as https://*.example.com, nor ${SANDBOXED}; ignored`
       );
     }
   }
@@ -60,9 +69,11 @@ export function parseOrigins(list: string | null | undefined): OriginPattern[] {
 
 /** Whether `origin` (as in MessageEvent.origin) is one of `patterns`. */
 export function matchOrigin(patterns: readonly OriginPattern[], origin: string): boolean {
-  if (origin === 'null') return false;
+  // An opaque origin only when the list names `sandboxed`: no origin, nor wildcard, matches it.
+  if (origin === 'null') return patterns.some(pattern => 'opaque' in pattern);
   let url: URL | null = null;
   for (const pattern of patterns) {
+    if ('opaque' in pattern) continue;
     if ('origin' in pattern) {
       if (pattern.origin === origin) return true;
       continue;

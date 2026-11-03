@@ -20,6 +20,8 @@
     <!-- The child's URL is in the query (`child`): the server's port is only known at run time. -->
     <iframe id="child" style="width: 400px; height: 300px; border: 0"></iframe>
     <script>
+      // A sandboxed iframe when the query has `sandbox` (its value the attribute's).
+      if (query.get('sandbox') !== null) document.getElementById('child').setAttribute('sandbox', query.get('sandbox'));
       if (query.get('child')) document.getElementById('child').src = query.get('child');
     </script>
   </body>

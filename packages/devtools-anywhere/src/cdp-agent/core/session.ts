@@ -49,6 +49,14 @@ export class CdpSession {
   /** Where the client's messages for other sessions (child targets') go, by session id. */
   private routes = new Map<string, (message: Record<string, unknown>) => void>();
 
+  /**
+   * Looks at each of the client's commands (on this session, not a child target's) before its
+   * handler: a promise it returns is the command's answer instead, its rejection the error;
+   * undefined lets the handler answer. Set by core/merged-frames.ts, which routes the commands for
+   * merged frames to their agents' sessions, and runs others there too.
+   */
+  intercept: ((method: string, params: object) => Promise<unknown> | undefined) | null = null;
+
   /** Adds the handlers of `domain`'s methods, keeping those registered before. */
   register(domain: string, handlers: Record<string, Handler>) {
     this.domains.set(domain, { ...this.domains.get(domain), ...handlers });
@@ -137,7 +145,8 @@ export class CdpSession {
       return;
     }
     try {
-      this.send({ id, result: await this.call(method, params) });
+      const routed = this.intercept?.(method, params ?? {});
+      this.send({ id, result: routed ? ((await routed) ?? {}) : await this.call(method, params) });
     } catch (e) {
       this.send({
         id,

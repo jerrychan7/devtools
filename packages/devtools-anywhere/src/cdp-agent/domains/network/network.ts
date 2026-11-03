@@ -8,6 +8,20 @@ import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types
 import { childTargets } from '../../core/child-targets';
 import { isFrameDocument, opaqueFrameOf } from './frames';
 
+/**
+ * What every request id the client sees starts with: '' or `m{ns}.` in a page whose agent is
+ * merged into its parent's (core/merged-frames.ts); the probe's ids go out with it.
+ */
+let idPrefix = '';
+
+/** Sets what the request ids of every session start with (see {@link idPrefix}). */
+export function setRequestIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
+
+/** A probe request id as the client sees it. */
+const wireId = (probeId: string) => idPrefix + probeId;
+
 export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return [];
   return document.cookie.split(';').map(pair => {
@@ -135,7 +149,9 @@ export function registerNetwork(ctx: Context) {
   let maxPostData = 0;
 
   function find(requestId: string) {
-    return probe.requests.find(r => r.requestId === requestId);
+    // The probe's own id, without the namespace of a merged frame's.
+    const id = idPrefix && requestId.startsWith(idPrefix) ? requestId.slice(idPrefix.length) : requestId;
+    return probe.requests.find(r => r.requestId === id);
   }
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
@@ -172,7 +188,7 @@ export function registerNetwork(ctx: Context) {
       }
       const callFrames = parseStack(rec.stack, 1);
       session.emit('Network.requestWillBeSent', {
-        requestId: rec.requestId,
+        requestId: wireId(rec.requestId),
         loaderId,
         documentURL: rec.frame?.documentURL ?? (opaque ? rec.url : location.href),
         request,
@@ -189,7 +205,7 @@ export function registerNetwork(ctx: Context) {
     if ((rec.state === 'headers' || rec.state === 'done') && !done.has('response')) {
       done.add('response');
       session.emit('Network.responseReceived', {
-        requestId: rec.requestId,
+        requestId: wireId(rec.requestId),
         loaderId,
         timestamp: (rec.responseTime ?? performance.now()) / 1000,
         type: rec.type,
@@ -213,14 +229,14 @@ export function registerNetwork(ctx: Context) {
     if (rec.state === 'done' && !done.has('end')) {
       done.add('end');
       session.emit('Network.loadingFinished', {
-        requestId: rec.requestId,
+        requestId: wireId(rec.requestId),
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         encodedDataLength: rec.encodedDataLength ?? 0,
       } satisfies Protocol.Network.LoadingFinishedEvent);
     } else if (rec.state === 'failed' && !done.has('end')) {
       done.add('end');
       session.emit('Network.loadingFailed', {
-        requestId: rec.requestId,
+        requestId: wireId(rec.requestId),
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         type: rec.type,
         errorText: rec.errorText ?? '',
@@ -232,10 +248,11 @@ export function registerNetwork(ctx: Context) {
   /** Emits whichever events of the socket's lifecycle have not been sent yet. */
   async function emitSocket(rec: SocketRecord, gen: number) {
     if (gen !== generation || isOwnUrl(probe, rec.url)) return;
-    const { requestId } = rec;
+    const { requestId: probeId } = rec;
+    const requestId = wireId(probeId);
     prune(sentSockets, probe.sockets, 'closed');
-    let done = sentSockets.get(requestId);
-    if (!done) sentSockets.set(requestId, (done = new Set()));
+    let done = sentSockets.get(probeId);
+    if (!done) sentSockets.set(probeId, (done = new Set()));
 
     if (!done.has('created')) {
       done.add('created');

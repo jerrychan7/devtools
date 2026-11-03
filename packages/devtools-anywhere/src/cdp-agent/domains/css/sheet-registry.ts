@@ -14,6 +14,17 @@ import { type StyleOrigin, buildStyle } from './style';
  * so ranges the client sends back keep pointing at the same rule even if the page adds or
  * removes rules in between.
  */
+/**
+ * What every style sheet id starts with: '' or `m{ns}.` in a page whose agent is merged into its
+ * parent's (core/merged-frames.ts).
+ */
+let idPrefix = '';
+
+/** Sets what the style sheet ids of every session start with (see {@link idPrefix}). */
+export function setSheetIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
+
 export class SheetRegistry {
   private sheetIds = new WeakMap<CSSStyleSheet, string>();
   /** Weak, so that sheets the page drops can be collected. */
@@ -48,7 +59,7 @@ export class SheetRegistry {
   idOf(sheet: CSSStyleSheet): string {
     let id = this.sheetIds.get(sheet);
     if (!id) {
-      id = `sheet-${++this.seq}`;
+      id = `${idPrefix}sheet-${++this.seq}`;
       this.sheetIds.set(sheet, id);
       this.sheets.set(id, new WeakRef(sheet));
     }

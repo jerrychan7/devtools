@@ -1,9 +1,25 @@
 // The parent's side of the handshake (protocol.ts): links the cross-origin iframes whose origin
 // data-frame-origins names, as child targets of this page's agent.
-import { type ChildLink, childTargets, frameOwners, frames, ownerOfWindow, watchOwner } from '../cdp-agent';
+import {
+  type ChildLink,
+  childTargets,
+  frameOwners,
+  frames,
+  mergedFrames,
+  ownerOfWindow,
+  watchOwner,
+} from '../cdp-agent';
 import { type OriginPattern, matchOrigin } from './origins';
 import { type PortEnd, openPort } from './port';
-import { FRAME_PING, FRAME_WELCOME, type FrameWelcome, postToTrusted, readHello } from './protocol';
+import {
+  FRAME_PING,
+  FRAME_WELCOME,
+  type FrameHello,
+  type FrameWelcome,
+  postToTrusted,
+  readHello,
+  refuseOpaqueHello,
+} from './protocol';
 
 /** A linked iframe: its link's port, and the hello's id it answered. */
 interface Linked {
@@ -25,13 +41,51 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     watched.delete(owner);
   });
 
+  /**
+   * A sandboxed iframe's hello (opaque origin): welcomed, to be merged into this page's agent,
+   * only as refuseOpaqueHello allows; the welcome, which can only go to `*`, goes to that very
+   * window, with the hello's id, the one its document accepts.
+   */
+  const onOpaqueHello = (event: MessageEvent, hello: FrameHello) => {
+    const found = ownerOfWindow(event.source);
+    const owner = found?.owner;
+    // The document as of the hello, and once the frames have seen every load since.
+    const loaderIdAtHello = owner && frames.opaqueOf(owner)?.loaderId;
+    frames.sync();
+    const opaque = owner && frames.opaqueOf(owner);
+    const refused = refuseOpaqueHello(patterns, {
+      isTrusted: event.isTrusted,
+      origin: event.origin,
+      source: event.source,
+      ownerWindow: owner ? Reflect.get(owner, 'contentWindow') : undefined,
+      opaque: opaque !== undefined,
+      loaderIdAtHello,
+      loaderIdNow: opaque?.loaderId,
+    });
+    if (refused || !found || !owner || !opaque) return;
+    const ns = mergedFrames.nsFor(owner);
+    accept(hello, found, ns, (welcome, port) => opaque.window.postMessage(welcome, '*', [port]));
+  };
+
   const onMessage = (event: MessageEvent) => {
     const hello = event.isTrusted ? readHello(event.data) : null;
-    if (!hello || !matchOrigin(patterns, event.origin)) return;
+    if (!hello) return;
+    if (event.origin === 'null') return onOpaqueHello(event, hello);
+    if (!matchOrigin(patterns, event.origin)) return;
     // Only one of this page's frames, in its document, a shadow tree or a same-origin frame.
     const found = ownerOfWindow(event.source);
     if (!found) return;
-    const { owner, frame, window: target } = found;
+    // To the origin the hello came from, which the list has: the port goes nowhere else.
+    accept(hello, found, 0, (welcome, port) => found.window?.postMessage(welcome, event.origin, [port]));
+  };
+
+  /** Links the iframe that said hello: a child target, or a merged frame in namespace `ns`. */
+  const accept = (
+    hello: FrameHello,
+    { owner, frame }: NonNullable<ReturnType<typeof ownerOfWindow>>,
+    ns: number,
+    post: (welcome: FrameWelcome, port: MessagePort) => void
+  ) => {
     const known = linked.get(owner);
     // A hello again (pinged meanwhile) from the document linked already.
     if (known?.id === hello.id && !known.end.closed) return;
@@ -46,9 +100,10 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
       frameId,
       parentFrameId: frame.id,
       parentTargetId: frames.top.id,
+      mode: ns ? 'merge' : 'target',
+      ns,
     };
-    // To the origin the hello came from, which the list has: the port goes nowhere else.
-    target?.postMessage(welcome, event.origin, [channel.port2]);
+    post(welcome, channel.port2);
     const end = openPort(channel.port1);
     const link: ChildLink = {
       owner,
@@ -75,11 +130,18 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     end.onClose(() => {
       if (linked.get(owner)?.end === end) linked.delete(owner);
     });
-    childTargets.addChild(link);
+    if (ns) mergedFrames.addMerged(link, ns);
+    else childTargets.addChild(link);
   };
 
+  const sandboxed = patterns.some(pattern => 'opaque' in pattern);
   const ping = () => {
-    for (const { window: target } of frameOwners()) if (target) postToTrusted(target, { type: FRAME_PING }, patterns);
+    for (const { owner, window: target } of frameOwners()) {
+      if (!target) continue;
+      // A ping carries nothing, and an opaque origin cannot be addressed.
+      if (sandboxed && frames.opaqueOf(owner)) target.postMessage({ type: FRAME_PING }, '*');
+      else postToTrusted(target, { type: FRAME_PING }, patterns);
+    }
   };
 
   // Their targets end with them: this page leaves, or the iframes link again at once.

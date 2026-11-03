@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <title>sandboxed child</title>
+    <script>
+      // Shown in a sandboxed iframe without allow-same-origin (an opaque origin), on its parent's
+      // origin: the probe, with data-parent-origins from the query (`parentOrigins`), links this
+      // page's agent to the parent's, which merges it when its data-frame-origins names `sandboxed`.
+      const query = new URLSearchParams(location.search);
+      const origins = query.get('parentOrigins');
+      document.write(
+        '<script src="/packages/devtools-anywhere/dist-test/probe.iife.js" data-no-panel' +
+          (origins === null ? '' : ` data-parent-origins="${origins}"`) +
+          '></' +
+          'script>'
+      );
+    </script>
+  </head>
+  <body style="margin: 0">
+    <p id="target">sandboxed child</p>
+    <script>
+      window.marker = 'sandboxed child of ' + self.origin;
+    </script>
+  </body>
+</html>

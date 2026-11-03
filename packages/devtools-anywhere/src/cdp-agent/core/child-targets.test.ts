@@ -6,9 +6,10 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import type { ChildLink, askChild as AskChild } from './child-targets.ts';
+import type { ChildLink, ChildTargets as ChildTargetsType, ParentLink, askChild as AskChild } from './child-targets.ts';
 
 let askChild: typeof AskChild;
+let ChildTargets: typeof ChildTargetsType;
 
 before(async () => {
   const bundled = await build({
@@ -19,10 +20,11 @@ before(async () => {
     write: false,
   });
   const code = bundled.outputFiles[0]?.text ?? '';
-  const loaded: { askChild: typeof AskChild } = await import(
+  const loaded: { askChild: typeof AskChild; ChildTargets: typeof ChildTargetsType } = await import(
     `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
   );
   askChild = loaded.askChild;
+  ChildTargets = loaded.ChildTargets;
 });
 
 /** A link whose iframe agent answers each command with `answer` (nothing if it returns undefined). */
@@ -83,4 +85,42 @@ test('rejects on a link closed already, without asking', async () => {
     return () => {};
   };
   await assert.rejects(askChild(link, 'Input.dispatchMouseEvent', {}, 1000), { code: -32000 });
+});
+
+test("a merged frame's link is found by linkOf, but is no child target, till it closes", () => {
+  const targets = new ChildTargets();
+  const link = linkAnswering(() => undefined);
+  const told: ChildLink[] = [];
+  targets.onChild(child => told.push(child));
+  targets.addMerged(link);
+  assert.deepEqual(targets.linkOf(link.owner), { link, merged: true });
+  assert.deepEqual([...targets.children()], []);
+  assert.deepEqual(told, []);
+  link.close();
+  assert.equal(targets.linkOf(link.owner), undefined);
+});
+
+test('the link to the parent tells whether it merges this page into the parent', () => {
+  const targets = new ChildTargets();
+  const closes = new Set<() => void>();
+  const parent: ParentLink = {
+    frameId: 'F',
+    parentFrameId: 'P',
+    parentTargetId: 'T',
+    send: () => {},
+    onMessage: () => () => {},
+    onSession: () => () => {},
+    onClose(listener) {
+      closes.add(listener);
+      return () => closes.delete(listener);
+    },
+    close: () => closes.forEach(l => l()),
+  };
+  targets.setParent(parent, { merged: true });
+  assert.equal(targets.parentMerged, true);
+  parent.close();
+  assert.equal(targets.parent, undefined);
+  assert.equal(targets.parentMerged, false);
+  targets.setParent(parent);
+  assert.equal(targets.parentMerged, false);
 });

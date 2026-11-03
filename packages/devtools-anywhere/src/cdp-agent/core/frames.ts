@@ -174,6 +174,8 @@ export class FrameRegistry {
   readonly #insertedAt = new WeakMap<FrameOwner, number>();
   #insertionSeq = 0;
   #contextSeq = EXECUTION_CONTEXT_ID;
+  /** Where the context ids start ({@link setContextIdBase}). */
+  #contextBase = 0;
   #observer: MutationObserver | null = null;
   /** Shadow roots watched like documents (load does not cross a shadow boundary). */
   readonly #watchedRoots = new Set<ShadowRoot>();
@@ -219,6 +221,33 @@ export class FrameRegistry {
     this.#byId.delete(this.#top.id);
     this.#top.id = parent.frameId;
     this.#byId.set(this.#top.id, this.top);
+  }
+
+  /**
+   * Moves the execution context ids into a namespace that starts at `base` (`ns * 2^32`), for a
+   * page whose agent is merged into its parent's (core/merged-frames.ts): the contexts there are
+   * renumbered, and those to come counted from there. Set when the merge link is made, before
+   * the link carries anything.
+   */
+  setContextIdBase(base: number): void {
+    const shift = base - this.#contextBase;
+    if (!shift) return;
+    this.#contextBase = base;
+    this.#contextSeq += shift;
+    const all = Array.from(this.#byContext.values());
+    this.#byContext.clear();
+    for (const frame of all) {
+      frame.executionContextId += shift;
+      this.#byContext.set(frame.executionContextId, frame);
+    }
+  }
+
+  /**
+   * The opaque frame a sandboxed iframe's element shows (no child target, see
+   * {@link OpaqueFrame}), as of the last sync; undefined for any other element.
+   */
+  opaqueOf(owner: Element): OpaqueFrame | undefined {
+    return isFrameOwner(owner) ? this.#opaque.get(owner) : undefined;
   }
 
   #add(frame: Frame): void {
