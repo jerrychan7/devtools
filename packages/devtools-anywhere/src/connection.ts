@@ -513,10 +513,14 @@ class ShellRelay extends RelayCore {
         if (typeof attach === 'boolean') {
           this.attached.delete(client);
           if (attach) this.attached.set(client, ++this.attachSeq);
-          // A session that ended before a new page instance re-sent its override: not re-sent ever.
           else if (this.overrides.get(client)?.pending) {
+            // Ended before a new page instance re-sent its override: it never will.
             this.overrides.delete(client);
             if (this.restoring && ![...this.overrides.values()].some(override => override.pending)) this.restore();
+          } else {
+            // Its session's end is its clear, as in Chrome: the page instance ending it may be going
+            // away, never to clear it itself.
+            this.setMetrics(client, null);
           }
           return;
         }
