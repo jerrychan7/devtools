@@ -187,6 +187,25 @@ async function grandchild(side: Side) {
   };
 }
 
+/** The iframe's own iframe's session, once its main context has been reported on it. */
+async function grandchildSession(side: Side, timeout = 10000): Promise<string> {
+  for (const start = Date.now(); ; await new Promise(r => setTimeout(r, 20))) {
+    const all = await side.events();
+    const session = get(
+      all.find(e => e.sessionId === side.child && e.method === 'Target.attachedToTarget')?.params,
+      'sessionId'
+    );
+    const ready = all.some(
+      e =>
+        e.sessionId === session &&
+        e.method === 'Runtime.executionContextCreated' &&
+        String(get(get(e.params, 'context'), 'origin')).includes(THIRD_HOST)
+    );
+    if (typeof session === 'string' && ready) return session;
+    if (Date.now() - start > timeout) throw new Error("the iframe's own was not set up");
+  }
+}
+
 test("a cross-origin iframe's own is a target on its session, end to end, as in Chrome", async () => {
   assert.ok(env);
   const views = [];
@@ -216,12 +235,11 @@ test('same-origin iframes in the iframe and in its own are frames of their targe
   for (const open of [chromeSide, oursSide]) {
     const side = await open(env, { nested: true });
     try {
+      // The iframe's own is set up (enabled, resumed) once its context is reported on its session;
+      // only then do the frames added in it come as events on it. It comes after the iframe's.
+      const s2 = await grandchildSession(side);
       await settle(side);
-      const all = await side.events();
-      const s2 = String(
-        get(all.find(e => e.sessionId === side.child && e.method === 'Target.attachedToTarget')?.params, 'sessionId')
-      );
-      const from = all.length;
+      const from = (await side.events()).length;
       const add = `new Promise(r => { const f = document.createElement('iframe'); f.src = 'frame-child.html';
         f.onload = r; document.body.append(f); }).then(() => 0)`;
       for (const sessionId of [side.child, s2]) {

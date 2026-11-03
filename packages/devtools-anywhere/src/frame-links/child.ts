@@ -86,7 +86,14 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
 
   const onMessage = (event: MessageEvent) => {
     if (!event.isTrusted || event.source !== window.parent || !matchOrigin(patterns, event.origin)) return;
-    if (isMessage(event.data, FRAME_PING)) return hello();
+    if (isMessage(event.data, FRAME_PING)) {
+      // The parent pings once it has let its links go (a new agent, back from the back/forward
+      // cache, linked to its own parent): its bye on the link's port may come after the ping,
+      // which a link still open would ignore, never to link again. The link is done with.
+      link?.close();
+      id = newId();
+      return hello();
+    }
     const welcome = readWelcome(event.data);
     const port = event.ports[0];
     // Only the welcome for this document's hello, once.
