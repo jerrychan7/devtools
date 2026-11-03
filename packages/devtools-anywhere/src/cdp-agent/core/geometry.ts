@@ -246,6 +246,16 @@ export function frameToTop(doc: Document): DOMMatrix | null {
   return m;
 }
 
+/**
+ * Maps the viewport of the document a frame owner shows to the top viewport, through the owner and
+ * the iframes holding it: for a document out of reach, e.g. a merged sandboxed frame's.
+ */
+export function ownerContentToTop(owner: Element): DOMMatrix {
+  const step = frameContentToViewport(owner);
+  const m = frameToTop(owner.ownerDocument);
+  return m ? m.multiply(step) : step;
+}
+
 /** A quad (or any list of x, y pairs) mapped through `m`. */
 export function mapPoints(m: DOMMatrixReadOnly, q: Quad): Quad {
   const out: Quad = [];

@@ -30,7 +30,7 @@ async function hrefIn(session: CdpSession, ns: number): Promise<string | undefin
 
 /** The elements whose frames were merged: a frame's next document links again, after its load. */
 const wasMerged = new WeakSet<Element>();
-mergedFrames.onMerged(link => wasMerged.add(link.owner));
+mergedFrames.onLinked((_ns, link) => wasMerged.add(link.owner));
 
 /**
  * The link of the document a merged frame shows after `previous`'s: the current one if newer, else
@@ -48,7 +48,7 @@ function nextLink(
       clearTimeout(timer);
       resolve(value);
     };
-    const stop = mergedFrames.onMerged((link, ns) => {
+    const stop = mergedFrames.onLinked((ns, link) => {
       if (link.owner === owner) done({ link, ns });
     });
     const timer = setTimeout(() => done(undefined), URL_TIMEOUT);
