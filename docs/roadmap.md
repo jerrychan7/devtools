@@ -42,10 +42,6 @@ What has been discussed and is not done yet, and why. Directions and known trade
 
 **Status**: a direction only; no design discussed yet.
 
-## iframes
-
-- **Several remote frontends and a cross-origin iframe**: a link serves one parent session at a time. Chrome gives each client its own child session; here the iframe's agent would need one session per parent session, multiplexed on the link.
-
 ## More that can be filled in the page
 
 All with standard page APIs, matching Chrome. By value for effort; the first three are small.

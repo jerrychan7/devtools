@@ -250,7 +250,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
 | 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到。没有隔离 world（`Page.createIsolatedWorld`） |
-| 跨域 iframe | ⚠️ | 需要 iframe 页面也加载探针，并且双方都配了[源名单](#跨域-iframe)，否则只显示为元素。要等 iframe 的探针运行后才连上：它的文档本身的请求报在它自己的会话里，而不是父页面的；导航后按 URL 设置的断点不会重新设上。导航后没有重新连接的页面，最多 10 秒后断开。远程调试有多个前端时，同一时间只有一个能调试它 |
+| 跨域 iframe | ⚠️ | 需要 iframe 页面也加载探针，并且双方都配了[源名单](#跨域-iframe)，否则只显示为元素。要等 iframe 的探针运行后才连上：它的文档本身的请求报在它自己的会话里，而不是父页面的；导航后按 URL 设置的断点不会重新设上。导航后没有重新连接的页面，最多 10 秒后断开 |
 | 跨源样式表 | ⚠️ | 需要 CORS；只读 |
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
 | 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |

@@ -250,7 +250,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Event listeners | ⚠️ | Only those added after the probe ran; no source location |
 | WebSocket | ⚠️ | Connections and frames; no handshake headers |
 | Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it. No isolated worlds (`Page.createIsolatedWorld`) |
-| Cross-origin iframes | ⚠️ | Only with the probe in the iframe's page and both [origin lists](#cross-origin-iframes); otherwise shown as elements only. Linked once the iframe's probe runs: its document's own request is reported in its session, not the parent's; breakpoints by URL are not set again after it navigates. A page that does not link again after a navigation is detached up to 10 s later. With several remote frontends, one at a time |
+| Cross-origin iframes | ⚠️ | Only with the probe in the iframe's page and both [origin lists](#cross-origin-iframes); otherwise shown as elements only. Linked once the iframe's probe runs: its document's own request is reported in its session, not the parent's; breakpoints by URL are not set again after it navigates. A page that does not link again after a navigation is detached up to 10 s later |
 | Cross-origin style sheets | ⚠️ | Need CORS; read-only |
 | Forced `:hover`, `:focus`, … | ⚠️ | Not for `@import` and `adoptedStyleSheets` sheets |
 | Screencast (device button outside shell mode) | ⚠️ | Redrawn by [snapDOM](https://github.com/zumerlab/snapdom) from the DOM: canvas, video and cross-origin images may be missing; ≤ 2 fps. Input replayed with `isTrusted: false` |
