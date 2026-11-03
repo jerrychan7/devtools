@@ -1,11 +1,13 @@
 import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
+import { childTargets } from '../../core/child-targets';
 import { CdpError } from '../../core/session';
 import { isChildDocument } from '../network/frames';
 import { isOwnRequest, refetch } from '../network/network';
 import { frameEvents, frameTree } from './frame-tree';
 import { sameDocumentNavigations } from './history-navigations';
+import { mergedResources, updateMergedUrls, withMergedUrls } from './merged';
 
 export function registerPage({ session, probe, frames }: Context) {
   let stopFrames: (() => void) | null = null;
@@ -27,26 +29,30 @@ export function registerPage({ session, probe, frames }: Context) {
      * navigations within their documents.
      */
     enable() {
-      if (!stopFrames) {
+      // A sandboxed iframe's agent merged into the page's: its frame is the page's to report.
+      if (!stopFrames && !childTargets.parentMerged) {
         const events = frameEvents(session, frames);
         stopFrames = frames.onChange(events);
-        stopOpaque = frames.onOpaqueChange(events);
+        stopOpaque = frames.onOpaqueChange(withMergedUrls(session, events));
       }
       stopSameDocument ??= sameDocumentNavigations(session, frames);
     },
 
     disable,
 
-    getFrameTree(): Protocol.Page.GetFrameTreeResponse {
+    async getFrameTree(): Promise<Protocol.Page.GetFrameTreeResponse> {
       frames.sync();
+      await updateMergedUrls(session, frames);
       return { frameTree: frameTree(frames, frames.top) };
     },
 
-    getResourceTree(): Protocol.Page.GetResourceTreeResponse {
+    async getResourceTree(): Promise<Protocol.Page.GetResourceTreeResponse> {
       frames.sync();
+      await updateMergedUrls(session, frames);
+      // The merged frames' resources, as their agents list them.
+      const byFrame = await mergedResources(session);
       // Each frame's own resources, as far as Resource Timing knows them (Sources panel): like
       // Chrome, those of the document the frame shows now, not its parent's or its children's.
-      const byFrame = new Map<string, Protocol.Page.FrameResource[]>();
       for (const rec of probe.requests) {
         if (
           !rec.initiatorType ||
