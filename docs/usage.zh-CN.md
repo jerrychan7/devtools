@@ -255,7 +255,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
 | 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |
 | 截图 | ⚠️ | 见[下文](#截图) |
-| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。页面重新加载后，页面一侧客户端的设置会失效 |
+| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。远程客户端的设置在页面重新加载后仍然有效，与 Chrome 一致 |
 | 全屏的页面 | ⚠️ | 有元素全屏时用不了 DevTools，外壳模式下也一样。按 Esc 退出全屏即可 |
 | 前端与页面同源 | ⚠️ | DevTools 的设置会和页面共用 `localStorage`：前端放在别的源 |
 | 浏览器 | ⚠️ | 页面这边：现代浏览器都行。DevTools 界面：只在 Chrome 上验证过；新版前端可能需要兼容补丁 |
