@@ -137,7 +137,7 @@ test('CSS.getEnvironmentVariables reads the env() values the page resolves', asy
     const vars =
       typeof result === 'object' && result && 'environmentVariables' in result ? result.environmentVariables : {};
     return {
-      environmentVariables: Object(vars) as Record<string, string>,
+      environmentVariables: Object.fromEntries(Object.entries(Object(vars)).map(([k, v]) => [k, String(v)])),
       children: document.documentElement.children.length - before,
     };
   });
