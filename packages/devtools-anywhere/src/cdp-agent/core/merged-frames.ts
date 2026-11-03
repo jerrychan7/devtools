@@ -126,6 +126,7 @@ export class MergedFrames {
   readonly #routes = new Map<string, readonly string[]>();
   readonly #fanOut = new Set<string>();
   readonly #clients = new Map<CdpSession, ClientState>();
+  readonly #mergedListeners = new Set<(link: ChildLink, ns: number) => void>();
 
   constructor(targets: ChildTargets = childTargets) {
     this.#targets = targets;
@@ -154,6 +155,13 @@ export class MergedFrames {
       }
     });
     for (const [session, state] of this.#clients) if (state.kept.size) this.#channel(session, state, ns);
+    for (const listener of this.#mergedListeners) listener(link, ns);
+  }
+
+  /** Listens to merged frames linked ({@link addMerged}), a frame's next document's too; returns its removal. */
+  onMerged(listener: (link: ChildLink, ns: number) => void): () => void {
+    this.#mergedListeners.add(listener);
+    return () => this.#mergedListeners.delete(listener);
   }
 
   /** The merged frames' namespaces, with their links. */

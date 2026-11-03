@@ -1,10 +1,12 @@
 // Sandboxed iframes without allow-same-origin, whose same-origin document is opaque: in the Page
 // domain, against Chrome's. Chrome keeps them in the page's frame tree, with no child target.
-import { after, before, test } from 'node:test';
+import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
 import type { Env, EventName, TestPage } from '../../../../test-support/conformance.ts';
+import { fixtureUrl, launchOopif } from '../../../../test-support/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
 
 for (const key of ['id', 'parentId', 'parentFrameId']) VOLATILE.add(key);
 
@@ -134,4 +136,110 @@ test('a sandboxed iframe navigating, then removed', async () => {
   [ours, chrome] = await recorded();
   assert.deepEqual(sequence(ours), sequence(chrome));
   assert.deepEqual(diffSubset(ours, chrome), []);
+});
+
+// The same iframe merged into the page's agent (core/merged-frames.ts): its page loads the probe,
+// whose agent links to the page's. Chrome's frame is the same; the page's agent reports it.
+describe('a sandboxed iframe merged into the page', () => {
+  let oopif: Env | undefined;
+  const sides: { ours?: MergedSide; chrome?: MergedSide } = {};
+  before(async () => {
+    oopif = await launchOopif();
+    sides.chrome = await chromeSide(oopif);
+    // Runtime's routes, to run scripts in the iframe, until the Runtime domain registers its own.
+    sides.ours = await oursSide(oopif, {
+      Runtime: { routeBy: { 'Runtime.evaluate': ['contextId'] }, fanOut: ['Runtime.enable', 'Runtime.disable'] },
+    });
+  });
+  after(async () => {
+    await sides.ours?.close();
+    await sides.chrome?.close();
+    await oopif?.close();
+  });
+
+  const both = () => {
+    const { ours, chrome } = sides;
+    assert.ok(ours && chrome);
+    return [ours, chrome] as const;
+  };
+
+  /** The iframe's frame, from the page's frame tree (`method`: getFrameTree or getResourceTree). */
+  async function childOf(side: MergedSide, method = 'Page.getFrameTree') {
+    const children = get(get(await side.send(method), 'frameTree'), 'childFrames');
+    const child = Array.isArray(children) ? children[0] : undefined;
+    const frame = get(child, 'frame');
+    assert.ok(frame);
+    return { frame, id: String(get(frame, 'id')), resources: get(child, 'resources') };
+  }
+
+  /** Runs a script in the iframe's latest execution context. */
+  async function inFrame(side: MergedSide, expression: string) {
+    const { id } = await childOf(side);
+    const created = (await side.events()).findLast(
+      e => e.method === 'Runtime.executionContextCreated' && get(get(e.params['context'], 'auxData'), 'frameId') === id
+    );
+    return side.send('Runtime.evaluate', { contextId: get(created?.params['context'], 'id'), expression });
+  }
+
+  /** The Page events of frame `frameId` since event `from`. */
+  async function pageEventsOf(side: MergedSide, frameId: string, from: number) {
+    return (await side.events())
+      .slice(from)
+      .filter(e => e.method.startsWith('Page.') && (e.params['frameId'] ?? get(e.params['frame'], 'id')) === frameId);
+  }
+
+  test('a navigation within its document is reported once, on the page', async () => {
+    const results = [];
+    for (const side of both()) {
+      const { id } = await childOf(side);
+      const from = (await side.events()).length;
+      await inFrame(side, `history.pushState(null, '', '#pushed')`);
+      await new Promise(r => setTimeout(r, 300));
+      const events = (await pageEventsOf(side, id, from)).filter(e => e.method === 'Page.navigatedWithinDocument');
+      results.push(events.map(e => ({ url: e.params['url'], type: e.params['navigationType'] })));
+    }
+    assert.deepEqual(results[0], results[1]);
+    assert.equal(results[1]?.length, 1);
+    assert.match(String(results[1]?.[0]?.url), /#pushed$/);
+  });
+
+  test("its own navigation: the page reports the document's URL, not the iframe's src, once", async () => {
+    const results = [];
+    for (const side of both()) {
+      const { id } = await childOf(side);
+      const from = (await side.events()).length;
+      const next = new URL(fixtureUrl(oopif as Env, 'sandboxed-child.html'));
+      next.searchParams.set('parentOrigins', new URL(fixtureUrl(oopif as Env, '')).origin);
+      next.searchParams.set('n', '2');
+      await inFrame(side, `location.href = ${JSON.stringify(next.href)}`);
+      for (let i = 0; i < 100; i++) {
+        if ((await pageEventsOf(side, id, from)).some(e => e.method === 'Page.frameStoppedLoading')) break;
+        await new Promise(r => setTimeout(r, 50));
+      }
+      const navigated = (await pageEventsOf(side, id, from)).filter(e => e.method === 'Page.frameNavigated');
+      const { frame } = await childOf(side);
+      results.push({
+        navigated: navigated.map(e => get(get(e.params, 'frame'), 'url')),
+        tree: { url: get(frame, 'url'), securityOrigin: get(frame, 'securityOrigin') },
+      });
+    }
+    assert.deepEqual(results[0], results[1]);
+    assert.match(String(results[1]?.tree.url), /n=2$/);
+  });
+
+  test('getResourceTree lists the frame with the resources of its document', async () => {
+    const results = [];
+    for (const side of both()) {
+      const { frame, resources } = await childOf(side, 'Page.getResourceTree');
+      const listed = Array.isArray(resources) ? resources : [];
+      results.push({
+        url: get(frame, 'url'),
+        // The agent's own scripts: Chrome lists them, the agent does not.
+        resources: listed
+          .filter(r => !String(get(r, 'url')).includes('/dist-test/'))
+          .map(r => [get(r, 'url'), get(r, 'type')]),
+      });
+    }
+    assert.deepEqual(results[0], results[1]);
+  });
 });
