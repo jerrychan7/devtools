@@ -9,19 +9,17 @@ type MethodOf<C, D extends string> = C extends `${D}.${infer M}` ? M : never;
 type CommandsByDomain = { [D in DomainOf<Command>]?: MethodOf<Command, D>[] };
 
 /**
- * Commands that succeed without effect. Enabling a domain whose events never come is what Chrome
- * answers too, so every `enable` here is kept. The rest can be done in the page but are not yet
- * (docs/roadmap.md), so the frontend and scripts are not told they cannot.
+ * Commands that succeed without effect: they can be done in the page but are not yet
+ * (docs/roadmap.md), so the frontend and scripts are not told they cannot. A domain is enabled
+ * here when the page can give its events later; one whose events only the browser has fails below.
+ * `Inspector` is about the connection itself, whose events come from it.
  */
 const NOOPS = {
   Accessibility: ['enable'],
   Animation: ['enable'],
-  Audits: ['enable'],
-  Autofill: ['enable'],
   CSS: ['trackComputedStyleUpdatesForNode'],
   // Device mode's size is the shell's (shell-layout.ts).
   Emulation: ['setEmulatedMedia', 'setEmulatedVisionDeficiency', 'setSafeAreaInsetsOverride', 'setUserAgentOverride'],
-  HeapProfiler: ['enable'],
   Inspector: ['enable'],
   // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear', 'startViolationsReport'],
@@ -42,13 +40,10 @@ const NOOPS = {
     'enableReportingApi',
     'setCacheDisabled',
     'setAttachDebugStack',
-    'emulateNetworkConditions',
     'setExtraHTTPHeaders',
     'setBlockedURLs',
     'setUserAgentOverride',
   ],
-  Preload: ['enable'],
-  Profiler: ['enable'],
   ServiceWorker: ['enable'],
   Storage: [
     'trackCacheStorageForOrigin',
@@ -64,7 +59,6 @@ const NOOPS = {
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */
 const UNDECLARED_NOOPS: Record<string, string[]> = {
-  Database: ['enable'],
   // No encodings override can be set, so clearing one is done.
   Network: ['clearAcceptedEncodingsOverride'],
 };
@@ -74,13 +68,19 @@ const UNDECLARED_NOOPS: Record<string, string[]> = {
  * frontend does not log a server error (-32000) and none of these callers checks it.
  */
 const UNSUPPORTED: Record<string, Record<string, string>> = {
-  Autofill: { setAddresses: 'the browser fills forms' },
+  Audits: { enable: 'issues are found by the browser' },
+  Autofill: { enable: 'the browser fills forms', setAddresses: 'the browser fills forms' },
   BackgroundService: { startObserving: 'the browser records background service events' },
+  // WebSQL is gone from browsers; the frontend still enables it.
+  Database: { enable: 'WebSQL databases are not available' },
   Emulation: {
     setAutoDarkModeOverride: 'auto dark mode is applied by the browser',
     resetPageScaleFactor: 'the pinch zoom cannot be changed',
   },
+  HeapProfiler: { enable: 'the heap is seen by the browser only' },
   Network: { setBypassServiceWorker: "the page's requests go through its service worker" },
+  Preload: { enable: 'speculative loads are made by the browser' },
+  Profiler: { enable: 'scripts are sampled by the browser' },
   Storage: {
     getSharedStorageMetadata: 'shared storage metadata is not readable',
     setInterestGroupTracking: 'interest groups are kept by the browser',
@@ -88,6 +88,13 @@ const UNSUPPORTED: Record<string, Record<string, string>> = {
   },
   Target: { setRemoteLocations: 'the browser discovers remote targets' },
 };
+
+const NO_THROTTLING = 'Not supported in the page: requests are throttled by the browser';
+
+/** Whether conditions slow requests down; 0 or less is no limit, as in Chrome. */
+function throttles(c: Protocol.Network.NetworkConditions | Protocol.Network.EmulateNetworkConditionsRequest) {
+  return [c.latency, c.downloadThroughput, c.uploadThroughput, c.packetLoss].some(v => (v ?? 0) > 0);
+}
 
 export function registerStubs(session: CdpSession) {
   for (const [domain, methods] of [...Object.entries(NOOPS), ...Object.entries(UNDECLARED_NOOPS)]) {
@@ -114,10 +121,15 @@ export function registerStubs(session: CdpSession) {
     },
   });
   session.register('Network', {
-    // Throttling cannot be emulated in the page: the rules are accepted but never applied.
-    emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => ({
-      ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`),
-    }),
+    // Throttling cannot be done in the page; going offline can, though not yet (docs/roadmap.md).
+    // The frontend sends these with no throttling on every connection, which succeeds.
+    emulateNetworkConditions: (params: Protocol.Network.EmulateNetworkConditionsRequest) => {
+      if (throttles(params)) throw new CdpError(NO_THROTTLING);
+    },
+    emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => {
+      if (params.matchedNetworkConditions.some(throttles)) throw new CdpError(NO_THROTTLING);
+      return { ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`) };
+    },
     // COOP, COEP and CSP are response headers of the document, unknown to the page.
     getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
   });

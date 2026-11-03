@@ -90,11 +90,38 @@ test('a command the page cannot carry out fails with why; one not yet done succe
   assert.match(await reply('Target.setRemoteLocations'), /^Not supported in the page: /);
   assert.match(await reply('BackgroundService.startObserving'), /^Not supported in the page: /);
   for (const method of [
+    'Audits.enable',
+    'Autofill.enable',
+    'Database.enable',
+    'HeapProfiler.enable',
+    'Preload.enable',
+    'Profiler.enable',
+  ]) {
+    assert.match(await reply(method), /^Not supported in the page: /, method);
+  }
+  const slow = { offline: false, latency: 400, downloadThroughput: 50000, uploadThroughput: 20000 };
+  assert.match(await reply('Network.emulateNetworkConditions', slow), /^Not supported in the page: /);
+  assert.match(
+    await reply('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [{ urlPattern: '', ...slow }] }),
+    /^Not supported in the page: /
+  );
+  const none = { offline: false, latency: 0, downloadThroughput: 0, uploadThroughput: 0 };
+  assert.equal(await reply('Network.emulateNetworkConditions', none), 'resolved');
+  assert.equal(await reply('Network.emulateNetworkConditions', { ...none, offline: true }), 'resolved');
+  assert.equal(
+    await reply('Network.emulateNetworkConditionsByRule', { offline: true, matchedNetworkConditions: [] }),
+    'resolved'
+  );
+  for (const method of [
     'Emulation.setEmulatedMedia',
     'Emulation.setSafeAreaInsetsOverride',
     'Network.setBlockedURLs',
     'Overlay.setPausedInDebuggerMessage',
+    'Accessibility.enable',
     'Animation.enable',
+    'Inspector.enable',
+    'Log.enable',
+    'ServiceWorker.enable',
     'Log.clear',
   ]) {
     assert.equal(await reply(method), 'resolved', method);
