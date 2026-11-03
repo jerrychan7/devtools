@@ -136,6 +136,12 @@ export class NodeRegistry {
   private contentDocuments = new WeakMap<Element, Document>();
   /** Called for every iframe document sent to the client, e.g. to observe its mutations. */
   onContentDocument: ((doc: Document) => void) | null = null;
+  /**
+   * The document of the merged frame (core/merged-frames.ts) an iframe holds, as its agent sent it
+   * to the client, for `depth` (that of the iframe's document: 0 without `pierce`); undefined when
+   * none. Set by the DOM domain.
+   */
+  mergedDocument: ((owner: FrameOwner, depth: number, pierce: boolean) => DomNode | undefined) | null = null;
   /** Called for every shadow root sent to the client, e.g. to observe its mutations. */
   onShadowRoot: ((root: ShadowRoot) => void) | null = null;
   /**
@@ -355,12 +361,17 @@ export class NodeRegistry {
    * Adds an iframe's frame id and document. Like Chrome, the document is not one of the
    * iframe's children (`childNodeCount` counts its fallback content) and has no parent id. A
    * cross-origin iframe has a frame id but no document, as Chrome reports an out-of-process one
-   * (its document is its own target's): the id its child target has, whether linked or not.
+   * (its document is its own target's): the id its child target has, whether linked or not. A
+   * merged sandboxed one has the document its agent sent ({@link mergedDocument}), as in Chrome,
+   * which keeps such a frame in the page's process.
    */
   private serializeFrame(owner: FrameOwner, result: DomNode, depth: number, pierce: boolean) {
     const frame = this.frames?.ofOwner(owner);
     if (!frame) {
-      if (isCrossOrigin(owner)) result.frameId = childTargets.frameIdOf(owner);
+      if (!isCrossOrigin(owner)) return;
+      result.frameId = childTargets.frameIdOf(owner);
+      const merged = this.mergedDocument?.(owner, pierce ? depth : 0, pierce);
+      if (merged) result.contentDocument = merged;
       return;
     }
     result.frameId = frame.id;
