@@ -2,14 +2,10 @@ import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
+import { isChildDocument } from '../network/frames';
 import { isOwnRequest, refetch } from '../network/network';
 import { frameEvents, frameTree } from './frame-tree';
 import { sameDocumentNavigations } from './history-navigations';
-
-/** Resource Timing initiators of documents: a frame's own, not resources of the page. */
-const DOCUMENT_INITIATORS = new Set(['navigation', 'iframe', 'frame']);
-/** Initiators whose loads are a frame's document when they are documents, else the page's resources. */
-const EMBEDDING_INITIATORS = new Set(['object', 'embed']);
 
 export function registerPage({ session, probe, frames }: Context) {
   let stopFrames: (() => void) | null = null;
@@ -47,8 +43,9 @@ export function registerPage({ session, probe, frames }: Context) {
       for (const rec of probe.requests) {
         if (
           !rec.initiatorType ||
-          DOCUMENT_INITIATORS.has(rec.initiatorType) ||
-          (EMBEDDING_INITIATORS.has(rec.initiatorType) && rec.type === 'Document') ||
+          // Documents are a frame's own, not resources of the page.
+          rec.initiatorType === 'navigation' ||
+          isChildDocument(rec) ||
           rec.type === 'Ping' ||
           isOwnRequest(probe, rec)
         )
@@ -145,9 +142,17 @@ export function registerPage({ session, probe, frames }: Context) {
 
     reload: () => location.reload(),
 
+    /** The frame given, as in Chrome; the loader returned is that of the document it leaves. */
     navigate(params: Protocol.Page.NavigateRequest): Protocol.Page.NavigateResponse {
-      location.href = params.url;
-      return { frameId: frames.top.id, loaderId: frames.top.loaderId };
+      // The URL first, as in Chrome: it must be absolute.
+      if (!URL.canParse(params.url)) throw new CdpError('Cannot navigate to invalid URL');
+      frames.sync();
+      const frame = params.frameId === undefined ? frames.top : frames.byId(params.frameId);
+      if (!frame) throw new CdpError('No frame with given id found');
+      const win = frame.document.defaultView;
+      if (!win) throw new CdpError('No frame with given id found');
+      win.location.href = params.url;
+      return { frameId: frame.id, loaderId: frame.loaderId };
     },
 
     addScriptToEvaluateOnNewDocument: (): Protocol.Page.AddScriptToEvaluateOnNewDocumentResponse => ({

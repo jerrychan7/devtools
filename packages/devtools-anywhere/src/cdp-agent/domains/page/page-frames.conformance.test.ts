@@ -126,6 +126,37 @@ test('an iframe navigating to another document, and its fragment in the frame tr
   assert.deepEqual(diffSubset(a, b), []);
 });
 
+test('an iframe loading another document detaches the old one’s frames before it navigates', async () => {
+  // The sides keep events by method: the order across methods is read from a session of its own
+  // for Chrome, and from the page for ours.
+  const kept: EventName[] = ['Page.frameAttached', 'Page.frameNavigated', 'Page.frameDetached'];
+  const session = await t.page.createCDPSession();
+  const chrome: string[] = [];
+  for (const name of kept) session.on(name, () => chrome.push(name));
+  await session.send('Page.enable');
+  await act(
+    () =>
+      t.page.evaluate(
+        () =>
+          new Promise(resolve => {
+            const frame = document.querySelector<HTMLIFrameElement>('#pre');
+            if (!frame) throw new Error('no #pre');
+            frame.onload = resolve;
+            frame.srcdoc = '<iframe name="inner" srcdoc="<i>again</i>"></iframe>';
+          })
+      ),
+    'Page.frameNavigated',
+    2
+  );
+  await session.detach();
+  const ours = await t.page.evaluate(
+    (names: string[]) => window.__ours.map(e => e.method).filter(m => names.includes(m)),
+    kept
+  );
+  assert.deepEqual(ours, chrome);
+  assert.equal(ours[0], 'Page.frameDetached');
+});
+
 test('removing an iframe detaches its frames, the innermost first', async () => {
   await act(
     () =>

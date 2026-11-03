@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { launch, openPage } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
+const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
+const OTHER = '/packages/devtools-anywhere/test-support/frame-other.html';
+
 let env: Env | undefined;
 let t: TestPage;
 
@@ -342,4 +345,42 @@ test('captureScreenshot draws again at half the size when drawing fails, not whe
   assert.deepEqual(result.scales, [1, 0.5, 0.25]);
   assert.equal(result.loads, 1);
   assert.match(result.error, /offline/);
+});
+
+test('Page.navigate with a frameId navigates that frame, not the page', async () => {
+  await t.page.evaluate(
+    child =>
+      new Promise(resolve => {
+        const frame = document.createElement('iframe');
+        frame.id = 'navigated';
+        frame.src = child;
+        frame.onload = resolve;
+        document.body.append(frame);
+      }),
+    CHILD
+  );
+  const top = await t.page.evaluate(() => location.href);
+  // Absolute: Chrome checks the URL first, and rejects a relative one as invalid.
+  const url = new URL(OTHER, top).href;
+  const [ours, chrome] = await Promise.all(
+    [t.ours, t.chrome].map(async side => {
+      const { frameTree } = await side.send('Page.getFrameTree');
+      const child = frameTree.childFrames?.find(c => c.frame.url.endsWith(CHILD));
+      assert.ok(child);
+      await assert.rejects(side.send('Page.navigate', { url, frameId: 'nope' }), /No frame with given id found/);
+      await assert.rejects(
+        side.send('Page.navigate', { url: OTHER, frameId: 'nope' }),
+        /Cannot navigate to invalid URL/
+      );
+      const res = await side.send('Page.navigate', { url, frameId: child.frame.id });
+      return res.frameId === child.frame.id;
+    })
+  );
+  assert.deepEqual([ours, chrome], [true, true]);
+  await t.page.waitForFunction(
+    other => document.querySelector('iframe#navigated')?.contentDocument?.URL.endsWith(other),
+    {},
+    OTHER
+  );
+  assert.equal(await t.page.evaluate(() => location.href), top);
 });

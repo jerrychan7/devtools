@@ -96,8 +96,9 @@ export function touchesFrames(records: MutationRecord[], shadowRootOf: ShadowRoo
 }
 
 /**
- * The page's frames: the top document and its same-origin iframes, which the agent can reach.
- * Cross-origin iframes are not registered (docs/roadmap.md, "iframes").
+ * The page's frames: the top document and the same-origin frames of its frame owners (`<iframe>`,
+ * `<frame>`, `<object>`, `<embed>`), which the agent can reach. Cross-origin ones are not
+ * registered here: {@link childTargets} exposes them as child targets, under the same frame ids.
  *
  * Iframes are found by {@link sync}, which walks the documents and the shadow trees in them; while
  * anyone listens through
@@ -201,7 +202,7 @@ export class FrameRegistry {
     return frame?.document === doc ? frame : undefined;
   }
 
-  /** The frame an `<iframe>` or `<frame>` holds, if it is registered. */
+  /** The frame a frame owner (`<iframe>`, `<frame>`, `<object>`, `<embed>`) holds, if registered. */
   ofOwner(owner: Element): Frame | undefined {
     return this.#byOwner.get(owner);
   }
@@ -305,6 +306,12 @@ export class FrameRegistry {
   sync(): void {
     // Insertions not yet delivered to the observer: another observer's callback may sync first.
     if (this.#observer) this.#noteInsertions(this.#observer.takeRecords());
+    // Shadow roots that left the page are let go, not kept with their trees for the page's life.
+    for (const root of this.#watchedRoots)
+      if (!root.host.isConnected) {
+        root.removeEventListener('load', this.#onLoad, true);
+        this.#watchedRoots.delete(root);
+      }
     this.#syncChildren(this.top);
   }
 
@@ -331,6 +338,8 @@ export class FrameRegistry {
         continue;
       }
       if (frame.document !== doc) {
+        // Like Chrome, the old document's frames go before the frame navigates.
+        for (const child of Array.from(this.childrenOf(frame))) this.#detach(child);
         this.#byContext.delete(frame.executionContextId);
         frame.document = doc;
         frame.loaderId = newLoaderId();
@@ -399,7 +408,8 @@ export const frames = new FrameRegistry(window);
 export function awaitsFirstDocument(frame: Frame): boolean {
   const { owner } = frame;
   if (!owner || frame.document.URL !== 'about:blank') return false;
-  if (owner.hasAttribute('srcdoc')) return true;
+  // Only an <iframe> takes srcdoc: in another owner it leaves the document as it is.
+  if (isHtml(owner, 'iframe') && owner.hasAttribute('srcdoc')) return true;
   const src = owner.getAttribute(sourceAttribute(owner))?.trim();
   if (!src) return false;
   try {

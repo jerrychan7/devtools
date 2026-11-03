@@ -63,6 +63,8 @@
 | 框架、隔离元素、铰链、刘海叠加层 | `Overlay.highlightFrame`、`setShowIsolatedElements`、`setShowHinge`、`setShowDisplayCutout` 是空操作 | 和 `highlightNode` 画在同一层 |
 | 模拟安全区（safe area） | `Emulation.setSafeAreaInsetsOverride` 是空操作 | 通过 CSSOM 把样式表里的 `env(safe-area-inset-*)` 替换成指定值；限制和模拟媒体特性相同：对 `@import`、跨域样式表不生效 |
 | Reporting API 和请求发起位置 | `Network.enableReportingApi`、`setAttachDebugStack` 是空操作 | 用 `ReportingObserver` 收集页面能看到的报告；在拦截的 fetch、XHR 里记录调用栈 |
+| 跨域 `<embed>` 文档作为子目标 | 找不到跨域 `<embed>` 的窗口：它没有 `contentWindow`，而跨域时读不了子窗口的 `frameElement`。因此其中的文档不会链接（握手被拒、也不被 ping），DOM 里也不当作跨域 frame；Chrome 会像 iframe 一样给它建子目标 | 用排除法认出它的窗口：页面的子窗口里，不属于其他 owner（iframe、frame、object 的 `contentWindow`，同域 embed）的那些，按文档顺序对应剩下的 embed |
+| 跨域 iframe 里的 `DOM.scrollIntoViewIfNeeded` | 只在 iframe 自己的文档里滚动，不会把 iframe 本身滚进外层页面的视口；Chrome 会把区域交给父 frame 继续滚动，节点最终在顶层视口可见 | 子目标把映射到自身视口的区域经 frame 链路发给父端，父端经该 iframe 映射后接着向外滚动 |
 
 价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。
 

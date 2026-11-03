@@ -111,3 +111,21 @@ test('breakpoint commands are accepted', async () => {
   });
   assert.deepEqual(possible.locations, []);
 });
+
+test("a same-origin iframe's script is reported in the iframe's context", async () => {
+  await t.page.evaluate(
+    () =>
+      new Promise(resolve => {
+        const frame = document.createElement('iframe');
+        frame.srcdoc = '<script src="/packages/devtools-anywhere/test-support/assets/resource.js?in-frame"></script>';
+        frame.onload = resolve;
+        document.body.append(frame);
+      })
+  );
+  const [chrome, ours] = await Promise.all([waitParsed(t.chrome, 'in-frame'), waitParsed(t.ours, 'in-frame')]);
+  const chromeTop = await parsed(t.chrome, 'before');
+  const oursTop = await parsed(t.ours, 'before');
+  assert.ok(chromeTop && oursTop);
+  assert.notEqual(chrome.executionContextId, chromeTop.executionContextId);
+  assert.notEqual(ours.executionContextId, oursTop.executionContextId);
+});

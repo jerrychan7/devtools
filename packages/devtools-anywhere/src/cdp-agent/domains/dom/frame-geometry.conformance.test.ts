@@ -171,34 +171,80 @@ test('DOM.getNodeForLocation looks into iframes', async () => {
   }
 });
 
-test('DOM.scrollIntoViewIfNeeded scrolls the iframes holding the node', async () => {
+test('DOM.scrollIntoViewIfNeeded scrolls the iframes and scroll containers holding the node', async () => {
+  // In the top page: a scroller holding a node in a shadow tree, far down and right in it; a node
+  // past the right edge; one partly below the bottom edge.
+  await t.page.evaluate(() => {
+    const scroller = document.createElement('div');
+    scroller.id = 'fg-top-scroller';
+    scroller.style.cssText = 'position:absolute;left:700px;top:40px;width:80px;height:60px;overflow:auto';
+    const host = document.createElement('div');
+    host.style.cssText = 'width:400px;height:400px';
+    host.attachShadow({ mode: 'open' }).innerHTML =
+      '<div id="fg-shadowed" style="margin:300px 0 0 250px;width:30px;height:20px"></div>';
+    scroller.append(host);
+    const wide = document.createElement('div');
+    wide.id = 'fg-wide';
+    wide.style.cssText = 'position:absolute;left:1400px;top:300px;width:40px;height:20px';
+    const partial = document.createElement('div');
+    partial.id = 'fg-partial';
+    partial.style.cssText = 'position:absolute;left:700px;top:600px;width:40px;height:80px';
+    document.body.append(scroller, wide, partial);
+  });
   const positions = () =>
     t.page.evaluate(() => {
-      const frame = document.getElementById('fg-frame');
-      const win = frame instanceof HTMLIFrameElement ? frame.contentWindow : null;
-      return [scrollY, win?.scrollY, win?.document.getElementById('fg-scroller')?.scrollTop].map(v =>
-        Math.round(v ?? -1)
-      );
+      const values = [scrollX, scrollY];
+      const top = document.getElementById('fg-top-scroller');
+      values.push(top?.scrollLeft ?? -1, top?.scrollTop ?? -1);
+      for (const id of ['fg-frame', 'fg-turned-frame']) {
+        const frame = document.getElementById(id);
+        const win = frame instanceof HTMLIFrameElement ? frame.contentWindow : null;
+        const scroller = win?.document.getElementById('fg-scroller');
+        values.push(win?.scrollX ?? -1, win?.scrollY ?? -1, scroller?.scrollLeft ?? -1, scroller?.scrollTop ?? -1);
+      }
+      return values.map(v => Math.round(v));
     });
   const reset = () =>
     t.page.evaluate(() => {
       scrollTo(0, 30);
-      const frame = document.getElementById('fg-frame');
-      const win = frame instanceof HTMLIFrameElement ? frame.contentWindow : null;
-      win?.scrollTo(0, 12);
-      win?.document.getElementById('fg-scroller')?.scrollTo(0, 0);
+      document.getElementById('fg-top-scroller')?.scrollTo(0, 0);
+      for (const id of ['fg-frame', 'fg-turned-frame']) {
+        const frame = document.getElementById(id);
+        const win = frame instanceof HTMLIFrameElement ? frame.contentWindow : null;
+        win?.scrollTo(0, 12);
+        win?.document.getElementById('fg-scroller')?.scrollTo(0, 0);
+      }
     });
-  const seen = [];
+  const cases: { frame?: string; id: string; rect?: Protocol.DOM.Rect }[] = [
+    { frame: 'fg-frame', id: 'fg-scrolled' },
+    { frame: 'fg-frame', id: 'fg-far' },
+    { frame: 'fg-turned-frame', id: 'fg-scrolled' },
+    { frame: 'fg-turned-frame', id: 'fg-far' },
+    { id: 'fg-shadowed' },
+    { id: 'fg-wide' },
+    { id: 'fg-partial' },
+    { id: 'fg-partial', rect: { x: 0, y: 70, width: 10, height: 10 } },
+  ];
+  const seen: number[][][] = [];
   for (const side of [t.ours, t.chrome]) {
     const results = [];
-    for (const id of ['fg-scrolled', 'fg-far']) {
+    for (const { frame, id, rect } of cases) {
       await reset();
-      const node = await nodeIn(side, 'fg-frame', id);
-      await side.send('DOM.scrollIntoViewIfNeeded', { nodeId: node.nodeId });
+      let node: DomNode | null | undefined;
+      if (frame) node = await nodeIn(side, frame, id);
+      else {
+        const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+        node = find(root, hasId(id));
+      }
+      assert.ok(node, `#${id}`);
+      await side.send('DOM.scrollIntoViewIfNeeded', { nodeId: node.nodeId, ...(rect && { rect }) });
       results.push(await positions());
     }
     seen.push(results);
   }
+  await t.page.evaluate(() => {
+    for (const id of ['fg-top-scroller', 'fg-wide', 'fg-partial']) document.getElementById(id)?.remove();
+  });
   await reset();
   assert.deepEqual(seen[0], seen[1]);
 });
