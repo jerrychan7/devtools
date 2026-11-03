@@ -3,7 +3,7 @@
 // Inside the page iframe of shell mode, it connects the page's CDP session to the shell and shows
 // the shell element's F12 button in the page.
 import { childTargets, createCdpSession, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
-import { connectFrontend, connectToShell } from './connection';
+import { connectFrontend, connectToShell, emulateInShell } from './connection';
 import {
   createGlobalElement,
   createPageSession,
@@ -41,7 +41,7 @@ if (!('DevtoolsAnywhere' in window)) {
   const api: DevtoolsAnywhereApi = {
     connectFrontend,
     connectRemote: (serverUrl, options) => connectRemote(createPageSession, serverUrl, options),
-    createCdpSession,
+    createCdpSession: options => emulateInShell(createCdpSession(options)),
     createGlobalElement,
     linkFrames: options => linkFrames(options, createPageSession),
   };

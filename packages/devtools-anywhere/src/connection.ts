@@ -1,13 +1,15 @@
-import { END_SESSION_CALLS, FRAME_ID, LOADER_ID, type CdpSession } from './cdp-agent';
+import { END_SESSION_CALLS, FRAME_ID, LOADER_ID, isShellPage, type CdpSession } from './cdp-agent';
 import {
   DETACH_METHOD,
   HELLO_METHOD,
+  METRICS_METHOD,
   PING_METHOD,
   RelayCore,
   parse,
   type DetachParams,
   type Frame,
   type HelloParams,
+  type MetricsParams,
   type Session,
 } from '@devtools-anywhere/relay-core';
 
@@ -20,6 +22,8 @@ const HELLO = JSON.stringify({ method: HELLO_METHOD, params: { loaderId: LOADER_
 const PING = JSON.stringify({ method: PING_METHOD });
 /** The start of the shell's detach (the relay's own message): its frontend reloaded. */
 const DETACH_PREFIX = `{"method":"${DETACH_METHOD}"`;
+/** The start of a metrics request or answer (the relay's own message), between the page and the shell. */
+const METRICS_PREFIX = `{"method":"${METRICS_METHOD}"`;
 
 interface Link {
   /**
@@ -61,6 +65,7 @@ function link(
     if (event.source !== peer() || event.origin !== origin || typeof event.data !== 'string') return;
     if (event.data === PING) return post(HELLO);
     if (onDetach && event.data.startsWith(DETACH_PREFIX)) return onDetach();
+    if (event.data.startsWith(METRICS_PREFIX)) return;
     if (onNewInstance) {
       const id = Number(/^\{"id":(\d+)/.exec(event.data)?.[1] ?? Number.NaN);
       if (id <= lastId) onNewInstance();
@@ -154,6 +159,55 @@ export function connectToShell(session: CdpSession): () => void {
   return () => connection.disconnect();
 }
 
+/** How long a client waits for the shell to answer a metrics request. */
+const METRICS_TIMEOUT = 2000;
+/** CDP sessions given the shell's device metrics so far, and metrics requests sent. */
+let metricsClients = 0;
+let metricsCalls = 0;
+/** The answers awaited from the shell, by request id. */
+const metricsAnswers = new Map<number, () => void>();
+
+function onMetricsAnswer(event: MessageEvent) {
+  if (event.source !== window.parent || event.origin !== location.origin || typeof event.data !== 'string') return;
+  if (!event.data.startsWith(METRICS_PREFIX)) return;
+  const params: unknown = parse(event.data)?.params;
+  const id: unknown = typeof params === 'object' && params !== null ? Reflect.get(params, 'id') : undefined;
+  if (typeof id === 'number') metricsAnswers.get(id)?.();
+}
+
+/**
+ * In shell mode, has `session` answer Emulation.setDeviceMetricsOverride and
+ * clearDeviceMetricsOverride by asking the shell, whose page size it is (shell-layout.ts), as
+ * Chrome's browser does for every client of the page; its override ends with its session.
+ * Elsewhere the page cannot resize itself: the methods stay unknown. Returns `session`.
+ */
+export function emulateInShell(session: CdpSession): CdpSession {
+  if (!isShellPage()) return session;
+  if (!metricsClients) window.addEventListener('message', onMetricsAnswer);
+  const client = `${LOADER_ID}:${++metricsClients}`;
+  const ask = (metrics: object | null) =>
+    new Promise<void>((resolve, reject) => {
+      const id = ++metricsCalls;
+      const timer = setTimeout(() => {
+        metricsAnswers.delete(id);
+        reject(new Error('The shell did not answer'));
+      }, METRICS_TIMEOUT);
+      metricsAnswers.set(id, () => {
+        clearTimeout(timer);
+        metricsAnswers.delete(id);
+        resolve();
+      });
+      const params: MetricsParams = { id, client, metrics };
+      window.parent.postMessage(JSON.stringify({ method: METRICS_METHOD, params }), location.origin);
+    });
+  session.register('Emulation', {
+    setDeviceMetricsOverride: (params: object) => ask(params),
+    clearDeviceMetricsOverride: () => ask(null),
+  });
+  session.onReset(() => void ask(null).catch(() => {}));
+  return session;
+}
+
 /** The page's size in device mode, in CSS pixels (0 for "as laid out"), and its scale. */
 export interface DeviceMetrics {
   width: number;
@@ -161,8 +215,19 @@ export interface DeviceMetrics {
   scale: number;
 }
 
+/** The shell frontend's key among the clients overriding the device metrics. */
+const FRONTEND = 'frontend';
+
 /** The shell's side of the relay core: one frontend, in an iframe; the page in another. */
 class ShellRelay extends RelayCore {
+  /**
+   * The clients whose device metrics override is on: the frontend (FRONTEND), and the page's
+   * other clients (emulateInShell). As in Chrome, the page has one override, the last set; a
+   * client's clear, or its session's end, clears it if that client's own is on, whoever set it last.
+   */
+  private readonly overriding = new Set<string>();
+  /** The page instance whose clients are in `overriding`. */
+  private metricsLoader = '';
   private frontendReady = false;
   /** Hellos without a loader id so far. */
   private unknownLoaders = 0;
@@ -226,6 +291,7 @@ class ShellRelay extends RelayCore {
    */
   private newFrontend() {
     this.closeSession(this.session);
+    this.setMetrics(FRONTEND, null);
     this.sendOwn(
       JSON.stringify({ method: DETACH_METHOD, params: { session: this.session.id } satisfies DetachParams })
     );
@@ -244,17 +310,23 @@ class ShellRelay extends RelayCore {
     if (method !== 'Emulation.setDeviceMetricsOverride' && method !== 'Emulation.clearDeviceMetricsOverride')
       return false;
     const params: unknown = message?.params;
-    const number = (name: string) => {
-      const value: unknown = typeof params === 'object' && params !== null ? Reflect.get(params, name) : undefined;
-      return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-    };
-    this.onMetrics(
-      method === 'Emulation.clearDeviceMetricsOverride'
-        ? null
-        : { width: number('width'), height: number('height'), scale: number('scale') || 1 }
-    );
+    this.setMetrics(FRONTEND, method === 'Emulation.clearDeviceMetricsOverride' ? null : (params ?? {}));
     this.postFrontend(JSON.stringify({ id: message?.id, result: {} }));
     return true;
+  }
+
+  /** Sets `client`'s override to `params` (Emulation.setDeviceMetricsOverride's), or clears it (null). */
+  private setMetrics(client: string, params: unknown) {
+    if (params === null) {
+      if (this.overriding.delete(client)) this.onMetrics(null);
+      return;
+    }
+    const number = (name: string) => {
+      const value: unknown = typeof params === 'object' ? Reflect.get(params, name) : undefined;
+      return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    };
+    this.overriding.add(client);
+    this.onMetrics({ width: number('width'), height: number('height'), scale: number('scale') || 1 });
   }
 
   readonly onMessage = (event: MessageEvent) => {
@@ -278,8 +350,23 @@ class ShellRelay extends RelayCore {
         const sent = field('loaderId');
         // A page without one (an older probe) is a new instance every time, as it always was.
         const loaderId = typeof sent === 'string' ? sent : `unknown-${++this.unknownLoaders}`;
+        // A new page instance: its CDP sessions, and their overrides, are new.
+        if (loaderId !== this.metricsLoader) {
+          this.metricsLoader = loaderId;
+          for (const client of this.overriding) if (client !== FRONTEND) this.setMetrics(client, null);
+        }
         this.page.contentWindow?.addEventListener('pagehide', this.onPagehide);
         return this.hello(loaderId);
+      }
+      if (event.data.startsWith(METRICS_PREFIX)) {
+        const params: unknown = parse(event.data)?.params;
+        const field = (name: keyof MetricsParams): unknown =>
+          typeof params === 'object' && params !== null ? Reflect.get(params, name) : undefined;
+        const id = field('id');
+        const metrics = field('metrics');
+        this.setMetrics(String(field('client')), typeof metrics === 'object' ? metrics : null);
+        const answer = { method: METRICS_METHOD, params: { id } };
+        return this.page.contentWindow?.postMessage(JSON.stringify(answer), location.origin);
       }
       this.pageMessage(this.session, event.data);
     }

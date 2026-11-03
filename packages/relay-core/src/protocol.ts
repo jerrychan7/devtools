@@ -9,6 +9,13 @@ export const PAGEHIDE_METHOD = 'DevtoolsAnywhere.pagehide';
 export const DETACH_METHOD = 'DevtoolsAnywhere.detach';
 /** Sent by the shell on startup, in case the page started listening first: the page says hello. */
 export const PING_METHOD = 'DevtoolsAnywhere.ping';
+/**
+ * Between a page in shell mode and the shell: a client of the page's CDP agent sets
+ * (`metrics`, its Emulation.setDeviceMetricsOverride params) or clears (`metrics` null) the
+ * page's size, which is the shell's (shell-layout.ts). The shell answers with the same method and
+ * the request's `id` alone.
+ */
+export const METRICS_METHOD = 'DevtoolsAnywhere.metrics';
 /** The code the remote server closes a page's connection with when another page took its id. */
 export const REPLACED_CLOSE_CODE = 4001;
 
@@ -29,4 +36,12 @@ export interface HelloParams {
 /** A detach's params: the session that ended, as the relay or the page's hello named it. */
 export interface DetachParams {
   session: number | string;
+}
+
+/** A metrics request's params; its answer has the `id` alone. */
+export interface MetricsParams {
+  id: number;
+  /** The client, unique across the page's instances. */
+  client: string;
+  metrics: object | null;
 }

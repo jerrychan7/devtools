@@ -17,7 +17,7 @@ import {
   type ParentLink,
   type SnapdomLoader,
 } from '../cdp-agent';
-import { connectFrontend, relayShell } from '../connection';
+import { connectFrontend, emulateInShell, relayShell } from '../connection';
 import { SHELL_HANDSHAKE } from '../shell-messages';
 import type { Grip } from '../grip';
 import { isDockSide, isEmbedderRequest } from './request';
@@ -77,8 +77,8 @@ export function setBundleUrl(url: string) {
  */
 let loadSnapdom: SnapdomLoader = () => Promise.reject(new Error('snapDOM: the bundle URL is not known'));
 
-/** The CDP session of a page, with the screencast's renderer. */
-export const createPageSession = () => createCdpSession({ loadSnapdom: () => loadSnapdom() });
+/** The CDP session of a page, with the screencast's renderer, and in shell mode the shell's device metrics. */
+export const createPageSession = () => emulateInShell(createCdpSession({ loadSnapdom: () => loadSnapdom() }));
 
 /**
  * Whether the browser has the top layer for popovers. There the toggler and the panel are above
