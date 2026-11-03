@@ -342,6 +342,17 @@ export function registerDom(ctx: Context) {
     } satisfies Protocol.DOM.SetChildNodesEvent);
   }
 
+  /** Like Chrome's PushChildNodesToFrontend: walks into children the client already has. */
+  function pushChildren(node: Node, depth: number, pierce = false) {
+    if (!isElement(node) && !isDocument(node) && !isDocumentFragment(node)) return;
+    if (!nodes.childrenSent.has(node)) {
+      emitChildren(node, depth === Infinity ? -1 : depth, pierce);
+      return;
+    }
+    if (depth <= 1) return;
+    for (const child of nodes.children(node)) pushChildren(child, depth - 1, pierce);
+  }
+
   /** The previous visible sibling the client already has: `unsent` tells those it does not. */
   function previousVisibleSibling(node: Node, unsent: (node: Node) => boolean): Node | null {
     for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n) && !unsent(n)) return n;
@@ -607,8 +618,8 @@ export function registerDom(ctx: Context) {
       // Like Chrome, children the client has are not sent again unless deeper ones are asked for:
       // the frontend asks again while its first request is pending, and would replace the nodes it
       // has (an iframe's grafted document with them) by new ones.
-      if (depth !== -1 && depth <= 1 && nodes.childrenSent.has(node)) return;
-      emitChildren(node, depth === -1 ? -1 : depth, params.pierce);
+      // Deeper ones are sent like Chrome: one setChildNodes per parent whose children the client lacks.
+      pushChildren(node, depth === -1 ? Infinity : depth, params.pierce);
     },
 
     describeNode(params: Protocol.DOM.DescribeNodeRequest): Protocol.DOM.DescribeNodeResponse {

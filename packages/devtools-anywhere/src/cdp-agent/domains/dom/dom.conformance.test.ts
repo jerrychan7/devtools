@@ -104,8 +104,7 @@ describe('DOM', () => {
     await request();
     await new Promise(r => setTimeout(r, 200));
     assert.deepEqual(await counts(), [0, 0]);
-    // Deeper: the grandchildren are sent. Chrome sends one event per parent (head, body) with its
-    // children; ours sends html's children again with theirs, in one event. Compare the grandchildren.
+    // Deeper: like Chrome, one event per parent whose children the client lacks (head, body).
     await request({ depth: 2 });
     await waitForBoth(t, 'DOM.setChildNodes');
     await new Promise(r => setTimeout(r, 200));
@@ -113,13 +112,17 @@ describe('DOM', () => {
       t.ours.events('DOM.setChildNodes'),
       t.chrome.events('DOM.setChildNodes'),
     ]);
-    assert.deepEqual(
-      diffSubset(
-        ours.flatMap(e => e.nodes).flatMap(n => n.children ?? []),
-        chrome.flatMap(e => e.nodes)
-      ),
-      []
-    );
+    assert.equal(ours.length, chrome.length);
+    for (const [i, event] of ours.entries()) {
+      const peer = chrome[i];
+      assert.ok(peer);
+      const [{ node: ourParent }, { node: chromeParent }] = await Promise.all([
+        t.ours.send('DOM.describeNode', { nodeId: event.parentId }),
+        t.chrome.send('DOM.describeNode', { nodeId: peer.parentId }),
+      ]);
+      assert.deepEqual(diffSubset(ourParent, chromeParent), []);
+      assert.deepEqual(diffSubset(event.nodes, peer.nodes), []);
+    }
   });
 
   describe('mutations', () => {
