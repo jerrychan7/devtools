@@ -50,7 +50,7 @@
 |---|---|---|
 | Animations 面板（`Animation` 域） | `enable` 是空操作 | `document.getAnimations()` 覆盖 CSS 动画、过渡和 Web Animations API；列出、暂停、调速、拖动进度都能对应上 |
 | 色觉缺陷模拟（`setEmulatedVisionDeficiency`） | 空操作 | 在 `<html>` 上加 SVG 滤镜，Chrome 用的也是颜色矩阵 |
-| 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`emulateNetworkConditions`、`overrideNetworkState` 是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速只能近似，不做 |
+| 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`overrideNetworkState` 和 `emulateNetworkConditions` 的离线是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速返回错误：页面没法让请求变慢 |
 | 浏览器默认样式 | Styles 里不显示 | 附带一份 Chromium 的 `html.css`（开源），用到时加载，用来匹配出「user agent stylesheet」规则；每次升级 Chrome 都要同步 |
 | Grid / Flex / 容器查询 / scroll-snap 叠加层 | `Overlay.setShow*Overlays` 是空操作 | 在页面里画出来；`getComputedStyle` 返回 grid 解析后的轨道尺寸；和 `highlightNode` 共用叠加层 |
 | 模拟 `prefers-color-scheme`、print 等媒体特性 | `setEmulatedMedia` 是空操作 | 通过 CSSOM 改写 `@media` 条件；限制和强制 `:hover` 相同：对 `@import`、跨域样式表和 `matchMedia` 不生效 |
@@ -67,7 +67,7 @@
 
 ## 没有效果的命令
 
-已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址。前端不记录服务器错误，也不检查这些命令的返回。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；启用一个永远不会有事件的域也返回成功，和 Chrome 一样。
+已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址、网络限速（设了延迟、吞吐量或丢包就算；都不设或只设离线时返回成功），以及启用只有浏览器才有事件的域：`Audits`（问题）、`Autofill`、`Database`（WebSQL）、`HeapProfiler`、`Preload`、`Profiler`。前端不记录服务器错误，这些命令失败时它的各个模型照常启动。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；页面以后能给出事件的域（`Accessibility`、`Animation`、`Log`、`ServiceWorker`）启用时也返回成功；`Inspector.enable` 管的是连接本身，也返回成功。
 
 ## 从旧版本线发布补丁
 

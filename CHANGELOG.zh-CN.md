@@ -12,7 +12,7 @@
 - `DOM.requestChildNodes` 不再重复发送客户端已有的子节点，与 Chrome 一致：前端请求两次时，展开的 iframe 会变成空白。
 - 外壳模式下重新加载的前端开始一个新会话，与 Chrome 一致。
 - 外壳模式下，页面的任何客户端（远程连入的 agent、`createCdpSession`）都能用 `Emulation.setDeviceMetricsOverride` 和 `clearDeviceMetricsOverride`，不再只限外壳自带的前端：以最后一次设置为准，客户端清除或断开时只撤销自己的设置；远程客户端的设置在页面重新加载后仍然有效，按客户端连上的先后重新应用，与 Chrome 一致。参数按 Chrome 的规则校验，报错相同；非外壳模式下这两条命令返回错误并说明原因。
-- 页面做不到的命令（自动深色模式、开启焦点模拟、双指缩放、后台服务记录、绕过 Service Worker、自动填充地址等）改为返回错误「Not supported in the page: <原因>」，不再假装成功；能在页面里实现、只是还没做的仍返回成功，并记进路线图。
+- 页面做不到的命令（自动深色模式、开启焦点模拟、双指缩放、后台服务记录、绕过 Service Worker、自动填充地址、网络限速、启用性能分析器等只有浏览器才有事件的域等）改为返回错误「Not supported in the page: <原因>」，不再假装成功；能在页面里实现、只是还没做的仍返回成功，并记进路线图。
 - 直接嵌入的前端重新加载后，改为按命令 id 重新从 1 开始来判断，不再看 iframe 的 load 事件：load 晚于新前端的第一批命令，会把它刚启用的东西又关掉。
 - `CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错「Frame not found」，与 Chrome 一致。
 
