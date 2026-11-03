@@ -182,11 +182,20 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
     if (new URL(req.url ?? '/', 'http://localhost').pathname === '/ws/echo') wsEcho(req, socket);
     else socket.destroy();
   };
-  return listenOnLoopback(port, () => {
+  const create = () => {
     const server = http.createServer(handle);
     server.on('upgrade', upgrade);
     return server;
-  });
+  };
+  return port === 0 ? listenOnLoopback(port, create) : listenOnAll(port, create);
+}
+
+/** Listens on every address at a given port: other devices on the network reach the server too. */
+async function listenOnAll(port: number, create: () => http.Server): Promise<PlaygroundServer> {
+  const server = create();
+  const error = await listen(server, port, '::');
+  if (error) throw new Error(`the server cannot listen on port ${port}: ${error}`);
+  return { url: `http://localhost:${port}`, close: () => server.close() };
 }
 
 /** Listens on `host` and `port`; resolves with the error code if that fails. */
@@ -198,7 +207,7 @@ function listen(server: http.Server, port: number, host: string): Promise<string
 }
 
 /**
- * Listens on both loopback addresses, 127.0.0.1 and ::1, at one port: the pages reach the server
+ * For a free port (the tests): listens on both loopback addresses, 127.0.0.1 and ::1, at one port: the pages reach the server
  * as localhost and as 127.0.0.1. Not on the wildcard address: macOS lets another process bind
  * 127.0.0.1 at a port a wildcard socket holds, and that process then gets every connection to
  * 127.0.0.1 there. Tests running side by side do just that (each Chrome's DevTools port is a free
