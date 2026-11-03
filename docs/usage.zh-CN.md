@@ -255,7 +255,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
 | 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |
 | 截图 | ⚠️ | 见[下文](#截图) |
-| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。远程客户端的设置在页面重新加载后仍然有效，与 Chrome 一致；远程客户端如果恰好在页面重新加载期间断开，它的设置最多会多保留 3 秒才撤销 |
+| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。远程客户端的设置在页面重新加载后仍然有效，与 Chrome 一致。参数按 Chrome 的规则检查，报错也与 Chrome 相同，但有两处例外："Invalid parameters" 的 data 不带 Chrome 的 "at position N"（这是 Chrome 内部编码里的字节偏移）；`devicePosture` 的 type 不认识时照常接受，而 Chrome 会不再应答 |
 | Rendering 面板的模拟 | ⚠️ | 「模拟页面处于焦点」做不到：在页面里使用 DevTools 时，焦点真的会离开页面元素，`:focus` 样式随之消失，开启时返回错误。自动深色模式、双指缩放重置同样做不到，返回错误。页面做不到的命令一律返回错误「Not supported in the page: <原因>」，能做但还没做的见[路线图](roadmap.zh-CN.md) |
 | 全屏的页面 | ⚠️ | 有元素全屏时用不了 DevTools，外壳模式下也一样。按 Esc 退出全屏即可 |
 | 前端与页面同源 | ⚠️ | DevTools 的设置会和页面共用 `localStorage`：前端放在别的源 |
