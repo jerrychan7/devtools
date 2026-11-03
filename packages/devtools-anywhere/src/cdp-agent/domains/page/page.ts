@@ -9,10 +9,13 @@ import { sameDocumentNavigations } from './history-navigations';
 
 export function registerPage({ session, probe, frames }: Context) {
   let stopFrames: (() => void) | null = null;
+  let stopOpaque: (() => void) | null = null;
   let stopSameDocument: (() => void) | null = null;
   const disable = () => {
     stopFrames?.();
     stopFrames = null;
+    stopOpaque?.();
+    stopOpaque = null;
     stopSameDocument?.();
     stopSameDocument = null;
   };
@@ -24,7 +27,11 @@ export function registerPage({ session, probe, frames }: Context) {
      * navigations within their documents.
      */
     enable() {
-      stopFrames ??= frames.onChange(frameEvents(session, frames));
+      if (!stopFrames) {
+        const events = frameEvents(session, frames);
+        stopFrames = frames.onChange(events);
+        stopOpaque = frames.onOpaqueChange(events);
+      }
       stopSameDocument ??= sameDocumentNavigations(session, frames);
     },
 

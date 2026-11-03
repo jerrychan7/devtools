@@ -144,6 +144,8 @@ export function registerNetwork(ctx: Context) {
     // The document of a sandboxed iframe: of that frame, as in Chrome.
     const opaque = rec.frame ? undefined : opaqueFrameOf(rec);
     const frameId = rec.frame?.frameId ?? (opaque ? childTargets.frameIdOf(opaque) : frames.top.id);
+    const loaderId =
+      rec.frame?.loaderId ?? (opaque && frames.opaqueLoaderId(opaque, rec.wallTime)) ?? frames.top.loaderId;
     prune(sent, probe.requests, 'end');
     let done = sent.get(rec.requestId);
     if (!done) sent.set(rec.requestId, (done = new Set()));
@@ -171,7 +173,7 @@ export function registerNetwork(ctx: Context) {
       const callFrames = parseStack(rec.stack, 1);
       session.emit('Network.requestWillBeSent', {
         requestId: rec.requestId,
-        loaderId: rec.frame?.loaderId ?? frames.top.loaderId,
+        loaderId,
         documentURL: rec.frame?.documentURL ?? (opaque ? rec.url : location.href),
         request,
         timestamp: rec.startTime / 1000,
@@ -188,7 +190,7 @@ export function registerNetwork(ctx: Context) {
       done.add('response');
       session.emit('Network.responseReceived', {
         requestId: rec.requestId,
-        loaderId: rec.frame?.loaderId ?? frames.top.loaderId,
+        loaderId,
         timestamp: (rec.responseTime ?? performance.now()) / 1000,
         type: rec.type,
         response: {

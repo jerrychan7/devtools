@@ -1,5 +1,12 @@
 import type { Protocol } from 'devtools-protocol';
-import { type Frame, type FrameChange, type FrameRegistry, awaitsFirstDocument } from '../../core/frames';
+import {
+  type Frame,
+  type FrameChange,
+  type FrameRegistry,
+  type OpaqueFrame,
+  type OpaqueFrameChange,
+  awaitsFirstDocument,
+} from '../../core/frames';
 import type { CdpSession } from '../../core/session';
 
 const LOCALHOST = /^(.+\.)?localhost$|^127(\.\d+){3}$|^\[::1\]$/;
@@ -21,7 +28,8 @@ function hostnameOf(origin: string): string {
  * iframe) is described as the main frame of Chrome's iframe target: with the parent's frame as
  * `parentId`, and an empty `name` (the parent's view has the iframe's name).
  */
-export function describeFrame(frames: FrameRegistry, frame: Frame): Protocol.Page.Frame {
+export function describeFrame(frames: FrameRegistry, frame: Frame | OpaqueFrame): Protocol.Page.Frame {
+  if (!('document' in frame)) return describeOpaqueFrame(frame);
   const win = frame.window;
   const linked = frame === frames.top ? frames.parent : undefined;
   const href = frame.document.URL;
@@ -47,9 +55,35 @@ export function describeFrame(frames: FrameRegistry, frame: Frame): Protocol.Pag
   };
 }
 
-/** The frame tree under `frame`, the children in document order of their `<iframe>`s. */
-export function frameTree(frames: FrameRegistry, frame: Frame): Protocol.Page.FrameTree {
-  const children = frames.childrenOf(frame);
+/**
+ * A sandboxed iframe's opaque frame as Chrome describes it: the security origin of its URL (not
+ * the opaque one), a secure context and NotIsolatedFeatureDisabled. Its document is out of reach:
+ * the URL is the iframe's, the name the iframe's `name` (else its id), the MIME type text/html.
+ */
+function describeOpaqueFrame(frame: OpaqueFrame): Protocol.Page.Frame {
+  const { url: href, owner } = frame;
+  const hash = href.indexOf('#');
+  const url = hash < 0 ? href : href.slice(0, hash);
+  const parent = frame.parent.window;
+  return {
+    id: frame.id,
+    parentId: frame.parent.id,
+    loaderId: frame.loaderId,
+    name: owner.getAttribute('name') || owner.id,
+    url,
+    ...(hash < 0 || hash === href.length - 1 ? {} : { urlFragment: href.slice(hash) }),
+    domainAndRegistry: '',
+    securityOrigin: url.startsWith('about:') ? '://' : new URL(url).origin,
+    mimeType: 'text/html',
+    secureContextType: parent.isSecureContext ? 'Secure' : 'InsecureScheme',
+    crossOriginIsolatedContextType: 'NotIsolatedFeatureDisabled',
+    gatedAPIFeatures: [],
+  };
+}
+
+/** The frame tree under `frame`, the children in the order they were registered. */
+export function frameTree(frames: FrameRegistry, frame: Frame | OpaqueFrame): Protocol.Page.FrameTree {
+  const children = 'document' in frame ? frames.treeChildrenOf(frame) : [];
   return {
     frame: describeFrame(frames, frame),
     ...(children.length ? { childFrames: children.map(child => frameTree(frames, child)) } : {}),
@@ -64,10 +98,13 @@ export function frameTree(frames: FrameRegistry, frame: Frame): Protocol.Page.Fr
  * the three come together. Chrome's experimental frameRequestedNavigation, frameStartedNavigating
  * and frameSubtreeWillBeDetached are not sent: their loader id and timing are not known here.
  */
-export function frameEvents(session: CdpSession, frames: FrameRegistry): (change: FrameChange) => void {
+export function frameEvents(
+  session: CdpSession,
+  frames: FrameRegistry
+): (change: FrameChange | OpaqueFrameChange) => void {
   /** Frames that started loading their first document, reported when attached. */
-  const loading = new WeakSet<Frame>();
-  const navigated = (frame: Frame) => {
+  const loading = new WeakSet<Frame | OpaqueFrame>();
+  const navigated = (frame: Frame | OpaqueFrame) => {
     session.emit('Page.frameNavigated', {
       frame: describeFrame(frames, frame),
       type: 'Navigation',
@@ -80,7 +117,8 @@ export function frameEvents(session: CdpSession, frames: FrameRegistry): (change
         frameId,
         parentFrameId: frame.parent?.id ?? frames.top.id,
       } satisfies Protocol.Page.FrameAttachedEvent);
-      if (awaitsFirstDocument(frame)) {
+      // An opaque frame's document is not known until its iframe's load.
+      if (!('document' in frame) || awaitsFirstDocument(frame)) {
         loading.add(frame);
         session.emit('Page.frameStartedLoading', { frameId });
         return;

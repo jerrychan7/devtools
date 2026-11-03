@@ -121,7 +121,11 @@ function observeResources(sink: NetworkSink, w: Realm, serviceWorkerUrl: string 
   const details = new Map<string, Partial<ProbeRequest>[]>();
   const awaiting = new WeakSet<ProbeRequest>();
   let isOurs = (_source: unknown) => false;
-  const container = w.navigator.serviceWorker;
+  // Reading it throws in an opaque origin (a sandbox without allow-same-origin).
+  let container: ServiceWorkerContainer | undefined;
+  try {
+    container = w.navigator.serviceWorker;
+  } catch {}
   if (container && serviceWorkerUrl) {
     // Only reports from our own worker (its URL differs in the query only), and only the
     // fields it sends: the page's own worker must not rewrite the records.

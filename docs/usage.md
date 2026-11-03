@@ -250,6 +250,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Event listeners | ⚠️ | Only those added after the probe ran; no source location |
 | WebSocket | ⚠️ | Connections and frames; no handshake headers |
 | Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it. No isolated worlds (`Page.createIsolatedWorld`) |
+| Sandboxed iframes (no `allow-same-origin`) | ⚠️ | Listed in the frame tree as in Chrome, but their opaque document is out of reach: shown as elements only, with no execution context or child frames of their own, and of its requests only its document's. The URL is the iframe's `src` (or `srcdoc`) as of its last load, not where its scripts navigated it; the MIME type is always text/html; the name is the iframe's `name` attribute, not a name its scripts set. The navigation is seen at the load event |
 | Cross-origin iframes | ⚠️ | Only with the probe in the iframe's page and both [origin lists](#cross-origin-iframes); otherwise shown as elements only. Linked once the iframe's probe runs: its document's own request is reported in its session, not the parent's; breakpoints by URL are not set again after it navigates. A page that does not link again after a navigation is detached up to 10 s later |
 | Cross-origin style sheets | ⚠️ | Need CORS; read-only |
 | Forced `:hover`, `:focus`, … | ⚠️ | Not for `@import` and `adoptedStyleSheets` sheets |

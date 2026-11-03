@@ -45,6 +45,49 @@ export interface ParentFrame {
   parentFrameId: string;
 }
 
+/**
+ * The frame of a sandboxed iframe (no allow-same-origin) showing a same-origin or `about:`
+ * document: opaque, so out of reach, yet Chrome keeps it in the page's frame tree, with no child
+ * target. Its document is not known: its URL is the iframe's `src` (or `srcdoc`) as of its last load.
+ */
+export interface OpaqueFrame {
+  readonly id: string;
+  loaderId: string;
+  url: string;
+  readonly owner: FrameOwner;
+  readonly parent: Frame;
+  readonly window: Window;
+  /** When (epoch ms) its document last committed, as the iframe's load tells; none before. */
+  committedAt?: number;
+  /** The loader of the document it is loading, once a request for it was seen. */
+  pendingLoaderId?: string;
+}
+
+/** A change to the opaque frames, as {@link FrameChange} is to the others. */
+export interface OpaqueFrameChange {
+  type: FrameChange['type'];
+  frame: OpaqueFrame;
+}
+
+/**
+ * The URL a sandboxed iframe without allow-same-origin loads into an opaque document of the
+ * parent's origin (or `about:blank`, `about:srcdoc`); undefined for any other owner.
+ */
+export function opaqueUrlOf(owner: FrameOwner): string | undefined {
+  if (!isHtml(owner, 'iframe') || owner.contentDocument || !owner.contentWindow) return undefined;
+  const sandbox = owner.getAttribute('sandbox');
+  if (sandbox === null || /(^|\s)allow-same-origin(\s|$)/i.test(sandbox)) return undefined;
+  if (owner.hasAttribute('srcdoc')) return 'about:srcdoc';
+  const src = owner.getAttribute('src')?.trim();
+  if (!src) return 'about:blank';
+  try {
+    const url = new URL(src, owner.baseURI);
+    return url.href === 'about:blank' || url.origin === owner.ownerDocument.defaultView?.origin ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const newLoaderId = () => `devtools-anywhere-loader-${Math.random().toString(36).slice(2)}`;
 
 /** A shadow host's shadow root, if reachable: closed ones only through the probe's record. */
@@ -117,6 +160,13 @@ export class FrameRegistry {
   readonly #byOwner = new WeakMap<Element, Frame>();
   readonly #children = new Map<Frame, Frame[]>();
   readonly #listeners = new Set<(change: FrameChange) => void>();
+  readonly #opaque = new Map<FrameOwner, OpaqueFrame>();
+  /** Opaque frames whose iframe fired load since the last sync: each load is a new document. */
+  readonly #opaqueLoaded = new WeakSet<FrameOwner>();
+  readonly #opaqueListeners = new Set<(change: OpaqueFrameChange) => void>();
+  /** When each frame was registered, to list opaque frames among the others as Chrome does. */
+  readonly #order = new WeakMap<object, number>();
+  #orderSeq = 0;
   /**
    * When frame owners were inserted, as read from DOM mutation records: new frames are registered,
    * and listed among their siblings, in this order, as Chrome lists frames in the order it made them.
@@ -130,7 +180,9 @@ export class FrameRegistry {
   /** Set by the agent to reach closed shadow roots too (the probe records them). */
   shadowRootOf: ShadowRootOf = openShadowRoot;
   readonly #onLoad = (event: Event) => {
-    if (isNode(event.target) && isFrameOwner(event.target)) this.sync();
+    if (!isNode(event.target) || !isFrameOwner(event.target)) return;
+    if (this.#opaque.has(event.target)) this.#opaqueLoaded.add(event.target);
+    this.sync();
   };
 
   constructor(top: Window) {
@@ -174,6 +226,7 @@ export class FrameRegistry {
     this.#byId.set(frame.id, frame);
     this.#byContext.set(frame.executionContextId, frame);
     this.#children.set(frame, []);
+    this.#order.set(frame, ++this.#orderSeq);
     if (frame.owner) this.#byOwner.set(frame.owner, frame);
     if (frame.parent) this.#children.get(frame.parent)?.push(frame);
     this.#watch(frame.document);
@@ -210,6 +263,50 @@ export class FrameRegistry {
   /** The child frames of `frame`, in the order they were registered, as Chrome lists them. */
   childrenOf(frame: Frame): readonly Frame[] {
     return this.#children.get(frame) ?? [];
+  }
+
+  /** The child frames of `frame` with its opaque ones, in the order they were registered. */
+  treeChildrenOf(frame: Frame): (Frame | OpaqueFrame)[] {
+    const all: (Frame | OpaqueFrame)[] = [...this.childrenOf(frame)];
+    for (const opaque of this.#opaque.values()) if (opaque.parent === frame) all.push(opaque);
+    const at = (f: object) => this.#order.get(f) ?? 0;
+    return all.sort((a, b) => at(a) - at(b));
+  }
+
+  /**
+   * Listens to changes of the opaque frames; returns a function that stops listening. They are
+   * found while anyone listens through {@link onChange}.
+   */
+  onOpaqueChange(listener: (change: OpaqueFrameChange) => void): () => void {
+    this.#opaqueListeners.add(listener);
+    return () => this.#opaqueListeners.delete(listener);
+  }
+
+  /**
+   * The loader id of the opaque frame's document requested at `wallTime` (epoch ms), so that
+   * Network gives its request the loader the frame then navigates with, as Chrome does: the
+   * current one for a request made before the document committed, else the next one.
+   */
+  opaqueLoaderId(owner: Element, wallTime: number): string | undefined {
+    const frame = isFrameOwner(owner) ? this.#opaque.get(owner) : undefined;
+    if (!frame || frame.committedAt === undefined || wallTime < frame.committedAt) return frame?.loaderId;
+    return (frame.pendingLoaderId ??= newLoaderId());
+  }
+
+  #emitOpaque(type: FrameChange['type'], frame: OpaqueFrame): void {
+    for (const listener of this.#opaqueListeners) listener({ type, frame });
+  }
+
+  #detachOpaque(frame: OpaqueFrame): void {
+    this.#opaque.delete(frame.owner);
+    if (!frame.owner.isConnected || contentWindowOf(frame.owner) !== frame.window) childTargets.forget(frame.owner);
+    this.#emitOpaque('detached', frame);
+  }
+
+  /** Detaches the frames in `frame`'s document, the opaque ones too. */
+  #detachChildren(frame: Frame): void {
+    for (const child of Array.from(this.childrenOf(frame))) this.#detach(child);
+    for (const opaque of Array.from(this.#opaque.values())) if (opaque.parent === frame) this.#detachOpaque(opaque);
   }
 
   /** All frames, the top one first, each followed by its descendants. */
@@ -322,7 +419,8 @@ export class FrameRegistry {
       if (isShadowRoot(node)) this.#watch(node);
       else owners.push(node);
     });
-    const added: { owner: FrameOwner; win: Window; doc: Document }[] = [];
+    const added: { owner: FrameOwner; win: Window; doc?: Document; url?: string }[] = [];
+    const opaqueFound = new Set<FrameOwner>();
     for (const owner of owners) {
       const doc = contentDocumentOf(owner);
       const win = contentWindowOf(owner);
@@ -332,6 +430,24 @@ export class FrameRegistry {
         this.#detach(frame);
         frame = undefined;
       }
+      const url = opaqueUrlOf(owner);
+      if (url !== undefined && win) {
+        opaqueFound.add(owner);
+        const opaque = this.#opaque.get(owner);
+        if (opaque?.window !== win) {
+          if (opaque) this.#detachOpaque(opaque);
+          added.push({ owner, win, url });
+        } else if (this.#opaqueLoaded.has(owner)) {
+          this.#opaqueLoaded.delete(owner);
+          opaque.url = url;
+          // The first document's loader is the one it was attached with.
+          if (opaque.committedAt !== undefined) opaque.loaderId = opaque.pendingLoaderId ?? newLoaderId();
+          delete opaque.pendingLoaderId;
+          opaque.committedAt = Date.now();
+          this.#emitOpaque('navigated', opaque);
+        }
+        continue;
+      }
       if (!doc || !win) continue;
       if (!frame) {
         added.push({ owner, win, doc });
@@ -339,7 +455,7 @@ export class FrameRegistry {
       }
       if (frame.document !== doc) {
         // Like Chrome, the old document's frames go before the frame navigates.
-        for (const child of Array.from(this.childrenOf(frame))) this.#detach(child);
+        this.#detachChildren(frame);
         this.#byContext.delete(frame.executionContextId);
         frame.document = doc;
         frame.loaderId = newLoaderId();
@@ -355,7 +471,23 @@ export class FrameRegistry {
     // were inserted; owners inserted when no one watched, in tree order.
     const at = (owner: FrameOwner) => this.#insertedAt.get(owner) ?? Number.MAX_SAFE_INTEGER;
     added.sort((a, b) => at(a.owner) - at(b.owner));
-    for (const { owner, win, doc } of added) {
+    for (const opaque of Array.from(this.#opaque.values()))
+      if (opaque.parent === parent && !opaqueFound.has(opaque.owner)) this.#detachOpaque(opaque);
+    for (const { owner, win, doc, url } of added) {
+      if (!doc) {
+        const opaque: OpaqueFrame = {
+          id: childTargets.frameIdOf(owner),
+          loaderId: newLoaderId(),
+          url: url ?? 'about:blank',
+          owner,
+          parent,
+          window: win,
+        };
+        this.#opaque.set(owner, opaque);
+        this.#order.set(opaque, ++this.#orderSeq);
+        this.#emitOpaque('attached', opaque);
+        continue;
+      }
       const frame: Frame = {
         // The id of the owner's frame, the same whether it is same-origin (here) or cross-origin
         // (a child target's), as Chrome keeps a frame's id when it changes process.
@@ -380,7 +512,7 @@ export class FrameRegistry {
 
   /** Unregisters a frame and its descendants, the descendants first. */
   #detach(frame: Frame): void {
-    for (const child of Array.from(this.childrenOf(frame))) this.#detach(child);
+    this.#detachChildren(frame);
     this.#children.delete(frame);
     this.#byId.delete(frame.id);
     this.#byContext.delete(frame.executionContextId);

@@ -436,3 +436,51 @@ test('the iframe back from the back/forward cache links again, as another docume
     await page.close();
   }
 });
+
+test('a sandboxed iframe (no allow-same-origin) loads the probe without errors, and is not linked: Chrome gives it no target', async () => {
+  // Its origin is opaque ("null"), which no list names. Chrome keeps such a frame in the page's
+  // own target: no attachedToTarget.
+  const origin = originOf('localhost');
+  const { page } = await open(origin, null);
+  // The probe loads there without an error: reads that throw in an opaque origin are guarded.
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(String(error)));
+  page.on('console', message => {
+    if (message.type() === 'error' && !message.location().url?.endsWith('/favicon.ico')) errors.push(message.text());
+  });
+  const session = await page.createCDPSession();
+  // Only targets of the sandboxed iframe: the page's own iframe, on another site, has one.
+  const attached: string[] = [];
+  session.on('Target.attachedToTarget', event => {
+    if (event.targetInfo.url.includes('n=sandboxed')) attached.push(event.targetInfo.url);
+  });
+  await session.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  try {
+    assert.ok(env);
+    const childUrl = new URL(fixtureUrl(env, 'frame-link-child.html'));
+    childUrl.searchParams.set('parentOrigins', `${origin} null`);
+    childUrl.searchParams.set('n', 'sandboxed');
+    await page.evaluate(
+      src =>
+        new Promise(resolve => {
+          const frame = Object.assign(document.createElement('iframe'), { id: 'sandboxed', src, onload: resolve });
+          frame.setAttribute('sandbox', 'allow-scripts');
+          document.body.append(frame);
+        }),
+      childUrl.href
+    );
+    await settle();
+    assert.deepEqual(await links(page), []);
+    assert.deepEqual(attached, []);
+    const sandboxed = page.frames().find(f => f.url().includes('n=sandboxed'));
+    assert.equal(await sandboxed?.evaluate(() => 'DevtoolsAnywhere' in window), true);
+    // Its own panel opens too.
+    await sandboxed?.evaluate(() => document.querySelector('devtools-anywhere')?.setOpen(true));
+    await page.waitForFrame(f => f.url().includes('fake-frontend.html'), { timeout: 5000 });
+    await settle();
+    assert.deepEqual(errors, []);
+  } finally {
+    await session.detach();
+    await page.close();
+  }
+});

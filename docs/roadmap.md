@@ -48,6 +48,7 @@ All with standard page APIs, matching Chrome. By value for effort; the first thr
 
 | Item | Now | How, in the page |
 |---|---|---|
+| Sandboxed iframes' content (no `allow-same-origin`) | Shown as elements only: no document, execution context or console of their own | The probe loaded in the sandboxed document links over postMessage as a cross-origin one does (checked against the owner's `contentWindow`, its origin being `"null"`), but is not reported as a target: as Chrome does, its DOM goes under the iframe node, its context and console into the parent's session, the domains proxying over the link |
 | The Animations panel (`Animation` domain) | `enable` is a no-op | `document.getAnimations()` has CSS animations, transitions and Web Animations; listing, pausing, playback rate and seeking map onto it |
 | Vision deficiencies (`setEmulatedVisionDeficiency`) | No-op | An SVG filter on `<html>`; Chrome uses color matrices too |
 | Network: blocked URLs, cache disabled, extra headers, offline | `setBlockedURLs`, `setCacheDisabled`, `setExtraHTTPHeaders`, `overrideNetworkState` and offline in `emulateNetworkConditions` are no-ops | For the fetch and XHR already intercepted; in shell mode, images and scripts too through the Service Worker. Throttling fails: the page cannot slow requests down |

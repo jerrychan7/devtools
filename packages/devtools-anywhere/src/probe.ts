@@ -159,21 +159,24 @@ const shellOpen = (worker: ServiceWorker) =>
     };
     worker.postMessage({ type: SHELL_QUERY }, [channel.port2]);
   });
-if (!readShellConfig() && navigator.serviceWorker) {
-  navigator.serviceWorker
-    .getRegistrations()
-    .then(registrations =>
-      Promise.all(
-        registrations.map(async r => {
-          const worker = r.active || r.waiting || r.installing;
-          if (!worker || !isShellWorker(worker.scriptURL)) return;
-          if (r.active && (await shellOpen(r.active))) return;
-          await r.unregister();
-        })
+// navigator.serviceWorker throws in an opaque origin (a sandbox without allow-same-origin).
+try {
+  if (!readShellConfig() && navigator.serviceWorker) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then(registrations =>
+        Promise.all(
+          registrations.map(async r => {
+            const worker = r.active || r.waiting || r.installing;
+            if (!worker || !isShellWorker(worker.scriptURL)) return;
+            if (r.active && (await shellOpen(r.active))) return;
+            await r.unregister();
+          })
+        )
       )
-    )
-    .catch(() => {});
-}
+      .catch(() => {});
+  }
+} catch {}
 
 /**
  * Whether the bundle's API (src/api.ts) has the function `name`, once the bundle has run: checked,

@@ -250,6 +250,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
 | 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到。没有隔离 world（`Page.createIsolatedWorld`） |
+| 沙箱 iframe（没有 `allow-same-origin`） | ⚠️ | 和 Chrome 一样列在 frame 树里，但它的不透明文档拿不到：只显示为元素，没有它自己的执行上下文和子 frame，请求只有它的文档本身。URL 取 iframe 上次 load 时的 `src`（或 `srcdoc`），不是它的脚本导航去的地址；MIME 类型固定为 text/html；名称取 iframe 的 `name` 属性，不是脚本设的名称。导航要到 load 事件才发现 |
 | 跨域 iframe | ⚠️ | 需要 iframe 页面也加载探针，并且双方都配了[源名单](#跨域-iframe)，否则只显示为元素。要等 iframe 的探针运行后才连上：它的文档本身的请求报在它自己的会话里，而不是父页面的；导航后按 URL 设置的断点不会重新设上。导航后没有重新连接的页面，最多 10 秒后断开 |
 | 跨源样式表 | ⚠️ | 需要 CORS；只读 |
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
