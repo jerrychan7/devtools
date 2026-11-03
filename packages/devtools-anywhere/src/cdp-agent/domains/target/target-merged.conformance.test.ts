@@ -66,3 +66,55 @@ test("Runtime.evaluate in the sandboxed frame's context goes there and back, as 
   assert.deepEqual(results[1], results[0]);
   assert.deepEqual(results[0], { type: 'string', value: 'null sandboxed child' });
 });
+
+test('Target.getTargets lists no target for the sandboxed iframe, as in Chrome', async () => {
+  for (const side of [chrome, ours]) {
+    assert.ok(side);
+    const infos = get(await side.send('Target.getTargets'), 'targetInfos');
+    assert.ok(Array.isArray(infos));
+    // Chrome's lists the browser's other pages and UI too: no iframe target is all compared.
+    assert.deepEqual(
+      infos.filter(info => get(info, 'type') === 'iframe'),
+      []
+    );
+    assert.ok(infos.some(info => get(info, 'type') === 'page'));
+  }
+});
+
+test('Target.getTargetInfo: the page, none for the sandboxed frame, as in Chrome', async () => {
+  const results = [];
+  for (const side of [chrome, ours]) {
+    assert.ok(side);
+    const own = get(await side.send('Target.getTargetInfo'), 'targetInfo');
+    const frame = await side.send('Target.getTargetInfo', { targetId: await sandboxedFrameId(side) });
+    results.push({ type: get(own, 'type'), parentId: get(own, 'parentId'), frame });
+  }
+  assert.deepEqual(results[1], results[0]);
+  assert.deepEqual(results[0], { type: 'page', parentId: undefined, frame: 'No target with given id found' });
+});
+
+test("the sandboxed frame's own agent tells the page's target as its own", async () => {
+  assert.ok(ours);
+  const pageId = get(get(await ours.send('Target.getTargetInfo'), 'targetInfo'), 'targetId');
+  const frameId = await sandboxedFrameId(ours);
+  const created = (await ours.events()).findLast(
+    e =>
+      e.method === 'Runtime.executionContextCreated' && get(get(e.params['context'], 'auxData'), 'frameId') === frameId
+  );
+  // Asked in the frame, of a session of its agent's own.
+  const reply = await ours.send('Runtime.evaluate', {
+    contextId: get(created?.params['context'], 'id'),
+    expression: `new Promise(resolve => {
+      const session = DevtoolsAnywhere.createCdpSession();
+      session.onMessage(m => resolve(JSON.parse(m).result.targetInfo));
+      void session.dispatch(JSON.stringify({ id: 1, method: 'Target.getTargetInfo' }));
+    })`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const info = get(get(reply, 'result'), 'value');
+  assert.deepEqual(
+    { targetId: get(info, 'targetId'), parentId: get(info, 'parentId'), parentFrameId: get(info, 'parentFrameId') },
+    { targetId: pageId, parentId: undefined, parentFrameId: undefined }
+  );
+});

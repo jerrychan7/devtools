@@ -127,9 +127,12 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
   function ownInfo(): Protocol.Target.TargetInfo {
     const { document: doc, window: win } = ctx.frames.top;
     const url = win.location.href;
-    const parent = targets.parent;
+    // A sandboxed iframe's agent merged into its parent's is in the parent's target, as Chrome
+    // keeps such a frame: its id is the parent's, and it has no parent of its own.
+    const merged = targets.parentMerged ? targets.parent : undefined;
+    const parent = merged ? undefined : targets.parent;
     const info: Protocol.Target.TargetInfo = {
-      targetId: parent?.frameId ?? ctx.frames.top.id,
+      targetId: parent?.frameId ?? merged?.parentTargetId ?? ctx.frames.top.id,
       type: parent ? 'iframe' : 'page',
       // Chrome reports the URL while the document has no title.
       title: doc.title || url,
