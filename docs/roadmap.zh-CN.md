@@ -68,7 +68,7 @@
 
 ## 没有效果的命令
 
-已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址、网络限速（设了延迟、吞吐量或丢包就算；都不设或只设离线时返回成功），以及启用只有浏览器才有事件的域：`Autofill`、`Database`（WebSQL）、`HeapProfiler`、`Preload`、`Profiler`。前端不记录服务器错误，这些命令失败时它的各个模型照常启动。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；页面以后能给出事件的域（`Accessibility`、`Animation`、`Audits`、`Log`、`ServiceWorker`）启用时也返回成功；`Inspector.enable` 管的是连接本身，也返回成功。
+已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址、安全隔离状态（COOP、COEP、CSP 是响应头）、浏览器的功能开关、网络限速（设了延迟、吞吐量或丢包就算；都不设或只设离线时返回成功），以及启用只有浏览器才有事件的域：`Autofill`、`Database`（WebSQL）、`HeapProfiler`、`Preload`、`Profiler`。前端不记录服务器错误，这些命令失败时它的各个模型照常启动；Frames 视图不显示隔离状态一节，跳出跟踪视图显示为未启用，与之前编造的回答效果相同。读取类命令同样返回失败而不编造数据，`CSS.getEnvironmentVariables` 则读取页面解析出的 env() 值。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；页面以后能给出事件的域（`Accessibility`、`Animation`、`Audits`、`Log`、`ServiceWorker`）启用时也返回成功；`Inspector.enable` 管的是连接本身，也返回成功。
 
 ## 从旧版本线发布补丁
 
