@@ -3,7 +3,7 @@
 // (probe-script.ts, data-frame-origins and data-parent-origins):
 //
 //   iframe → parent window   { type: FRAME_HELLO, id }       when its agent is ready, or pinged
-//   parent → iframe window   { type: FRAME_PING }            when the parent's agent is ready
+//   parent → iframe window   { type: FRAME_PING }            when the parent's agent is ready, or has let its links go
 //   parent → iframe window   { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId } + a MessagePort
 //   either end → port        CDP messages, as strings; { type: FRAME_BYE } as the last
 //   parent → port            { type: FRAME_OPEN_SESSION } + a MessagePort, for each of its clients
@@ -19,7 +19,11 @@ import type { OriginPattern } from './origins';
 
 /** Posted by an iframe's page to its parent window: it asks for a link. */
 export const FRAME_HELLO = 'devtools-anywhere:frame-hello';
-/** Posted by the parent to its iframes when its agent is ready: they say hello (again). */
+/**
+ * Posted by the parent to its iframes when its agent is ready, back from the back/forward cache,
+ * or linked to its own parent, its links let go each time: they end a link still open (its bye
+ * may come later) and say hello again.
+ */
 export const FRAME_PING = 'devtools-anywhere:frame-ping';
 /** Posted by the parent to an iframe it trusts, with its end of the link's port. */
 export const FRAME_WELCOME = 'devtools-anywhere:frame-welcome';
