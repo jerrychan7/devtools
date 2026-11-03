@@ -360,3 +360,107 @@ test('remote debugging: messages with a session id go through the server both wa
     await remote.close();
   }
 });
+
+test('two clients attach the same iframe, each with a session of its own, as in Chrome', async () => {
+  const frameId = await add('child');
+  const other = await page.evaluate(() => window.__harness?.another() ?? -1);
+  /** Sends the other client's message. */
+  const sendOther = (message: object) =>
+    page.evaluate(
+      (other, message) => void window.__harness?.others[other]?.dispatch(JSON.stringify(message)).catch(() => {}),
+      other,
+      message
+    );
+  const mine = (m: Message) => m['other'] === undefined;
+  const theirs = (m: Message) => m['other'] === other;
+  send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const s1 = await attached(frameId);
+  await sendOther({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const event = await message(m => theirs(m) && m['method'] === 'Target.attachedToTarget');
+  const s2 = String(field(event['params'], 'sessionId'));
+  assert.notEqual(s1, s2);
+  assert.equal(field(field(event['params'], 'targetInfo'), 'attached'), true);
+
+  // One client's Runtime.enable is its own: the other hears of no context.
+  send({ id: 2, method: 'Runtime.enable', sessionId: s1 });
+  await message(m => mine(m) && m['id'] === 2);
+  const created = await message(m => m['method'] === 'Runtime.executionContextCreated');
+  assert.equal(created['sessionId'], s1);
+  assert.ok(mine(created));
+  await sendOther({ id: 2, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: s2 });
+  assert.deepEqual(await message(m => theirs(m) && m['id'] === 2), {
+    id: 2,
+    result: { result: { type: 'string', value: 'child' } },
+    sessionId: s2,
+    other,
+  });
+  assert.equal((await out()).filter(m => m['method'] === 'Runtime.executionContextCreated').length, 1);
+  await sendOther({ id: 3, method: 'Runtime.enable', sessionId: s2 });
+  const second = await message(m => theirs(m) && m['method'] === 'Runtime.executionContextCreated');
+  assert.equal(second['sessionId'], s2);
+  assert.equal((await out()).filter(m => m['method'] === 'Runtime.executionContextCreated').length, 2);
+
+  // One detaches: the other's session goes on, and the target is still attached.
+  send({ id: 3, method: 'Target.detachFromTarget', params: { sessionId: s1 } });
+  await message(m => mine(m) && m['id'] === 3);
+  await waitFor(async () => ((await received('child')).some(m => m['endSession'] === true) ? true : undefined));
+  await sendOther({ id: 4, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: s2 });
+  assert.equal(
+    field(field(field(await message(m => theirs(m) && m['id'] === 4), 'result'), 'result'), 'value'),
+    'child'
+  );
+  send({ id: 4, method: 'Target.getTargetInfo', params: { targetId: frameId } });
+  assert.equal(
+    field(field(field(await message(m => mine(m) && m['id'] === 4), 'result'), 'targetInfo'), 'attached'),
+    true
+  );
+  send({ id: 5, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: s1 });
+  assert.deepEqual(field(await message(m => mine(m) && m['id'] === 5), 'error'), {
+    code: -32001,
+    message: 'Session with given id not found.',
+  });
+
+  // Both detached: no longer attached.
+  await sendOther({ id: 5, method: 'Target.detachFromTarget', params: { sessionId: s2 } });
+  await message(m => theirs(m) && m['id'] === 5);
+  send({ id: 6, method: 'Target.getTargetInfo', params: { targetId: frameId } });
+  assert.equal(
+    field(field(field(await message(m => mine(m) && m['id'] === 6), 'result'), 'targetInfo'), 'attached'),
+    false
+  );
+});
+
+test('a navigated iframe carries each client’s session on, each set up as it was', async () => {
+  const frameId = await add('child');
+  const other = await page.evaluate(() => window.__harness?.another() ?? -1);
+  const sendOther = (message: object) =>
+    page.evaluate(
+      (other, message) => void window.__harness?.others[other]?.dispatch(JSON.stringify(message)).catch(() => {}),
+      other,
+      message
+    );
+  send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const s1 = await attached(frameId);
+  await sendOther({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const event = await message(m => m['other'] === other && m['method'] === 'Target.attachedToTarget');
+  const s2 = String(field(event['params'], 'sessionId'));
+  send({ id: 2, method: 'Runtime.enable', sessionId: s1 });
+  await reply(2);
+  await page.evaluate(() => window.__harness?.navigate('child'));
+  // The next document's Runtime is enabled again for the first client only.
+  const contexts = await waitFor(async () => {
+    const got = (await out()).filter(m => m['method'] === 'Runtime.executionContextCreated');
+    return got.length >= 2 ? got : undefined;
+  });
+  await new Promise(r => setTimeout(r, 200));
+  assert.deepEqual(
+    (await out()).filter(m => m['method'] === 'Runtime.executionContextCreated').map(m => m['sessionId']),
+    [s1, s1]
+  );
+  assert.equal(contexts[1]?.['other'], undefined);
+  await sendOther({ id: 2, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: s2 });
+  assert.equal(
+    field(field(field(await message(m => m['other'] === other && m['id'] === 2), 'result'), 'result'), 'value'),
+    'child'
+  );
+});

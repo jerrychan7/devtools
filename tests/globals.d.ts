@@ -77,5 +77,10 @@ declare global {
       log: Record<string, unknown>[];
       send(method: string, params?: object, sessionId?: string): Promise<Record<string, unknown>>;
     };
+    /** Flatten clients of the page's agent, each a session of its own (target-clients.conformance.test.ts). */
+    __clients?: {
+      log: Record<string, unknown>[];
+      send(method: string, params?: object, sessionId?: string): Promise<Record<string, unknown>>;
+    }[];
   }
 }

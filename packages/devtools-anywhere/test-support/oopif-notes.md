@@ -253,6 +253,17 @@ A grandchild OOPIF is attached on the **child's** session (the `attachedToTarget
 session talks over the one connection, so s2's messages carry `sessionId: s2` directly; there is no
 nesting in the wire format, only in which session announced and detaches it.
 
+## Clients
+
+Two clients of one page (two connections, each with a flatten session attached to the page target,
+each turning auto-attach on) both get `attachedToTarget` for the same iframe target, with different
+session ids (target-clients.conformance.test.ts). What one enables on its child session is its own:
+the other gets no `Runtime.executionContextCreated` until it sends `Runtime.enable` itself. One
+detaching (`Target.detachFromTarget`) leaves the other's child session working, and the target's
+`attached` stays true. Observed: `attached` is true for the iframe target before either client
+attached it, in the test's browser, where puppeteer's own connection auto-attaches every target; so
+Chrome's `attached` is "any client attached", not "this client attached".
+
 ## Points for the design
 
 - A child target's id must equal the frame id the parent reports (`frameAttached`, iframe node `frameId`,
