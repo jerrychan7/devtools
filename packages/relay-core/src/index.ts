@@ -162,7 +162,11 @@ export abstract class RelayCore {
       session.enabled.delete(enable);
       // A held Debugger.enable the frontend disabled since is not sent to the next instance.
       if (enable === HELD_ENABLE) this.release(session);
-    } else if (!child && method === 'Emulation.clearDeviceMetricsOverride') session.metrics = undefined;
+    } else if (!child && method === 'Emulation.clearDeviceMetricsOverride') {
+      // A set still unanswered is older than the clear: its late result must not bring it back.
+      session.metrics = undefined;
+      session.setting.clear();
+    }
     if (!isId(id)) return this.send(session, data);
     // Between two page instances Chrome fails the command too, and the next may never come.
     if (this.loaderId && !this.pageReady) {

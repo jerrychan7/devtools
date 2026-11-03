@@ -1,4 +1,5 @@
 import { FRAME_ID } from './context';
+import { CdpError } from './session';
 
 /**
  * Cross-origin iframes as child targets (docs/roadmap.md, "iframes"; what Chrome does is in
@@ -88,7 +89,8 @@ export const RELINK_AFTER_LOAD = 2000;
 export const OWN_ID_PREFIX = 'target-own-';
 let ownSeq = 0;
 
-function parse(message: string): Record<string, unknown> | undefined {
+/** A CDP message from an iframe's agent, parsed: undefined unless it is a JSON object. */
+export function parse(message: string): Record<string, unknown> | undefined {
   try {
     const value: unknown = JSON.parse(message);
     return typeof value === 'object' && value !== null && !Array.isArray(value) ? { ...value } : undefined;
@@ -99,24 +101,50 @@ function parse(message: string): Record<string, unknown> | undefined {
 
 /**
  * Sends the iframe's agent a command of this agent's own, the response to which no client sees;
- * resolves with its result, or undefined on an error, when the link closes or after `timeout` ms.
+ * resolves with its result. Rejects with the agent's error as it answered it, or with one of its
+ * own when the link closes or after `timeout` ms.
  */
 export function askChild(link: ChildLink, method: string, params: object, timeout: number): Promise<unknown> {
   const id = `${OWN_ID_PREFIX}${++ownSeq}`;
-  return new Promise(resolve => {
-    const done = (result: unknown) => {
+  return new Promise((resolve, reject) => {
+    // A link closed already calls its close listener at once, before the rest are there.
+    let offClose = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const done = (settle: () => void) => {
       off();
       offClose();
       clearTimeout(timer);
-      resolve(result);
+      settle();
     };
     const off = link.onMessage(message => {
       if (!message.includes(id)) return;
       const parsed = parse(message);
-      if (parsed?.['id'] === id) done(parsed['result']);
+      if (parsed?.['id'] !== id) return;
+      const error = parsed['error'];
+      if (typeof error !== 'object' || error === null) return done(() => resolve(parsed['result']));
+      const code = Reflect.get(error, 'code');
+      const text = Reflect.get(error, 'message');
+      const data = Reflect.get(error, 'data');
+      done(() =>
+        reject(
+          new CdpError(
+            typeof text === 'string' ? text : 'Internal error',
+            typeof code === 'number' ? code : -32000,
+            typeof data === 'string' ? data : undefined
+          )
+        )
+      );
     });
-    const offClose = link.onClose(() => done(undefined));
-    const timer = setTimeout(() => done(undefined), timeout);
+    let closed = false;
+    offClose = link.onClose(() => {
+      closed = true;
+      done(() => reject(new CdpError(`${method}: the iframe's link closed`)));
+    });
+    if (closed) return;
+    timer = setTimeout(
+      () => done(() => reject(new CdpError(`${method}: the iframe's agent did not answer in time`))),
+      timeout
+    );
     link.send(JSON.stringify({ id, method, params }));
   });
 }

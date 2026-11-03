@@ -193,16 +193,22 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
 /** Listens on every address at a given port: other devices on the network reach the server too. */
 async function listenOnAll(port: number, create: () => http.Server): Promise<PlaygroundServer> {
   const server = create();
-  const error = await listen(server, port, '::');
+  // No host: Node binds '::' and falls back to 0.0.0.0 on a machine without IPv6.
+  const error = await listen(server, port);
   if (error) throw new Error(`the server cannot listen on port ${port}: ${error}`);
   return { url: `http://localhost:${port}`, close: () => server.close() };
 }
 
-/** Listens on `host` and `port`; resolves with the error code if that fails. */
-function listen(server: http.Server, port: number, host: string): Promise<string | null> {
+/** Listens on `host` (every address if omitted) and `port`; resolves with the error code if that fails. */
+function listen(server: http.Server, port: number, host?: string): Promise<string | null> {
   return new Promise(resolve => {
-    server.once('error', (e: NodeJS.ErrnoException) => resolve(e.code ?? 'error'));
-    server.listen(port, host, () => resolve(null));
+    const onError = (e: NodeJS.ErrnoException) => resolve(e.code ?? 'error');
+    server.once('error', onError);
+    // Later errors are not swallowed by this listener once listening.
+    server.listen(port, host, () => {
+      server.off('error', onError);
+      resolve(null);
+    });
   });
 }
 

@@ -272,9 +272,15 @@ function hookWebSocket(probe: Probe, w: Realm, listen: Listen, notify: (rec: Soc
 
 // ---- fetch ----
 
-function bodyToString(body: unknown, w: Realm): string | undefined {
+/**
+ * An object's class, whichever window made it: frames of one origin pass each other Requests and
+ * bodies, which are not instanceof the hooked window's classes.
+ */
+const kind = (x: unknown) => Object.prototype.toString.call(x).slice(8, -1);
+
+function bodyToString(body: unknown): string | undefined {
   if (typeof body === 'string') return body;
-  if (body instanceof w.URLSearchParams) return body.toString();
+  if (kind(body) === 'URLSearchParams') return String(body);
   return undefined;
 }
 
@@ -292,7 +298,7 @@ function hookFetch(track: Track, update: Update, probe: Probe, w: Realm) {
       endTime: now(),
     });
   w.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    const req = input instanceof w.Request ? input : null;
+    const req = kind(input) === 'Request' ? (input as Request) : null;
     const headers = init?.headers || req?.headers;
     let url: string;
     let requestHeaders: Headers;
@@ -304,19 +310,14 @@ function hookFetch(track: Track, update: Update, probe: Probe, w: Realm) {
       // An invalid URL or header: fetch itself rejects, without making a request.
       return origFetch.call(this, input, init);
     }
-    const postData = bodyToString(init?.body, w);
+    const postData = bodyToString(init?.body);
     // Other bodies (in a Request, FormData, Blob, buffers) are read from a copy, afterwards.
     let copy: Request | undefined;
     if (postData === undefined) {
       const body = init?.body;
       try {
-        if (
-          body instanceof w.Blob ||
-          body instanceof w.FormData ||
-          body instanceof w.ArrayBuffer ||
-          w.ArrayBuffer.isView(body)
-        )
-          copy = new w.Request(url, { method: 'POST', body });
+        if (/^(Blob|File|FormData|ArrayBuffer)$/.test(kind(body)) || ArrayBuffer.isView(body))
+          copy = new w.Request(url, { method: 'POST', body: body ?? null });
         else if (body == null && req?.body) copy = req.clone();
       } catch {
         // A body already used: fetch rejects it.
@@ -459,7 +460,7 @@ function hookXhr(track: Track, update: Update, listen: Listen, probe: Probe, w: 
         method: info.method,
         url: info.url,
         requestHeaders: info.headers,
-        postData: bodyToString(body, w),
+        postData: bodyToString(body),
         stack: new Error().stack,
       });
       if (!watched.has(this)) {

@@ -6,8 +6,10 @@ import {
   type ChildTargets,
   childTargets,
   OWN_ID_PREFIX,
+  parse,
 } from '../../core/child-targets';
 import type { Context } from '../../core/context';
+import { isFrameOwner, sourceAttribute } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 /**
@@ -61,15 +63,6 @@ function newSessionId() {
     .toUpperCase();
 }
 
-function parse(message: string): Record<string, unknown> | undefined {
-  try {
-    const value: unknown = JSON.parse(message);
-    return typeof value === 'object' && value !== null && !Array.isArray(value) ? { ...value } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 const field = (value: unknown, name: string): unknown =>
   typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
 
@@ -79,12 +72,13 @@ function childFrames(tree: unknown): unknown[] {
   return Array.isArray(children) ? children : [];
 }
 
-/** Asks the iframe's agent, waiting {@link INFO_TIMEOUT} ms at most. */
-const ask = (link: ChildLink, method: string, params: object = {}) => askChild(link, method, params, INFO_TIMEOUT);
+/** Asks the iframe's agent, waiting {@link INFO_TIMEOUT} ms at most: undefined if it did not answer. */
+const ask = (link: ChildLink, method: string, params: object = {}) =>
+  askChild(link, method, params, INFO_TIMEOUT).catch(() => undefined);
 
 /** The URL an iframe was given, for one whose agent does not tell its own. */
 function srcOf(owner: Element): string {
-  const src = owner.getAttribute(owner.localName === 'object' ? 'data' : 'src');
+  const src = isFrameOwner(owner) ? owner.getAttribute(sourceAttribute(owner))?.trim() : undefined;
   try {
     return src ? new URL(src, owner.baseURI).href : '';
   } catch {
@@ -101,12 +95,19 @@ interface Attached {
   channel: ChildSession | undefined;
   /** The link closed: the iframe is between two documents, and the target kept for the next one. */
   between: boolean;
-  /** What the client's messages wait for: the next document set up as the client set up the last. */
+  /**
+   * What the client's messages wait for: the next document set up as the client set up the last.
+   * At first, the client told of the target: nothing comes on the session before it is.
+   */
   ready: Promise<void>;
+  /** The client was told of the target: only then is it told of its end. */
+  announced: boolean;
   /** The sessions of the iframe's own child targets (and theirs), routed to the link as they are. */
   readonly nested: Map<string, { targetId: string; off: () => void }>;
   /** The `enable`s and {@link KEPT} commands the client sent on the session, with their params. */
   readonly kept: Map<string, unknown>;
+  /** The ids of the client's commands sent on to the iframe's agent, not yet answered. */
+  readonly pending: Set<unknown>;
   readonly offs: (() => void)[];
   /** What ends with the link. */
   linkOffs: (() => void)[];
@@ -119,6 +120,8 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
   let discover = false;
   /** By target id. */
   const attached = new Map<string, Attached>();
+  /** The child targets this client has heard of by `Target.targetCreated`, by target id. */
+  const announced = new Set<string>();
 
   /** This page's target: an iframe's too, when its agent is linked to its parent's. */
   function ownInfo(): Protocol.Target.TargetInfo {
@@ -166,26 +169,37 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
   const postOn = (entry: Attached, message: object) =>
     session.post(JSON.stringify({ ...message, sessionId: entry.sessionId }));
 
+  /** Whether a session id is already another target's: an attached one's, or another iframe's child's. */
+  const taken = (sessionId: string) =>
+    [...attached.values()].some(entry => entry.sessionId === sessionId || entry.nested.has(sessionId));
+
   /** A message from the iframe's agent, on to the client with the link's session id unless it has one. */
   function fromChild(entry: Attached, message: string) {
     const parsed = parse(message);
     if (!parsed) return;
     const { id, method, params } = parsed;
     if (typeof id === 'string' && id.startsWith(OWN_ID_PREFIX)) return;
+    if (method === undefined) entry.pending.delete(id);
+    // The iframe's agent is not trusted: only its own children's sessions are its to speak on.
     const own = parsed['sessionId'];
-    if (typeof own === 'string' && own) return session.post(message);
-    // The iframe's own children: their sessions are the iframe's to route to.
+    const onNested = typeof own === 'string' && own !== '';
+    if (onNested && !entry.nested.has(own)) return;
+    // The iframe's own children (and theirs): their sessions are the iframe's to route to, not one taken.
     const nested = field(params, 'sessionId');
     if (typeof nested === 'string' && method === 'Target.attachedToTarget' && !entry.nested.has(nested)) {
+      if (!nested || taken(nested)) return;
       const targetId = field(field(params, 'targetInfo'), 'targetId');
       entry.nested.set(nested, {
         targetId: typeof targetId === 'string' ? targetId : '',
         off: session.route(nested, m => entry.channel?.send(JSON.stringify(m))),
       });
     } else if (typeof nested === 'string' && method === 'Target.detachedFromTarget') {
-      entry.nested.get(nested)?.off();
+      const child = entry.nested.get(nested);
+      if (!child) return;
+      child.off();
       entry.nested.delete(nested);
     }
+    if (onNested) return session.post(message);
     postOn(entry, parsed);
   }
 
@@ -198,17 +212,26 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
   /** The client's message on a child target's session, to the iframe's agent as its own client's, without the session id. */
   function toChild(entry: Attached, message: Record<string, unknown>) {
     const { id, method, params } = message;
-    if (typeof method === 'string') keep(entry, method, params);
     delete message['sessionId'];
     if (entry.between) {
       // Like the relay for a page between two instances: what the next document is set up with
-      // succeeds, anything else fails as in Chrome.
-      if (id === undefined) return;
+      // succeeds, anything else fails as in Chrome, and so leaves the next document's setup as it was.
       const enable = typeof method === 'string' && (method.endsWith('.enable') || KEPT.has(method));
+      if (enable) keep(entry, method, params);
+      if (id === undefined) return;
       postOn(entry, enable ? { id, result: {} } : { id, error: NAVIGATED_ERROR });
       return;
     }
-    void entry.ready.then(() => entry.channel?.send(JSON.stringify(message)));
+    if (typeof method === 'string') keep(entry, method, params);
+    if (id !== undefined) entry.pending.add(id);
+    const { channel } = entry;
+    void entry.ready.then(() => {
+      if (channel && entry.channel === channel) return channel.send(JSON.stringify(message));
+      // The document went away first: the command fails as one sent between two documents.
+      if (entry.pending.delete(id) && attached.get(entry.link.frameId) === entry) {
+        postOn(entry, { id, error: NAVIGATED_ERROR });
+      }
+    });
   }
 
   /** Opens the client's session on a link of an attached target, and listens to it. */
@@ -229,6 +252,9 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     entry.between = true;
     entry.channel = undefined;
     entry.linkOffs.forEach(off => off());
+    // What the document was asked and did not answer never will be: it fails as in Chrome.
+    for (const id of entry.pending) postOn(entry, { id, error: NAVIGATED_ERROR });
+    entry.pending.clear();
     for (const [sessionId, { targetId, off }] of entry.nested) {
       off();
       postOn(entry, {
@@ -248,7 +274,10 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
    */
   function relink(entry: Attached, link: ChildLink) {
     follow(entry, link);
+    const announcing = entry.ready;
     entry.ready = (async () => {
+      // Linked again before the client was told of the target: it hears of the target first.
+      await announcing;
       const [tree, targetInfo] = await Promise.all([ask(link, 'Page.getFrameTree'), infoOf(link)]);
       if (attached.get(link.frameId) !== entry || entry.link !== link) return;
       const { kept } = entry;
@@ -280,7 +309,7 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
 
   /** A child target's URL changed. */
   function changed(targetInfo: Protocol.Target.TargetInfo) {
-    if (!discover && !attached.has(targetInfo.targetId)) return;
+    if (!announced.has(targetInfo.targetId) && !attached.has(targetInfo.targetId)) return;
     session.emit('Target.targetInfoChanged', { targetInfo } satisfies Protocol.Target.TargetInfoChangedEvent);
   }
 
@@ -292,8 +321,10 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
       channel: undefined,
       between: false,
       ready: Promise.resolve(),
+      announced: false,
       nested: new Map(),
       kept: new Map(),
+      pending: new Set(),
       offs: [],
       linkOffs: [],
     };
@@ -302,15 +333,19 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     if (!holders) attachments.set(link.frameId, (holders = new Set()));
     holders.add(entry);
     follow(entry, link);
-    const targetInfo = await infoOf(link);
-    // Let go meanwhile: auto-attach turned off, the iframe gone, or the client.
-    if (attached.get(link.frameId) !== entry) return;
-    entry.offs.push(session.route(entry.sessionId, message => toChild(entry, message)));
-    session.emit('Target.attachedToTarget', {
-      sessionId: entry.sessionId,
-      targetInfo,
-      waitingForDebugger: false,
-    } satisfies Protocol.Target.AttachedToTargetEvent);
+    entry.ready = (async () => {
+      const targetInfo = await infoOf(link);
+      // Let go meanwhile, untold: auto-attach turned off, the iframe gone, or the client.
+      if (attached.get(link.frameId) !== entry) return;
+      entry.offs.push(session.route(entry.sessionId, message => toChild(entry, message)));
+      entry.announced = true;
+      session.emit('Target.attachedToTarget', {
+        sessionId: entry.sessionId,
+        targetInfo,
+        waitingForDebugger: false,
+      } satisfies Protocol.Target.AttachedToTargetEvent);
+    })();
+    await entry.ready;
   }
 
   /** Lets a target go: with an event when the client is to hear of it, and ending its session in the iframe when it is still there. */
@@ -327,7 +362,9 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     // What the client started there ends, its own children let go too, as when a client leaves Chrome.
     entry.channel?.close();
     entry.channel = undefined;
-    if (notify) {
+    // The session is gone: its commands are answered no more.
+    entry.pending.clear();
+    if (notify && entry.announced) {
       session.emit('Target.detachedFromTarget', {
         sessionId: entry.sessionId,
         targetId: link.frameId,
@@ -336,19 +373,21 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
   }
 
   async function announce(link: ChildLink) {
+    if (announced.has(link.frameId)) return;
+    announced.add(link.frameId);
     const targetInfo = await infoOf(link);
-    if (discover) session.emit('Target.targetCreated', { targetInfo } satisfies Protocol.Target.TargetCreatedEvent);
+    if (discover && announced.has(link.frameId))
+      session.emit('Target.targetCreated', { targetInfo } satisfies Protocol.Target.TargetCreatedEvent);
   }
 
   targets.onChild((link, previous) => {
     const entry = previous && attached.get(previous.frameId);
     if (entry && entry.link === previous) return relink(entry, link);
-    // Another session's target carried on: news to this one only if it discovers targets.
-    if (previous) {
-      if (discover) void infoOf(link).then(changed);
-      return;
-    }
-    if (discover) void announce(link);
+    // A target carried on (another session's, or one this client let go) is news to it only if it
+    // heard of it: one between two documents when the client turned discovery or auto-attach on is
+    // new to it, as in Chrome, where the target was there all along.
+    if (announced.has(link.frameId)) void infoOf(link).then(changed);
+    else if (discover) void announce(link);
     if (autoAttach) void attach(link);
   });
   // Like Chrome when the iframe is removed, or comes back to this page's origin; its own children
@@ -359,21 +398,25 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
       leave(entry, link);
       detach(entry, true);
     }
-    if (discover) session.emit('Target.targetDestroyed', { targetId: link.frameId });
+    if (announced.delete(link.frameId)) session.emit('Target.targetDestroyed', { targetId: link.frameId });
   });
   session.onReset(() => {
     // The client is gone: no one to tell.
     autoAttach = false;
     discover = false;
+    announced.clear();
     for (const entry of attached.values()) detach(entry, false);
   });
 
   session.register('Target', {
     setAutoAttach(params: Protocol.Target.SetAutoAttachRequest) {
       // Only flatten sessions are supported: Chrome accepts the others too, wrapping the
-      // messages in Target.receivedMessageFromTarget, which is not done here, so nothing is
-      // attached without flatten (the frontend always asks for it).
-      autoAttach = params.autoAttach === true && params.flatten === true;
+      // messages in Target.receivedMessageFromTarget, which is not done here; without flatten
+      // nothing could be attached, so it fails (the frontend always asks for it).
+      if (params.autoAttach === true && params.flatten !== true) {
+        throw new CdpError('Not supported in the page: only flatten sessions are supported');
+      }
+      autoAttach = params.autoAttach === true;
       if (autoAttach) for (const link of targets.children()) void attach(link);
       // Like Chrome, turning it off detaches the targets it attached.
       else for (const entry of attached.values()) detach(entry, true);
@@ -382,6 +425,7 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     async setDiscoverTargets(params: Protocol.Target.SetDiscoverTargetsRequest) {
       const was = discover;
       discover = params.discover === true;
+      if (!discover) announced.clear();
       if (!discover || was) return;
       // Like Chrome, every target there is, this page's own included.
       session.emit('Target.targetCreated', { targetInfo: ownInfo() } satisfies Protocol.Target.TargetCreatedEvent);

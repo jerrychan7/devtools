@@ -143,3 +143,15 @@ test('a new page instance is sent the device metrics override the page took, not
   relay.say('l3');
   assert.deepEqual(resent(relay), []);
 });
+
+test('a device metrics override cleared before its answer is not sent to a new page instance', () => {
+  const relay = new PageRelay();
+  relay.say('l1');
+  relay.fromClient({ id: 1, method: 'Emulation.setDeviceMetricsOverride', params: { width: 400, height: 600 } });
+  relay.fromClient({ id: 2, method: 'Emulation.clearDeviceMetricsOverride' });
+  relay.fromPage({ id: 1, result: {} });
+  relay.fromPage({ id: 2, result: {} });
+  relay.delivered.length = 0;
+  relay.say('l2');
+  assert.ok(!relay.delivered.some(body => body.includes('Emulation.setDeviceMetricsOverride')));
+});

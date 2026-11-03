@@ -2,7 +2,7 @@
 // agent with stand-in links to cross-origin iframes. Each stand-in iframe agent is CDP sessions
 // in the same page, one for the link and one per session the parent opens, each with the Target
 // domain of its own (so it can have children too) and a Runtime that answers the agent's name
-// and, enabled, reports an execution context; its link passes messages on asynchronously, as a
+// and, enabled, reports an execution context (Runtime.awaitPromise never answers); its link passes messages on asynchronously, as a
 // MessagePort would.
 import { CdpSession, FRAME_ID, childTargets, createCdpSession } from '../src/cdp-agent';
 import { ChildTargets, type ChildLink, type ChildSession, type ParentLink } from '../src/cdp-agent/core/child-targets';
@@ -21,6 +21,8 @@ interface Agent {
   /** The agent it is linked to (none for the page's), and that agent's links. */
   parent: string | undefined;
   holder: ChildTargets;
+  /** The sessions it made: the link's, then one per session the parent opened. */
+  sessions: CdpSession[];
 }
 
 const parse = (message: string): Record<string, unknown> => ({ ...Object(JSON.parse(message)) });
@@ -150,8 +152,10 @@ export class Harness {
       parentLink(frameId, parent === undefined ? FRAME_ID : (this.agents.get(parent)?.link.frameId ?? ''))
     );
     const received: Record<string, unknown>[] = [];
+    const sessions: CdpSession[] = [];
     const make = () => {
       const session = new CdpSession();
+      sessions.push(session);
       registerTarget({ session, frames }, targets);
       let contexts = 0;
       session.register('Runtime', {
@@ -161,6 +165,8 @@ export class Harness {
         disable: () => {},
         runIfWaitingForDebugger: () => {},
         evaluate: () => ({ result: { type: 'string', value: name } }),
+        // Never answered: a command in flight when the document goes away.
+        awaitPromise: () => new Promise<never>(() => {}),
       });
       const dispatch = session.dispatch.bind(session);
       session.dispatch = message => {
@@ -170,7 +176,7 @@ export class Harness {
       return session;
     };
     const { link, own: session } = newLink(owner, frameId, make, received);
-    this.agents.set(name, { session, targets, link, received, parent, holder });
+    this.agents.set(name, { session, targets, link, received, parent, holder, sessions });
     holder.addChild(link);
   }
 
@@ -187,6 +193,13 @@ export class Harness {
 
   received(name: string): Record<string, unknown>[] {
     return this.agents.get(name)?.received ?? [];
+  }
+
+  /** Has agent `name` send `message` as it is on the last session the parent opened, as a rogue agent could. */
+  forge(name: string, message: object) {
+    const session = this.agents.get(name)?.sessions.at(-1);
+    if (!session) throw new Error(`no agent ${name}`);
+    session.post(JSON.stringify(message));
   }
 
   /** Removes the iframe of agent `name`. */

@@ -20,7 +20,13 @@ type Evaluate = (code: string) => unknown;
 /** Indirect eval of `win`: runs code in its global scope. */
 function evaluateIn(win: Window & typeof globalThis): Evaluate {
   return code => {
-    const evaluate: unknown = Reflect.get(win, 'eval');
+    let evaluate: unknown;
+    try {
+      evaluate = Reflect.get(win, 'eval');
+    } catch {
+      // The frame navigated cross-origin: its document's context is gone.
+      throw new CdpError('Cannot find context with specified id');
+    }
     if (typeof evaluate !== 'function') throw new CdpError('Cannot evaluate in this context');
     return Reflect.apply(evaluate, undefined, [code]);
   };
@@ -222,6 +228,9 @@ interface Scope {
   evaluate: Evaluate;
   repl: ReturnType<typeof replBindings>;
   lexicalNames: ReturnType<typeof globalLexicalNames>;
+  /** The console utilities put on window and their values, while `utilityUsers` evaluations run. */
+  utilities: Map<string, unknown>;
+  utilityUsers: number;
 }
 
 export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
@@ -234,12 +243,16 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       const win = realmOf(frame.document);
       // The top page's eval as the agent found it, others' as they are now.
       const evaluate = frame === topFrame ? globalEval : evaluateIn(win);
+      const utilities = new Map<string, unknown>();
       scope = {
         frame,
         win,
         evaluate,
-        repl: replBindings(win, evaluate),
+        // A declaration shadows a utility, as in Chrome, where they are not window's.
+        repl: replBindings(win, evaluate, name => isUtility(win, utilities, name)),
         lexicalNames: globalLexicalNames(probe, frame.document, evaluate, frame === topFrame),
+        utilities,
+        utilityUsers: 0,
       };
       scopes.set(frame.document, scope);
     }
@@ -275,15 +288,31 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     };
   }
 
-  /** Keeps the utilities until `fn` settles, so code after an `await` can use them too. */
+  /** Whether window's `name` is still the utility put there, not something since assigned or declared. */
+  function isUtility(win: Window, utilities: Map<string, unknown>, name: string): boolean {
+    const own = Object.getOwnPropertyDescriptor(win, name);
+    return !!own && 'value' in own && utilities.has(name) && own.value === utilities.get(name);
+  }
+
+  /**
+   * Keeps the utilities until `fn` settles, so code after an `await` can use them too. Evaluations
+   * running at once share them: they go when the last one settles, unless the page changed them.
+   */
   async function withCommandLineApi<T>(scope: Scope, fn: () => Promise<T>): Promise<T> {
-    const { win } = scope;
-    const added = Object.entries(commandLineApi(scope)).filter(([name]) => !(name in win));
-    for (const [name, value] of added) Reflect.set(win, name, value);
+    const { win, utilities } = scope;
+    for (const [name, value] of Object.entries(commandLineApi(scope))) {
+      if (name in win && !isUtility(win, utilities, name)) continue;
+      Reflect.set(win, name, value);
+      utilities.set(name, value);
+    }
+    scope.utilityUsers++;
     try {
       return await fn();
     } finally {
-      for (const [name] of added) Reflect.deleteProperty(win, name);
+      if (--scope.utilityUsers === 0) {
+        for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
+        utilities.clear();
+      }
     }
   }
 
@@ -294,6 +323,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     generatePreview = false,
     inPromise = false
   ) {
+    // The context could not run the code at all: a protocol error, not the page's exception.
+    if (error instanceof CdpError) throw error;
     hideEvalFrames(error, win);
     const callFrames = isError(error, win) ? parseStack(error.stack) : [];
     // One object for both places, like V8.
@@ -447,6 +478,14 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     async callFunctionOn(
       params: Protocol.Runtime.CallFunctionOnRequest
     ): Promise<Protocol.Runtime.CallFunctionOnResponse> {
+      // Like V8: exactly one of them says where to call.
+      const targets = [params.objectId, params.executionContextId, params.uniqueContextId].filter(
+        target => target !== undefined
+      ).length;
+      if (targets > 1)
+        throw new CdpError('ObjectId, executionContextId and uniqueContextId must mutually exclude each other', -32602);
+      if (targets === 0)
+        throw new CdpError('Either objectId or executionContextId or uniqueContextId must be specified', -32602);
       const self = params.objectId ? objects.get(params.objectId) : undefined;
       // Like Chrome, in the context asked for, else in the object's.
       const scope = scopeOf(

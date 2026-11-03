@@ -70,9 +70,12 @@ export function executionContexts(frames: FrameRegistry, emit: (method: string, 
      * is given. Throws Chrome's error for a context that is gone or never was.
      */
     frameOf(contextId?: number, uniqueContextId?: string): Frame {
+      // Nothing may have followed the frames (Runtime disabled, a navigation not yet loaded).
+      if (contextId !== undefined || uniqueContextId !== undefined) frames.sync();
       if (uniqueContextId !== undefined) {
         const frame = Array.from(frames).find(f => uniqueIdOf(f.executionContextId) === uniqueContextId);
-        if (!frame) throw new CdpError('Cannot find context with specified id');
+        // V8's word for an unknown uniqueContextId, unlike an unknown executionContextId.
+        if (!frame) throw new CdpError('uniqueContextId not found');
         return frame;
       }
       if (contextId === undefined) return frames.top;

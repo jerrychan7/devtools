@@ -59,12 +59,39 @@ test('let, const and class are kept across commands and declared again', async (
   await both('h');
 });
 
+test('a declaration shadows a console utility and is kept', async () => {
+  const send = (side: Side, expression: string) =>
+    side.send('Runtime.evaluate', { expression, replMode: true, includeCommandLineAPI: true });
+  for (const expression of ['let values = [1]; values', 'values', 'const copy = 2', 'copy + 1']) {
+    const chrome = outcome(await send(chromePage.chrome, expression));
+    const ours = outcome(await send(oursPage.ours, expression));
+    assert.deepEqual(ours, chrome, expression);
+  }
+});
+
 test('a name a page script or var declared cannot be declared', async () => {
   await both('var v = 1');
   await both('let v = 2');
   for (const t of [chromePage, oursPage]) await t.page.addScriptTag({ content: 'let pageLet = 1' });
   await both('let pageLet = 2');
   await both('pageLet');
+});
+
+test('page scripts cannot hand values to the console declarations, nor take the hand-over', async () => {
+  await both('const guarded = 1; class Handed {}');
+  for (const t of [chromePage, oursPage])
+    await t.page.evaluate(() => {
+      // What the rewritten console input calls, when there is one: called and replaced by the page.
+      const hand: unknown = Reflect.get(globalThis, '__devtoolsAnywhereRepl__');
+      if (typeof hand === 'function') {
+        hand('guarded', 2);
+        hand('Handed', 3);
+      }
+      Object.defineProperty(globalThis, '__devtoolsAnywhereRepl__', { value: 1, configurable: true });
+    });
+  await both('[guarded, typeof Handed]');
+  await both('class Later {}; Later.name');
+  await both('typeof Later');
 });
 
 test('closures see the live binding, and so do page scripts', async () => {
