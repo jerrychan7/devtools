@@ -29,6 +29,8 @@ const PARAMS: Schema = {
   screenOrientation: { 'type!': 'string', 'angle!': 'int32' },
   viewport: { 'x!': 'double', 'y!': 'double', 'width!': 'double', 'height!': 'double', 'scale!': 'double' },
   displayFeature: { 'orientation!': 'string', 'offset!': 'int32', 'maskLength!': 'int32' },
+  // Any type is taken. Chrome stops answering one it does not know (the session hangs): deliberately
+  // not mirrored.
   devicePosture: { 'type!': 'string' },
   scrollbarType: 'string',
 };
@@ -38,6 +40,8 @@ const PARAMS: Schema = {
  * ones ignored), each object's missing mandatory fields after its given ones, by name.
  */
 function deserialize(value: object, schema: Schema, path: string) {
+  // Chrome's data text, without its "at position N": the byte offset in Chrome's CBOR encoding of
+  // the params, which the page does not have.
   const bad = (name: string, why: string): never => {
     throw new CdpError('Invalid parameters', INVALID_PARAMS, `Failed to deserialize ${path}${name} - ${why}`);
   };
