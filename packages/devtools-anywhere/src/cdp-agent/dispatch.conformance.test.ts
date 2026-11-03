@@ -95,6 +95,8 @@ test('a command the page cannot carry out fails with why; one not yet done succe
     'HeapProfiler.enable',
     'Preload.enable',
     'Profiler.enable',
+    'Network.getSecurityIsolationStatus',
+    'SystemInfo.getFeatureState',
   ]) {
     assert.match(await reply(method), /^Not supported in the page: /, method);
   }
@@ -126,4 +128,22 @@ test('a command the page cannot carry out fails with why; one not yet done succe
   ]) {
     assert.equal(await reply(method), 'resolved', method);
   }
+});
+
+test('CSS.getEnvironmentVariables reads the env() values the page resolves', async () => {
+  const { environmentVariables, children } = await t.page.evaluate(async () => {
+    const before = document.documentElement.children.length;
+    const result = await window.__session.call('CSS.getEnvironmentVariables');
+    const vars =
+      typeof result === 'object' && result && 'environmentVariables' in result ? result.environmentVariables : {};
+    return {
+      environmentVariables: Object(vars) as Record<string, string>,
+      children: document.documentElement.children.length - before,
+    };
+  });
+  assert.equal(environmentVariables['safe-area-inset-top'], '0px');
+  assert.equal(environmentVariables['no-such-variable'], undefined);
+  for (const value of Object.values(environmentVariables)) assert.match(value, /^-?[\d.]+px$/);
+  // The probe element is gone again.
+  assert.equal(children, 0);
 });

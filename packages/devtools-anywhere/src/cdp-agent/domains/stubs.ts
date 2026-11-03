@@ -79,7 +79,11 @@ const UNSUPPORTED: Record<string, Record<string, string>> = {
     resetPageScaleFactor: 'the pinch zoom cannot be changed',
   },
   HeapProfiler: { enable: 'the heap is seen by the browser only' },
-  Network: { setBypassServiceWorker: "the page's requests go through its service worker" },
+  Network: {
+    // The frontend reads a failure as no status: the Frames view leaves the isolation section out.
+    getSecurityIsolationStatus: 'COOP, COEP and CSP response headers are unknown to the page',
+    setBypassServiceWorker: "the page's requests go through its service worker",
+  },
   Preload: { enable: 'speculative loads are made by the browser' },
   Profiler: { enable: 'scripts are sampled by the browser' },
   Storage: {
@@ -87,6 +91,8 @@ const UNSUPPORTED: Record<string, Record<string, string>> = {
     setInterestGroupTracking: 'interest groups are kept by the browser',
     setSharedStorageTracking: 'shared storage access is seen by the browser only',
   },
+  // The bounce tracking view reads a failure as the feature being off, as it did the made-up answer.
+  SystemInfo: { getFeatureState: 'feature flags of the browser are not readable' },
   Target: { setRemoteLocations: 'the browser discovers remote targets' },
 };
 
@@ -131,13 +137,5 @@ export function registerStubs(session: CdpSession) {
       if (params.matchedNetworkConditions.some(throttles)) throw new CdpError(NO_THROTTLING);
       return { ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`) };
     },
-    // COOP, COEP and CSP are response headers of the document, unknown to the page.
-    getSecurityIsolationStatus: (): Protocol.Network.GetSecurityIsolationStatusResponse => ({ status: {} }),
   });
-  // Feature flags of the browser are not readable from the page: report them as off.
-  session.register('SystemInfo', {
-    getFeatureState: (): Protocol.SystemInfo.GetFeatureStateResponse => ({ featureEnabled: false }),
-  });
-  // env() values are not readable from the page.
-  session.register('CSS', { getEnvironmentVariables: () => ({ environmentVariables: {} }) });
 }
