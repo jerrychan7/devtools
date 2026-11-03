@@ -9,7 +9,7 @@ import {
   type HelloParams,
 } from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
-import { announceRemoteClient, endSession, nameRemoteClient } from './connection';
+import { announceRemoteClient, endSession, forgetRemoteClient, nameRemoteClient } from './connection';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -125,6 +125,9 @@ export function connectRemote(
     return found.cdp;
   }
   function detach(id: string) {
+    // The shell forgets when its client attached, now: the page may be going away, and a session
+    // this instance never served ended while the page was between instances.
+    forgetRemoteClient(id);
     const found = sessions.get(id);
     if (!found) return;
     sessions.delete(id);
@@ -133,8 +136,6 @@ export function connectRemote(
     const { cdp } = found;
     void endSession(cdp).then(() => {
       cdp.reset();
-      // After its override's clear (on reset): the shell forgets when it attached.
-      announceRemoteClient(cdp, false);
       idle.push(cdp);
     });
   }

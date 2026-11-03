@@ -69,7 +69,7 @@ declare global {
     __devtools?: DevtoolsAnywhereElement;
     resourceLoaded?: boolean;
     /** Internals the tests' bundle (dist-test/) exposes. */
-    __devtoolsAnywhereTest: { childTargets: ChildTargets };
+    __devtoolsAnywhereTest: { childTargets: ChildTargets; shellClients: () => string[] };
     /** The links frame-links.test.ts has seen, and how many of them have closed. */
     __links?: { frameId: string; closed: boolean }[];
     /** A flatten client of the page's agent: its events, and its commands' replies (oopif.conformance.test.ts). */

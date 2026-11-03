@@ -170,12 +170,12 @@ async function reloadPage() {
   );
 }
 
-async function connect(): Promise<Client> {
+async function connect(tag = 'remote-emulation'): Promise<Client> {
   assert.ok(remote);
   const at = new URL(remote.url).origin;
   const listed = await waitFor(async () => {
     const list: { url: string; webSocketDebuggerUrl: string }[] = await (await fetch(`${at}/json/list`)).json();
-    return list.find(t => t.url.includes('remote-emulation'));
+    return list.find(t => t.url.includes(tag));
   });
   return Client.connect(listed.webSocketDebuggerUrl);
 }
@@ -321,3 +321,57 @@ function watchSizes() {
   }, natural);
 }
 const watchedSizes = () => shell.evaluate(() => Reflect.get(window, '__natural'));
+
+test("the shell forgets a client's attach time when its session ends, whichever page instance it ends in", async () => {
+  assert.ok(env && remote);
+  shell = await env.browser.newPage();
+  const at = new URL(remote.url).origin;
+  await shell.goto(
+    `${env.baseUrl}/tests/e2e/pages/remote-page.html?local&testBuild&panel&remote-forget&remote=${encodeURIComponent(at + '/')}`
+  );
+  await shell.waitForFunction(
+    () => !!document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow?.DevtoolsAnywhere
+  );
+  await frontendRequest(shell, { type: 'page-bounds', x: 0, y: 0, width: 300, height: 200 });
+  const clients = () => shell.evaluate(() => window.__devtoolsAnywhereTest.shellClients());
+  const remoteClients = async () => (await clients()).filter(client => client.startsWith('remote:'));
+  // A page-side client: its attach time goes with its session.
+  await shell.evaluate(() => {
+    const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+    if (!view) throw new Error('no page window');
+    view.__sessions = [view.DevtoolsAnywhere.createCdpSession()];
+    return view.__sessions[0]?.call('Emulation.setDeviceMetricsOverride', {
+      width: 400,
+      height: 600,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+  });
+  const before = await clients();
+  assert.equal(before.length, 2, 'the frontend and the page-side client');
+  await shell.evaluate(() => {
+    const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+    view?.__sessions?.[0]?.reset();
+  });
+  await waitFor(async () => (await clients()).length === 1);
+  assert.deepEqual(await clients(), ['frontend']);
+  assert.equal(await pageSize(), '300x200');
+  // A remote client that disconnects at once.
+  const a = await connect('remote-forget');
+  await waitFor(async () => (await remoteClients()).length === 1);
+  a.socket.close();
+  await waitFor(async () => (await remoteClients()).length === 0);
+  // A remote client whose session ends while the page is between instances: its end reaches the
+  // next instance, which never served it. Without an override, nothing else would drop it.
+  const b = await connect('remote-forget');
+  await waitFor(async () => (await remoteClients()).length === 1);
+  await shell.evaluate(() => {
+    const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+    view?.addEventListener('pagehide', () => Reflect.set(top ?? window, '__left', true));
+    view?.location.reload();
+  });
+  await shell.waitForFunction(() => Reflect.get(window, '__left') === true);
+  b.socket.close();
+  await waitFor(async () => (await remoteClients()).length === 0);
+  await shell.close();
+});

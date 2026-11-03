@@ -174,15 +174,22 @@ const REMOTE_CLIENT = 'remote:';
 /** Clients named after the remote session they serve, for the shell to know them across reloads. */
 const metricsNames = new WeakMap<CdpSession, string>();
 
-/**
- * Tells the shell, in shell mode, that `session`'s client (a remote one) attached now, or that its
- * session ended (`attach` false).
- */
-export function announceRemoteClient(session: CdpSession, attach = true) {
-  const client = metricsNames.get(session);
-  if (!isShellPage() || client === undefined) return;
+/** Tells the shell, in shell mode, that `client` attached now, or that its session ended (`attach` false). */
+function announce(client: string, attach: boolean) {
+  if (!isShellPage()) return;
   const params: MetricsParams = { id: 0, client, metrics: null, attach };
   window.parent.postMessage(JSON.stringify({ method: METRICS_METHOD, params }), location.origin);
+}
+
+/** Tells the shell that `session`'s client (a remote one, named) attached now. */
+export function announceRemoteClient(session: CdpSession) {
+  const client = metricsNames.get(session);
+  if (client !== undefined) announce(client, true);
+}
+
+/** Tells the shell that the remote session `id` ended: it forgets when its client attached. */
+export function forgetRemoteClient(id: string) {
+  announce(REMOTE_CLIENT + id, false);
 }
 
 /** Names `session`'s client after the remote server's session `id` it now serves (remote.ts). */
@@ -237,7 +244,11 @@ export function emulateInShell(session: CdpSession): CdpSession {
     },
     clearDeviceMetricsOverride: () => ask(null),
   });
-  session.onReset(() => void ask(null).catch(() => {}));
+  session.onReset(() => {
+    void ask(null).catch(() => {});
+    // After its override's clear: the shell forgets when it attached.
+    announce(metricsNames.get(session) ?? client, false);
+  });
   return session;
 }
 
@@ -274,6 +285,11 @@ class ShellRelay extends RelayCore {
    * Chrome applies the overrides again in that order, so the last-attached client's holds.
    */
   private readonly attached = new Map<string, number>();
+
+  /** The clients in `attached`, in attach order. */
+  clients(): string[] {
+    return [...this.attached].sort(([, a], [, b]) => a - b).map(([client]) => client);
+  }
   private attachSeq = 0;
   /** The override the page has now (params), or null. */
   private applied: unknown = null;
@@ -497,6 +513,11 @@ class ShellRelay extends RelayCore {
         if (typeof attach === 'boolean') {
           this.attached.delete(client);
           if (attach) this.attached.set(client, ++this.attachSeq);
+          // A session that ended before a new page instance re-sent its override: not re-sent ever.
+          else if (this.overrides.get(client)?.pending) {
+            this.overrides.delete(client);
+            if (this.restoring && ![...this.overrides.values()].some(override => override.pending)) this.restore();
+          }
           return;
         }
         this.setMetrics(client, typeof metrics === 'object' ? metrics : null);
@@ -514,6 +535,12 @@ class ShellRelay extends RelayCore {
  * reloads (the relay core's work, shared with the remote server). Returns a function that
  * disconnects.
  */
+/** The shell's relay, for the tests (shellClients). */
+let lastShellRelay: ShellRelay | undefined;
+
+/** The clients whose attach time the shell's relay keeps, in attach order: for the tests alone. */
+export const shellClients = (): string[] => lastShellRelay?.clients() ?? [];
+
 export function relayShell(
   page: HTMLIFrameElement,
   devtools: HTMLIFrameElement,
@@ -521,6 +548,7 @@ export function relayShell(
   onMetrics: (metrics: DeviceMetrics | null) => void
 ): () => void {
   const relay = new ShellRelay(page, devtools, frontendOrigin, onMetrics);
+  lastShellRelay = relay;
   window.addEventListener('message', relay.onMessage);
   page.contentWindow?.postMessage(PING, location.origin);
   return () => window.removeEventListener('message', relay.onMessage);
