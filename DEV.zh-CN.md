@@ -143,6 +143,8 @@ pnpm typecheck                                # 先构建，再检查所有包�
 - `*.conformance.test.ts`（在 CDP agent 各个域的旁边）：同一个页面分别通过真实 Chrome 的 CDP 和我们的实现来检查，对比两边的输出。实现或修改 CDP 方法时请在这里加测试：以真实 Chrome 的行为为准，而不是协议文档。它们和页面一样加载构建产物。
 - `tests/e2e/`：连接层、外壳模式、零配置接入、Vite 插件和真实前端。测试打开的页面在 `pages/`（脚本与样式在 `pages/assets/`），替身前端在 `frontends/`。
 
+需要读取包内部状态的测试加载 `packages/devtools-anywhere/dist-test/` 而不是 `dist/`：`build.ts` 在那里把两个脚本再构建一遍（不发布），并设置 `DEVTOOLS_ANYWHERE_TEST`，只有这份构建会把内部状态暴露为 `window.__devtoolsAnywhereTest`（`iife.ts`；类型在 `tests/globals.d.ts`）。测试专用的钩子加在那里、放在 `DEVTOOLS_ANYWHERE_TEST` 之后，不要加进发布的包或其 API。
+
 ### 修改前端
 
 `packages/devtools-frontend` 按钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)，只保留入口能加载到的文件。为了尽量少改上游：

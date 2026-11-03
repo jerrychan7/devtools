@@ -246,7 +246,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 断点、Profiler、内存、性能 | ❌ 不打包这些面板 | 没有 JS API。`debugger;` 不会暂停；外壳模式下改为输出一条带堆栈的警告 |
 | 网络时序 | ❌ | 没有 JS API |
 | 源代码 | ⚠️ | 文档、外链脚本和样式表、图片、字体；不列内联脚本；代码段可用 |
-| 浏览器默认样式 | ❌ | 浏览器不向页面公开 |
+| 浏览器默认样式 | ⚠️ | Styles 里暂不显示（见[路线图](roadmap.zh-CN.md#其他能在页面里补上的功能)） |
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
 | 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到。没有隔离 world（`Page.createIsolatedWorld`） |

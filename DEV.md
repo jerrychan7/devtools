@@ -143,6 +143,8 @@ A test sits next to what it tests, as `<name>.test.ts`; only tests that span pac
 - `*.conformance.test.ts` (next to the CDP agent's domains): the same page is inspected through real Chrome's CDP and through ours, and the outputs are compared. When implementing or changing a CDP method, add a test here: real Chrome is the reference, not the protocol documentation. They load the built bundles, as pages do.
 - `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend. The pages they open are in `pages/` (their scripts and styles in `pages/assets/`), the stand-in frontends in `frontends/`.
 
+A test that needs the bundle's internals loads `packages/devtools-anywhere/dist-test/` instead of `dist/`: `build.ts` builds the two scripts there a second time (not published) with `DEVTOOLS_ANYWHERE_TEST` set, and only that build exposes them as `window.__devtoolsAnywhereTest` (`iife.ts`; its type is in `tests/globals.d.ts`). Add a test-only hook there, behind `DEVTOOLS_ANYWHERE_TEST`, never to the published bundle or its API.
+
 ### Working on the frontend
 
 `packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at a pinned revision and keeps only what its entrypoint can load. How it fits into upstream with as few patches as possible:

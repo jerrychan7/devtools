@@ -48,7 +48,7 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 
 1. 使用零配置探针（`data-devtools-frontend-url`，或 Vite 插件）时，顶层页面首次加载就默认进入外壳模式：探针在页面脚本运行前自己把前端地址和 bundle 地址写入 `sessionStorage`，不需要再刷新一次。除非设置了 `data-open-immediately`，DevTools 一开始是隐藏的。其他情况下，点击 DevTools 工具栏上的锁形按钮「Keep DevTools open across reloads」，写入这些地址后刷新页面。
 2. 探针作为第一个脚本，在顶层窗口检测到配置后，先写入一个不闭合的 `<plaintext>`，让页面剩余的内容变成纯文本（页面脚本都不会执行），再用 `document.open()` / `document.write()` 把文档替换成外壳。外壳中有指向 `location.href` 的页面 iframe，以及 `<devtools-anywhere>`，它凭所在的文档认出自己是外壳的组件。（Chrome 在 `window.stop()` 之后会忽略 `document.open()`，所以改用 `<plaintext>`。）
-3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间转发消息。
+3. 在 iframe 中，探针照常捕获，并加载 bundle，把页面的 CDP 会话连接到外壳。外壳在页面和前端之间、以及页面和它的其他客户端（远程调试）之间转发消息，和 Chrome 一样每个都是独立的客户端。页面只有一个设备尺寸覆盖，即最后设置的那个；某个客户端清除覆盖或结束会话时，只有它自己的覆盖还生效才会撤掉；页面刷新后按客户端连接的先后重新应用各自的覆盖，因此最后连接的客户端的覆盖生效。
 4. 页面刷新或跳转后，新页面会发出 hello；外壳通知前端页面已导航，并把前端发过的所有 `enable` 命令重新发给新页面，新页面就会回放它自己最早的输出。地址栏和标题跟随页面变化，包括加载、前进后退和同文档导航（有 Navigation API 时也包括 `pushState`），因此刷新或复制链接打开的都是当前显示的页面。
 5. DevTools 铺满外壳，由它来排布页面和自己，和 Chrome 一样：页面 iframe 叠放在前端预留的页面区域上方。停靠位置和尺寸由 DevTools 自己管理（用它的分隔条；DevTools 面板边缘正中、靠页面一侧还有一个抓手，像面板的一个小标签，触屏上更大）。取消停靠时，DevTools 是页面上方的浮动窗口。工具栏上的设备按钮是设备模式，和 Chrome 一样，取代了投屏：页面 iframe 按设备尺寸设置并缩放到适合窗口，工具栏的菜单可以截图。取消停靠时，设备模式的工具栏画在前端的一个页面（`device_mode_emulation_frame.html`，Chrome 也是这么做的）里，显示在浮动窗口下方。
 6. 点工具栏上的 × 只隐藏 DevTools，仍留在外壳模式；在重新显示 DevTools 之前，页面按自己的尺寸铺满外壳。再点一次锁形按钮会清除配置，并在普通模式下重新加载页面；这个选择会记在 `localStorage` 里，之后优先于页面的 `data-default-shell-mode`，除非页面设置了 `data-shell-mode-locked`。
@@ -66,6 +66,15 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 | `devtools-anywhere-service-worker.js`：外壳模式下，给页面 iframe 中加载的、没有引入探针的同源页面注入探针 | 安全上下文（HTTPS 或 localhost）、作用域覆盖这些页面（`Service-Worker-Allowed: /`），并且站点没有自己的 Service Worker |
 
 所有方式共用同一份探针。
+
+### 4. 跨域 iframe
+
+页面无法访问跨域 iframe 的内部，所以同样加载了探针和 bundle 的 iframe 页面由它自己的 CDP agent 调试，并与父页面的 agent 建立链接，和 Chrome 把进程外 iframe 当作独立 target 调试一样（`src/frame-links/`、`src/cdp-agent/core/child-targets.ts`）。
+
+- **双向信任。** 父页面列出它的 DevTools 可以调试的 iframe（`data-frame-origins`），iframe 列出可以调试它的页面（`data-parent-origins`）；两个名单默认都为空，只有双方互相列出才会建立链接。只有一方不够：父页面的名单防止页面把自己的 DevTools 交给它没选择的 iframe，iframe 的名单防止任何嵌入它的页面读取它。
+- **握手。** iframe 的 agent 就绪时（或父页面 ping 时：父页面的 agent 就绪、从往返缓存恢复、或自己被链接到它的父页面）向父页面发 hello。hello 和 ping 不带页面的任何内容，所以名单含通配符时可以发往任意源；父页面对受信任的 hello 回一个 welcome，只发往从 hello 读到的 iframe 的确切源，带上 frame id 和一个 `MessagePort`，iframe 再校验 welcome 的来源。端口上传 CDP 消息；由于端口没有关闭事件，关闭的一方发 bye。
+- **子 target 与会话。** 父页面的 Target 域把链接公布为 `iframe` target（`Target.setAutoAttach`），按 `sessionId` 路由消息。每个附加它的客户端都通过自己的端口与 iframe 的 agent 建立独立会话，和 Chrome 给每个客户端独立会话一样；会话结束时停用该客户端在那里启用的内容。
+- **重新链接。** 链接关闭时如果元素已移除，target 立即结束；否则保留 target 等待 iframe 的下一个文档：10 秒，或 iframe 再次加载后 2 秒。这样导航时 target 得以保留，而换成没有探针（或不再受信任）的页面时不会留下失效的 target。
 
 ## 拆包
 

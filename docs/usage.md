@@ -246,7 +246,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Breakpoints, Profiler, Memory, Performance | ❌ Panels not included | No JS API. `debugger;` does not pause; in shell mode it logs a warning with its stack |
 | Network timing | ❌ | No JS API |
 | Sources | ⚠️ | Documents, external scripts and style sheets, images, fonts; no inline scripts; snippets work |
-| Browser default styles | ❌ | Not exposed to pages |
+| Browser default styles | ⚠️ | Not shown in Styles yet ([roadmap](roadmap.md#more-that-can-be-filled-in-the-page)) |
 | Event listeners | ⚠️ | Only those added after the probe ran; no source location |
 | WebSocket | ⚠️ | Connections and frames; no handshake headers |
 | Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it. No isolated worlds (`Page.createIsolatedWorld`) |
