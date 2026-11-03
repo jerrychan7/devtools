@@ -6,6 +6,7 @@ import { toTag } from '../../core/objects';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
 import { childTargets } from '../../core/child-targets';
+import { mergedFrames } from '../../core/merged-frames';
 import { isFrameDocument, opaqueFrameOf } from './frames';
 
 /**
@@ -18,6 +19,27 @@ let idPrefix = '';
 export function setRequestIdPrefix(prefix: string): void {
   idPrefix = prefix;
 }
+
+/**
+ * The commands of a sandboxed iframe merged into this page's agent (core/merged-frames.ts): by
+ * request id to the iframe's agent, which made the request; what sets up the requests reported,
+ * to every one. Network.getCookies stays the page's: the iframe's opaque origin has no cookies,
+ * and Chrome answers with the page's (network-sandboxed.conformance.test.ts).
+ */
+mergedFrames.registerRoutes('Network', {
+  routeBy: {
+    'Network.getResponseBody': ['requestId'],
+    'Network.getRequestPostData': ['requestId'],
+    'Network.replayXHR': ['requestId'],
+  },
+  fanOut: [
+    'Network.enable',
+    'Network.disable',
+    'Network.setExtraHTTPHeaders',
+    'Network.setBlockedURLs',
+    'Network.setCacheDisabled',
+  ],
+});
 
 /** A probe request id as the client sees it. */
 const wireId = (probeId: string) => idPrefix + probeId;
@@ -157,6 +179,9 @@ export function registerNetwork(ctx: Context) {
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
     if (isOwnRequest(probe, rec) || isFrameDocument(rec)) return;
+    // Merged into the parent's agent, this page's document request is the parent's to report, as
+    // that of its sandboxed iframe (frames.ts, opaqueFrameOf): once, as in Chrome.
+    if (childTargets.parentMerged && !rec.frame && rec.initiatorType === 'navigation') return;
     // The document of a sandboxed iframe: of that frame, as in Chrome.
     const opaque = rec.frame ? undefined : opaqueFrameOf(rec);
     const frameId = rec.frame?.frameId ?? (opaque ? childTargets.frameIdOf(opaque) : frames.top.id);
