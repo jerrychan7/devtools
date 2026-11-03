@@ -228,7 +228,7 @@ interface Scope {
   evaluate: Evaluate;
   repl: ReturnType<typeof replBindings>;
   lexicalNames: ReturnType<typeof globalLexicalNames>;
-  /** The console utilities put on window and their values, while `utilityUsers` evaluations run. */
+  /** The console utilities put on window and their values, until the task boundary after the last of `utilityUsers` evaluations' synchronous part. */
   utilities: Map<string, unknown>;
   utilityUsers: number;
 }
@@ -295,8 +295,11 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
   }
 
   /**
-   * Keeps the utilities until `fn` settles, so code after an `await` can use them too. Evaluations
-   * running at once share them: they go when the last one settles, unless the page changed them.
+   * Puts the utilities on window until the microtask checkpoint after `fn`'s synchronous part, as
+   * Chrome: code after `await Promise.resolve()` still sees them, code after a timer does not.
+   * Evaluations running at once share them: they go at the first task boundary after the last
+   * one's synchronous part. Names the page itself defines are left as they are. Resolves after
+   * both `fn` settled and the utilities are gone.
    */
   async function withCommandLineApi<T>(scope: Scope, fn: () => Promise<T>): Promise<T> {
     const { win, utilities } = scope;
@@ -306,13 +309,22 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       utilities.set(name, value);
     }
     scope.utilityUsers++;
+    const released = new Promise<void>(resolve => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        if (--scope.utilityUsers === 0) {
+          for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
+          utilities.clear();
+        }
+        resolve();
+      };
+      channel.port2.postMessage(null);
+    });
     try {
       return await fn();
     } finally {
-      if (--scope.utilityUsers === 0) {
-        for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
-        utilities.clear();
-      }
+      await released;
     }
   }
 
