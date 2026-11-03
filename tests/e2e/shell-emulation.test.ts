@@ -119,19 +119,25 @@ test("in shell mode, a client's session ending ends its override", async () => {
   assert.equal(await pageSize(), natural);
 });
 
-test('outside shell mode, the page cannot resize itself: the methods are unknown', async () => {
+test('outside shell mode, the page cannot resize itself: the methods say so', async () => {
   assert.ok(env);
   const plain = await env.browser.newPage();
   await plain.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
   await plain.addScriptTag({ path: CDP_BUNDLE });
-  const result = await plain.evaluate(() =>
-    window.DevtoolsAnywhere.createCdpSession()
-      .call('Emulation.setDeviceMetricsOverride', { width: 400, height: 600, deviceScaleFactor: 1, mobile: false })
-      .then(
-        () => 'ok',
-        (e: unknown) => String(e instanceof Error ? e.message : e)
-      )
-  );
-  assert.equal(result, "'Emulation.setDeviceMetricsOverride' wasn't found");
+  // The responses as a frontend gets them: a server error, as Chrome's when a command cannot be done.
+  const responses = await plain.evaluate(async () => {
+    const session = window.DevtoolsAnywhere.createCdpSession();
+    const received: unknown[] = [];
+    session.onMessage(message => received.push(JSON.parse(message)));
+    const params = { width: 400, height: 600, deviceScaleFactor: 1, mobile: false };
+    await session.dispatch(JSON.stringify({ id: 1, method: 'Emulation.setDeviceMetricsOverride', params }));
+    await session.dispatch(JSON.stringify({ id: 2, method: 'Emulation.clearDeviceMetricsOverride', params: {} }));
+    return received;
+  });
+  const error = { code: -32000, message: 'Device metrics can only be overridden in shell mode' };
+  assert.deepEqual(responses, [
+    { id: 1, error },
+    { id: 2, error },
+  ]);
   await plain.close();
 });

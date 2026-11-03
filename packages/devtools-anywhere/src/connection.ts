@@ -161,6 +161,8 @@ export function connectToShell(session: CdpSession): () => void {
 
 /** How long a client waits for the shell to answer a metrics request. */
 const METRICS_TIMEOUT = 2000;
+/** Why a page outside shell mode cannot override its device metrics: its size is not its own. */
+const NOT_IN_SHELL = 'Device metrics can only be overridden in shell mode';
 /** The largest width and height Chrome takes for a device metrics override. */
 const MAX_SIZE = 10_000_000;
 /** CDP sessions given the shell's device metrics so far, and metrics requests sent. */
@@ -190,10 +192,16 @@ function onMetricsAnswer(event: MessageEvent) {
  * In shell mode, has `session` answer Emulation.setDeviceMetricsOverride and
  * clearDeviceMetricsOverride by asking the shell, whose page size it is (shell-layout.ts), as
  * Chrome's browser does for every client of the page; its override ends with its session.
- * Elsewhere the page cannot resize itself: the methods stay unknown. Returns `session`.
+ * Elsewhere the page cannot resize itself: the methods fail, saying so. Returns `session`.
  */
 export function emulateInShell(session: CdpSession): CdpSession {
-  if (!isShellPage()) return session;
+  if (!isShellPage()) {
+    const unsupported = () => {
+      throw new CdpError(NOT_IN_SHELL);
+    };
+    session.register('Emulation', { setDeviceMetricsOverride: unsupported, clearDeviceMetricsOverride: unsupported });
+    return session;
+  }
   if (!metricsClients) window.addEventListener('message', onMetricsAnswer);
   const client = `${LOADER_ID}:${++metricsClients}`;
   const ask = (metrics: object | null) =>
