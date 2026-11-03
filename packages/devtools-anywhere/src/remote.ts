@@ -8,7 +8,7 @@ import {
   type HelloParams,
 } from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
-import { endSession } from './connection';
+import { endSession, nameRemoteClient } from './connection';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -116,6 +116,8 @@ export function connectRemote(
     let found = sessions.get(id);
     if (!found) {
       const cdp = idle.pop() ?? createSession();
+      // Its device metrics override is the remote session's, kept across reloads (shell mode).
+      nameRemoteClient(cdp, id);
       found = { cdp, off: cdp.onMessage(message => send(`${id}:${message}`)) };
       sessions.set(id, found);
     }

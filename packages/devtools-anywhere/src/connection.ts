@@ -1,4 +1,4 @@
-import { END_SESSION_CALLS, FRAME_ID, LOADER_ID, isShellPage, type CdpSession } from './cdp-agent';
+import { CdpError, END_SESSION_CALLS, FRAME_ID, LOADER_ID, isShellPage, type CdpSession } from './cdp-agent';
 import {
   DETACH_METHOD,
   HELLO_METHOD,
@@ -161,11 +161,22 @@ export function connectToShell(session: CdpSession): () => void {
 
 /** How long a client waits for the shell to answer a metrics request. */
 const METRICS_TIMEOUT = 2000;
+/** The largest width and height Chrome takes for a device metrics override. */
+const MAX_SIZE = 10_000_000;
 /** CDP sessions given the shell's device metrics so far, and metrics requests sent. */
 let metricsClients = 0;
 let metricsCalls = 0;
 /** The answers awaited from the shell, by request id. */
 const metricsAnswers = new Map<number, () => void>();
+/** The start of the key of a remote frontend's client: the same across the page's instances. */
+const REMOTE_CLIENT = 'remote:';
+/** Clients named after the remote session they serve, for the shell to know them across reloads. */
+const metricsNames = new WeakMap<CdpSession, string>();
+
+/** Names `session`'s client after the remote server's session `id` it now serves (remote.ts). */
+export function nameRemoteClient(session: CdpSession, id: string) {
+  metricsNames.set(session, REMOTE_CLIENT + id);
+}
 
 function onMetricsAnswer(event: MessageEvent) {
   if (event.source !== window.parent || event.origin !== location.origin || typeof event.data !== 'string') return;
@@ -197,11 +208,20 @@ export function emulateInShell(session: CdpSession): CdpSession {
         metricsAnswers.delete(id);
         resolve();
       });
-      const params: MetricsParams = { id, client, metrics };
+      const params: MetricsParams = { id, client: metricsNames.get(session) ?? client, metrics };
       window.parent.postMessage(JSON.stringify({ method: METRICS_METHOD, params }), location.origin);
     });
   session.register('Emulation', {
-    setDeviceMetricsOverride: (params: object) => ask(params),
+    setDeviceMetricsOverride: (params: object) => {
+      // As Chrome checks them (it keeps no override it rejects).
+      const valid = (name: string) => {
+        const value: unknown = Reflect.get(params, name);
+        return typeof value === 'number' && value >= 0 && value <= MAX_SIZE;
+      };
+      if (!valid('width') || !valid('height'))
+        throw new CdpError(`Width and height values must be positive, not greater than ${MAX_SIZE}`, -32602);
+      return ask(params);
+    },
     clearDeviceMetricsOverride: () => ask(null),
   });
   session.onReset(() => void ask(null).catch(() => {}));
@@ -217,15 +237,36 @@ export interface DeviceMetrics {
 
 /** The shell frontend's key among the clients overriding the device metrics. */
 const FRONTEND = 'frontend';
+/** How long the shell waits, after a new page instance's hello, for its remote clients' overrides. */
+const RESTORE_TIMEOUT = 3000;
+
+/** A client's device metrics override: its params, and whether a new page instance has yet to re-send it. */
+interface Override {
+  params: unknown;
+  pending: boolean;
+}
+
+const sameParams = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** The shell's side of the relay core: one frontend, in an iframe; the page in another. */
 class ShellRelay extends RelayCore {
   /**
-   * The clients whose device metrics override is on: the frontend (FRONTEND), and the page's
-   * other clients (emulateInShell). As in Chrome, the page has one override, the last set; a
-   * client's clear, or its session's end, clears it if that client's own is on, whoever set it last.
+   * The clients whose device metrics override is on, with its params: the frontend (FRONTEND), and
+   * the page's other clients (emulateInShell). As in Chrome, the page has one override, the last
+   * set; a client's clear, or its session's end, clears it if that client's own is on, whoever set
+   * it last; a client setting its own again while the page has one does nothing.
    */
-  private readonly overriding = new Set<string>();
+  private readonly overrides = new Map<string, Override>();
+  /**
+   * The clients in the order they attached (as first seen): after a reload Chrome applies the
+   * overrides again in that order, so the last-attached client's holds.
+   */
+  private readonly attached = new Map<string, number>();
+  private attachSeq = 0;
+  /** The override the page has now (params), or null. */
+  private applied: unknown = null;
+  /** Waiting for a new page instance's remote clients to re-send their overrides, the size kept meanwhile. */
+  private restoring: ReturnType<typeof setTimeout> | undefined;
   /** The page instance whose clients are in `overriding`. */
   private metricsLoader = '';
   private frontendReady = false;
@@ -252,6 +293,7 @@ class ShellRelay extends RelayCore {
     this.frontendOrigin = frontendOrigin;
     this.onMetrics = onMetrics;
     this.session = this.openSession({ send: message => this.postFrontend(message) });
+    this.attached.set(FRONTEND, ++this.attachSeq);
   }
 
   private postFrontend(message: string) {
@@ -296,6 +338,8 @@ class ShellRelay extends RelayCore {
       JSON.stringify({ method: DETACH_METHOD, params: { session: this.session.id } satisfies DetachParams })
     );
     this.session = this.openSession({ send: message => this.postFrontend(message) });
+    this.attached.delete(FRONTEND);
+    this.attached.set(FRONTEND, ++this.attachSeq);
   }
 
   /**
@@ -317,16 +361,73 @@ class ShellRelay extends RelayCore {
 
   /** Sets `client`'s override to `params` (Emulation.setDeviceMetricsOverride's), or clears it (null). */
   private setMetrics(client: string, params: unknown) {
+    if (!this.attached.has(client)) this.attached.set(client, ++this.attachSeq);
+    const own = this.overrides.get(client);
     if (params === null) {
-      if (this.overriding.delete(client)) this.onMetrics(null);
+      if (!this.overrides.delete(client)) return;
+      this.endRestore();
+      return this.apply(null);
+    }
+    // A new page instance's re-sent one: applied in attach order once all are back, or not at all
+    // when a client set or cleared one since.
+    if (own?.pending) {
+      own.params = params;
+      own.pending = false;
+      if (this.restoring && ![...this.overrides.values()].some(override => override.pending)) this.restore();
       return;
     }
+    if (own && this.applied !== null && sameParams(own.params, params)) return;
+    this.overrides.set(client, { params, pending: false });
+    this.endRestore();
+    this.apply(params);
+  }
+
+  /** Gives the page the override `params` (or none), unless it has it already. */
+  private apply(params: unknown) {
+    if (sameParams(params, this.applied)) return;
+    this.applied = params;
+    if (params === null) return this.onMetrics(null);
     const number = (name: string) => {
       const value: unknown = typeof params === 'object' ? Reflect.get(params, name) : undefined;
       return typeof value === 'number' && Number.isFinite(value) ? value : 0;
     };
-    this.overriding.add(client);
     this.onMetrics({ width: number('width'), height: number('height'), scale: number('scale') || 1 });
+  }
+
+  /**
+   * A new page instance: its own clients' sessions, and their overrides, are gone; remote clients'
+   * sessions go on, their overrides re-sent by the relay core. The page keeps its size until they
+   * are (Chrome never shows the page's own size meanwhile), then has the last-attached client's.
+   */
+  private newInstance() {
+    for (const [client, override] of this.overrides) {
+      if (client.startsWith(REMOTE_CLIENT)) override.pending = true;
+      else if (client !== FRONTEND) this.overrides.delete(client);
+    }
+    for (const client of this.attached.keys())
+      if (client !== FRONTEND && !client.startsWith(REMOTE_CLIENT)) this.attached.delete(client);
+    this.endRestore();
+    if ([...this.overrides.values()].some(override => override.pending))
+      this.restoring = setTimeout(() => this.restore(), RESTORE_TIMEOUT);
+    else this.restore();
+  }
+
+  /** Applies the last-attached client's override, those not re-sent by now gone. */
+  private restore() {
+    this.endRestore();
+    let last: Override | undefined;
+    let lastSeq = 0;
+    for (const [client, override] of this.overrides) {
+      const seq = this.attached.get(client) ?? 0;
+      if (override.pending) this.overrides.delete(client);
+      else if (seq > lastSeq) [last, lastSeq] = [override, seq];
+    }
+    this.apply(last ? last.params : null);
+  }
+
+  private endRestore() {
+    clearTimeout(this.restoring);
+    this.restoring = undefined;
   }
 
   readonly onMessage = (event: MessageEvent) => {
@@ -353,7 +454,7 @@ class ShellRelay extends RelayCore {
         // A new page instance: its CDP sessions, and their overrides, are new.
         if (loaderId !== this.metricsLoader) {
           this.metricsLoader = loaderId;
-          for (const client of this.overriding) if (client !== FRONTEND) this.setMetrics(client, null);
+          this.newInstance();
         }
         this.page.contentWindow?.addEventListener('pagehide', this.onPagehide);
         return this.hello(loaderId);

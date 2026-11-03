@@ -25,7 +25,7 @@ import { registerWebMcp } from './domains/webmcp/webmcp';
 import { installProbe, keep } from './probe';
 import type { Probe } from './probe/types';
 
-export { CdpSession, END_SESSION_CALLS, type Handler } from './core/session';
+export { CdpError, CdpSession, END_SESSION_CALLS, type Handler } from './core/session';
 export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {
