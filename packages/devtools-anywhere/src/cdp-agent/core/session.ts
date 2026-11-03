@@ -26,10 +26,13 @@ export const END_SESSION_CALLS: readonly string[] = [
 /** An error answered to the client as a CDP error response. */
 export class CdpError extends Error {
   readonly code: number;
+  /** Details Chrome adds to some errors (what failed to deserialize). */
+  readonly data: string | undefined;
 
-  constructor(message: string, code = -32000) {
+  constructor(message: string, code = -32000, data?: string) {
     super(message);
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -138,7 +141,10 @@ export class CdpSession {
     } catch (e) {
       this.send({
         id,
-        error: { code: e instanceof CdpError ? e.code : -32000, message: errorMessage(e) },
+        error:
+          e instanceof CdpError && e.data !== undefined
+            ? { code: e.code, message: errorMessage(e), data: e.data }
+            : { code: e instanceof CdpError ? e.code : -32000, message: errorMessage(e) },
       });
     }
   }

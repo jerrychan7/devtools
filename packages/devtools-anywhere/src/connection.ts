@@ -12,6 +12,7 @@ import {
   type MetricsParams,
   type Session,
 } from '@devtools-anywhere/relay-core';
+import { checkMetrics, sameMetrics } from './device-metrics';
 
 /**
  * Sent by a page in shell mode when its CDP session starts listening, or when pinged. Carries
@@ -163,8 +164,6 @@ export function connectToShell(session: CdpSession): () => void {
 const METRICS_TIMEOUT = 2000;
 /** Why a page outside shell mode cannot override its device metrics: its size is not its own. */
 const NOT_IN_SHELL = 'Device metrics can only be overridden in shell mode';
-/** The largest width and height Chrome takes for a device metrics override. */
-const MAX_SIZE = 10_000_000;
 /** CDP sessions given the shell's device metrics so far, and metrics requests sent. */
 let metricsClients = 0;
 let metricsCalls = 0;
@@ -222,12 +221,7 @@ export function emulateInShell(session: CdpSession): CdpSession {
   session.register('Emulation', {
     setDeviceMetricsOverride: (params: object) => {
       // As Chrome checks them (it keeps no override it rejects).
-      const valid = (name: string) => {
-        const value: unknown = Reflect.get(params, name);
-        return typeof value === 'number' && value >= 0 && value <= MAX_SIZE;
-      };
-      if (!valid('width') || !valid('height'))
-        throw new CdpError(`Width and height values must be positive, not greater than ${MAX_SIZE}`, -32602);
+      checkMetrics(params);
       return ask(params);
     },
     clearDeviceMetricsOverride: () => ask(null),
@@ -253,8 +247,6 @@ interface Override {
   params: unknown;
   pending: boolean;
 }
-
-const sameParams = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** The shell's side of the relay core: one frontend, in an iframe; the page in another. */
 class ShellRelay extends RelayCore {
@@ -362,7 +354,18 @@ class ShellRelay extends RelayCore {
     if (method !== 'Emulation.setDeviceMetricsOverride' && method !== 'Emulation.clearDeviceMetricsOverride')
       return false;
     const params: unknown = message?.params;
-    this.setMetrics(FRONTEND, method === 'Emulation.clearDeviceMetricsOverride' ? null : (params ?? {}));
+    const set = typeof params === 'object' && params !== null ? params : {};
+    if (method === 'Emulation.setDeviceMetricsOverride') {
+      try {
+        checkMetrics(set);
+      } catch (e) {
+        const { code, message: text, data } = e instanceof CdpError ? e : new CdpError(String(e));
+        const error = data === undefined ? { code, message: text } : { code, message: text, data };
+        this.postFrontend(JSON.stringify({ id: message?.id, error }));
+        return true;
+      }
+    }
+    this.setMetrics(FRONTEND, method === 'Emulation.clearDeviceMetricsOverride' ? null : set);
     this.postFrontend(JSON.stringify({ id: message?.id, result: {} }));
     return true;
   }
@@ -384,7 +387,7 @@ class ShellRelay extends RelayCore {
       if (this.restoring && ![...this.overrides.values()].some(override => override.pending)) this.restore();
       return;
     }
-    if (own && this.applied !== null && sameParams(own.params, params)) return;
+    if (own && this.applied !== null && sameMetrics(own.params, params)) return;
     this.overrides.set(client, { params, pending: false });
     this.endRestore();
     this.apply(params);
@@ -392,7 +395,7 @@ class ShellRelay extends RelayCore {
 
   /** Gives the page the override `params` (or none), unless it has it already. */
   private apply(params: unknown) {
-    if (sameParams(params, this.applied)) return;
+    if (sameMetrics(params, this.applied)) return;
     this.applied = params;
     if (params === null) return this.onMetrics(null);
     const number = (name: string) => {

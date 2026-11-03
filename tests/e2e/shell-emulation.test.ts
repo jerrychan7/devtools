@@ -119,6 +119,121 @@ test("in shell mode, a client's session ending ends its override", async () => {
   assert.equal(await pageSize(), natural);
 });
 
+const base = metrics(400, 600);
+/** Params Chrome rejects, one check each, and ones it takes. */
+const checked: object[] = [
+  { ...base, width: -1 },
+  { ...base, height: 10000001 },
+  { ...base, width: 1.5 },
+  { ...base, width: '4' },
+  { height: 600, deviceScaleFactor: 1, mobile: false },
+  { width: 400, height: 600, mobile: false },
+  { ...base, mobile: 'x' },
+  { ...base, deviceScaleFactor: -1 },
+  { ...base, scale: 0 },
+  { ...base, scale: 10.1 },
+  { ...base, scale: 10 },
+  { ...base, screenWidth: -1 },
+  { ...base, screenHeight: 100000000 },
+  { ...base, positionX: -1 },
+  { ...base, positionX: 100 },
+  { ...base, screenWidth: 500, screenHeight: 700, positionX: 100, positionY: 100 },
+  { ...base, screenOrientation: { type: 'portraitPrimary', angle: 360 } },
+  { ...base, screenOrientation: { type: 'bogus', angle: 0 } },
+  { ...base, screenOrientation: { type: 'landscapePrimary', angle: 90 } },
+  { ...base, displayFeature: { orientation: 'vertical', offset: -1, maskLength: 1 } },
+  { ...base, displayFeature: { orientation: 'bogus', offset: 1, maskLength: 1 } },
+  { ...base, displayFeature: { orientation: 'vertical', offset: 399, maskLength: 2 } },
+  { ...base, displayFeature: { orientation: 'horizontal', offset: 10, maskLength: 2 } },
+];
+/** An error as compared: Chrome's deserialization details end with a position, which is left out. */
+interface Response {
+  id?: unknown;
+  result?: unknown;
+  error?: unknown;
+}
+const errorOf = (error: unknown) =>
+  error === undefined || error === null ? 'ok' : JSON.stringify(error).replace(/ at position \d+/, '');
+
+test("in shell mode, the page's clients check device metrics as Chrome does", async () => {
+  assert.ok(env);
+  const chrome = await env.browser.newPage();
+  await chrome.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
+  // Chrome's raw responses, with their codes and data, over the browser's own connection.
+  const socket = new WebSocket(env.browser.wsEndpoint());
+  await new Promise(resolve => (socket.onopen = resolve));
+  const answers = new Map<number, (message: Response) => void>();
+  socket.onmessage = event => {
+    const message: Response = JSON.parse(String(event.data));
+    if (typeof message.id === 'number') answers.get(message.id)?.(message);
+  };
+  let seq = 0;
+  const raw = (method: string, params: object, sessionId?: string) =>
+    new Promise<Response>(resolve => {
+      answers.set(++seq, resolve);
+      socket.send(JSON.stringify({ id: seq, method, params, sessionId }));
+    });
+  const listed = await raw('Target.getTargets', {});
+  const infos: unknown = Reflect.get(listed.result ?? {}, 'targetInfos');
+  const info = Array.isArray(infos) ? infos.find(t => Reflect.get(t, 'url') === chrome.url()) : undefined;
+  const attached = await raw('Target.attachToTarget', { targetId: Reflect.get(info, 'targetId'), flatten: true });
+  const sessionId = String(Reflect.get(attached.result ?? {}, 'sessionId'));
+  const expected: string[] = [];
+  for (const params of checked) {
+    expected.push(errorOf((await raw('Emulation.setDeviceMetricsOverride', params, sessionId)).error));
+    await raw('Emulation.clearDeviceMetricsOverride', {}, sessionId);
+  }
+  socket.close();
+  await chrome.close();
+  const actual = await page.evaluate(async checked => {
+    const view = document.querySelector<HTMLIFrameElement>('#devtools-anywhere-page')?.contentWindow;
+    const session = view?.__sessions?.[0];
+    if (!session) throw new Error('no session');
+    const received: unknown[] = [];
+    const off = session.onMessage(message => received.push(JSON.parse(message)));
+    let id = 1000;
+    for (const params of checked) {
+      await session.dispatch(JSON.stringify({ id: ++id, method: 'Emulation.setDeviceMetricsOverride', params }));
+      await session.dispatch(JSON.stringify({ id: ++id, method: 'Emulation.clearDeviceMetricsOverride' }));
+    }
+    off();
+    return received.filter((_, index) => index % 2 === 0).map(message => Reflect.get(Object(message), 'error'));
+  }, checked);
+  assert.deepEqual(actual.map(errorOf), expected);
+  assert.equal(await pageSize(), natural);
+});
+
+test("in shell mode, setting the same override again does nothing, the same as Chrome's", async () => {
+  // Measured in Chrome: the same whatever the key order, with omitted fields as their defaults
+  // (scale 1, screen size 0, one view coordinate alone); different with both view coordinates,
+  // or a screen orientation, given.
+  const same: object[] = [
+    { mobile: false, deviceScaleFactor: 1, height: 600, width: 400 },
+    { ...base, scale: 1 },
+    { ...base, screenWidth: 0, screenHeight: 0 },
+    { ...base, screenWidth: 0, positionX: 0 },
+    { ...base, dontSetVisibleSize: true },
+  ];
+  const different: object[] = [
+    { ...base, positionX: 0, positionY: 0, screenWidth: 0, screenHeight: 0 },
+    { ...base, screenOrientation: { type: 'portraitPrimary', angle: 0 } },
+    { ...base, mobile: true },
+  ];
+  for (const [variants, size] of [
+    [same, '700x300'],
+    [different, '400x600'],
+  ] as const) {
+    for (const variant of variants) {
+      assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', base), 'ok');
+      assert.equal(await call(1, 'Emulation.setDeviceMetricsOverride', metrics(700, 300)), 'ok');
+      assert.equal(await call(0, 'Emulation.setDeviceMetricsOverride', variant), 'ok');
+      assert.equal(await pageSize(), size, JSON.stringify(variant));
+      await call(0, 'Emulation.clearDeviceMetricsOverride');
+      await call(1, 'Emulation.clearDeviceMetricsOverride');
+    }
+  }
+});
+
 test('outside shell mode, the page cannot resize itself: the methods say so', async () => {
   assert.ok(env);
   const plain = await env.browser.newPage();
