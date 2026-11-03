@@ -38,6 +38,8 @@ const MAX_QUEUED_SIZE = 64 * 1024 * 1024;
 const DROPPED_ERROR = { code: -32000, message: 'Too many messages queued for the page' };
 /** The `enable` whose result only the page has (Chrome always returns a debuggerId): it waits for one. */
 const HELD_ENABLE = 'Debugger.enable';
+/** A session's device metrics override, which Chrome keeps across reloads: it is re-sent. */
+const SET_METRICS = 'Emulation.setDeviceMetricsOverride';
 
 /** A DevTools frontend, as far as the relay is concerned. */
 export interface Client {
@@ -61,8 +63,10 @@ export interface Session {
    * target ids: a new page instance has none of them, which the frontend is told.
    */
   readonly children: Map<string, string>;
-  /** The params of its last Emulation.setDeviceMetricsOverride not cleared since, to re-send. */
+  /** The params of its last Emulation.setDeviceMetricsOverride the page took, not cleared since, to re-send. */
   metrics?: unknown;
+  /** The params of its Emulation.setDeviceMetricsOverride commands the page has not answered, by id. */
+  readonly setting: Map<string | number, unknown>;
 }
 
 /** The page's main frame, for the `Page.frameNavigated` a new instance is reported with. */
@@ -78,6 +82,7 @@ export interface Envelope {
   id?: unknown;
   method?: unknown;
   params?: unknown;
+  result?: unknown;
   /** A child target's session, flattened as in Chrome: its messages pass through as they are. */
   sessionId?: unknown;
 }
@@ -126,6 +131,7 @@ export abstract class RelayCore {
       deferred: new Set(),
       held: new Set(),
       children: new Map(),
+      setting: new Map(),
     };
     this.sessions.set(session.id, session);
     return session;
@@ -138,6 +144,7 @@ export abstract class RelayCore {
     session.held.clear();
     session.children.clear();
     session.metrics = undefined;
+    session.setting.clear();
   }
 
   /** A message from a frontend: CDP, as Chrome takes it. */
@@ -155,8 +162,7 @@ export abstract class RelayCore {
       session.enabled.delete(enable);
       // A held Debugger.enable the frontend disabled since is not sent to the next instance.
       if (enable === HELD_ENABLE) this.release(session);
-    } else if (!child && method === 'Emulation.setDeviceMetricsOverride') session.metrics = params ?? {};
-    else if (!child && method === 'Emulation.clearDeviceMetricsOverride') session.metrics = undefined;
+    } else if (!child && method === 'Emulation.clearDeviceMetricsOverride') session.metrics = undefined;
     if (!isId(id)) return this.send(session, data);
     // Between two page instances Chrome fails the command too, and the next may never come.
     if (this.loaderId && !this.pageReady) {
@@ -166,6 +172,8 @@ export abstract class RelayCore {
       return this.abandon(session, id, method);
     }
     session.pending.set(id, child ? `${child} ${method}` : method);
+    // Kept once the page takes it: one it rejects is not re-sent either.
+    if (!child && method === SET_METRICS) session.setting.set(id, params ?? {});
     this.send(session, data);
   }
 
@@ -173,8 +181,13 @@ export abstract class RelayCore {
   protected pageMessage(session: Session, body: string) {
     if (body.startsWith('{"method":"Target.')) this.noteChild(session, body);
     if (!body.startsWith('{"method"')) {
-      const id = parse(body)?.id;
+      const message = parse(body);
+      const id = message?.id;
       if (!isId(id) || !session.pending.delete(id)) return;
+      if (session.setting.has(id)) {
+        if (message?.result !== undefined) session.metrics = session.setting.get(id);
+        session.setting.delete(id);
+      }
     }
     session.client.send(body);
   }
@@ -248,6 +261,7 @@ export abstract class RelayCore {
   /** A queued message will never reach the page: the frontend waiting for it gets an error. */
   private drop({ session, data }: Queued) {
     const id = session && parse(data)?.id;
+    if (session && isId(id)) session.setting.delete(id);
     if (session && isId(id) && session.pending.delete(id)) {
       session.client.send(JSON.stringify({ id, error: DROPPED_ERROR }));
     }
@@ -276,6 +290,7 @@ export abstract class RelayCore {
     for (const session of this.sessions.values()) {
       for (const [id, method] of session.pending) this.abandon(session, id, method);
       session.pending.clear();
+      session.setting.clear();
     }
     // The relay's own messages (detach) are still for the page: only the sessions' ones go.
     this.queue = this.queue.filter(queued => !queued.session);
@@ -357,7 +372,7 @@ export abstract class RelayCore {
     }
     // Chrome applies its sessions' overrides again in the order they attached: the last one's
     // holds, whoever set theirs last (the sessions are in that order here).
-    if (session.metrics !== undefined) this.command(session, 'Emulation.setDeviceMetricsOverride', session.metrics);
+    if (session.metrics !== undefined) this.command(session, SET_METRICS, session.metrics);
     // The Elements panel requests the new page's document.
     if (enabled.has('DOM.enable')) client.send(JSON.stringify({ method: 'DOM.documentUpdated', params: {} }));
   }

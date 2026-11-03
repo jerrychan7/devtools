@@ -114,3 +114,32 @@ test("a child target's commands between page instances fail, and none is held", 
   relay.say('l2');
   assert.deepEqual(relay.delivered, []);
 });
+
+test('a new page instance is sent the device metrics override the page took, not one it rejected or cleared', () => {
+  const resent = (relay: PageRelay) =>
+    json(relay.delivered.splice(0)).filter(
+      message =>
+        typeof message === 'object' &&
+        message !== null &&
+        'method' in message &&
+        message.method === 'Emulation.setDeviceMetricsOverride'
+    );
+  const relay = new PageRelay();
+  relay.say('l1');
+  const taken = { width: 400, height: 600, deviceScaleFactor: 1, mobile: false };
+  relay.fromClient({ id: 1, method: 'Emulation.setDeviceMetricsOverride', params: taken });
+  relay.fromPage({ id: 1, result: {} });
+  relay.fromClient({ id: 2, method: 'Emulation.setDeviceMetricsOverride', params: { width: -5 } });
+  relay.fromPage({ id: 2, error: { code: -32602, message: 'Width and height values must be positive' } });
+  relay.delivered.length = 0;
+  relay.say('l2');
+  assert.deepEqual(
+    resent(relay).map(message =>
+      typeof message === 'object' && message !== null ? Reflect.get(message, 'params') : undefined
+    ),
+    [taken]
+  );
+  relay.fromClient({ id: 3, method: 'Emulation.clearDeviceMetricsOverride' });
+  relay.say('l3');
+  assert.deepEqual(resent(relay), []);
+});
