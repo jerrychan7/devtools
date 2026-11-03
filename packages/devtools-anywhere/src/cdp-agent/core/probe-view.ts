@@ -1,6 +1,7 @@
 // The probe records raw facts only, to stay small; this turns them into the entries and
 // records the domains use, once DevTools connects.
 import type { ConsoleEntry, ConsoleType, LogEntry, Probe, ProbeLog, ProbeRequest, RequestRecord } from '../probe/types';
+import { toTag } from './objects';
 
 /** The probe as the domains see it: log entries and request records in their final form. */
 export interface ProbeView extends Omit<
@@ -84,7 +85,7 @@ function consoleEntry(call: Extract<ProbeLog, { kind: 'console' }>): Omit<Consol
 }
 
 /** Whether `value` is a Headers object of any realm: a same-origin iframe's fetch() gives its own. */
-const isHeaders = (value: object): value is Headers => Object.prototype.toString.call(value) === '[object Headers]';
+const isHeaders = (value: object): value is Headers => toTag(value) === 'Headers';
 
 function headersToObject(headers: Record<string, string> | Headers | string): Record<string, string> {
   const obj: Record<string, string> = {};
@@ -285,7 +286,7 @@ export function viewProbe(probe: Probe): ProbeView {
     listeners: probe.listeners,
     ownUrls: probe.ownUrls,
     fetch: probe.fetch,
-    ...(probe.hookNetwork ? { hookNetwork: probe.hookNetwork } : {}),
+    hookNetwork: probe.hookNetwork,
     tools: probe.tools,
     bodyLimits(totalSize, resourceSize) {
       maxTotal = totalSize;

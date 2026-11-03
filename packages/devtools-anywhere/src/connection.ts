@@ -6,7 +6,7 @@ import {
   PING_METHOD,
   RelayCore,
   parse,
-  type DetachParams,
+  type SessionParams,
   type Frame,
   type HelloParams,
   type MetricsParams,
@@ -41,20 +41,23 @@ interface Link {
  * Only messages whose source is the peer window and whose origin is `origin` are accepted,
  * and outgoing messages are addressed to that origin only. Outgoing messages are queued
  * until the peer sends its first message: before that, its window may still be loading.
- * Incoming messages wait for `after`, if given. `onNewInstance`, if given, is called before the
- * first message of a new instance of the peer, told by its command ids starting again.
+ * Incoming messages wait for `after`, if given. `onDetach`, if given, is called when the peer
+ * says the session ended (the shell, when its frontend reloads). `onNewInstance`, if given, is
+ * called before the first message of a new instance of the peer, told by its command ids starting
+ * again.
  */
 function link(
   session: CdpSession,
   peer: () => Window | null | undefined,
   origin: string,
-  after?: Promise<void>,
-  onDetach?: () => void,
-  onNewInstance?: () => void
+  {
+    after,
+    onDetach,
+    onNewInstance,
+  }: { after?: Promise<void> | undefined; onDetach?: () => void; onNewInstance?: () => void } = {}
 ): Link {
   let ready = false;
-  /** The highest command id the peer sent: a new instance numbers its commands from 1 again. */
-  let lastId = 0;
+  const track = onNewInstance && instanceTracker(onNewInstance);
   const queue: string[] = [];
   const post = (message: string) => peer()?.postMessage(message, origin);
 
@@ -67,11 +70,7 @@ function link(
     if (event.data === PING) return post(HELLO);
     if (onDetach && event.data.startsWith(DETACH_PREFIX)) return onDetach();
     if (event.data.startsWith(METRICS_PREFIX)) return;
-    if (onNewInstance) {
-      const id = Number(/^\{"id":(\d+)/.exec(event.data)?.[1] ?? Number.NaN);
-      if (id <= lastId) onNewInstance();
-      if (id > 0) lastId = id;
-    }
+    track?.(event.data);
     if (!ready) {
       ready = true;
       queue.splice(0).forEach(post);
@@ -100,6 +99,20 @@ function link(
 }
 
 /**
+ * Returns a function to call with each message of a frontend, which calls `onNew` before the first
+ * message of a new instance of it, told by its command ids starting again.
+ */
+function instanceTracker(onNew: () => void): (message: string) => void {
+  /** The highest command id the frontend sent: a new instance numbers its commands from 1 again. */
+  let lastId = 0;
+  return message => {
+    const id = Number(/^\{"id":(\d+)/.exec(message)?.[1] ?? Number.NaN);
+    if (id <= lastId) onNew();
+    if (id > 0) lastId = id;
+  };
+}
+
+/**
  * Ends what a frontend started in the page, like a new Chrome session: e.g. Debugger.enable and
  * CSS.enable only report scripts and style sheets again after a disable.
  */
@@ -119,19 +132,15 @@ const ending = new WeakMap<CdpSession, Promise<void>>();
  */
 export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, frontendOrigin: string): () => void {
   // The previous frontend's session ends (and resets) before this one's first message.
-  const connection: Link = link(
-    session,
-    () => frame.contentWindow,
-    frontendOrigin,
-    ending.get(session),
-    undefined,
-    () => {
+  const connection: Link = link(session, () => frame.contentWindow, frontendOrigin, {
+    after: ending.get(session),
+    onNewInstance: () => {
       // A new session, as on disconnect: the new instance's messages wait for its end.
       const ended = endSession(session).then(() => session.reset());
       ending.set(session, ended);
       connection.reset(ended);
-    }
-  );
+    },
+  });
   return () => {
     connection.disconnect();
     // Nothing the frontend asked for outlives it: inspect mode, highlights, forced states, the
@@ -149,13 +158,9 @@ export function connectFrontend(session: CdpSession, frame: HTMLIFrameElement, f
  * for an embedded frontend: the new instance's messages wait for its end.
  */
 export function connectToShell(session: CdpSession): () => void {
-  const connection = link(
-    session,
-    () => window.parent,
-    location.origin,
-    undefined,
-    () => connection.reset(endSession(session).then(() => session.reset()))
-  );
+  const connection = link(session, () => window.parent, location.origin, {
+    onDetach: () => connection.reset(endSession(session).then(() => session.reset())),
+  });
   window.parent.postMessage(HELLO, location.origin);
   return () => connection.disconnect();
 }
@@ -295,15 +300,15 @@ class ShellRelay extends RelayCore {
   private applied: unknown = null;
   /** Waiting for a new page instance's remote clients to re-send their overrides, the size kept meanwhile. */
   private restoring: ReturnType<typeof setTimeout> | undefined;
-  /** The page instance whose clients are in `overriding`. */
+  /** The page instance whose clients are in `overrides` and `attached`. */
   private metricsLoader = '';
   private frontendReady = false;
   /** Hellos without a loader id so far. */
   private unknownLoaders = 0;
   private readonly toFrontend: string[] = [];
   private session: Session;
-  /** The highest command id the frontend sent: a new frontend instance numbers its commands from 1 again. */
-  private lastId = 0;
+  /** Tells a new frontend instance by its command ids starting again. */
+  private readonly trackFrontend = instanceTracker(() => this.newFrontend());
   private readonly page: HTMLIFrameElement;
   private readonly devtools: HTMLIFrameElement;
   private readonly frontendOrigin: string;
@@ -363,7 +368,7 @@ class ShellRelay extends RelayCore {
     this.closeSession(this.session);
     this.setMetrics(FRONTEND, null);
     this.sendOwn(
-      JSON.stringify({ method: DETACH_METHOD, params: { session: this.session.id } satisfies DetachParams })
+      JSON.stringify({ method: DETACH_METHOD, params: { session: this.session.id } satisfies SessionParams })
     );
     this.session = this.openSession({ send: message => this.postFrontend(message) });
     this.attached.delete(FRONTEND);
@@ -378,6 +383,9 @@ class ShellRelay extends RelayCore {
   private emulate(data: string): boolean {
     if (!data.includes('DeviceMetricsOverride')) return false;
     const message = parse(data);
+    // A child target's session (a cross-origin iframe's): its own target answers, not the shell's
+    // page size.
+    if (message?.sessionId) return false;
     const method = message?.method;
     if (method !== 'Emulation.setDeviceMetricsOverride' && method !== 'Emulation.clearDeviceMetricsOverride')
       return false;
@@ -472,6 +480,12 @@ class ShellRelay extends RelayCore {
     this.restoring = undefined;
   }
 
+  /** The relay is disconnected: it no longer sets the page's size, nor hears the page go. */
+  dispose() {
+    this.endRestore();
+    this.page.contentWindow?.removeEventListener('pagehide', this.onPagehide);
+  }
+
   readonly onMessage = (event: MessageEvent) => {
     if (typeof event.data !== 'string') return;
     if (event.source === this.devtools.contentWindow && event.origin === this.frontendOrigin) {
@@ -481,9 +495,7 @@ class ShellRelay extends RelayCore {
       }
       // The frame's load comes after the new instance's first commands, so it is told by these:
       // its numbers start again.
-      const id = Number(/^\{"id":(\d+)/.exec(event.data)?.[1] ?? Number.NaN);
-      if (id <= this.lastId) this.newFrontend();
-      if (id > 0) this.lastId = id;
+      this.trackFrontend(event.data);
       if (!this.emulate(event.data)) this.clientMessage(this.session, event.data);
     } else if (event.source === this.page.contentWindow && event.origin === location.origin) {
       if (event.data.startsWith(`{"method":"${HELLO_METHOD}"`)) {
@@ -533,18 +545,21 @@ class ShellRelay extends RelayCore {
   };
 }
 
+/** The test build's flag (build.ts): false in the published bundle. */
+declare const DEVTOOLS_ANYWHERE_TEST: boolean;
+
+/** The shell's relay, for the tests (shellClients): set in the test build alone. */
+let lastShellRelay: ShellRelay | undefined;
+
+/** The clients whose attach time the shell's relay keeps, in attach order: for the tests alone. */
+export const shellClients = (): string[] => lastShellRelay?.clients() ?? [];
+
 /**
  * Runs in the shell document: relays CDP messages between the DevTools frontend in
  * `devtools` and the page's CDP session in `page`, and keeps DevTools working across page
  * reloads (the relay core's work, shared with the remote server). Returns a function that
  * disconnects.
  */
-/** The shell's relay, for the tests (shellClients). */
-let lastShellRelay: ShellRelay | undefined;
-
-/** The clients whose attach time the shell's relay keeps, in attach order: for the tests alone. */
-export const shellClients = (): string[] => lastShellRelay?.clients() ?? [];
-
 export function relayShell(
   page: HTMLIFrameElement,
   devtools: HTMLIFrameElement,
@@ -552,8 +567,12 @@ export function relayShell(
   onMetrics: (metrics: DeviceMetrics | null) => void
 ): () => void {
   const relay = new ShellRelay(page, devtools, frontendOrigin, onMetrics);
-  lastShellRelay = relay;
+  if (DEVTOOLS_ANYWHERE_TEST) lastShellRelay = relay;
   window.addEventListener('message', relay.onMessage);
   page.contentWindow?.postMessage(PING, location.origin);
-  return () => window.removeEventListener('message', relay.onMessage);
+  return () => {
+    window.removeEventListener('message', relay.onMessage);
+    relay.dispose();
+    if (lastShellRelay === relay) lastShellRelay = undefined;
+  };
 }

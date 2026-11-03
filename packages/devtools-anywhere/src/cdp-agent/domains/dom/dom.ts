@@ -32,6 +32,7 @@ import {
   isSvgElement,
   isText,
   realmOf,
+  styleOf,
   sourceAttribute,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
@@ -112,7 +113,7 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
   const ys: number[] = [];
   mapQuad(m, { left: 0, top: 0, right: width, bottom: height }).forEach((v, i) => (i % 2 ? ys : xs).push(v));
   // The line boxes of an inline element can fall short of its bounds, when transformed.
-  const inline = realmOf(el).getComputedStyle(el).display === 'inline';
+  const inline = styleOf(el).display === 'inline';
   const near = (a: number, b: number, inside: number) => (inline ? (b - a) * inside >= -1 : Math.abs(a - b) <= 1);
   const ok =
     near(Math.min(...xs), rect.left, 1) &&
@@ -149,7 +150,7 @@ function boxModelInFrame(el: Element): Protocol.DOM.BoxModel {
     return { content: q, padding: q, border: q, margin: q, width, height };
   }
   const rect = el.getBoundingClientRect();
-  const style = realmOf(el).getComputedStyle(el);
+  const style = styleOf(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const side = (prefix: string, suffix = '') => ({
     top: px(`${prefix}-top${suffix}`),
@@ -341,9 +342,9 @@ export function registerDom(ctx: Context) {
     } satisfies Protocol.DOM.SetChildNodesEvent);
   }
 
-  /** The previous visible sibling the client already has: `pending` are not reported yet. */
-  function previousVisibleSibling(node: Node, pending: Set<Node>): Node | null {
-    for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n) && !pending.has(n)) return n;
+  /** The previous visible sibling the client already has: `unsent` tells those it does not. */
+  function previousVisibleSibling(node: Node, unsent: (node: Node) => boolean): Node | null {
+    for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n) && !unsent(n)) return n;
     return null;
   }
 
@@ -410,9 +411,7 @@ export function registerDom(ctx: Context) {
     if (!parent || ownerId === undefined || parentId === undefined || !nodes.childrenSent.has(parent)) return;
     session.emit('DOM.childNodeRemoved', { parentNodeId: parentId, nodeId: ownerId });
     nodes.forget(owner);
-    let previous = owner.previousSibling;
-    while (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
-      previous = previous.previousSibling;
+    const previous = previousVisibleSibling(owner, n => nodes.knownId(n) === undefined);
     session.emit('DOM.childNodeInserted', {
       parentNodeId: parentId,
       previousNodeId: previous ? nodes.idOf(previous) : 0,
@@ -433,6 +432,8 @@ export function registerDom(ctx: Context) {
     if (!changedFrames) {
       const changed = (changedFrames = new Set());
       queueMicrotask(() => {
+        // Dropped by DOM.disable meanwhile: Chrome sends no DOM event after it.
+        if (changedFrames !== changed) return;
         changedFrames = null;
         // Pending mutations first, so that the client has the iframe's current place.
         flushMutations();
@@ -508,7 +509,7 @@ export function registerDom(ctx: Context) {
           // The sibling it was inserted after, as Chrome reports it right away, if the client has it.
           let previous = k ? (record.addedNodes[k - 1] ?? null) : record.previousSibling;
           if (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
-            previous = previousVisibleSibling(node, pending);
+            previous = previousVisibleSibling(node, n => pending.has(n));
           // Like Chrome, an inserted iframe comes without its frame, which does not exist yet when
           // Chrome reports it; the iframe is sent again with its document once that is loaded.
           const owner = isFrameOwner(node) ? node : null;
@@ -583,6 +584,7 @@ export function registerDom(ctx: Context) {
       observer = null;
       stopFrames?.();
       stopFrames = null;
+      changedFrames = null;
       attachShadow.unpatch();
       searches.clear();
       history.reset();
@@ -824,7 +826,7 @@ export function registerDom(ctx: Context) {
     },
 
     scrollIntoViewIfNeeded(params: Protocol.DOM.ScrollIntoViewIfNeededRequest) {
-      scrollIntoViewIfNeeded(element(params));
+      scrollIntoViewIfNeeded(element(params), params.rect);
     },
 
     /** Elements whose computed style matches any of the given ones (e.g. the Layout pane's grids). */
@@ -835,7 +837,7 @@ export function registerDom(ctx: Context) {
       const visit = (root: ParentNode) => {
         for (const el of root.querySelectorAll('*')) {
           if (!nodes.isVisible(el) || closestOwn(el)) continue;
-          const style = realmOf(el).getComputedStyle(el);
+          const style = styleOf(el);
           if (params.computedStyles.some(({ name, value }) => style.getPropertyValue(name) === value)) found.push(el);
           const shadowRoot = params.pierce && nodes.shadowRootOf(el);
           if (shadowRoot) visit(shadowRoot);

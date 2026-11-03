@@ -2,6 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { base64, readBody } from '../../core/body';
 import { CdpError } from '../../core/session';
+import { toTag } from '../../core/objects';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
 import { isFrameDocument } from './frames';
@@ -84,10 +85,9 @@ export async function refetch(probe: Context['probe'], url: string, init?: Reque
   return res;
 }
 
-/** The class of a value of any realm: a same-origin iframe's socket gives its own Blobs and buffers. */
-const classOf = (value: unknown) => Object.prototype.toString.call(value).slice(8, -1);
-const isBlob = (value: unknown): value is Blob => classOf(value) === 'Blob';
-const isArrayBuffer = (value: unknown): value is ArrayBuffer => classOf(value) === 'ArrayBuffer';
+// By class, not instanceof: a same-origin iframe's socket gives its own realm's Blobs and buffers.
+const isBlob = (value: unknown): value is Blob => toTag(value) === 'Blob';
+const isArrayBuffer = (value: unknown): value is ArrayBuffer => toTag(value) === 'ArrayBuffer';
 
 /**
  * CDP frame of a WebSocket payload: text as is, binary data (converted only now) as base64.
@@ -139,7 +139,7 @@ export function registerNetwork(ctx: Context) {
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
-    if (isOwnRequest(probe, rec) || isFrameDocument(probe, rec)) return;
+    if (isOwnRequest(probe, rec) || isFrameDocument(rec)) return;
     prune(sent, probe.requests, 'end');
     let done = sent.get(rec.requestId);
     if (!done) sent.set(rec.requestId, (done = new Set()));

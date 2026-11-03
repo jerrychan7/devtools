@@ -2,7 +2,7 @@ import type { ProbeView } from '../../core/probe-view';
 import { isElement, isHtml } from '../../core/realm';
 import { topLevelLexicalNames } from '../../core/lexer';
 import { refetch } from '../network/network';
-import { IDENTIFIER } from './repl';
+import { isDeclared } from './repl';
 
 /**
  * The names the page's classic scripts declared with top-level `let`, `const` and `class`
@@ -63,22 +63,7 @@ export function globalLexicalNames(
     return names;
   }
 
-  function declared(name: string): boolean {
-    if (!IDENTIFIER.test(name)) return false;
-    try {
-      // A ReferenceError: not declared, or declared but in its temporal dead zone.
-      evaluate(name);
-      return true;
-    } catch {
-      try {
-        // Like V8, a name in its temporal dead zone is listed: only there does `typeof` throw.
-        evaluate(`typeof ${name}`);
-        return false;
-      } catch {
-        return true;
-      }
-    }
-  }
+  const declared = (name: string) => isDeclared(name, evaluate);
 
   /** The last result, until a script is added, removed or loaded. */
   let cached: Promise<string[]> | undefined;
@@ -123,32 +108,30 @@ export function globalLexicalNames(
   };
 
   async function compute(): Promise<string[]> {
-    {
-      const lists: (string[] | Promise<string[]>)[] = [];
-      const modules = new Set<string>();
-      for (const script of doc.querySelectorAll<HTMLScriptElement>('script')) {
-        if (script.src) {
-          if (isModule(script)) modules.add(script.src);
-          else if (isClassic(script) && /^https?:/.test(script.src) && !probe.ownUrls.has(script.src))
-            lists.push(fromUrl(script.src));
-        } else if (isClassic(script)) {
-          const text = script.text;
-          const names = nextInline.get(text) ?? inline.get(text) ?? lex(text);
-          nextInline.set(text, names);
-          lists.push(names);
-        }
+    const lists: (string[] | Promise<string[]>)[] = [];
+    const modules = new Set<string>();
+    for (const script of doc.querySelectorAll<HTMLScriptElement>('script')) {
+      if (script.src) {
+        if (isModule(script)) modules.add(script.src);
+        else if (isClassic(script) && /^https?:/.test(script.src) && !probe.ownUrls.has(script.src))
+          lists.push(fromUrl(script.src));
+      } else if (isClassic(script)) {
+        const text = script.text;
+        const names = nextInline.get(text) ?? inline.get(text) ?? lex(text);
+        nextInline.set(text, names);
+        lists.push(names);
       }
-      // Scripts added and removed again, or loaded by other means.
-      for (const rec of isTop ? probe.requests : [])
-        if (rec.type === 'Script' && rec.state === 'done' && !modules.has(rec.url) && !probe.ownUrls.has(rec.url))
-          lists.push(fromUrl(rec.url, true));
-      external = nextExternal;
-      inline = nextInline;
-      nextExternal = new Map();
-      nextInline = new Map();
-      const names = new Set<string>();
-      for (const list of await Promise.all(lists)) for (const name of list) names.add(name);
-      return [...names].filter(declared);
     }
+    // Scripts added and removed again, or loaded by other means.
+    for (const rec of isTop ? probe.requests : [])
+      if (rec.type === 'Script' && rec.state === 'done' && !modules.has(rec.url) && !probe.ownUrls.has(rec.url))
+        lists.push(fromUrl(rec.url, true));
+    external = nextExternal;
+    inline = nextInline;
+    nextExternal = new Map();
+    nextInline = new Map();
+    const names = new Set<string>();
+    for (const list of await Promise.all(lists)) for (const name of list) names.add(name);
+    return [...names].filter(declared);
   }
 }

@@ -14,6 +14,24 @@ export function returnLast(code: string, options?: LexOptions): string {
 
 export const IDENTIFIER = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*$/u;
 
+/** Whether global code declares `name`, a binding in its temporal dead zone included. */
+export function isDeclared(name: string, evaluate: (code: string) => unknown): boolean {
+  if (!IDENTIFIER.test(name)) return false;
+  try {
+    // A ReferenceError: not declared, or declared but in its temporal dead zone.
+    evaluate(name);
+    return true;
+  } catch {
+    try {
+      // Like V8, a name in its temporal dead zone counts: only there does `typeof` throw.
+      evaluate(`typeof ${name}`);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+}
+
 /** Global function the rewritten console input hands its declarations to. */
 const REPL_EXPORT = '__devtoolsAnywhereRepl__';
 
@@ -50,7 +68,12 @@ interface ReplBinding {
  *
  * One per realm: `win` is the window of a frame's document, `evaluate` runs its global code.
  */
-export function replBindings(win: Window & typeof globalThis, evaluate: (code: string) => unknown) {
+export function replBindings(
+  win: Window & typeof globalThis,
+  evaluate: (code: string) => unknown,
+  /** Whether window's `name` is a console utility, there only while console input runs. */
+  isUtility: (name: string) => boolean = () => false
+) {
   const bindings = new Map<string, ReplBinding>();
   /** Every name a compiled command declared, initialized or not (V8 lists them all). */
   const declared = new Set<string>();
@@ -62,9 +85,8 @@ export function replBindings(win: Window & typeof globalThis, evaluate: (code: s
   let saved = new Map<ReplBinding, { state: BindingState; value: unknown; kind: ReplBinding['kind'] }>();
   let nextTemp = 0;
 
-  function referenceError(message: string, fn: () => unknown) {
-    const error = new win.ReferenceError(message);
-    // Thrown where the binding is used, not in the accessor.
+  /** `error` with its stack starting where the binding is used, not in the accessor `fn`. */
+  function thrown<E extends Error>(error: E, fn: (...args: never[]) => unknown): E {
     const capture: unknown = Reflect.get(win.Error, 'captureStackTrace');
     if (typeof capture === 'function') Reflect.apply(capture, win.Error, [error, fn]);
     return error;
@@ -79,7 +101,8 @@ export function replBindings(win: Window & typeof globalThis, evaluate: (code: s
       return known;
     }
     // A property of the page's (a configurable one, like `name`) is left as it is.
-    if (Object.getOwnPropertyDescriptor(win, name)) return undefined;
+    if (isUtility(name)) Reflect.deleteProperty(win, name);
+    else if (Object.getOwnPropertyDescriptor(win, name)) return undefined;
     const binding: ReplBinding = { kind, value: undefined, state: 'tdz' };
     bindings.set(name, binding);
     saved.set(binding, { state: 'dead', value: undefined, kind });
@@ -88,16 +111,12 @@ export function replBindings(win: Window & typeof globalThis, evaluate: (code: s
       enumerable: false,
       get: function get() {
         // V8's REPL mode says so in the dead zone too.
-        if (binding.state !== 'ready') throw referenceError(`${name} is not defined`, get);
+        if (binding.state !== 'ready') throw thrown(new win.ReferenceError(`${name} is not defined`), get);
         return binding.value;
       },
       set: function set(value: unknown) {
-        if (binding.state === 'ready' && binding.kind === 'const') {
-          const error = new win.TypeError('Assignment to constant variable.');
-          const capture: unknown = Reflect.get(win.Error, 'captureStackTrace');
-          if (typeof capture === 'function') Reflect.apply(capture, win.Error, [error, set]);
-          throw error;
-        }
+        if (binding.state === 'ready' && binding.kind === 'const')
+          throw thrown(new win.TypeError('Assignment to constant variable.'), set);
         // The declaration's initializer.
         binding.value = value;
         binding.state = 'ready';
@@ -113,22 +132,18 @@ export function replBindings(win: Window & typeof globalThis, evaluate: (code: s
     binding.state = 'ready';
   }
 
+  /** Classes a committed command has yet to hand over, each once: page scripts may call it too. */
+  const handing = new Set<string>();
+  function receive(name: string, value: unknown) {
+    if (handing.delete(name)) hand(name, value);
+  }
+
   /** Declared by a page script (a lexical binding, maybe in its dead zone) or `var`. */
   function declaredByPage(name: string): boolean {
+    if (isUtility(name)) return false;
     const own = Object.getOwnPropertyDescriptor(win, name);
     if (own) return !own.configurable || vars.has(name);
-    if (name in win || !IDENTIFIER.test(name)) return false;
-    try {
-      evaluate(name);
-      return true;
-    } catch {
-      try {
-        evaluate(`typeof ${name}`);
-        return false;
-      } catch {
-        return true;
-      }
-    }
+    return !(name in win) && isDeclared(name, evaluate);
   }
 
   return {
@@ -178,7 +193,8 @@ export function replBindings(win: Window & typeof globalThis, evaluate: (code: s
         }
       /** What declaring takes, done by `commit` once the input is known to compile. */
       const plan: (() => void)[] = [];
-      const canBind = (name: string) => bindings.has(name) || !Object.getOwnPropertyDescriptor(win, name);
+      const canBind = (name: string) =>
+        bindings.has(name) || isUtility(name) || !Object.getOwnPropertyDescriptor(win, name);
       const declare = (name: string, kind: ReplBinding['kind'], initialized: boolean) =>
         plan.push(() => {
           const binding = bind(name, kind);
@@ -221,9 +237,11 @@ export function replBindings(win: Window & typeof globalThis, evaluate: (code: s
       // On a line of its own after the input: no column moves.
       if (classes.length) script += `\n;${handOver(classes)}`;
       const commit = () => {
-        if (!Object.getOwnPropertyDescriptor(win, REPL_EXPORT))
-          Object.defineProperty(win, REPL_EXPORT, { value: hand, configurable: true });
+        // Whatever the page put there is replaced: the class lines call ours.
+        if (Object.getOwnPropertyDescriptor(win, REPL_EXPORT)?.value !== receive)
+          Object.defineProperty(win, REPL_EXPORT, { value: receive, configurable: true });
         for (const step of plan) step();
+        for (const name of classes) handing.add(name);
       };
       return { script, body, commit };
     },

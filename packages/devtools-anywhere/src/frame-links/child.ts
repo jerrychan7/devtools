@@ -3,11 +3,28 @@
 import { type CdpSession, type ParentLink, childTargets, frames } from '../cdp-agent';
 import { endSession } from '../connection';
 import { type OriginPattern, matchOrigin } from './origins';
-import { openPort } from './port';
+import { type Channel, openPort } from './port';
 import { FRAME_HELLO, FRAME_PING, type FrameWelcome, isMessage, postToTrusted, readWelcome } from './protocol';
 
 /** A new id for this page's hellos. */
 const newId = () => Math.random().toString(36).slice(2);
+
+/**
+ * Carries `session`'s messages over `channel` and the channel's to the session, each after
+ * `before` (the end of the session's last use). Returns a function that stops sending the session's.
+ */
+function pipe(
+  session: CdpSession,
+  channel: Pick<Channel, 'send' | 'onMessage'>,
+  before?: () => Promise<void>
+): () => void {
+  const dispatch = (message: string) =>
+    session.dispatch(message).catch(() => {
+      // Malformed message: there is no id to answer to.
+    });
+  channel.onMessage(message => void (before ? before().then(() => dispatch(message)) : dispatch(message)));
+  return session.onMessage(message => channel.send(message));
+}
 
 /**
  * Says hello to the parent window if its origin may be one of `patterns`, and again when pinged,
@@ -21,6 +38,12 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
   let id = newId();
   let link: ParentLink | undefined;
   let session: CdpSession | undefined;
+  /**
+   * The end of the last link's use of that session: its domains disabled and ids forgotten. The
+   * next link's messages wait for it, or what they enable would be undone, as connectFrontend's
+   * next frontend waits for the last one's.
+   */
+  let ending: Promise<void> = Promise.resolve();
   /**
    * Clients' sessions that ended, reset, for the next client: a session's domains listen to the
    * page for good, so they are not made anew for each attach.
@@ -49,22 +72,12 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     frames.link({ frameId, parentFrameId });
     // The parent agent's own commands, on a session kept across links.
     const own = (session ??= createSession());
-    const offSession = own.onMessage(message => linked.send(message));
-    linked.onMessage(message => {
-      own.dispatch(message).catch(() => {
-        // Malformed message: there is no id to answer to.
-      });
-    });
+    const offSession = pipe(own, linked, () => ending);
     // Each of the parent's clients that attaches this target gets a session of its own, as in
     // Chrome; it ends as on a frontend's disconnect, the domains disabled and ids forgotten.
     linked.onSession(channel => {
       const client = idle.pop() ?? createSession();
-      const off = client.onMessage(message => channel.send(message));
-      channel.onMessage(message => {
-        client.dispatch(message).catch(() => {
-          // Malformed message: there is no id to answer to.
-        });
-      });
+      const off = pipe(client, channel);
       channel.onClose(() => {
         off();
         void endSession(client)
@@ -79,7 +92,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
         frames.link(undefined);
       }
       // Nothing the parent's agent asked for outlives the link.
-      void endSession(own).then(() => own.reset());
+      ending = endSession(own).then(() => own.reset());
     });
     childTargets.setParent(linked);
   };

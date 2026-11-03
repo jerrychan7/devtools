@@ -35,6 +35,11 @@ export function realmOf(node: Node): Window & typeof globalThis {
   return documentOf(node).defaultView ?? window;
 }
 
+/** An element's computed style, from its own realm (the top page's `getComputedStyle` is not). */
+export function styleOf(el: Element, pseudo?: string): CSSStyleDeclaration {
+  return realmOf(el).getComputedStyle(el, pseudo);
+}
+
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
 /** Whether `node` is the HTML element `<name>`, e.g. `isHtml(node, 'template')`. */

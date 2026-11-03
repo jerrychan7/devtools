@@ -67,7 +67,8 @@ const UNDECLARED_NOOPS: Record<string, string[]> = {
 
 /**
  * Commands a page cannot carry out, with why. They fail rather than succeed without effect; the
- * frontend does not log a server error (-32000) and none of these callers checks it.
+ * frontend does not log a server error (-32000), and the few callers that check for one adjust what
+ * they show, as noted below.
  */
 const UNSUPPORTED: Record<string, Record<string, string>> = {
   Autofill: { enable: 'the browser fills forms', setAddresses: 'the browser fills forms' },

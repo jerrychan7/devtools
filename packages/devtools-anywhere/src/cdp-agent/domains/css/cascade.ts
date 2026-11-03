@@ -69,7 +69,7 @@ export class Cascade {
     const layerOrders = new Map<TreeScope, Map<string, number>>();
     const pending: { sheet: CSSStyleSheet; tree: TreeScope; entry: Entry }[] = [];
     for (const { sheet, tree } of this.sheets.scoped()) {
-      if (sheet.disabled || !sheetApplies(sheet)) continue;
+      if (sheet.disabled || !sheetApplies(sheet, this.sheets.realmOf(sheet))) continue;
       let layerOrder = layerOrders.get(tree);
       if (!layerOrder) layerOrders.set(tree, (layerOrder = new Map()));
       for (const entry of this.sheets.entries(sheet, true, layerOrder)) pending.push({ sheet, tree, entry });

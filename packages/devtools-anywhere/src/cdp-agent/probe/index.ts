@@ -43,6 +43,9 @@ export function installProbe(): Probe {
   const hooked = new WeakSet<Console>();
   const probe: Probe = {
     version: 1,
+    hookNetwork(win, frame) {
+      hookNetwork(probe, sink, win, listen, frame);
+    },
     logs,
     requests,
     onLog(listener) {
@@ -129,7 +132,6 @@ export function installProbe(): Probe {
   };
   const shell = readShellConfig();
   hookNetwork(probe, sink, w, listen, undefined, shell?.serviceWorker);
-  probe.hookNetwork = (win, frame) => hookNetwork(probe, sink, win, listen, frame);
 
   if (shell && window === top) {
     // When it refuses (a loop), the page loads on its own: probe.ts sees no config left.

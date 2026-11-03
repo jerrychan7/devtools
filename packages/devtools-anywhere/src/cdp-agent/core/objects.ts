@@ -37,7 +37,8 @@ class InternalEntry {
 }
 
 const TypedArray = Object.getPrototypeOf(Int8Array);
-const toTag = (v: unknown) => Object.prototype.toString.call(v).slice(8, -1);
+/** The class of a value of any realm, as `Object.prototype.toString` names it. */
+export const toTag = (v: unknown) => Object.prototype.toString.call(v).slice(8, -1);
 /** The native getter `proto[key]`; only used inside brand checks, where throwing means "no". */
 const getter = (proto: object, key: PropertyKey) => {
   const get = Object.getOwnPropertyDescriptor(proto, key)?.get;

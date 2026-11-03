@@ -5,7 +5,7 @@ import {
   HELLO_METHOD,
   PAGEHIDE_METHOD,
   REPLACED_CLOSE_CODE,
-  type DetachParams,
+  type SessionParams,
   type HelloParams,
 } from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
@@ -152,7 +152,7 @@ export function connectRemote(
       if (!attach && message.method !== DETACH_METHOD) return;
       const params = 'params' in message ? message.params : undefined;
       if (typeof params !== 'object' || !params) return;
-      const field = (name: keyof DetachParams): unknown => Reflect.get(params, name);
+      const field = (name: keyof SessionParams): unknown => Reflect.get(params, name);
       const session = field('session');
       if (session === undefined) return;
       // A session's start is its attach time, which a device metrics override's order needs.

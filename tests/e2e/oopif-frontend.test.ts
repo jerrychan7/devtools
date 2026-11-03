@@ -105,7 +105,6 @@ const panelShowing = (id: string) =>
     return inspectorView.tabbedPane.selectedTabId === id && (await inspectorView.panel(id)).isShowing();
   }, id);
 
-/** Clicks a panel's tab until the panel shows. */
 /** The text of the frontend's elements that match, with that of their shadow trees, style sheets left out. */
 const deepTexts = (selector: string) =>
   frontend.evaluate(selector => {
@@ -124,6 +123,7 @@ const deepTexts = (selector: string) =>
     return found;
   }, selector);
 
+/** Clicks a panel's tab until the panel shows. */
 async function showPanel(id: string) {
   await waitFor(async () => {
     await (await element(`#tab-${id}`)).click();
@@ -158,24 +158,19 @@ test("the Elements panel expands the cross-origin iframe's document", { skip }, 
   await element('.elements-tree-outline [role="treeitem"]', '<iframe');
   // The frontend has grafted the child target's document under the <iframe> (DOMModel
   // .requestDocument of the child, DOM.getFrameOwner on the parent): expanding it, by the rows'
-  // disclosure triangles, shows the document, fetched from the child's session.
-  for (
-    let i = 0;
-    i < 8 && !(await texts('.elements-tree-outline [role="treeitem"]')).some(r => r.includes('child page'));
-    i++
-  ) {
+  // disclosure triangles, shows the document, fetched from the child's session. The child target
+  // attaches asynchronously, the <iframe> not expandable until then: each poll clicks whichever
+  // row on the way is still collapsed, none yet meaning wait.
+  const rows = await waitFor(async () => {
+    const found = await texts('.elements-tree-outline [role="treeitem"]');
+    if (found.some(row => row.includes('child page'))) return found;
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
     const row = (await collapsedInIframe()).asElement() as ElementHandle<Element> | null;
     await row?.evaluate(el => el.scrollIntoView({ block: 'center' }));
     const box = await row?.boundingBox();
-    if (!box) break;
     // The triangle, left of the row's title.
-    await frontend.page().mouse.click(box.x + 20, box.y + 8);
-    await new Promise(r => setTimeout(r, 300));
-  }
-  const rows = await waitFor(async () => {
-    const found = await texts('.elements-tree-outline [role="treeitem"]');
-    return found.some(row => row.includes('child page')) ? found : null;
+    if (box) await frontend.page().mouse.click(box.x + 20, box.y + 8);
+    return null;
   });
   const at = rows.findIndex(row => row.startsWith('<iframe'));
   // The child's document, its URL that of the iframe's page, right under the <iframe>.

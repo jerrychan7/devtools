@@ -1,9 +1,9 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { closestOwn } from '../../core/nodes';
-import { askChild, type ChildLink, type ChildTargets, childTargets } from '../../core/child-targets';
+import { askChild, type ChildLink, childTargets } from '../../core/child-targets';
 import { frameDocumentOf, hitPath, parentFrameDocument, pointInFrame, pointInOwnerContent } from '../../core/geometry';
-import { documentOf, isElement, isHtml, isHtmlElement, realmOf } from '../../core/realm';
+import { documentOf, isElement, isHtml, isHtmlElement, realmOf, styleOf } from '../../core/realm';
 
 /** How long a cross-origin iframe's agent has to carry out forwarded input, in ms. */
 const FORWARD_TIMEOUT = 5000;
@@ -41,7 +41,7 @@ function scrollBy(target: Target, dx: number, dy: number): boolean {
   for (let doc: Document | null = documentOf(target), from = isElement(target) ? target : null; doc;) {
     for (let el = from; el; el = el.parentElement) {
       if (el === doc.documentElement || el === doc.body) break;
-      const style = realmOf(el).getComputedStyle(el);
+      const style = styleOf(el);
       const canX = /auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth;
       const canY = /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight;
       const left = el.scrollLeft;
@@ -85,7 +85,7 @@ const isEditable = (el: Element | null) =>
  * this agent's own, which the client does not see, and is answered once the iframe's agent has
  * carried it out.
  */
-export function registerInput({ session, frames }: Context, links: ChildTargets = childTargets) {
+export function registerInput({ session, frames }: Context) {
   const top = frames.top;
   let emitTouch = false;
   /** What the mouse is over: the element in each document from the top one in (see `hitAt`). */
@@ -113,10 +113,18 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
 
   /** The link of the cross-origin iframe `target` is, if it is one. */
   const linkOf = (target: Target | null): ChildLink | undefined =>
-    target && isElement(target) ? links.childOf(target) : undefined;
+    target && isElement(target) ? childTargets.childOf(target) : undefined;
 
-  /** The touch going on in a cross-origin iframe: the iframe's agent has it till it ends. */
-  let touchIn: { link: ChildLink; owner: Element } | null = null;
+  /**
+   * The touch going on in a cross-origin iframe: the iframe's agent has it till it ends, or till
+   * its link closes (the iframe gone or navigated), touch emulation is switched, or a new press
+   * comes (the release was lost).
+   */
+  let touchIn: { link: ChildLink; owner: Element; off: () => void } | null = null;
+  const endTouchIn = () => {
+    touchIn?.off();
+    touchIn = null;
+  };
 
   /**
    * Sends a mouse (or touch) command on to a cross-origin iframe's agent, at the top viewport
@@ -292,17 +300,19 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
   async function touch(p: MouseEventRequest) {
     // A touch that started in a cross-origin iframe is the iframe's agent's till it ends, as a
     // touch stays with what it touched; a wheel over one is too.
+    if (touchIn && p.type === 'mousePressed') endTouchIn();
     if (touchIn) {
       const { link, owner } = touchIn;
-      if (p.type === 'mouseReleased') touchIn = null;
+      if (p.type === 'mouseReleased') endTouchIn();
       return await forward(link, owner, 'Input.emulateTouchFromMouseEvent', p);
     }
+    const path = elementsAt(p.x, p.y);
+    const found = path[path.length - 1] ?? null;
     if (p.type === 'mousePressed' || p.type === 'mouseWheel') {
-      const owner = elementsAt(p.x, p.y).pop() ?? null;
-      const link = linkOf(owner);
-      if (link && owner) {
-        if (p.type === 'mousePressed') touchIn = { link, owner };
-        return await forward(link, owner, 'Input.emulateTouchFromMouseEvent', p);
+      const link = linkOf(found);
+      if (link && found) {
+        if (p.type === 'mousePressed') touchIn = { link, owner: found, off: link.onClose(endTouchIn) };
+        return await forward(link, found, 'Input.emulateTouchFromMouseEvent', p);
       }
     }
     // Hovering does not touch, and Chrome ignores a release without a touch to end.
@@ -311,7 +321,6 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
     // the release still ends it. Like Chrome, a touch starting off the page (or on nothing)
     // goes to the root element.
     const held = pressed && isElement(pressed) ? pressed : null;
-    const found = elementsAt(p.x, p.y).pop() ?? null;
     const target = found ?? (p.type === 'mousePressed' ? null : held) ?? top.document.documentElement;
     if (p.type === 'mouseWheel') return wheel(target, p);
     const type = p.type === 'mousePressed' ? 'touchstart' : p.type === 'mouseReleased' ? 'touchend' : 'touchmove';
@@ -362,7 +371,7 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
       // click, unless cancelled.
       if (tapped && proceed) {
         const init = mouseInit({ ...p, button: 'left', clickCount: 1 }, 0, target);
-        hover(found ? hitAt(p.x, p.y) : [target], p, 0, false);
+        hover(found ? path : [target], p, 0, false);
         if (touchOffPage) return undefined;
         if (target.dispatchEvent(mouseEvent(target, 'mousedown', { ...init, buttons: BUTTONS.left }))) focus(target);
         target.dispatchEvent(mouseEvent(target, 'mouseup', init));
@@ -509,6 +518,7 @@ export function registerInput({ session, frames }: Context, links: ChildTargets 
   session.register('Emulation', {
     setEmitTouchEventsForMouse(p: Protocol.Emulation.SetEmitTouchEventsForMouseRequest) {
       emitTouch = p.enabled;
+      endTouchIn();
     },
     // The page's own touch support (maxTouchPoints, media queries) cannot be changed.
     setTouchEmulationEnabled: () => {},

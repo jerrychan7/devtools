@@ -209,8 +209,9 @@ export interface Probe {
   clearLogs(): void;
   /**
    * Captures the console calls and uncaught errors of a same-origin iframe's document, as for the
-   * top page; entries name the document. Records its shadow roots too, as {@link shadowRoots}. Once per document: a frame that loads another one needs
-   * it again. What the document logged before is not captured.
+   * top page; entries name the document. Records its shadow roots too, as {@link shadowRoots}.
+   * Once per window: called again for one already hooked (one kept across a navigation, as from
+   * the initial about:blank), it does nothing. What the document logged before is not captured.
    */
   hookWindow(win: Window & typeof globalThis): void;
   /** Every shadow root attached since the probe ran, including closed ones. */
@@ -228,10 +229,9 @@ export interface Probe {
   /**
    * Hooks the network APIs of a same-origin iframe's window like the top one's: its requests are
    * recorded here, tagged with what `frame` returns when each starts. Called again for a window
-   * already hooked (one kept across a navigation), it only replaces `frame`. Absent in probes
-   * from before 0.3.0.
+   * already hooked (one kept across a navigation), it only replaces `frame`.
    */
-  hookNetwork?(win: Window & typeof globalThis, frame: () => FrameTag): void;
+  hookNetwork(win: Window & typeof globalThis, frame: () => FrameTag): void;
   /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
   tools: Map<string, ToolRecord>;
   /**

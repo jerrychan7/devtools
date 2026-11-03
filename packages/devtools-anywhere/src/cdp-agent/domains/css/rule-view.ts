@@ -4,16 +4,7 @@ import { queriedAxes } from '../../core/container-query';
 import type { NodeRegistry } from '../../core/nodes';
 import { specificity, splitTopLevel } from '../../core/selectors';
 import type { TreeScope } from './forced-pseudo';
-import {
-  type StyleRule,
-  ancestorsOf,
-  mediaList,
-  realmOfSheet,
-  resolveSelector,
-  ruleType,
-  scopeText,
-  selectorLabel,
-} from './rules';
+import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scopeText, selectorLabel } from './rules';
 import type { SheetRegistry } from './sheet-registry';
 import { sourceSelectors } from './source';
 import { type CSSStyle, buildStyle } from './style';
@@ -85,7 +76,7 @@ export class RuleView {
           source: 'mediaRule',
           sourceURL: this.sheets.sourceURL(sheet),
           styleSheetId,
-          mediaList: mediaList(a.conditionText, realmOfSheet(sheet)),
+          mediaList: mediaList(a.conditionText, this.sheets.realmOf(sheet)),
         });
       else if (isCssom(a, 'CSSSupportsRule'))
         supports.push({ text: a.conditionText, active: CSS.supports(a.conditionText), styleSheetId });

@@ -62,7 +62,7 @@ export function registerCss(ctx: Context) {
     return roots;
   }
 
-  const sheets = new SheetRegistry(ctx.probe.fetch, shadowRoots);
+  const sheets = new SheetRegistry(ctx.probe.fetch, shadowRoots, ctx.frames);
   const forced = new ForcedPseudoClasses(
     () => sheets.trees(),
     sheet => sheets.rulesOf(sheet)
@@ -506,7 +506,7 @@ export function registerCss(ctx: Context) {
     trackComputedStyleUpdates: () => {},
     takeComputedStyleUpdates: (): Protocol.CSS.TakeComputedStyleUpdatesResponse => ({ nodeIds: [] }),
     getEnvironmentVariables: (): Protocol.CSS.GetEnvironmentVariablesResponse => ({
-      environmentVariables: environmentVariables(documents()[0]),
+      environmentVariables: environmentVariables(ctx.frames.top.document),
     }),
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {
       const el = element(params.nodeId);

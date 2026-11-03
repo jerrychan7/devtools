@@ -42,7 +42,7 @@ export interface HelloParams {
  * An attach's or a detach's params: the session that started or ended, as the relay or the page's
  * hello named it.
  */
-export interface DetachParams {
+export interface SessionParams {
   session: number | string;
 }
 

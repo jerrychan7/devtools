@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { frames } from '../../core/frames';
+import type { FrameRegistry } from '../../core/frames';
 import { isCssom, realmOf } from '../../core/realm';
 import { splitTopLevel } from '../../core/selectors';
 
@@ -118,9 +118,8 @@ export function importedLayer(sheet: CSSStyleSheet): string[] {
  * Whether a sheet's own conditions hold: the media of its <link>, <style> or @import, and the
  * supports() of its @import, up through the sheets that import it.
  */
-export function sheetApplies(sheet: CSSStyleSheet): boolean {
-  // Media queries hold or not in the sheet's own window: an iframe has a viewport of its own.
-  const realm = realmOfSheet(sheet);
+export function sheetApplies(sheet: CSSStyleSheet, realm: Window): boolean {
+  // Media queries hold or not in the sheet's own window (`realm`): an iframe has a viewport of its own.
   for (let s: CSSStyleSheet | null = sheet; s; s = s.ownerRule?.parentStyleSheet ?? null) {
     if (s.media.mediaText && !realm.matchMedia(s.media.mediaText).matches) return false;
     const owner = s.ownerRule;
@@ -159,7 +158,7 @@ export function mediaList(text: string, realm: Window): Protocol.CSS.MediaQuery[
  * The window whose document the sheet (or the sheet importing it) belongs to: that of its owner
  * node, or for a constructed sheet, the realm it was made in, whose trees alone can adopt it.
  */
-export function realmOfSheet(sheet: CSSStyleSheet): Window & typeof globalThis {
+export function realmOfSheet(sheet: CSSStyleSheet, frames: FrameRegistry): Window & typeof globalThis {
   let top = sheet;
   while (top.ownerRule?.parentStyleSheet) top = top.ownerRule.parentStyleSheet;
   if (top.ownerNode) return realmOf(top.ownerNode);

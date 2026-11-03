@@ -2,7 +2,8 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../../core/nodes';
 import type { Frame } from '../../core/frames';
-import { isElement, isNode, realmOf } from '../../core/realm';
+import { parentFrameDocument } from '../../core/geometry';
+import { documentOf, isElement, isNode, realmOf } from '../../core/realm';
 import { boxModel, resolveNode } from '../dom/dom';
 
 /**
@@ -26,15 +27,6 @@ function isRect(quad: number[]) {
 }
 
 type RGBA = Protocol.DOM.RGBA;
-
-/** The window holding a same-origin frame's window; null for the top one. */
-function frameParent(win: Window): Window | null {
-  try {
-    return win.frameElement?.ownerDocument.defaultView ?? null;
-  } catch {
-    return null;
-  }
-}
 
 const color = (c: RGBA | undefined, fallback: string) => (c ? `rgba(${c.r},${c.g},${c.b},${c.a ?? 1})` : fallback);
 
@@ -88,8 +80,12 @@ class Highlighter {
     this.tracking = new AbortController();
     const options = { capture: true, passive: true, signal: this.tracking.signal };
     // Scrolling in the iframes holding the element moves it too, and does not reach the top window.
-    for (let win: Window = realmOf(el), parent = frameParent(win); parent; win = parent, parent = frameParent(win))
-      win.addEventListener('scroll', this.redraw, options);
+    for (
+      let doc = documentOf(el), parent = parentFrameDocument(doc);
+      parent;
+      doc = parent, parent = parentFrameDocument(doc)
+    )
+      realmOf(doc).addEventListener('scroll', this.redraw, options);
     addEventListener('scroll', this.redraw, options);
     addEventListener('resize', this.redraw, options);
     // Pinch zoom and the on-screen keyboard move the visual viewport only.

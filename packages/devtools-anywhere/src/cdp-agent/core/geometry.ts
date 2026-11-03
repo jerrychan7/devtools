@@ -1,4 +1,13 @@
-import { contentDocumentOf, isFrameOwner, isHtmlElement, isSvg, isSvgElement, realmOf } from './realm';
+import {
+  contentDocumentOf,
+  isFrameOwner,
+  isHtmlElement,
+  isShadowRoot,
+  isSvg,
+  isSvgElement,
+  realmOf,
+  styleOf,
+} from './realm';
 
 /** A CDP quad: x1 y1 … x4 y4, clockwise from the top left. */
 export type Quad = number[];
@@ -13,21 +22,7 @@ export interface Box {
 export const rectQuad = (r: Box): Quad => [r.left, r.top, r.right, r.top, r.right, r.bottom, r.left, r.bottom];
 
 /** The quad of `box` (in an element's local, untransformed coordinates) mapped through `m`. */
-export function mapQuad(m: DOMMatrixReadOnly, box: Box): Quad {
-  const corners: [number, number][] = [
-    [box.left, box.top],
-    [box.right, box.top],
-    [box.right, box.bottom],
-    [box.left, box.bottom],
-  ];
-  return corners.flatMap(([x, y]) => {
-    const p = m.transformPoint(new DOMPoint(x, y));
-    return [p.x / p.w, p.y / p.w];
-  });
-}
-
-/** The computed style of an element, in its own realm. */
-const styleOf = (el: Element) => realmOf(el).getComputedStyle(el);
+export const mapQuad = (m: DOMMatrixReadOnly, box: Box): Quad => mapPoints(m, rectQuad(box));
 
 /** An SVG element with a bounding box and screen CTM (`SVGGraphicsElement`), of any realm. */
 const isSvgGraphics = (el: Element): el is SVGGraphicsElement => isSvgElement(el) && 'getBBox' in el;
@@ -356,18 +351,36 @@ function expose(scroller: Element | Window, rect: Box, visible: Box): Box {
   };
 }
 
+/** The parent of an element in the flat tree: a slotted element's slot, a shadow root's host. */
+function flatParent(el: Element): Element | null {
+  const root = el.getRootNode();
+  return el.assignedSlot ?? el.parentElement ?? (isShadowRoot(root) ? root.host : null);
+}
+
 /**
  * Scrolls an element into view like Chrome's DOM.scrollIntoViewIfNeeded: each scroll container
- * holding it, the viewport of its document and then those of the documents of the iframes
- * holding that one, from the inside out, each by itself "center if needed" ({@link exposeDelta}).
+ * holding it (up the flat tree, out of shadow trees), the viewport of its document and then those
+ * of the documents of the iframes holding that one, from the inside out, each by itself "center
+ * if needed" ({@link exposeDelta}). `part` is the area to expose, relative to the element's border
+ * box; the whole of it by default.
  */
-export function scrollIntoViewIfNeeded(el: Element): void {
+export function scrollIntoViewIfNeeded(
+  el: Element,
+  part?: { x: number; y: number; width: number; height: number }
+): void {
   const r = el.getBoundingClientRect();
-  let rect: Box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  let rect: Box = part
+    ? {
+        left: r.left + part.x,
+        top: r.top + part.y,
+        right: r.left + part.x + part.width,
+        bottom: r.top + part.y + part.height,
+      }
+    : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
   let doc = el.ownerDocument;
-  let from: Element | null = el.parentElement;
+  let from: Element | null = flatParent(el);
   for (;;) {
-    for (let a = from; a && a !== doc.documentElement && a !== doc.body; a = a.parentElement) {
+    for (let a = from; a && a !== doc.documentElement && a !== doc.body; a = flatParent(a)) {
       const style = styleOf(a);
       const clips = (v: string) => v !== 'visible' && v !== 'clip';
       if (!clips(style.overflowX) && !clips(style.overflowY)) continue;
@@ -383,7 +396,7 @@ export function scrollIntoViewIfNeeded(el: Element): void {
     if (!owner) return;
     rect = boundsOf(mapPoints(frameContentToViewport(owner), rectQuad(rect)));
     doc = owner.ownerDocument;
-    from = owner.parentElement;
+    from = flatParent(owner);
   }
 }
 

@@ -24,7 +24,7 @@ import {
   RelayCore,
   isId,
   parse,
-  type DetachParams,
+  type SessionParams,
   type Frame,
   type HelloParams,
   type Session,
@@ -96,7 +96,7 @@ export class Target extends RelayCore {
   attachClient(client: Peer) {
     const session = this.openSession(client);
     this.byClient.set(client, session);
-    this.sendOwn(JSON.stringify({ method: ATTACH_METHOD, params: { session: session.id } satisfies DetachParams }));
+    this.sendOwn(JSON.stringify({ method: ATTACH_METHOD, params: { session: session.id } satisfies SessionParams }));
   }
 
   detachClient(client: Peer) {
@@ -105,7 +105,7 @@ export class Target extends RelayCore {
     this.byClient.delete(client);
     this.closeSession(session);
     // Like a new Chrome session for whichever frontend gets the page's server next.
-    this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session: session.id } satisfies DetachParams }));
+    this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session: session.id } satisfies SessionParams }));
   }
 
   /** A message from the page: one from a connection already replaced is ignored. */
@@ -155,7 +155,7 @@ export class Target extends RelayCore {
     const stale: unknown = params('sessions');
     for (const session of Array.isArray(stale) ? stale : []) {
       if (isId(session) && !this.sessions.has(Number(session)))
-        this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session } satisfies DetachParams }));
+        this.sendOwn(JSON.stringify({ method: DETACH_METHOD, params: { session } satisfies SessionParams }));
     }
     this.hello(text(params('loaderId')));
   }

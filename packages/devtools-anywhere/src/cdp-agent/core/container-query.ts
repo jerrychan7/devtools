@@ -1,4 +1,4 @@
-import { documentOf, isShadowRoot, realmOf } from './realm';
+import { documentOf, isShadowRoot, realmOf, styleOf } from './realm';
 import { splitTopLevel } from './selectors';
 
 /**
@@ -102,7 +102,7 @@ function findContainer(start: Element | null, name: string, features: Set<string
   const size = features.size > 0;
   const block = [...features].some(f => BLOCK_FEATURES.has(f));
   for (let el = start; el; el = el.assignedSlot ?? parentOf(el)) {
-    const style = realmOf(el).getComputedStyle(el);
+    const style = styleOf(el);
     if (name && !style.containerName.split(/\s+/).includes(name)) continue;
     if (size) {
       const types = style.containerType.split(/\s+/);
@@ -124,7 +124,7 @@ interface Box {
 function contentBox(el: Element): Box | null {
   // No box (display: none on it or an ancestor, display: contents): its size is unknown.
   if (!el.getClientRects().length) return null;
-  const style = realmOf(el).getComputedStyle(el);
+  const style = styleOf(el);
   let width = parseFloat(style.width);
   let height = parseFloat(style.height);
   if (Number.isNaN(width) || Number.isNaN(height)) return null;
@@ -143,9 +143,8 @@ function length(value: string, box: Box): number | null {
   if (!m) return null;
   const n = Number(m[1]);
   const unit = (m[2] ?? '').toLowerCase();
-  const realm = realmOf(box.el);
-  const { innerWidth, innerHeight } = realm;
-  const fontSize = (el: Element) => parseFloat(realm.getComputedStyle(el).fontSize);
+  const { innerWidth, innerHeight } = realmOf(box.el);
+  const fontSize = (el: Element) => parseFloat(styleOf(el).fontSize);
   switch (unit) {
     case '':
       return n === 0 ? 0 : null;
@@ -268,7 +267,7 @@ function styleQuery(inner: string, container: Element | null): Kleene {
   const colon = inner.indexOf(':');
   const name = (colon < 0 ? inner : inner.slice(0, colon)).trim();
   if (!name.startsWith('--')) return null;
-  const actual = realmOf(container).getComputedStyle(container).getPropertyValue(name).trim();
+  const actual = styleOf(container).getPropertyValue(name).trim();
   if (colon < 0) return actual !== '';
   return actual === inner.slice(colon + 1).trim();
 }

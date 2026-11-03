@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { isCssom, isHtml, isShadowRoot } from '../../core/realm';
-import { frames } from '../../core/frames';
+import type { FrameRegistry } from '../../core/frames';
 import { isOwn } from '../../core/nodes';
 import { CdpError } from '../../core/session';
 import { adoptedOf } from '../../core/adopted';
@@ -32,10 +32,17 @@ export class SheetRegistry {
 
   private fetch: typeof globalThis.fetch;
   private shadowRoots: () => ShadowRoot[];
+  private frames: FrameRegistry;
 
-  constructor(fetch: typeof globalThis.fetch, shadowRoots: () => ShadowRoot[]) {
+  constructor(fetch: typeof globalThis.fetch, shadowRoots: () => ShadowRoot[], frames: FrameRegistry) {
     this.fetch = fetch;
     this.shadowRoots = shadowRoots;
+    this.frames = frames;
+  }
+
+  /** The window whose document the sheet belongs to ({@link realmOfSheet}). */
+  realmOf(sheet: CSSStyleSheet): Window & typeof globalThis {
+    return realmOfSheet(sheet, this.frames);
   }
 
   idOf(sheet: CSSStyleSheet): string {
@@ -95,7 +102,7 @@ export class SheetRegistry {
   trees(): { tree: TreeScope; sheets: CSSStyleSheet[] }[] {
     if (this.memo?.trees) return this.memo.trees;
     const result: { tree: TreeScope; sheets: CSSStyleSheet[] }[] = [];
-    for (const tree of [...Array.from(frames, f => f.document), ...this.shadowRoots()]) {
+    for (const tree of [...Array.from(this.frames, f => f.document), ...this.shadowRoots()]) {
       const list: CSSStyleSheet[] = [];
       for (const sheet of Array.from(tree.styleSheets)) {
         // devtools-anywhere's own sheets are not the page's.
@@ -234,7 +241,7 @@ export class SheetRegistry {
           this.ruleId(sheet, rule);
           result.push({ rule, layer });
         } else if (isCssom(rule, 'CSSMediaRule')) {
-          if (onlyActive && !realmOfSheet(sheet).matchMedia(rule.conditionText).matches) continue;
+          if (onlyActive && !this.realmOf(sheet).matchMedia(rule.conditionText).matches) continue;
           visit(this.rulesOf(rule), layer);
         } else if (isCssom(rule, 'CSSSupportsRule')) {
           if (onlyActive && !CSS.supports(rule.conditionText)) continue;
@@ -277,7 +284,7 @@ export class SheetRegistry {
 
   /** The URL the rules of a sheet come from: its own, or the base URL of its document. */
   sourceURL(sheet: CSSStyleSheet): string {
-    return sheet.href ?? sheet.ownerNode?.baseURI ?? realmOfSheet(sheet).document.baseURI;
+    return sheet.href ?? sheet.ownerNode?.baseURI ?? this.realmOf(sheet).document.baseURI;
   }
 
   origin(sheet: CSSStyleSheet): StyleOrigin {
@@ -300,7 +307,7 @@ export class SheetRegistry {
       (isHtml(owner, 'style') && !this.fromParser(owner));
     return {
       styleSheetId: this.idOf(sheet),
-      frameId: frames.ofWindow(realmOfSheet(sheet)).id,
+      frameId: this.frames.ofWindow(this.realmOf(sheet)).id,
       sourceURL: sheet.href ?? (isInspector || local || !owner ? '' : owner.baseURI),
       origin: this.origin(sheet),
       title: sheet.title ?? '',

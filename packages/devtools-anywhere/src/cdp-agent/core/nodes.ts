@@ -11,7 +11,7 @@ import {
   isFrameOwner,
   isHtml,
   isShadowRoot,
-  realmOf,
+  styleOf,
   type FrameOwner,
 } from './realm';
 
@@ -82,8 +82,8 @@ export type Inspectable = Node | PseudoElement;
 
 /** Whether `host` currently generates the pseudo-element. */
 export function hasPseudoElement(host: Element, type: PseudoType): boolean {
-  if (type === 'marker') return realmOf(host).getComputedStyle(host).display.includes('list-item');
-  const content = realmOf(host).getComputedStyle(host, `::${type}`).content;
+  if (type === 'marker') return styleOf(host).display.includes('list-item');
+  const content = styleOf(host, `::${type}`).content;
   return content !== 'none' && content !== 'normal' && content !== '';
 }
 
