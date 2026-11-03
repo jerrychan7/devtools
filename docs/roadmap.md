@@ -62,7 +62,6 @@ Of little value: the performance monitor (`Performance.getMetrics`: only the DOM
 
 ## Gaps in Emulation
 
-- `Emulation.setDeviceMetricsOverride` is not implemented: device mode in shell mode is laid out by the frontend, not through CDP, so tools that resize the viewport over CDP cannot. In shell mode it could reuse device mode's sizing of the page iframe.
 - `setEmulatedMedia`, `setUserAgentOverride` and others are no-ops that succeed. That is fine for the DevTools frontend but misleading for scripts, which take them as done. Whether they should fail instead depends on whether the frontend relies on them succeeding.
 
 ## Patches from an older release line

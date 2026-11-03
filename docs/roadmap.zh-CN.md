@@ -62,7 +62,6 @@
 
 ## Emulation 的缺口
 
-- `Emulation.setDeviceMetricsOverride` 没有实现。外壳模式下的设备模式由前端直接布局 iframe，没有走 CDP。通过 CDP 改视口的自动化工具因此改不了尺寸；在外壳模式下可以复用设备模式的 iframe 尺寸逻辑来补上。
 - `setEmulatedMedia`、`setUserAgentOverride` 等是空操作：返回成功，但实际没有效果。对 DevTools 前端来说没问题，对自动化脚本却有误导，因为它会以为已经设置好了。要不要改成返回错误，需要权衡前端是否依赖它们成功返回。
 
 ## 从旧版本线发布补丁
