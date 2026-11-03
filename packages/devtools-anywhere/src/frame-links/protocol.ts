@@ -6,7 +6,9 @@
 //   parent → iframe window   { type: FRAME_PING }            when the parent's agent is ready
 //   parent → iframe window   { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId } + a MessagePort
 //   either end → port        CDP messages, as strings; { type: FRAME_BYE } as the last
-//   parent → port            { type: FRAME_END_SESSION } when its client lets the iframe's target go
+//   parent → port            { type: FRAME_OPEN_SESSION } + a MessagePort, for each of its clients
+//                            that attaches the iframe's target: a CDP session of its own, over
+//                            that port, with the same bye; it ends with the link too
 //
 // `id` names the iframe's document: a hello the parent has answered already (it hears one per
 // ping) is not answered again, and a welcome for an earlier document is ignored. Neither hello
@@ -24,11 +26,11 @@ export const FRAME_WELCOME = 'devtools-anywhere:frame-welcome';
 /** Posted on the port by the end that closes the link: a port has no close event. */
 export const FRAME_BYE = 'devtools-anywhere:frame-bye';
 /**
- * Posted on the port by the parent when its client's session with the iframe's target ends (the
- * target detached, the client gone) while the link stays: the iframe's agent ends that session
- * and resets, as a new Chrome session starts clean.
+ * Posted on the port by the parent, with a port of its own, when one of its clients attaches the
+ * iframe's target: the iframe's agent makes a session for it, as Chrome does for each client, and
+ * ends it (what it enabled disabled) on that port's bye.
  */
-export const FRAME_END_SESSION = 'devtools-anywhere:frame-end-session';
+export const FRAME_OPEN_SESSION = 'devtools-anywhere:frame-open-session';
 
 export interface FrameHello {
   type: typeof FRAME_HELLO;

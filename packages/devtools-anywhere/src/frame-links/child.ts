@@ -12,7 +12,8 @@ const newId = () => Math.random().toString(36).slice(2);
 /**
  * Says hello to the parent window if its origin may be one of `patterns`, and again when pinged,
  * until welcomed from one of them. The link's CDP messages go to a session of this page's agent,
- * made by `createSession` and reset when the link closes; the parent's agent speaks for it.
+ * made by `createSession` and reset when the link closes; the parent's agent speaks for it, and
+ * opens one more for each of its clients that attaches this page's target.
  * Returns a function that stops and closes the link.
  */
 export function linkParent(patterns: readonly OriginPattern[], createSession: () => CdpSession): () => void {
@@ -33,7 +34,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
       parentTargetId,
       send: end.send,
       onMessage: end.onMessage,
-      onEndSession: end.onEndSession,
+      onSession: end.onSession,
       onClose: end.onClose,
       close: end.close,
     };
@@ -41,20 +42,26 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     // The page's frames are the iframe target's from now on: its top frame has the parent's id
     // for it, before the agent reports anything over the link.
     frames.link({ frameId, parentFrameId });
+    // The parent agent's own commands, on a session kept across links.
     const own = (session ??= createSession());
-    /** The end of the parent's client's last session: the next one's messages wait for it. */
-    let ended = Promise.resolve();
     const offSession = own.onMessage(message => linked.send(message));
     linked.onMessage(message => {
-      void ended.then(() =>
-        own.dispatch(message).catch(() => {
-          // Malformed message: there is no id to answer to.
-        })
-      );
+      own.dispatch(message).catch(() => {
+        // Malformed message: there is no id to answer to.
+      });
     });
-    // Like a new Chrome session for the next client: the domains disabled, ids forgotten.
-    linked.onEndSession(() => {
-      ended = ended.then(() => endSession(own)).then(() => own.reset());
+    // Each of the parent's clients that attaches this target gets a session of its own, as in
+    // Chrome; it ends as on a frontend's disconnect, the domains disabled and ids forgotten.
+    linked.onSession(channel => {
+      const client = createSession();
+      const off = client.onMessage(message => channel.send(message));
+      channel.onMessage(message => {
+        client.dispatch(message).catch(() => {});
+      });
+      channel.onClose(() => {
+        off();
+        void endSession(client).then(() => client.reset());
+      });
     });
     linked.onClose(() => {
       offSession();
@@ -62,8 +69,8 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
         link = undefined;
         frames.link(undefined);
       }
-      // Nothing the parent's DevTools asked for outlives the link, as on a frontend's disconnect.
-      void ended.then(() => endSession(own)).then(() => own.reset());
+      // Nothing the parent's agent asked for outlives the link.
+      void endSession(own).then(() => own.reset());
     });
     childTargets.setParent(linked);
   };

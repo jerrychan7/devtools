@@ -55,7 +55,7 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
       frameId,
       send: end.send,
       onMessage: end.onMessage,
-      endSession: end.endSession,
+      openSession: end.openSession,
       onClose: end.onClose,
       close: end.close,
     };

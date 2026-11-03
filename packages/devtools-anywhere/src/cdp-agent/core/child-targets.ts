@@ -5,11 +5,28 @@ import { FRAME_ID } from './context';
  * test-support/oopif-notes.md). An iframe whose page loads the probe too, and whose origin and
  * the parent's trust each other, gets a link: a MessagePort carrying CDP messages between the
  * parent's agent and the iframe's own. The parent's Target domain announces it as an `iframe`
- * target and routes the frontend's messages to it by `sessionId`.
+ * target and routes the frontend's messages to it by `sessionId`, each client's over a session of
+ * its own with the iframe's agent, as Chrome gives each client its own session with a target.
  *
  * This file is the contract between the two halves: the handshake that makes links
  * (trust, the probe attributes, the port) and the Target domain that uses them.
  */
+
+/**
+ * A session of one of the parent's clients with the iframe's agent, over the link: CDP messages
+ * without `sessionId`, both ways.
+ */
+export interface ChildSession {
+  send(message: string): void;
+  onMessage(listener: (message: string) => void): () => void;
+  /** Listens to the session's end: closed by either end, or the link closed. */
+  onClose(listener: () => void): () => void;
+  /**
+   * Ends the session, as a client disconnecting from Chrome: what it enabled in the iframe's
+   * agent is disabled, and its node ids and remote objects are forgotten.
+   */
+  close(): void;
+}
 
 /** The parent's end of a link to a cross-origin iframe's agent. */
 export interface ChildLink {
@@ -17,16 +34,15 @@ export interface ChildLink {
   readonly owner: Element;
   /** The frame id the parent gave the iframe: the child target's id, as in Chrome. */
   readonly frameId: string;
-  /** Sends a CDP message (without `sessionId`) to the iframe's agent. */
-  send(message: string): void;
-  /** Listens to the iframe agent's CDP messages: responses and events, without `sessionId`. */
-  onMessage(listener: (message: string) => void): () => void;
   /**
-   * Ends the session the iframe's agent has for the link's client, as a new Chrome session
-   * starts clean: what it enabled is disabled, and its node ids and remote objects are
-   * forgotten. Messages sent after it reach the new session.
+   * Sends a CDP message (without `sessionId`) to the iframe's agent, on a session of the parent
+   * agent's own (askChild, the Input domain's forwarding), no client's.
    */
-  endSession(): void;
+  send(message: string): void;
+  /** Listens to the iframe agent's CDP messages on that session: responses and events, without `sessionId`. */
+  onMessage(listener: (message: string) => void): () => void;
+  /** Opens a new session with the iframe's agent, for a client that attaches the target. */
+  openSession(): ChildSession;
   /**
    * Listens to the link's end: the iframe navigated away, was removed, or closed it. The target
    * may outlive it (ChildTargets.onGone), for the iframe's next document.
@@ -45,8 +61,8 @@ export interface ParentLink {
   readonly parentTargetId: string;
   send(message: string): void;
   onMessage(listener: (message: string) => void): () => void;
-  /** Listens to the parent ending its client's session ({@link ChildLink.endSession}). */
-  onEndSession(listener: () => void): () => void;
+  /** Listens to the sessions the parent opens for its clients ({@link ChildLink.openSession}). */
+  onSession(listener: (session: ChildSession) => void): () => void;
   onClose(listener: () => void): () => void;
   close(): void;
 }
@@ -66,8 +82,8 @@ export const RELINK_TIMEOUT = 10_000;
 export const RELINK_AFTER_LOAD = 2000;
 
 /**
- * Prefix of the ids of an agent's own commands to an iframe's agent (askChild): their responses
- * are not the client's, and are not passed on to it.
+ * Prefix of the ids of an agent's own commands to an iframe's agent (askChild, the Target
+ * domain's replays): their responses are not the client's, and are not passed on to it.
  */
 export const OWN_ID_PREFIX = 'target-own-';
 let ownSeq = 0;

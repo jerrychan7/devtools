@@ -284,23 +284,23 @@ test('getTargets, getTargetInfo and setDiscoverTargets list the page and its ifr
   assert.deepEqual(field(field(own, 'targetInfo'), 'type'), 'iframe');
 });
 
-test("a client's end detaches silently, and another client's session can attach the iframe then", async () => {
+test("a client's end detaches silently, and leaves another client's session with the target", async () => {
   const frameId = await add('child');
   const other = await page.evaluate(() => window.__harness?.another() ?? -1);
   send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
   await attached(frameId);
-  // The link carries one session: the other client's waits for it.
+  // Like Chrome: each client attaches the target, with a session of its own.
   await page.evaluate(
     (other, params) => window.__harness?.others[other]?.call('Target.setAutoAttach', params),
     other,
     AUTO_ATTACH
   );
-  await new Promise(r => setTimeout(r, 200));
-  assert.equal((await events('Target.attachedToTarget')).length, 1);
-  await page.evaluate(() => window.__harness?.end());
   const theirs = await message(m => m['method'] === 'Target.attachedToTarget' && m['other'] === other);
   assert.equal(field(field(theirs['params'], 'targetInfo'), 'targetId'), frameId);
+  await page.evaluate(() => window.__harness?.end());
+  await waitFor(async () => ((await received('child')).some(m => m['endSession'] === true) ? true : undefined));
   assert.equal((await events('Target.detachedFromTarget')).length, 0);
+  assert.equal((await received('child')).filter(m => m['endSession'] === true).length, 1);
 });
 
 test('embedded: messages with a session id go through connectFrontend both ways', async () => {

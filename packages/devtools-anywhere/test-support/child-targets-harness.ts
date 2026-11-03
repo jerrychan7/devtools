@@ -1,10 +1,11 @@
 // Runs in a test page (bundled from the sources by bundleHarness, in child-targets.ts): the page's
-// agent with stand-in links to cross-origin iframes. Each stand-in iframe agent is a CDP session
-// in the same page with the Target domain of its own (so it can have children too) and a
-// Runtime.evaluate that answers its name; its link passes messages on asynchronously, as a
+// agent with stand-in links to cross-origin iframes. Each stand-in iframe agent is CDP sessions
+// in the same page, one for the link and one per session the parent opens, each with the Target
+// domain of its own (so it can have children too) and a Runtime that answers the agent's name
+// and, enabled, reports an execution context; its link passes messages on asynchronously, as a
 // MessagePort would.
 import { CdpSession, FRAME_ID, childTargets, createCdpSession } from '../src/cdp-agent';
-import { ChildTargets, type ChildLink, type ParentLink } from '../src/cdp-agent/core/child-targets';
+import { ChildTargets, type ChildLink, type ChildSession, type ParentLink } from '../src/cdp-agent/core/child-targets';
 import { frames } from '../src/cdp-agent/core/frames';
 import { registerTarget } from '../src/cdp-agent/domains/target/target';
 import { connectFrontend, endSession } from '../src/connection';
@@ -24,28 +25,65 @@ interface Agent {
 
 const parse = (message: string): Record<string, unknown> => ({ ...Object(JSON.parse(message)) });
 
-function newLink(owner: Element, frameId: string, agent: CdpSession, received: Record<string, unknown>[]): ChildLink {
+/** Messages from `agent` to `listeners`, and to `agent` by `send`, asynchronously, while `open()`. */
+function channelTo(agent: CdpSession, open: () => boolean) {
   const listeners = new Set<(message: string) => void>();
-  const closes = new Set<() => void>();
-  let open = true;
   agent.onMessage(message => {
-    if (open) queueMicrotask(() => listeners.forEach(listener => listener(message)));
+    if (open()) queueMicrotask(() => listeners.forEach(listener => listener(message)));
   });
   return {
-    owner,
-    frameId,
-    send(message) {
-      if (open) queueMicrotask(() => void agent.dispatch(message).catch(() => {}));
+    send(message: string) {
+      if (open()) queueMicrotask(() => void agent.dispatch(message).catch(() => {}));
     },
-    onMessage(listener) {
+    onMessage(listener: (message: string) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    endSession() {
-      if (!open) return;
-      // Recorded among what the agent received, as a message of its own.
-      received.push({ endSession: true });
-      queueMicrotask(() => void endSession(agent).then(() => agent.reset()));
+  };
+}
+
+/**
+ * A stand-in link to the agent whose sessions `make` makes: one for the link, one per session
+ * opened. Each session's end is recorded among what the agent received, as a message of its own.
+ */
+function newLink(
+  owner: Element,
+  frameId: string,
+  make: () => CdpSession,
+  received: Record<string, unknown>[]
+): { link: ChildLink; own: CdpSession } {
+  const closes = new Set<() => void>();
+  const sessions = new Set<() => void>();
+  let open = true;
+  const own = make();
+  const { send, onMessage } = channelTo(own, () => open);
+  const link: ChildLink = {
+    owner,
+    frameId,
+    send,
+    onMessage,
+    openSession() {
+      const agent = make();
+      const ends = new Set<() => void>();
+      let live = open;
+      const end = () => {
+        if (!live) return;
+        live = false;
+        sessions.delete(end);
+        received.push({ endSession: true });
+        queueMicrotask(() => void endSession(agent).then(() => agent.reset()));
+        ends.forEach(listener => listener());
+      };
+      if (live) sessions.add(end);
+      const session: ChildSession = {
+        ...channelTo(agent, () => live),
+        onClose(listener) {
+          ends.add(listener);
+          return () => ends.delete(listener);
+        },
+        close: end,
+      };
+      return session;
     },
     onClose(listener) {
       closes.add(listener);
@@ -54,9 +92,11 @@ function newLink(owner: Element, frameId: string, agent: CdpSession, received: R
     close() {
       if (!open) return;
       open = false;
+      [...sessions].forEach(end => end());
       closes.forEach(listener => listener());
     },
   };
+  return { link, own };
 }
 
 const parentLink = (frameId: string, parentFrameId: string): ParentLink => ({
@@ -65,7 +105,7 @@ const parentLink = (frameId: string, parentFrameId: string): ParentLink => ({
   parentTargetId: parentFrameId,
   send() {},
   onMessage: () => () => {},
-  onEndSession: () => () => {},
+  onSession: () => () => {},
   onClose: () => () => {},
   close() {},
 });
@@ -105,25 +145,31 @@ export class Harness {
 
   /** A stand-in agent for the document in `owner`, linked to `holder`. */
   #link(name: string, owner: Element, frameId: string, parent: string | undefined, holder: ChildTargets) {
-    const session = new CdpSession();
     const targets = new ChildTargets();
     targets.setParent(
       parentLink(frameId, parent === undefined ? FRAME_ID : (this.agents.get(parent)?.link.frameId ?? ''))
     );
-    registerTarget({ session, frames }, targets);
-    session.register('Runtime', {
-      enable: () => {},
-      disable: () => {},
-      runIfWaitingForDebugger: () => {},
-      evaluate: () => ({ result: { type: 'string', value: name } }),
-    });
     const received: Record<string, unknown>[] = [];
-    const dispatch = session.dispatch.bind(session);
-    session.dispatch = message => {
-      if (typeof message === 'string') received.push(parse(message));
-      return dispatch(message);
+    const make = () => {
+      const session = new CdpSession();
+      registerTarget({ session, frames }, targets);
+      let contexts = 0;
+      session.register('Runtime', {
+        enable: () => {
+          session.emit('Runtime.executionContextCreated', { context: { id: ++contexts, name } });
+        },
+        disable: () => {},
+        runIfWaitingForDebugger: () => {},
+        evaluate: () => ({ result: { type: 'string', value: name } }),
+      });
+      const dispatch = session.dispatch.bind(session);
+      session.dispatch = message => {
+        if (typeof message === 'string') received.push(parse(message));
+        return dispatch(message);
+      };
+      return session;
     };
-    const link = newLink(owner, frameId, session, received);
+    const { link, own: session } = newLink(owner, frameId, make, received);
     this.agents.set(name, { session, targets, link, received, parent, holder });
     holder.addChild(link);
   }
