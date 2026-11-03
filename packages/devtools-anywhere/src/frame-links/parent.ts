@@ -107,6 +107,8 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     removeEventListener('pageshow', onPageshow);
     offParent();
     closeAll();
+    // And those kept for their iframe's next document, which no link can carry on now.
+    for (const owner of watched.keys()) childTargets.end(owner);
     offGone();
   };
 }

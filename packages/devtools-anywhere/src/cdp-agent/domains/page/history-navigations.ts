@@ -40,8 +40,27 @@ export function sameDocumentNavigations(session: CdpSession, frames: FrameRegist
     History,
     Map<HistoryMethod, { native: History[HistoryMethod]; wrapper: History[HistoryMethod] }>
   >();
+  /** The History prototype of each frame's current document, so that a gone realm is let go. */
+  const protoOf = new Map<Frame, History>();
+  const unpatch = (proto: History) => {
+    const methods = patched.get(proto);
+    if (!methods) return;
+    // A wrapper installed on top of ours stays, and ours, silent, with it.
+    for (const [name, { native, wrapper }] of methods) if (proto[name] === wrapper) proto[name] = native;
+    patched.delete(proto);
+  };
+  /** Lets the frame's last realm go, once no frame's current document is in it any more. */
+  const release = (frame: Frame) => {
+    const proto = protoOf.get(frame);
+    protoOf.delete(frame);
+    if (proto && !Array.from(protoOf.values()).includes(proto)) unpatch(proto);
+  };
   const patch = (frame: Frame) => {
     const proto = realmOf(frame.document).History.prototype;
+    if (protoOf.get(frame) !== proto) {
+      release(frame);
+      protoOf.set(frame, proto);
+    }
     if (patched.has(proto)) return;
     const methods = new Map<HistoryMethod, { native: History[HistoryMethod]; wrapper: History[HistoryMethod] }>();
     for (const name of ['pushState', 'replaceState'] as const) {
@@ -111,17 +130,18 @@ export function sameDocumentNavigations(session: CdpSession, frames: FrameRegist
     listen(frame);
     reported.set(frame, frame.document.URL);
   };
-  const stopFrames = frames.onChange(({ type, frame }) => (type === 'detached' ? unlisten(frame) : follow(frame)));
+  const stopFrames = frames.onChange(({ type, frame }) => {
+    if (type !== 'detached') return follow(frame);
+    unlisten(frame);
+    release(frame);
+  });
   for (const frame of frames) follow(frame);
 
   return () => {
     on = false;
     stopFrames();
     for (const frame of Array.from(listening.keys())) unlisten(frame);
-    // A wrapper installed on top of ours stays, and ours, silent, with it.
-    for (const [proto, methods] of patched) {
-      for (const [name, { native, wrapper }] of methods) if (proto[name] === wrapper) proto[name] = native;
-      patched.delete(proto);
-    }
+    for (const proto of Array.from(patched.keys())) unpatch(proto);
+    protoOf.clear();
   };
 }

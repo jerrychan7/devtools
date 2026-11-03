@@ -381,6 +381,25 @@ describe('Runtime exceptions of commands', () => {
     assert.equal(await t.page.evaluate(() => 'keys' in window), false);
   });
 
+  test('evaluations running at once keep the utilities until the last one settles', async () => {
+    // Ours only: both sides share the page's window, so Chrome's evaluations would see our
+    // utilities. Chrome itself has none after an `await` (its scope ends with the synchronous
+    // part); keeping them across it is ours.
+    const run = (ms: number) =>
+      t.ours.send('Runtime.evaluate', {
+        expression: `(await new Promise(r => setTimeout(r, ${ms})), typeof $)`,
+        replMode: true,
+        includeCommandLineAPI: true,
+        returnByValue: true,
+      });
+    const results = await Promise.all([run(50), run(150)]);
+    assert.deepEqual(
+      results.map(r => r.result.value),
+      ['function', 'function']
+    );
+    assert.equal(await t.page.evaluate(() => '$' in window), false);
+  });
+
   test('callFunctionOn passes objectId, value and unserializableValue arguments', async () => {
     const [{ result: o }, { result: c }] = await Promise.all([
       t.ours.send('Runtime.evaluate', { expression: '({ n: 1 })' }),
