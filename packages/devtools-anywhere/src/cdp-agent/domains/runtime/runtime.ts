@@ -3,6 +3,7 @@ import type { Context } from '../../core/context';
 import type { Frame } from '../../core/frames';
 import { returnOutsideFunction } from '../../core/lexer';
 import { isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
+import { mergedFrames, ownerOfId } from '../../core/merged-frames';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
@@ -232,6 +233,32 @@ interface Scope {
   utilities: Map<string, unknown>;
   utilityUsers: number;
 }
+
+// A merged sandboxed iframe's contexts and objects are its agent's (core/merged-frames.ts): commands
+// naming them go there, the others reach every agent. Its events (executionContextCreated,
+// consoleAPICalled, exceptionThrown) carry ids of its namespace and are the client's as they are.
+mergedFrames.registerRoutes('Runtime', {
+  routeBy: {
+    'Runtime.evaluate': ['contextId', 'uniqueContextId'],
+    // An argument of the other side is unknown where the call runs, as across processes in Chrome.
+    'Runtime.callFunctionOn': ['objectId', 'executionContextId', 'uniqueContextId'],
+    'Runtime.getProperties': ['objectId'],
+    'Runtime.releaseObject': ['objectId'],
+    'Runtime.awaitPromise': ['promiseObjectId'],
+    'Runtime.compileScript': ['executionContextId'],
+    'Runtime.runScript': ['executionContextId'],
+    'Runtime.globalLexicalScopeNames': ['executionContextId'],
+  },
+  fanOut: [
+    'Runtime.enable',
+    'Runtime.disable',
+    'Runtime.runIfWaitingForDebugger',
+    'Runtime.releaseObjectGroup',
+    'Runtime.discardConsoleEntries',
+    'Runtime.addBinding',
+  ],
+});
+mergedFrames.registerRoutes('Log', { fanOut: ['Log.clear'] });
 
 export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
   const topFrame = frames.top;
@@ -498,6 +525,11 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         throw new CdpError('ObjectId, executionContextId and uniqueContextId must mutually exclude each other', -32602);
       if (targets === 0)
         throw new CdpError('Either objectId or executionContextId or uniqueContextId must be specified', -32602);
+      // An object of the other side of a merge (core/merged-frames.ts) is in another world, as for
+      // Chrome, where the sandboxed iframe shares the page's process.
+      const world = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
+      if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== world))
+        throw new CdpError('Argument should belong to the same JavaScript world as target object');
       const self = params.objectId ? objects.get(params.objectId) : undefined;
       // Like Chrome, in the context asked for, else in the object's.
       const scope = scopeOf(
