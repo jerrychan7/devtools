@@ -63,6 +63,11 @@ export interface FrameWelcome {
   mode: 'target' | 'merge';
   /** The namespace of the merged iframe's ids (1 or more); 0 for a child target. */
   ns: number;
+  /**
+   * A merged iframe's: the loader id the parent gives its document, which Chrome gives the
+   * document's requests too (cdp-agent/core/frames.ts, opaqueLoaderId).
+   */
+  loaderId?: string;
 }
 
 /** The highest namespace: `ns * 2^32` plus an agent's own ids stays a safe integer. */
@@ -92,8 +97,18 @@ export function readWelcome(data: unknown): FrameWelcome | null {
   if (typeof ns !== 'number' || !Number.isInteger(ns)) return null;
   if (mode === 'target' && ns === 0)
     return { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId, mode, ns };
+  const loaderId = field(data, 'loaderId');
   if (mode === 'merge' && ns >= 1 && ns <= MAX_NS)
-    return { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId, mode, ns };
+    return {
+      type: FRAME_WELCOME,
+      id,
+      frameId,
+      parentFrameId,
+      parentTargetId,
+      mode,
+      ns,
+      ...(typeof loaderId === 'string' ? { loaderId } : {}),
+    };
   return null;
 }
 

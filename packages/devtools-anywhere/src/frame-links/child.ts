@@ -54,7 +54,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     if (!link) postToTrusted(window.parent, { type: FRAME_HELLO, id }, patterns);
   };
 
-  const connect = (port: MessagePort, { frameId, parentFrameId, parentTargetId, mode, ns }: FrameWelcome) => {
+  const connect = (port: MessagePort, { frameId, parentFrameId, parentTargetId, mode, ns, loaderId }: FrameWelcome) => {
     const merged = mode === 'merge';
     // Merged into the parent's agent, this page's ids are in the namespace it gave, before any
     // session makes one for the link.
@@ -73,7 +73,7 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
     link = linked;
     // The page's frames are the iframe target's from now on: its top frame has the parent's id
     // for it, before the agent reports anything over the link.
-    frames.link({ frameId, parentFrameId });
+    frames.link({ frameId, parentFrameId, ...(loaderId === undefined ? {} : { loaderId }) });
     // The parent agent's own commands, on a session kept across links.
     const own = (session ??= createSession());
     const offSession = pipe(own, linked, () => ending);
