@@ -4,6 +4,7 @@ import { type Context } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
 import { parentOf } from '../../core/container-query';
 import { CdpError } from '../../core/session';
+import { mergedFrames } from '../../core/merged-frames';
 import { resolveElement } from '../dom/dom';
 import { historyOf } from '../../core/history';
 import { quietly, watchAdopted, watchTrees } from '../../core/adopted';
@@ -21,6 +22,40 @@ const OBSERVED: MutationObserverInit = {
   characterData: true,
   attributeFilter: ['href', 'rel', 'disabled', 'media', 'type'],
 };
+
+/**
+ * Commands for a merged sandboxed iframe's nodes or style sheets go to its agent
+ * (core/merged-frames.ts); its style sheets come in its own CSS.styleSheetAdded, of its frame id.
+ * The rest fan out: what they answer without an id (media queries, computed style updates) the
+ * iframe's agent answers empty, as the page's does, so the page's answer is the merged one.
+ */
+const NODE_ID = ['nodeId'];
+const SHEET_ID = ['styleSheetId'];
+mergedFrames.registerRoutes('CSS', {
+  routeBy: {
+    'CSS.getMatchedStylesForNode': NODE_ID,
+    'CSS.getInlineStylesForNode': NODE_ID,
+    'CSS.getComputedStyleForNode': NODE_ID,
+    'CSS.getBackgroundColors': NODE_ID,
+    'CSS.getPlatformFontsForNode': NODE_ID,
+    'CSS.forcePseudoState': NODE_ID,
+    'CSS.setEffectivePropertyValueForNode': NODE_ID,
+    'CSS.getStyleSheetText': SHEET_ID,
+    'CSS.setStyleSheetText': SHEET_ID,
+    'CSS.collectClassNames': SHEET_ID,
+    'CSS.setRuleSelector': SHEET_ID,
+    'CSS.addRule': SHEET_ID,
+    'CSS.setStyleTexts': ['edits.0.styleSheetId'],
+    'CSS.createStyleSheet': ['frameId'],
+  },
+  fanOut: [
+    'CSS.enable',
+    'CSS.disable',
+    'CSS.getMediaQueries',
+    'CSS.trackComputedStyleUpdates',
+    'CSS.takeComputedStyleUpdates',
+  ],
+});
 
 export function registerCss(ctx: Context) {
   const { session, nodes } = ctx;
