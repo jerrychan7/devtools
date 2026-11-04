@@ -127,6 +127,7 @@ export class MergedFrames {
   readonly #fanOut = new Set<string>();
   readonly #clients = new Map<CdpSession, ClientState>();
   readonly #linked = new Set<(ns: number, link: ChildLink) => void>();
+  readonly #routed = new Set<(session: CdpSession, ns: number, method: string) => void>();
 
   constructor(targets: ChildTargets = childTargets) {
     this.#targets = targets;
@@ -218,7 +219,18 @@ export class MergedFrames {
   route(session: CdpSession, method: string, params: object): Promise<unknown> | undefined {
     const ns = this.ownerOf(method, params);
     if (ns === undefined || !this.#links.has(ns)) return undefined;
-    return this.forSession(session).ask(ns, method, params);
+    return this.forSession(session)
+      .ask(ns, method, params)
+      .then(result => {
+        for (const listener of this.#routed) listener(session, ns, method);
+        return result;
+      });
+  }
+
+  /** Calls `listener` after each routed command a frame's agent answered with a result; returns its removal. */
+  onRouted(listener: (session: CdpSession, ns: number, method: string) => void): () => void {
+    this.#routed.add(listener);
+    return () => this.#routed.delete(listener);
   }
 
   /** Runs a command in the page, then in every merged frame's agent, whose answers are ignored. */

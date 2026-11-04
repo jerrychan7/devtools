@@ -764,7 +764,11 @@ export function registerDom(ctx: Context) {
     moveTo(params: Protocol.DOM.MoveToRequest): Protocol.DOM.MoveToResponse | Promise<unknown> {
       // Within a merged frame, its agent moves it; not across the iframe (-32000).
       const ns = merged.oneFrame([params.nodeId, params.targetNodeId, params.insertBeforeNodeId]);
-      if (ns !== undefined) return merged.ask(ns, 'DOM.moveTo', params);
+      if (ns !== undefined)
+        return merged.ask(ns, 'DOM.moveTo', params).then(result => {
+          merged.recordEdit(ns);
+          return result;
+        });
       const node = resolveNode(ctx, params);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
@@ -775,7 +779,11 @@ export function registerDom(ctx: Context) {
 
     copyTo(params: Protocol.DOM.CopyToRequest): Protocol.DOM.CopyToResponse | Promise<unknown> {
       const ns = merged.oneFrame([params.nodeId, params.targetNodeId, params.insertBeforeNodeId]);
-      if (ns !== undefined) return merged.ask(ns, 'DOM.copyTo', params);
+      if (ns !== undefined)
+        return merged.ask(ns, 'DOM.copyTo', params).then(result => {
+          merged.recordEdit(ns);
+          return result;
+        });
       const copy = resolveNode(ctx, params).cloneNode(true);
       // The copy is not forced into any pseudo-class state.
       if (isElement(copy))
@@ -957,8 +965,14 @@ export function registerDom(ctx: Context) {
 
     getTopLayerElements: () => ({ nodeIds: [] }),
     markUndoableState: () => history.markUndoableState(),
-    undo: () => history.undo(),
-    redo: () => history.redo(),
+    async undo() {
+      history.undo();
+      await merged.replayed();
+    },
+    async redo() {
+      history.redo();
+      await merged.replayed();
+    },
     hideHighlight: () => session.call('Overlay.hideHighlight'),
     highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => session.call('Overlay.highlightNode', params),
   });
