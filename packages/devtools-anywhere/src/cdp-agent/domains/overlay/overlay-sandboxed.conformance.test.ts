@@ -86,6 +86,26 @@ test("highlightNode draws a sandboxed iframe's node on the page where Chrome pla
   assert.deepEqual(actual, expected);
 });
 
+test("hideHighlight sent while a sandboxed iframe's node is being highlighted leaves nothing drawn", async () => {
+  // Chrome applies overlay commands in order; its overlay is not in the page's DOM, so only ours
+  // is looked at. The merged highlight awaits the iframe's agent, and the hide arrives meanwhile.
+  const layers = await run(ours, async side => {
+    await side.send('Overlay.enable');
+    const objectId = await targetObject(side);
+    await Promise.all([
+      side.send('Overlay.highlightNode', { objectId, highlightConfig: {} }),
+      side.send('Overlay.hideHighlight'),
+    ]);
+    const drawn = await side.send('Runtime.evaluate', {
+      returnByValue: true,
+      awaitPromise: true,
+      expression: `${DRAWN}.then(() => document.querySelectorAll('[data-devtools-anywhere="overlay"]').length)`,
+    });
+    return get(get(drawn, 'result'), 'value');
+  });
+  assert.equal(layers, 0);
+});
+
 test('inspect mode picks the node clicked in a sandboxed iframe, as in Chrome', async () => {
   const pick = async (side: MergedSide) => {
     await side.send('Overlay.enable');

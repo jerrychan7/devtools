@@ -40,6 +40,15 @@ class Highlighter {
   private current: { el: Element; config: Protocol.Overlay.HighlightConfig } | null = null;
   private tracking: AbortController | null = null;
   private frame = 0;
+  private drawn = 0;
+
+  /**
+   * Bumped by every highlight and hide, in the order the commands arrive: a highlight awaited
+   * elsewhere (a merged frame's) draws only if nothing came after it, as in Chrome.
+   */
+  get generation(): number {
+    return this.drawn;
+  }
 
   private ensureLayer(): HTMLDivElement {
     if (this.layer?.isConnected) return this.layer;
@@ -52,6 +61,7 @@ class Highlighter {
   }
 
   hide() {
+    this.drawn++;
     this.untrack();
     this.layer?.remove();
     this.layer = null;
@@ -64,6 +74,7 @@ class Highlighter {
 
   /** Highlights an element's margin, border, padding and content boxes, with a size label. */
   element(el: Element, config: Protocol.Overlay.HighlightConfig = {}) {
+    this.drawn++;
     if (this.current?.el !== el || !this.tracking) this.track(el);
     this.current = { el, config };
     this.draw(el, config);
@@ -115,6 +126,7 @@ class Highlighter {
    * agent reports it, mapped into the top viewport (`m`); `name` is its label's selector.
    */
   remote(model: Protocol.DOM.BoxModel, m: DOMMatrixReadOnly, config: Protocol.Overlay.HighlightConfig, name: string) {
+    this.drawn++;
     this.untrack();
     const map = (q: number[]) => mapPoints(m, q);
     this.paint(
@@ -184,12 +196,14 @@ class Highlighter {
   }
 
   area(x: number, y: number, width: number, height: number, fill: string, outline?: string) {
+    this.drawn++;
     this.untrack();
     const layer = this.ensureLayer();
     layer.replaceChildren(this.rect(x, y, width, height, fill, outline));
   }
 
   areaQuad(q: number[], fill: string, outline?: string) {
+    this.drawn++;
     this.untrack();
     const layer = this.ensureLayer();
     layer.replaceChildren(this.quad(q, fill, outline));
@@ -376,12 +390,15 @@ export function registerOverlay(ctx: Context) {
     if (!link) throw new CdpError('No node with given id found');
     const ids = { nodeId: params.nodeId, backendNodeId: params.backendNodeId, objectId: params.objectId };
     const client = mergedFrames.forSession(session);
+    const generation = highlighter.generation;
     const [box, described] = await Promise.all([
       client.ask(ns, 'DOM.getBoxModel', ids),
       client.ask(ns, 'DOM.describeNode', ids),
     ]);
     const model = typeof box === 'object' && box !== null ? Reflect.get(box, 'model') : undefined;
     if (!isBoxModel(model)) throw new CdpError('Could not compute box model.');
+    // Hidden or highlighted again while asking: that later command stands, as in Chrome.
+    if (highlighter.generation !== generation) return;
     highlighter.remote(model, ownerContentToTop(link.owner), params.highlightConfig, labelOf(described));
   }
 
