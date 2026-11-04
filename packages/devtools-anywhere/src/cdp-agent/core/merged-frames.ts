@@ -33,7 +33,8 @@ import { CdpError, type CdpSession } from './session';
  *     report on enable comes before the client's answer). The last params of each are kept, a
  *     `.disable` dropping its `.enable`, and sent again to a merged frame linked later (a reload).
  * - Ids: a merged frame's agent makes its ids in namespace `ns` (1, 2, …, given by the handshake,
- *   a new one for each document, so that no id of a document gone is taken again, as in Chrome):
+ *   a new one for each document, so that no id of a document gone is taken again, as in Chrome;
+ *   the same document linked again keeps its own, {@link MergedFrames.nsFor}):
  *   integers (nodeId, backendNodeId, executionContextId) from `ns * 2^32`, strings (objectId,
  *   styleSheetId, scriptId, requestId) prefixed `m{ns}.`; frame ids are the page's own for the
  *   iframe. {@link ownerOfId} tells which: the page's own ids are below 2^32 and unprefixed.
@@ -126,6 +127,8 @@ export class MergedFrames {
   /** The links by namespace. */
   readonly #links = new Map<number, ChildLink>();
   #nsSeq = 0;
+  /** The namespace each element's frame was given last. */
+  readonly #lastNs = new WeakMap<Element, number>();
   readonly #routes = new Map<string, readonly string[]>();
   readonly #fanOut = new Set<string>();
   readonly #clients = new Map<CdpSession, ClientState>();
@@ -136,11 +139,15 @@ export class MergedFrames {
   }
 
   /**
-   * A namespace for the next merged document: a new one each time, a frame's next document
-   * included, whose ids then never are those of the one before (Chrome takes none again).
+   * The namespace of a document of `owner`'s frame that says hello: a new one for each document, a
+   * frame's next one included, whose ids then never are those of the one before (Chrome takes none
+   * again); but `previous`, the one a document linked before tells (its ids made already are in
+   * it), if `owner`'s frame was given it last.
    */
-  nextNs(): number {
-    return ++this.#nsSeq;
+  nsFor(owner: Element, previous?: number): number {
+    const ns = previous !== undefined && previous === this.#lastNs.get(owner) ? previous : ++this.#nsSeq;
+    this.#lastNs.set(owner, ns);
+    return ns;
   }
 
   /**

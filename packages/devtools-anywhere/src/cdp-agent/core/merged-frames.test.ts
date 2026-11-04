@@ -286,11 +286,18 @@ test('a command by frame id goes to that frame', async () => {
   assert.deepEqual(await send('Page.getResourceTree', { frameId: 'FRAME-A' }), { id: 1, result: { from: 'A' } });
 });
 
-test('each merged document gets a namespace of its own, that of a frame reloaded included', () => {
+test('each merged document gets a namespace of its own; one linked again keeps its own', () => {
   const merged = setUp();
-  assert.equal(merged.nextNs(), 1);
-  assert.equal(merged.nextNs(), 2);
-  assert.equal(merged.nextNs(), 3);
+  const one = {} as Element;
+  const two = {} as Element;
+  assert.equal(merged.nsFor(one), 1);
+  assert.equal(merged.nsFor(two), 2);
+  // The frame's next document (no namespace told), then that one linked again.
+  assert.equal(merged.nsFor(one), 3);
+  assert.equal(merged.nsFor(one, 3), 3);
+  // A namespace the element was not given last is not given again, to it or another.
+  assert.equal(merged.nsFor(one, 1), 4);
+  assert.equal(merged.nsFor(two, 4), 5);
 });
 
 /** A frame agent that announces a context, of namespace `ns`, on Runtime.enable. */
