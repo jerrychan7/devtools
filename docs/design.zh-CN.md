@@ -80,8 +80,8 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 
 没有 `allow-same-origin` 的沙箱 iframe（`src` 与页面同源、`about:blank` 或 `srcdoc`）在 Chrome 里属于页面自己的 target，所以它的 agent 像跨域 iframe 那样建立链接，但并入父页面的 target，而不是成为子 target（`src/frame-links/`、`src/cdp-agent/core/merged-frames.ts`）。
 
-- **信任。** 父页面的 `data-frame-origins` 写了 `sandboxed` 才开启；任何源和通配符都不匹配 `null`。父页面只接受满足以下条件的 `null` 源 hello：消息受信任，来自 owner 元素自己的 `contentWindow`，并且该 owner 是页面里的不透明沙箱 frame（`src` 跨站的拒绝）。welcome 没法发往不透明源，只能发往 `*`，但只投递给那个 window，带上 hello 的 nonce，并且要确认 hello 之后 frame 的文档（它的 loader id）没变。welcome 写明 `merge`，带上 id 号段和文档的 loader id；iframe 只有自己的源是 `null` 时才接受 merge。
-- **id。** iframe 的 agent 在自己的号段里分配 id：节点、backend 节点和执行上下文 id 从 `ns × 2^32` 起，对象、样式表、脚本、请求和 loader 的 id 加 `m{ns}.` 前缀。id 的归属直接从 id 上读出，不用维护映射表。
+- **信任。** 父页面的 `data-frame-origins` 写了 `sandboxed` 才开启；任何源和通配符都不匹配 `null`。父页面只接受满足以下条件的 `null` 源 hello：消息受信任，来自 owner 元素自己的 `contentWindow`，并且该 owner 是页面里的不透明沙箱 frame（`src` 跨源的拒绝，同站的也一样）。welcome 没法发往不透明源，只能发往 `*`，但只投递给那个 window，带上 hello 的 nonce，并且要确认 hello 之后 frame 的文档（它的 loader id）没变。welcome 写明 `merge`，带上 id 号段和文档的 loader id；iframe 只有自己的源是 `null` 时才接受 merge。hello 的格式是 `{ type, id, ns? }`。
+- **id。** 每个新文档分配新的号段；同一文档重新链接（被 ping、从往返缓存恢复）时在 hello 里带上原号段并沿用，前提是它等于该元素最近一次分到的号段。文档离开时，父页面替它发 `Runtime.executionContextDestroyed`；重新加载后的执行上下文 id 不复用，与 Chrome 一致。iframe 的 agent 在自己的号段里分配 id：节点、backend 节点和执行上下文 id 从 `ns × 2^32` 起，对象、样式表、脚本、请求和 loader 的 id 加 `m{ns}.` 前缀。id 的归属直接从 id 上读出，不用维护映射表。
 - **路由。** 每个域用 `mergedFrames.registerRoutes` 注册一张表：哪些命令按参数里的 id 路由，原样发给所属 frame 的 agent，走该客户端自己的会话；哪些命令扇出（`enable`、`disable`、不带 id 的设置），父页面先执行，再发给每个并入的 frame，frame 重新链接时重放。frame 的事件原样转发给客户端，就像父页面自己的。不发 `Target.attachedToTarget`。
 - **嫁接。** 少数结果由父页面拼装：`DOM.getDocument` 和 `describeNode` 把 frame 的文档作为 `contentDocument` 接到 iframe 下；`performSearch` 合并各 frame 的结果；点和四边形按 iframe 的内容框换算（getNodeForLocation、getBoxModel、highlightNode、Input）；Page 里 frame 仍是父页面的不透明 frame，URL 取自 iframe 的 agent。
 
