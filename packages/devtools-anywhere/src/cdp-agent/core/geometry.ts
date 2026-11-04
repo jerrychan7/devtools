@@ -372,14 +372,15 @@ function flatParent(el: Element): Element | null {
  * holding it (up the flat tree, out of shadow trees), the viewport of its document and then those
  * of the documents of the iframes holding that one, from the inside out, each by itself "center
  * if needed" ({@link exposeDelta}). `part` is the area to expose, relative to the element's border
- * box; the whole of it by default.
+ * box; the whole of it by default. Returns the area as it is then in the viewport of the last
+ * document reached, and that document: beyond it, a cross-origin parent's to scroll on.
  */
 export function scrollIntoViewIfNeeded(
   el: Element,
   part?: { x: number; y: number; width: number; height: number }
-): void {
+): { rect: Box; doc: Document } {
   const r = el.getBoundingClientRect();
-  let rect: Box = part
+  const rect: Box = part
     ? {
         left: r.left + part.x,
         top: r.top + part.y,
@@ -387,8 +388,19 @@ export function scrollIntoViewIfNeeded(
         bottom: r.top + part.y + part.height,
       }
     : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
-  let doc = el.ownerDocument;
-  let from: Element | null = flatParent(el);
+  return exposeFrom(el.ownerDocument, flatParent(el), rect);
+}
+
+/**
+ * Scrolls on outward from a frame owner the area `rect` of its frame's viewport, which that frame
+ * (a cross-origin iframe's agent) exposed in its own document already; as {@link scrollIntoViewIfNeeded}.
+ */
+export function scrollFrameAreaIntoView(owner: Element, rect: Box): { rect: Box; doc: Document } {
+  const mapped = boundsOf(mapPoints(frameContentToViewport(owner), rectQuad(rect)));
+  return exposeFrom(owner.ownerDocument, flatParent(owner), mapped);
+}
+
+function exposeFrom(doc: Document, from: Element | null, rect: Box): { rect: Box; doc: Document } {
   for (;;) {
     for (let a = from; a && a !== doc.documentElement && a !== doc.body; a = flatParent(a)) {
       const style = styleOf(a);
@@ -403,7 +415,7 @@ export function scrollIntoViewIfNeeded(
     const win = doc.defaultView;
     if (win) rect = expose(win, rect, { left: 0, top: 0, right: root.clientWidth, bottom: root.clientHeight });
     const owner = frameElementOf(doc);
-    if (!owner) return;
+    if (!owner) return { rect, doc };
     rect = boundsOf(mapPoints(frameContentToViewport(owner), rectQuad(rect)));
     doc = owner.ownerDocument;
     from = flatParent(owner);

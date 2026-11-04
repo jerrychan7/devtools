@@ -37,7 +37,7 @@ import {
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames';
-import { childTargets } from '../../core/child-targets';
+import { childTargets, SCROLL_PARENT } from '../../core/child-targets';
 import { attachShadowHook } from './attach-shadow';
 import { mergedDom, type SearchPart } from './merged';
 import {
@@ -910,7 +910,10 @@ export function registerDom(ctx: Context) {
     },
 
     scrollIntoViewIfNeeded(params: Protocol.DOM.ScrollIntoViewIfNeededRequest) {
-      scrollIntoViewIfNeeded(element(params), params.rect);
+      const { rect, doc } = scrollIntoViewIfNeeded(element(params), params.rect);
+      // In a cross-origin iframe, its parent's agent scrolls on outward.
+      if (doc === ctx.frames.top.document)
+        childTargets.parent?.send(JSON.stringify({ method: SCROLL_PARENT, params: { rect } }));
     },
 
     /** Elements whose computed style matches any of the given ones (e.g. the Layout pane's grids). */

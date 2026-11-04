@@ -149,6 +149,28 @@ export function askChild(link: ChildLink, method: string, params: object, timeou
   });
 }
 
+/**
+ * Sent by an iframe's agent to its parent's, on the link's own session, as an event: the area
+ * (`params.rect`, in the iframe's viewport) DOM.scrollIntoViewIfNeeded exposed in the iframe's
+ * page, for the parent to scroll on outward, as Chrome hands it to the parent's renderer.
+ */
+export const SCROLL_PARENT = 'DevtoolsAnywhere.scrollParent';
+
+/** The area of a {@link SCROLL_PARENT} message, if `message` is one, of finite numbers. */
+export function readScrollParent(
+  message: string
+): { left: number; top: number; right: number; bottom: number } | undefined {
+  if (!message.includes(SCROLL_PARENT)) return undefined;
+  const parsed = parse(message);
+  const params = parsed?.['method'] === SCROLL_PARENT ? parsed['params'] : undefined;
+  const rect = typeof params === 'object' && params !== null ? Reflect.get(params, 'rect') : undefined;
+  if (typeof rect !== 'object' || rect === null) return undefined;
+  const [left, top, right, bottom] = ['left', 'top', 'right', 'bottom'].map(name => Reflect.get(rect, name));
+  const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  if (!finite(left) || !finite(top) || !finite(right) || !finite(bottom)) return undefined;
+  return { left, top, right, bottom };
+}
+
 /** The links of a page's agent: to its cross-origin iframes, and to its parent if it is one. */
 export class ChildTargets {
   readonly #children = new Set<ChildLink>();

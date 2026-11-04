@@ -58,7 +58,10 @@ export {
   type ChildSession,
   type ChildTargets,
   type ParentLink,
+  readScrollParent,
+  SCROLL_PARENT,
 } from './core/child-targets';
+export { scrollFrameAreaIntoView } from './core/geometry';
 export { frameOwners, ownerOfWindow, watchOwner } from './frame-owners';
 export { mergedFrames, type MergedFrames, type RouteTable } from './core/merged-frames';
 
