@@ -48,9 +48,6 @@ All with standard page APIs, matching Chrome. By value for effort; the first thr
 
 | Item | Now | How, in the page |
 |---|---|---|
-| Sandboxed iframes with a cross-site `src` | Refused: shown as elements only | Out-of-process iframes in Chrome, so child targets: trusted by the `null` origin plus the origin the iframe's `src` would have had (its precursor), as Chrome tells them apart |
-| Sandboxed iframes with a same-site, cross-origin `src` | Refused like cross-site ones: shown as elements only, not in the frame tree | Chrome keeps them in the page's target: merged as those of the page's origin are, taking a `src` of the page's site as an opaque frame of the page |
-| Debugger breakpoints (`setBreakpointByUrl` and the like) | No-ops: no `locations` returned | Chrome resolves them to locations; the page can match the URL and position against the scripts it has seen and return them |
 | Merged sandboxed iframes: the initial about:blank's context, the `loaderId` of their navigations, their URL after `pushState` | The context is missing; `frameNavigated` keeps the old `loaderId`; the URL waits for the next `getFrameTree` | The page sees the iframe's initial about:blank and can announce its context; the iframe's agent can give each new document's loader id and tell the page of `pushState` as it does Page.navigatedWithinDocument |
 | The Animations panel (`Animation` domain) | `enable` is a no-op | `document.getAnimations()` has CSS animations, transitions and Web Animations; listing, pausing, playback rate and seeking map onto it |
 | Vision deficiencies (`setEmulatedVisionDeficiency`) | No-op | An SVG filter on `<html>`; Chrome uses color matrices too |
@@ -84,3 +81,4 @@ The two gaps noted in DEV.md, "Patching an older release": CI does not run on `r
 
 - **Dragging the divider in shell mode**: Chrome keeps mouse events in the frame where the button was pressed, so a fast drag loses the divider. It does not reproduce headless, and the earlier attempts were reverted.
 - **Touch screens**: many small things to improve; low priority.
+- **Sandboxed iframes whose `src` is of another origin** (same-site or cross-site): refused, shown as elements only. Chrome keeps same-site ones in the page's target and makes cross-site ones child targets. Left as is: a sandboxed document's origin is `null`, so trusting one means trusting its `src`, which its navigations make unverifiable; the cases are rare and the gain does not cover the added trust.
