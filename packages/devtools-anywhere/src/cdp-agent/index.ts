@@ -11,6 +11,7 @@ import { registerCss } from './domains/css/css';
 import { registerDebugger, setScriptIdPrefix } from './domains/debugger/debugger';
 import { registerDom } from './domains/dom/dom';
 import { registerDomDebugger } from './domains/dom-debugger/dom-debugger';
+import { registerEmulation } from './domains/emulation/emulation';
 import { registerInput } from './domains/input/input';
 import { hookFrameNetwork } from './domains/network/frames';
 import { registerNetwork, setRequestIdPrefix } from './domains/network/network';
@@ -164,6 +165,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerScreencast(ctx, render);
   registerScreenshot(ctx, render);
   registerInput(ctx);
+  registerEmulation(ctx);
   registerWebMcp(ctx);
   return ctx.session;
 }

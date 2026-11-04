@@ -114,8 +114,7 @@ test('a command the page cannot carry out fails with why; one not yet done succe
     'resolved'
   );
   for (const method of [
-    'Emulation.setEmulatedMedia',
-    'Emulation.setSafeAreaInsetsOverride',
+    'Emulation.setUserAgentOverride',
     'Network.setBlockedURLs',
     'Overlay.setPausedInDebuggerMessage',
     'Audits.enable',

@@ -22,7 +22,7 @@ const NOOPS = {
   Animation: ['enable'],
   CSS: ['trackComputedStyleUpdatesForNode'],
   // Device mode's size is the shell's (shell-layout.ts).
-  Emulation: ['setEmulatedMedia', 'setEmulatedVisionDeficiency', 'setSafeAreaInsetsOverride', 'setUserAgentOverride'],
+  Emulation: ['setUserAgentOverride'],
   Inspector: ['enable'],
   // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear', 'startViolationsReport'],
