@@ -1,5 +1,5 @@
 // Where the DevTools frontend shows each CDP domain the in-page agent carries out, and what a view
-// opened there shows for tests/e2e/pages/ui-entries.html. Read by tests/e2e/ui-entries.test.ts:
+// opened there shows for tests/e2e/smoke/ui-entries.html. Read by tests/e2e/smoke/ui-entries.test.ts:
 // every domain with a handler that does something must be here, and every entry must open and show
 // its content, so a domain cannot be implemented with no way to see it in the frontend.
 
@@ -42,7 +42,7 @@ export const UI_ENTRIES: Record<string, UiEntry | null> = {
     tab: 'styles',
     text: '--ui-entries-css',
   },
-  Debugger: { view: 'navigator-network', trigger: 'assets/ui-entries.js', text: 'ui-entries.js', expand: true },
+  Debugger: { view: 'navigator-network', trigger: 'ui-entries.js', text: 'ui-entries.js', expand: true },
   DOM: { view: 'elements', trigger: 'the h1 marker', text: 'ui-entries-marker' },
   DOMDebugger: {
     view: 'elements.event-listeners',

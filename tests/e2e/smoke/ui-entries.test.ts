@@ -1,17 +1,17 @@
 // A gate against a CDP domain the agent carries out that the frontend cannot show: every domain
 // with a working handler has an entry in ./ui-entries.ts (or null, with why), and each entry's view
-// opens in the real frontend, without errors, and shows its content from pages/ui-entries.html.
+// opens in the real frontend, without errors, and shows its content from ui-entries.html.
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ElementHandle, Frame, JSHandle, Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
-import type { Env } from '../support/browser.ts';
+import { launch } from '../../support/browser.ts';
+import type { Env } from '../../support/browser.ts';
 import { UI_ENTRIES } from './ui-entries.ts';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const BUNDLE = path.join(root, 'packages/devtools-anywhere/dist/devtools-anywhere.iife.js');
 const built = existsSync(path.join(root, 'packages/devtools-frontend/dist/anywhere_app.html'));
 const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first';
@@ -31,7 +31,7 @@ before(async () => {
   page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
   page.on('console', message => messages.push(message.text()));
   await page.setViewport({ width: 1000, height: 1600 });
-  await page.goto(env.baseUrl + '/tests/e2e/pages/ui-entries.html');
+  await page.goto(env.baseUrl + '/tests/e2e/smoke/ui-entries.html');
   frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
   // Loaded: the Elements panel, shown first, shows the page.
   await waitFor(async () =>
@@ -78,7 +78,7 @@ test('every domain the agent carries out has an entry', async () => {
   // The no-op domains are recognized, and a domain carried out cannot be missed for one.
   assert.ok(domains.includes('Runtime') && !domains.includes('Inspector'), domains.join());
   const missing = domains.filter(domain => !Object.hasOwn(UI_ENTRIES, domain));
-  assert.deepEqual(missing, [], 'domains without an entry in tests/e2e/ui-entries.ts');
+  assert.deepEqual(missing, [], 'domains without an entry in tests/e2e/smoke/ui-entries.ts');
 });
 
 /**

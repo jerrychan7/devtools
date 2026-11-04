@@ -4,4 +4,4 @@ indexedDB.open('ui-entries-db', 1).onupgradeneeded = event => event.target.resul
 caches.open('ui-entries-cache');
 localStorage.setItem('ui-entries-key', 'value');
 document.addEventListener('uientriesevent', () => {});
-fetch('/tests/e2e/pages/ui-entries.html?ui-entries-fetch');
+fetch('/tests/e2e/smoke/ui-entries.html?ui-entries-fetch');
