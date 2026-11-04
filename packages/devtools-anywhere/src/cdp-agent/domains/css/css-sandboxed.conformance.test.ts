@@ -86,11 +86,12 @@ async function setUp(side: MergedSide): Promise<SetUp> {
   return { frameId, nodeId: await targetNode(side), sheetId: String(sheetId) };
 }
 
-const sides = new Map<MergedSide, SetUp>();
+const sides = new Map<MergedSide, Promise<SetUp>>();
 
-function setUpOf(side: MergedSide): SetUp {
-  const set = sides.get(side);
-  assert.ok(set, 'set up by the first test');
+/** The side's set-up, made by whichever test asks first: each test runs alone as well. */
+function setUpOf(side: MergedSide): Promise<SetUp> {
+  let set = sides.get(side);
+  if (!set) sides.set(side, (set = setUp(side)));
   return set;
 }
 
@@ -98,8 +99,7 @@ test("CSS.styleSheetAdded of the sandboxed frame's sheet carries its frame id, a
   const headers = [];
   for (const side of [chrome, ours]) {
     assert.ok(side);
-    const set = await setUp(side);
-    sides.set(side, set);
+    const set = await setUpOf(side);
     const added = (await side.events()).findLast(
       e => e.method === 'CSS.styleSheetAdded' && get(e.params['header'], 'styleSheetId') === set.sheetId
     );
@@ -128,7 +128,7 @@ function declared(style: unknown): unknown {
 
 /** The selectors and declarations of the regular rules matching #target. */
 async function matched(side: MergedSide): Promise<unknown> {
-  const set = setUpOf(side);
+  const set = await setUpOf(side);
   const reply = await side.send('CSS.getMatchedStylesForNode', { nodeId: set.nodeId });
   const rules = get(reply, 'matchedCSSRules');
   assert.ok(Array.isArray(rules), String(reply));
@@ -144,7 +144,7 @@ async function matched(side: MergedSide): Promise<unknown> {
 
 /** #target's computed color. */
 async function color(side: MergedSide): Promise<unknown> {
-  const set = setUpOf(side);
+  const set = await setUpOf(side);
   const computed = get(await side.send('CSS.getComputedStyleForNode', { nodeId: set.nodeId }), 'computedStyle');
   assert.ok(Array.isArray(computed));
   return get(
@@ -170,7 +170,7 @@ test("CSS.setStyleTexts on the sandboxed frame's rule, as in Chrome", async () =
   const results = [];
   for (const side of [chrome, ours]) {
     assert.ok(side);
-    const set = setUpOf(side);
+    const set = await setUpOf(side);
     const reply = await side.send('CSS.setStyleTexts', {
       edits: [
         {
