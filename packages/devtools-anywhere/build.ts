@@ -63,6 +63,7 @@ const builds: BuildOptions[] = [
 const userAgent = 'src/cdp-agent/domains/css/user-agent';
 mkdirSync('dist', { recursive: true });
 copyFileSync(`${userAgent}/html.css`, 'dist/chromium-html.css');
+copyFileSync(`${userAgent}/COPYING.LIB`, 'dist/chromium-html.LICENSE.txt');
 const pinned: unknown = JSON.parse(readFileSync('package.json', 'utf8')).chrome;
 if (readFileSync(`${userAgent}/CHROME_VERSION`, 'utf8').trim() !== pinned)
   console.warn(`${userAgent}/html.css is not Chrome ${String(pinned)}'s: run scripts/sync-user-agent-css.ts`);

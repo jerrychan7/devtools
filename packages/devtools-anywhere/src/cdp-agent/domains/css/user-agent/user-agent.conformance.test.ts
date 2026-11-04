@@ -104,3 +104,35 @@ describe('user agent stylesheet', () => {
     assert.ok(!userAgent(ours.matchedCSSRules).some(m => /(^|, )a(,|$)/.test(m.rule.selectorList.text)));
   });
 });
+
+// The sheet is the only LGPL file of the package, which a site may leave out: dist-test/ has none.
+test('without chromium-html.css next to the bundle, styles come without user agent rules, asked for once', async () => {
+  assert.ok(env);
+  const bare = await env.browser.newPage();
+  try {
+    const asked: string[] = [];
+    bare.on('request', r => {
+      if (r.url().endsWith('/chromium-html.css')) asked.push(r.url());
+    });
+    await bare.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
+    await bare.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<h1 id="h">h</h1>'));
+    await bare.addScriptTag({ url: env.baseUrl + '/packages/devtools-anywhere/dist-test/devtools-anywhere.iife.js' });
+    await bare.evaluate(() => {
+      window.__session = window.DevtoolsAnywhere.createCdpSession();
+      window.__session.onMessage(() => {});
+    });
+    const send: Send = (method, params = {}) => bare.evaluate((m, p) => window.__session.call(m, p), method, params);
+    await send('DOM.enable');
+    await send('CSS.enable');
+    for (let i = 0; i < 3; i++) {
+      const styles = (await send('CSS.getMatchedStylesForNode', {
+        nodeId: await nodeId(send, '#h'),
+      })) as Protocol.CSS.GetMatchedStylesForNodeResponse;
+      assert.deepEqual(userAgent(styles.matchedCSSRules), []);
+      assert.ok(styles.computedStyle?.length ?? styles.matchedCSSRules);
+    }
+    assert.equal(asked.length, 1);
+  } finally {
+    await bare.close();
+  }
+});

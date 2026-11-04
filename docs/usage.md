@@ -289,7 +289,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Frontend on the page's origin | ⚠️ | DevTools' settings share the page's `localStorage`: host it on another origin |
 | Browsers | ⚠️ | Page side: any modern browser. DevTools UI: verified in Chrome only; newer frontends may need compatibility patches |
 
-snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `accessibility.js` only for the accessibility tree; `chromium-html.css` only for the browser default styles.
+snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `accessibility.js` only for the accessibility tree; `chromium-html.css` only for the browser default styles. It is a copy of Chromium's `html.css`, the package's only file under the LGPL (2.0 or later; its license is next to it as `chromium-html.LICENSE.txt`, and in THIRD_PARTY_LICENSES.md). A site that does not want it can leave both files out: Styles then shows no user agent stylesheet rules, and nothing else changes.
 
 ### Screenshots
 
@@ -305,7 +305,7 @@ snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `acces
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | `probe.iife.js`, `devtools-anywhere.iife.js` (the element), `devtools-anywhere-service-worker.js`, `snapdom.js`, `accessibility.js`, `chromium-html.css`; TypeScript types for the element, its events and the attributes. No module to import |
+| `devtools-anywhere` | `probe.iife.js`, `devtools-anywhere.iife.js` (the element), `devtools-anywhere-service-worker.js`, `snapdom.js`, `accessibility.js`, `chromium-html.css` (with `chromium-html.LICENSE.txt`); TypeScript types for the element, its events and the attributes. No module to import |
 | `@devtools-anywhere/devtools-frontend` | The frontend, English and Chinese UI |
 | `@devtools-anywhere/devtools-frontend-locales` | The other 80 UI languages; serve from the frontend's directory. Missing languages fall back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |

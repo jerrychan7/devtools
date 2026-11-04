@@ -108,6 +108,9 @@ export function registerCss(ctx: Context) {
   const userAgent = uaUrl
     ? new UserAgentStyles(async () => {
         const response = await ctx.probe.fetch(uaUrl);
+        // Not deployed (it may be left out, being the only LGPL file): no user agent rules, and no
+        // request again. A failed request is tried again with the next one.
+        if (response.status === 404) return '';
         if (!response.ok) throw new Error(`${uaUrl}: ${response.status}`);
         return response.text();
       })

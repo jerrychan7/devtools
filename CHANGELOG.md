@@ -18,7 +18,7 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 Public API, as in `packages/*/etc/*.public.api.md`: unchanged since 0.3.0.
 
-- `devtools-anywhere` ships two more files in `dist/`, loaded on first use: `accessibility.js` (exported as `./accessibility.js`) and `chromium-html.css`; self-hosted, serve them with the bundle. It depends on `dom-accessibility-api` now.
+- `devtools-anywhere` ships two more files in `dist/`, loaded on first use: `accessibility.js` (exported as `./accessibility.js`) and `chromium-html.css`; self-hosted, serve them with the bundle. `chromium-html.css` is under the LGPL (2.0 or later), the package's only file that is not MIT or BSD; its license ships as `chromium-html.LICENSE.txt`, and leaving both out only drops the user agent stylesheet rules. It depends on `dom-accessibility-api` now.
 - The probe grows from 18948 to 19385 bytes minified.
 - The messages between the probe in a cross-origin iframe and its parent gained the internal event `DevtoolsAnywhere.scrollParent`: use the same version of the probe on both sides.
 

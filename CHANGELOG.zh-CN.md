@@ -18,7 +18,7 @@
 
 公开 API（以 `packages/*/etc/*.public.api.md` 为准）与 0.3.0 相比没有变化。
 
-- `devtools-anywhere` 的 `dist/` 新增两个首次使用时才加载的文件：`accessibility.js`（导出为 `./accessibility.js`）和 `chromium-html.css`；自托管时和 bundle 放在一起。新增依赖 `dom-accessibility-api`。
+- `devtools-anywhere` 的 `dist/` 新增两个首次使用时才加载的文件：`accessibility.js`（导出为 `./accessibility.js`）和 `chromium-html.css`；自托管时和 bundle 放在一起。`chromium-html.css` 采用 LGPL（2.0 或更高版本），是包里唯一不属于 MIT 或 BSD 的文件；许可全文随附为 `chromium-html.LICENSE.txt`，两个文件都删掉只会少掉 user agent stylesheet 规则。新增依赖 `dom-accessibility-api`。
 - 探针 minify 后从 18948 字节增到 19385 字节。
 - 跨域 iframe 里的探针和父页面之间的消息新增内部事件 `DevtoolsAnywhere.scrollParent`：两边请使用同一版本的探针。
 

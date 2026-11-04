@@ -289,7 +289,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 前端与页面同源 | ⚠️ | DevTools 的设置会和页面共用 `localStorage`：前端放在别的源 |
 | 浏览器 | ⚠️ | 页面这边：现代浏览器都行。DevTools 界面：只在 Chrome 上验证过；新版前端可能需要兼容补丁 |
 
-snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js` 只在用到无障碍树时加载；`chromium-html.css` 只在显示浏览器默认样式时加载。
+snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js` 只在用到无障碍树时加载；`chromium-html.css` 只在显示浏览器默认样式时加载。它是 Chromium `html.css` 的副本，也是包里唯一采用 LGPL（2.0 或更高版本）的文件；许可全文放在它旁边的 `chromium-html.LICENSE.txt`，也列在 THIRD_PARTY_LICENSES.md 里。不想分发它的站点可以把这两个文件一起删掉：Styles 里就不再显示 user agent stylesheet 规则，其他功能不受影响。
 
 ### 截图
 
@@ -305,7 +305,7 @@ snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js
 
 | 包 | 内容 |
 |---|---|
-| `devtools-anywhere` | `probe.iife.js`、`devtools-anywhere.iife.js`（组件）、`devtools-anywhere-service-worker.js`、`snapdom.js`、`accessibility.js`、`chromium-html.css`；组件、事件和各属性的 TypeScript 类型。没有可以 import 的模块 |
+| `devtools-anywhere` | `probe.iife.js`、`devtools-anywhere.iife.js`（组件）、`devtools-anywhere-service-worker.js`、`snapdom.js`、`accessibility.js`、`chromium-html.css`（及 `chromium-html.LICENSE.txt`）；组件、事件和各属性的 TypeScript 类型。没有可以 import 的模块 |
 | `@devtools-anywhere/devtools-frontend` | 前端，英文和中文界面 |
 | `@devtools-anywhere/devtools-frontend-locales` | 其余 80 种界面语言；和前端放在同一目录。缺少的语言退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |

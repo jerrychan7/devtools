@@ -6,6 +6,7 @@
 //   - the es-module-lexer license (embedded below: the port lives in packages/devtools-anywhere/src/cdp-agent)
 //   - @zumer/snapdom from node_modules
 //   - dom-accessibility-api from node_modules
+//   - Chromium's html.css and its LGPL text, in packages/devtools-anywhere/src/cdp-agent/domains/css/user-agent
 //   - the devtools-frontend checkout at packages/devtools-frontend/REVISION, for the DevTools
 //     license and the README.chromium + LICENSE of every library under front_end/third_party
 //     that ends up in packages/devtools-frontend/dist (which must be built: the frontend build
@@ -109,6 +110,21 @@ const domAccessibility: Component = {
   packages: ['devtools-anywhere'],
   note: 'Bundled as dist/accessibility.js, loaded on demand for the Accessibility domain.',
 };
+const userAgentDir = path.join(repo, 'packages/devtools-anywhere/src/cdp-agent/domains/css/user-agent');
+const userAgentChrome = read(path.join(userAgentDir, 'CHROME_VERSION'));
+const userAgentCss: Component = {
+  name: "Chromium's default style sheet (html.css)",
+  version: `Chrome ${userAgentChrome}`,
+  license: 'LGPL-2.0-or-later',
+  copyright: 'Lars Knoll; Apple Inc.',
+  url: `https://chromium.googlesource.com/chromium/src/+/refs/tags/${userAgentChrome}/third_party/blink/renderer/core/html/resources/html.css`,
+  text: read(path.join(userAgentDir, 'COPYING.LIB')),
+  packages: ['devtools-anywhere'],
+  note:
+    'Shipped unmodified as dist/chromium-html.css, with this license as dist/chromium-html.LICENSE.txt; ' +
+    'loaded on demand for the Styles pane. It is the only file under this license: deleting both leaves ' +
+    'out the user agent stylesheet rules and nothing else.',
+};
 const devtools: Component = {
   name: 'Chrome DevTools frontend',
   version: read(path.join(repo, 'packages/devtools-frontend/REVISION')),
@@ -180,7 +196,7 @@ const frontendComponents = frontendLibraries.map(([dir, distPath, copyright]): C
   };
 });
 
-const all = [lexer, snapdom, domAccessibility, devtools, ...frontendComponents];
+const all = [lexer, snapdom, domAccessibility, userAgentCss, devtools, ...frontendComponents];
 
 const DEV_DEPENDENCIES = `| Dependency | License | Used for |
 | --- | --- | --- |
