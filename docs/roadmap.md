@@ -48,7 +48,6 @@ All with standard page APIs, matching Chrome. By value for effort; the first thr
 
 | Item | Now | How, in the page |
 |---|---|---|
-| Merged sandboxed iframes: the initial about:blank's context, the `loaderId` of their navigations, their URL after `pushState` | The context is missing; `frameNavigated` keeps the old `loaderId`; the URL waits for the next `getFrameTree` | The page sees the iframe's initial about:blank and can announce its context; the iframe's agent can give each new document's loader id and tell the page of `pushState` as it does Page.navigatedWithinDocument |
 | The Animations panel (`Animation` domain) | `enable` is a no-op | `document.getAnimations()` has CSS animations, transitions and Web Animations; listing, pausing, playback rate and seeking map onto it |
 | Vision deficiencies (`setEmulatedVisionDeficiency`) | No-op | An SVG filter on `<html>`; Chrome uses color matrices too |
 | Network: blocked URLs, cache disabled, extra headers, offline | `setBlockedURLs`, `setCacheDisabled`, `setExtraHTTPHeaders`, `overrideNetworkState` and offline in `emulateNetworkConditions` are no-ops | For the fetch and XHR already intercepted; in shell mode, images and scripts too through the Service Worker. Throttling fails: the page cannot slow requests down |
@@ -82,3 +81,4 @@ The two gaps noted in DEV.md, "Patching an older release": CI does not run on `r
 - **Dragging the divider in shell mode**: Chrome keeps mouse events in the frame where the button was pressed, so a fast drag loses the divider. It does not reproduce headless, and the earlier attempts were reverted.
 - **Touch screens**: many small things to improve; low priority.
 - **Sandboxed iframes whose `src` is of another origin** (same-site or cross-site): refused, shown as elements only. Chrome keeps same-site ones in the page's target and makes cross-site ones child targets. Left as is: a sandboxed document's origin is `null`, so trusting one means trusting its `src`, which its navigations make unverifiable; the cases are rare and the gain does not cover the added trust.
+- **Merged sandboxed iframes: the initial about:blank's context and the `loaderId` of their navigations**: the context is missing (Chrome reports it only to a client attached before the iframe navigates, which ours seldom is); `frameNavigated` keeps the old `loaderId`, as the page cannot tell an iframe that loaded before it looked from one that has not loaded yet, and a new one would break the document request's `loaderId`.

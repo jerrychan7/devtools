@@ -48,7 +48,6 @@
 
 | 项目 | 现状 | 页面内的做法 |
 |---|---|---|
-| 并入的沙箱 iframe：起初 about:blank 的执行上下文、导航的 `loaderId`、`pushState` 后的 URL | 执行上下文没有；`frameNavigated` 的 `loaderId` 不变；URL 要到下次 `getFrameTree` 才刷新 | 父页面看得到 iframe 起初的 about:blank，可以报出它的执行上下文；沙箱的 agent 可以给出每个新文档的 loader id，并像 Page.navigatedWithinDocument 那样把 `pushState` 告诉父页面 |
 | Animations 面板（`Animation` 域） | `enable` 是空操作 | `document.getAnimations()` 覆盖 CSS 动画、过渡和 Web Animations API；列出、暂停、调速、拖动进度都能对应上 |
 | 色觉缺陷模拟（`setEmulatedVisionDeficiency`） | 空操作 | 在 `<html>` 上加 SVG 滤镜，Chrome 用的也是颜色矩阵 |
 | 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`overrideNetworkState` 和 `emulateNetworkConditions` 的离线是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速返回错误：页面没法让请求变慢 |
@@ -82,3 +81,4 @@ DEV.md「给旧版本打补丁」一节记下的两处缺口：CI 不在 `releas
 - **外壳模式下分隔条拖动**：Chrome 会把鼠标事件留在按下时所在的 frame，拖快了分隔条会跟丢。在 headless 下复现不了，之前的改动已全部撤回。
 - **触屏体验**：要优化的地方很多，但都很零碎，优先级低。
 - **`src` 跨源的沙箱 iframe**（同站或跨站）：拒绝连接，只显示为元素。Chrome 把同站的留在页面的 target 里，跨站的作为子 target。维持现状：沙箱文档的源是 `null`，信任它只能信任 `src`，而帧内导航会让 `src` 无从验证；这类场景少，收益抵不上多出来的信任范围。
+- **并入的沙箱 iframe：起初 about:blank 的执行上下文、导航的 `loaderId`**：执行上下文没有（Chrome 只对 iframe 导航前就已连上的客户端报出，我们的客户端很少这么早连上）；`frameNavigated` 的 `loaderId` 不变：页面分不清 iframe 是在它开始观察前就已 load 完，还是还没 load，换新 id 又会和文档请求的 `loaderId` 对不上。
