@@ -29,7 +29,8 @@ before(async () => {
     await side.send('Page.enable');
     await side.send('Network.enable');
   }
-  await t.chrome.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  for (const side of [t.ours, t.chrome])
+    await side.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
 });
 after(() => env?.close());
 
@@ -99,6 +100,7 @@ test('sandboxed iframes are attached and navigated in the page, with no child ta
     assert.deepEqual(diffSubset(of(ours), of(chrome)), [], id);
   }
   assert.deepEqual(await t.chrome.events('Target.attachedToTarget'), []);
+  assert.deepEqual(await t.ours.events('Target.attachedToTarget'), []);
   await sameLoader('n=s1');
   await sameLoader('n=s2');
 });
@@ -178,6 +180,34 @@ describe('a sandboxed iframe merged into the page', () => {
     return side.send('Runtime.evaluate', { contextId: get(created?.params['context'], 'id'), expression });
   }
 
+  /** Polls `get` till it gives a value, for up to 5 s; undefined if it never does. */
+  async function poll<T>(get: () => Promise<T | undefined>): Promise<T | undefined> {
+    for (let i = 0; i < 100; i++) {
+      const value = await get();
+      if (value !== undefined) return value;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return undefined;
+  }
+
+  /** The URL of sandboxed-child.html, trusting the parent, with `n` in its query. */
+  function childUrl(n: string) {
+    const next = new URL(fixtureUrl(oopif as Env, 'sandboxed-child.html'));
+    next.searchParams.set('parentOrigins', new URL(fixtureUrl(oopif as Env, '')).origin);
+    next.searchParams.set('n', n);
+    return next.href;
+  }
+
+  /** The URLs frame `frameId` was reported navigated to since event `from`, once it stopped loading. */
+  async function navigatedSince(side: MergedSide, frameId: string, from: number) {
+    const stopped = await poll(async () =>
+      (await pageEventsOf(side, frameId, from)).some(e => e.method === 'Page.frameStoppedLoading') ? true : undefined
+    );
+    assert.ok(stopped, 'frameStoppedLoading');
+    const navigated = (await pageEventsOf(side, frameId, from)).filter(e => e.method === 'Page.frameNavigated');
+    return navigated.map(e => get(get(e.params, 'frame'), 'url'));
+  }
+
   /** The Page events of frame `frameId` since event `from`. */
   async function pageEventsOf(side: MergedSide, frameId: string, from: number) {
     return (await side.events())
@@ -191,8 +221,12 @@ describe('a sandboxed iframe merged into the page', () => {
       const { id } = await childOf(side);
       const from = (await side.events()).length;
       await inFrame(side, `history.pushState(null, '', '#pushed')`);
-      await new Promise(r => setTimeout(r, 300));
-      const events = (await pageEventsOf(side, id, from)).filter(e => e.method === 'Page.navigatedWithinDocument');
+      const within = async () =>
+        (await pageEventsOf(side, id, from)).filter(e => e.method === 'Page.navigatedWithinDocument');
+      await poll(async () => ((await within()).length > 0 ? true : undefined));
+      // A while longer, for any second report.
+      await new Promise(r => setTimeout(r, 200));
+      const events = await within();
       results.push(events.map(e => ({ url: e.params['url'], type: e.params['navigationType'] })));
     }
     assert.deepEqual(results[0], results[1]);
@@ -205,23 +239,62 @@ describe('a sandboxed iframe merged into the page', () => {
     for (const side of both()) {
       const { id } = await childOf(side);
       const from = (await side.events()).length;
-      const next = new URL(fixtureUrl(oopif as Env, 'sandboxed-child.html'));
-      next.searchParams.set('parentOrigins', new URL(fixtureUrl(oopif as Env, '')).origin);
-      next.searchParams.set('n', '2');
-      await inFrame(side, `location.href = ${JSON.stringify(next.href)}`);
-      for (let i = 0; i < 100; i++) {
-        if ((await pageEventsOf(side, id, from)).some(e => e.method === 'Page.frameStoppedLoading')) break;
-        await new Promise(r => setTimeout(r, 50));
-      }
-      const navigated = (await pageEventsOf(side, id, from)).filter(e => e.method === 'Page.frameNavigated');
+      await inFrame(side, `location.href = ${JSON.stringify(childUrl('2'))}`);
+      const navigated = await navigatedSince(side, id, from);
       const { frame } = await childOf(side);
-      results.push({
-        navigated: navigated.map(e => get(get(e.params, 'frame'), 'url')),
-        tree: { url: get(frame, 'url'), securityOrigin: get(frame, 'securityOrigin') },
-      });
+      results.push({ navigated, tree: { url: get(frame, 'url'), securityOrigin: get(frame, 'securityOrigin') } });
     }
     assert.deepEqual(results[0], results[1]);
+    assert.equal(results[1]?.navigated.length, 1);
+    assert.match(String(results[1]?.navigated[0]), /n=2$/);
     assert.match(String(results[1]?.tree.url), /n=2$/);
+  });
+
+  test("Page.navigate takes the frame's id and navigates it, as in Chrome", async () => {
+    const results = [];
+    for (const side of both()) {
+      const { id } = await childOf(side);
+      const from = (await side.events()).length;
+      const reply = await side.send('Page.navigate', { url: childUrl('3'), frameId: id });
+      assert.equal(get(reply, 'frameId'), id);
+      const navigated = await navigatedSince(side, id, from);
+      const { frame } = await childOf(side);
+      results.push({ navigated, tree: get(frame, 'url') });
+    }
+    assert.deepEqual(results[0], results[1]);
+    assert.equal(results[1]?.navigated.length, 1);
+    assert.match(String(results[1]?.tree), /n=3$/);
+  });
+
+  test('a navigation waiting for its URL when Page is disabled is not reported', async () => {
+    const [ours, chrome] = both();
+    // Chrome: the same navigation, so that both show the same document after.
+    const { id } = await childOf(chrome);
+    const from = (await chrome.events()).length;
+    await inFrame(chrome, `location.href = ${JSON.stringify(childUrl('4'))}`);
+    await navigatedSince(chrome, id, from);
+    // Ours: disabled as soon as the iframe loads, while the page waits for its agent to tell the URL.
+    await ours.send('Runtime.evaluate', {
+      expression: `document.querySelector('iframe').addEventListener('load', () => {
+        window.__disabledAt = window.__client.log.length;
+        void window.__client.send('Page.disable');
+      }, { once: true })`,
+    });
+    await inFrame(ours, `location.href = ${JSON.stringify(childUrl('4'))}`);
+    const at = await poll(async () => {
+      const value = get(
+        get(await ours.send('Runtime.evaluate', { expression: 'window.__disabledAt' }), 'result'),
+        'value'
+      );
+      return typeof value === 'number' ? value : undefined;
+    });
+    assert.ok(at !== undefined, 'disabled');
+    // Past the longest wait for the URL (twice merged.ts's URL_TIMEOUT): as in Chrome, nothing.
+    await new Promise(r => setTimeout(r, 2500));
+    const later = (await ours.events()).slice(at).filter(e => e.method.startsWith('Page.'));
+    assert.deepEqual(later, []);
+    await ours.send('Page.enable');
+    assert.match(String(get((await childOf(ours)).frame, 'url')), /n=4$/);
   });
 
   test('getResourceTree lists the frame with the resources of its document', async () => {
