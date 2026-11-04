@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { registerViolations } from './violations';
 import type { Context } from '../../core/context';
 import type { Frame } from '../../core/frames';
 import { returnOutsideFunction } from '../../core/lexer';
@@ -263,6 +264,7 @@ mergedFrames.registerRoutes('Log', { fanOut: ['Log.clear'] });
 
 export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
   const topFrame = frames.top;
+  registerViolations(session, topFrame.window);
   /** Per document: a navigated frame's new document is a new realm, with bindings of its own. */
   const scopes = new WeakMap<Document, Scope>();
   function scopeOf(frame: Frame): Scope {
