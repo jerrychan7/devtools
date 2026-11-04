@@ -12,6 +12,7 @@ import { ForcedPseudoClasses } from './forced-pseudo';
 import { backgroundsBehind } from './color';
 import { Cascade } from './cascade';
 import { ComputedStyleUpdates } from './computed-updates';
+import { UserAgentStyles, userAgentSheetUrl } from './user-agent/user-agent';
 import { RuleView } from './rule-view';
 import { SheetRegistry, isConstructed } from './sheet-registry';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
@@ -101,7 +102,17 @@ export function registerCss(ctx: Context) {
   );
   sheets.isOwnSheet = sheet => forced.owns(sheet);
   const rules = new RuleView(sheets, nodes);
-  const cascade = new Cascade(sheets, forced, nodes, rules);
+  // DevTools' own request, not one of the page's.
+  const uaUrl = userAgentSheetUrl;
+  if (uaUrl) ctx.probe.ownUrls.add(uaUrl);
+  const userAgent = uaUrl
+    ? new UserAgentStyles(async () => {
+        const response = await ctx.probe.fetch(uaUrl);
+        if (!response.ok) throw new Error(`${uaUrl}: ${response.status}`);
+        return response.text();
+      })
+    : null;
+  const cascade = new Cascade(sheets, forced, nodes, rules, userAgent);
   const updates = new ComputedStyleUpdates(
     nodes,
     () => [...documents(), ...shadowRoots()],
@@ -280,6 +291,7 @@ export function registerCss(ctx: Context) {
     // Adopted sheets change unseen: catch up before answering.
     if (enabled) await syncSheets();
     else await loadCopies();
+    await userAgent?.ready();
     return cascade.forRequest(() => {
       // For a pseudo-element, its host is the first element it inherits from.
       if (pseudo) {

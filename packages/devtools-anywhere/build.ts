@@ -1,7 +1,7 @@
 // Bundles the package with esbuild. Type declarations are emitted separately by tsc.
 // `--watch` rebuilds on every change (`pnpm dev`).
 import { context, type BuildOptions } from 'esbuild';
-import { rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
 
 const watch = process.argv.includes('--watch');
@@ -49,6 +49,15 @@ const builds: BuildOptions[] = [
     external: ['@zumer/snapdom'],
   },
 ];
+
+// Chromium's user agent style sheet, which the bundle loads from next to it on demand
+// (src/cdp-agent/domains/css/user-agent/README.md); it must be that of the pinned Chrome.
+const userAgent = 'src/cdp-agent/domains/css/user-agent';
+mkdirSync('dist', { recursive: true });
+copyFileSync(`${userAgent}/html.css`, 'dist/chromium-html.css');
+const pinned: unknown = JSON.parse(readFileSync('package.json', 'utf8')).chrome;
+if (readFileSync(`${userAgent}/CHROME_VERSION`, 'utf8').trim() !== pinned)
+  console.warn(`${userAgent}/html.css is not Chrome ${String(pinned)}'s: run scripts/sync-user-agent-css.ts`);
 
 const contexts = await Promise.all(builds.map(options => context(options)));
 if (watch) {

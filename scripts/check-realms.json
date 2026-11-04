@@ -1,6 +1,7 @@
 {
   "core/history.ts": 1,
   "domains/css/style.ts": 1,
+  "domains/css/user-agent/user-agent.ts": 1,
   "domains/dom-debugger/dom-debugger.ts": 3,
   "domains/network/frames.ts": 1,
   "domains/network/network.ts": 3,

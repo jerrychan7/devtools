@@ -8,6 +8,7 @@ import type { RuleView } from './rule-view';
 import { type Entry, type StyleRule, ancestorsOf, resolveSelector, sheetApplies } from './rules';
 import type { SheetRegistry } from './sheet-registry';
 import { hostMatcher } from './source';
+import type { UserAgentStyles } from './user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from './style';
 
 /** A style rule ready for matching: its selectors resolved and split, with forced pseudo-classes rewritten. */
@@ -44,12 +45,21 @@ export class Cascade {
   private readonly forced: ForcedPseudoClasses;
   private readonly nodes: NodeRegistry;
   private readonly rules: RuleView;
+  /** The user agent style sheet's rules, which come before all others. */
+  private readonly userAgent: UserAgentStyles | null;
 
-  constructor(sheets: SheetRegistry, forced: ForcedPseudoClasses, nodes: NodeRegistry, rules: RuleView) {
+  constructor(
+    sheets: SheetRegistry,
+    forced: ForcedPseudoClasses,
+    nodes: NodeRegistry,
+    rules: RuleView,
+    userAgent: UserAgentStyles | null = null
+  ) {
     this.sheets = sheets;
     this.forced = forced;
     this.nodes = nodes;
     this.rules = rules;
+    this.userAgent = userAgent;
   }
 
   /** Runs `answer` with the candidates collected once for it. */
@@ -225,16 +235,19 @@ export class Cascade {
       }
     // Context, then layers, then specificity, then scope proximity (nearer roots win), then order of
     // appearance. Inspector rules win over regular ones of equal specificity, as they come last.
-    return matches
-      .sort(
-        (x, y) =>
-          x.rank - y.rank ||
-          this.compareLayers(x.layer, y.layer) ||
-          compareSpecificity(x.spec, y.spec) ||
-          (x.proximity === y.proximity ? 0 : x.proximity > y.proximity ? -1 : 1) ||
-          x.order - y.order
-      )
-      .map(m => m.match);
+    const userAgent = this.userAgent?.matchedRules(el, pseudo) ?? [];
+    return userAgent.concat(
+      matches
+        .sort(
+          (x, y) =>
+            x.rank - y.rank ||
+            this.compareLayers(x.layer, y.layer) ||
+            compareSpecificity(x.spec, y.spec) ||
+            (x.proximity === y.proximity ? 0 : x.proximity > y.proximity ? -1 : 1) ||
+            x.order - y.order
+        )
+        .map(m => m.match)
+    );
   }
 
   inlineStyle(el: Element): CSSStyle | undefined {

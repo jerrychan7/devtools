@@ -12,6 +12,7 @@
     "pnpm-lock.yaml",
     "packages/devtools-frontend/src/**",
     "packages/devtools-frontend/patches/**",
-    "experiments/**"
+    "experiments/**",
+    "packages/devtools-anywhere/src/cdp-agent/domains/css/user-agent/html.css"
   ]
 }
