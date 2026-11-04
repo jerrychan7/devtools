@@ -37,9 +37,9 @@ async function seen(side: Side) {
   const names: string[] = [];
   for (const method of EVENTS) {
     for (const params of await side.events(method)) {
-      const { origin, storageKey: key, ...rest } = params as Record<string, unknown>;
-      delete rest.bucketId;
-      if ('bucketInfo' in rest) rest.bucketInfo = 'bucket';
+      const { origin, storageKey: key, ...rest }: Record<string, unknown> = { ...params };
+      delete rest['bucketId'];
+      if ('bucketInfo' in rest) rest['bucketInfo'] = 'bucket';
       names.push(`${method} ${JSON.stringify({ origin, key, ...rest })}`);
     }
   }

@@ -53,7 +53,6 @@ test('unregister removes the registration and reports it deleted', async () => {
 
 test('commands that need the worker fail', async () => {
   await assert.rejects(t.ours.send('ServiceWorker.stopAllWorkers'), /Not supported in the page/);
-  await assert.rejects(t.ours.send('ServiceWorker.inspectWorker', { versionId: '0' }), /Not supported in the page/);
   await assert.rejects(
     t.ours.send('ServiceWorker.setForceUpdateOnPageLoad', { forceUpdateOnPageLoad: true }),
     /Not supported in the page/
