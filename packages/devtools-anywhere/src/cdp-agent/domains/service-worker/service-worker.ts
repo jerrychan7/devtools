@@ -37,7 +37,13 @@ const workersOf = (reg: ServiceWorkerRegistration) => [reg.installing, reg.waiti
  * when the view is opened again.
  */
 export function registerServiceWorker(session: CdpSession) {
-  const container = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined;
+  // Reading it throws a SecurityError in a document of an opaque origin (a sandboxed iframe's).
+  let container: ServiceWorkerContainer | undefined;
+  try {
+    container = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined;
+  } catch {
+    container = undefined;
+  }
   let enabled = false;
   /** The registrations reported, with the workers already listened to. */
   const known = new Set<ServiceWorkerRegistration>();
