@@ -213,7 +213,7 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 ### 分支与 PR
 
-`main` 存放已发布的内容：发布在它上面打 tag，只能通过 PR 修改。下一个 minor 的开发放在它的开发分支 `dev/x.y.0` 上（现在是 `dev/0.3.0`），可以随时推送；发布该 minor 时经 `release/x.y.0` 进入 `main`：`dev` → `release` → `main`。
+`main` 存放已发布的内容：发布在它上面打 tag，只能通过 PR 修改。下一个 minor 的开发放在它的开发分支 `dev/x.y.0` 上（现在是 `dev/0.4.0`），可以随时推送；发布该 minor 时经 `release/x.y.0` 进入 `main`：`dev` → `release` → `main`。
 
 | 分支 | 用途 | 规则 |
 | --- | --- | --- |
@@ -223,10 +223,10 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 | `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 从 `dev/x.y.0` 拉出（patch 从 `main` 拉出），合进 `main`，然后在 `main` 上打 tag |
 | `release/x.y` | 只在需要时用来给旧的 minor 打补丁（见「给旧版本打补丁」） | 从 tag `vx.y.0` 拉出，在该 minor 需要补丁期间保留 |
 
-不能等到下一个 minor 的修复，走从 `main` 拉出的 `fix/…` 分支合进 `main`，从那里作为 patch 发布；然后把 `main` 合并进 `dev/x.y.0`，让修复也进入开发分支。x.y.0 发布后删除 `dev/x.y.0`，再从 `main` 拉出 `dev/x.(y+1).0`。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。推送到 `dev/x.y.0` 不运行，免得开发中的推送排队：由 `release/x.y.0` 的 PR 检查，或者手动在该分支上运行 CI（`gh workflow run ci.yml --ref dev/0.3.0`）。
+不能等到下一个 minor 的修复，走从 `main` 拉出的 `fix/…` 分支合进 `main`，从那里作为 patch 发布；然后把 `main` 合并进 `dev/x.y.0`，让修复也进入开发分支。x.y.0 发布后删除 `dev/x.y.0`，再从 `main` 拉出 `dev/x.(y+1).0`。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。推送到 `dev/x.y.0` 不运行，免得开发中的推送排队：由 `release/x.y.0` 的 PR 检查，或者手动在该分支上运行 CI（`gh workflow run ci.yml --ref dev/0.4.0`）。
 
 ```bash
-git switch -c feat/my-change dev/0.3.0
+git switch -c feat/my-change dev/0.4.0
 # … 提交 …
 git push -u origin feat/my-change
 gh pr create --fill
