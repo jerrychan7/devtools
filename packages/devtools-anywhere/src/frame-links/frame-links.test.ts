@@ -525,7 +525,8 @@ test('a sandboxed iframe of the page origin is merged when data-frame-origins na
       polling: 50,
     });
     const [merged] = await mergedOf(page);
-    assert.equal(merged?.ns, 1);
+    // A namespace of its own (the first, or the next, when the page's ping crossed its first hello).
+    assert.ok(merged && merged.ns >= 1);
     // No child target: merged into the page's.
     assert.equal(await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()].length), 0);
     await child.waitForFunction(() => window.__devtoolsAnywhereTest.childTargets.parentMerged, {
@@ -550,6 +551,52 @@ test('a sandboxed iframe of the page origin is merged when data-frame-origins na
         })
     );
     assert.deepEqual(result, { result: { type: 'string', value: 'sandboxed child of null' } });
+  } finally {
+    await page.close();
+  }
+});
+
+test('a merged document linked again (pinged) keeps its namespace; its next document takes another', async () => {
+  const { page } = await openSandboxed(`${originOf('127.0.0.1')} sandboxed`);
+  try {
+    const linked = () =>
+      page.waitForFunction(() => [...window.__devtoolsAnywhereTest.mergedFrames.frames()].length > 0, {
+        timeout: 5000,
+        polling: 50,
+      });
+    await linked();
+    await settle();
+    const [first] = await mergedOf(page);
+    assert.ok(first);
+    const linkOf = () => [...window.__devtoolsAnywhereTest.mergedFrames.frames()][0]?.[1];
+    const before = await page.evaluateHandle(linkOf);
+    // The parent's ping: the iframe lets its link go and says hello again, the same document.
+    await page.evaluate(() =>
+      document.querySelector('iframe')?.contentWindow?.postMessage({ type: 'devtools-anywhere:frame-ping' }, '*')
+    );
+    await page.waitForFunction(
+      old => [...window.__devtoolsAnywhereTest.mergedFrames.frames()][0]?.[1] !== old,
+      {
+        timeout: 5000,
+        polling: 50,
+      },
+      before
+    );
+    await linked();
+    assert.deepEqual(await mergedOf(page), [first]);
+    // Reloaded: another document, another namespace.
+    await page.evaluate(() => {
+      const iframe = document.querySelector('iframe');
+      if (iframe) iframe.setAttribute('src', iframe.getAttribute('src') ?? '');
+    });
+    await page.waitForFunction(
+      ns => [...window.__devtoolsAnywhereTest.mergedFrames.frames()].some(([n]) => n !== ns),
+      { timeout: 5000, polling: 50 },
+      first.ns
+    );
+    const [next] = await mergedOf(page);
+    assert.ok(next && next.ns > first.ns);
+    assert.equal(next.frameId, first.frameId);
   } finally {
     await page.close();
   }

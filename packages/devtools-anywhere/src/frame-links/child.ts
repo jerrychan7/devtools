@@ -49,16 +49,21 @@ export function linkParent(patterns: readonly OriginPattern[], createSession: ()
    * page for good, so they are not made anew for each attach.
    */
   const idle: CdpSession[] = [];
+  /**
+   * The namespace this document's ids are in, once merged: told in its next hellos, for the
+   * parent to give it again, the ids made already (backend node ids, sheet ids, …) being in it.
+   */
+  let mergedNs: number | undefined;
 
   const hello = () => {
-    if (!link) postToTrusted(window.parent, { type: FRAME_HELLO, id }, patterns);
+    if (!link) postToTrusted(window.parent, { type: FRAME_HELLO, id, ...(mergedNs ? { ns: mergedNs } : {}) }, patterns);
   };
 
   const connect = (port: MessagePort, { frameId, parentFrameId, parentTargetId, mode, ns, loaderId }: FrameWelcome) => {
     const merged = mode === 'merge';
     // Merged into the parent's agent, this page's ids are in the namespace it gave, before any
     // session makes one for the link.
-    if (merged) setIdNamespace(ns);
+    if (merged) setIdNamespace((mergedNs = ns));
     const end = openPort(port);
     const linked: ParentLink = {
       frameId,

@@ -2,7 +2,7 @@
 // cdp-agent/core/child-targets.ts), both with the bundle loaded, each trusting the other's origin
 // (probe-script.ts, data-frame-origins and data-parent-origins):
 //
-//   iframe → parent window   { type: FRAME_HELLO, id }       when its agent is ready, or pinged
+//   iframe → parent window   { type: FRAME_HELLO, id, ns? }  when its agent is ready, or pinged
 //   parent → iframe window   { type: FRAME_PING }            when the parent's agent is ready, or has let its links go
 //   parent → iframe window   { type: FRAME_WELCOME, id, frameId, parentFrameId, parentTargetId } + a MessagePort
 //   either end → port        CDP messages, as strings; { type: FRAME_BYE } as the last
@@ -45,6 +45,12 @@ export const FRAME_OPEN_SESSION = 'devtools-anywhere:frame-open-session';
 export interface FrameHello {
   type: typeof FRAME_HELLO;
   id: string;
+  /**
+   * A merged iframe's document linked before (pinged, back from the back/forward cache): the
+   * namespace its ids are in, which the parent gives it again if it gave it to that element last
+   * (cdp-agent/core/merged-frames.ts, nsFor).
+   */
+  ns?: number;
 }
 
 export interface FrameWelcome {
@@ -82,7 +88,11 @@ export const isMessage = (data: unknown, type: string): boolean => field(data, '
 
 export function readHello(data: unknown): FrameHello | null {
   const id = field(data, 'id');
-  return isMessage(data, FRAME_HELLO) && typeof id === 'string' ? { type: FRAME_HELLO, id } : null;
+  if (!isMessage(data, FRAME_HELLO) || typeof id !== 'string') return null;
+  const ns = field(data, 'ns');
+  return typeof ns === 'number' && Number.isInteger(ns) && ns >= 1 && ns <= MAX_NS
+    ? { type: FRAME_HELLO, id, ns }
+    : { type: FRAME_HELLO, id };
 }
 
 export function readWelcome(data: unknown): FrameWelcome | null {
