@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
+import type { Frame, OpaqueFrame } from '../../core/frames';
 import { childTargets } from '../../core/child-targets';
 import { CdpError } from '../../core/session';
 import { isChildDocument } from '../network/frames';
@@ -23,6 +24,18 @@ export function registerPage({ session, probe, frames }: Context) {
   };
   session.onReset(disable);
 
+  /** The opaque frame of id `id` in the frame tree, if any. */
+  const opaqueById = (id: string, under: Frame = frames.top): OpaqueFrame | undefined => {
+    for (const child of frames.treeChildrenOf(under)) {
+      const opaque = child.owner && frames.opaqueOf(child.owner);
+      if (opaque?.id === id) return opaque;
+      const frame = opaque ? undefined : frames.byId(child.id);
+      const found = frame && opaqueById(id, frame);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
   session.register('Page', {
     /**
      * Like Chrome, frames attached, navigated and detached are reported from now on, and the
@@ -33,7 +46,12 @@ export function registerPage({ session, probe, frames }: Context) {
       if (!stopFrames && !childTargets.parentMerged) {
         const events = frameEvents(session, frames);
         stopFrames = frames.onChange(events);
-        stopOpaque = frames.onOpaqueChange(withMergedUrls(session, events));
+        const merged = withMergedUrls(session, events);
+        const off = frames.onOpaqueChange(merged.onChange);
+        stopOpaque = () => {
+          off();
+          merged.stop();
+        };
       }
       stopSameDocument ??= sameDocumentNavigations(session, frames);
     },
@@ -161,7 +179,14 @@ export function registerPage({ session, probe, frames }: Context) {
       if (!URL.canParse(params.url)) throw new CdpError('Cannot navigate to invalid URL');
       frames.sync();
       const frame = params.frameId === undefined ? frames.top : frames.byId(params.frameId);
-      if (!frame) throw new CdpError('No frame with given id found');
+      if (!frame) {
+        // A sandboxed iframe's opaque frame (merged or not): in Chrome's frame tree, so navigable
+        // by its id; its document is out of reach, but its location may still be set.
+        const opaque = params.frameId === undefined ? undefined : opaqueById(params.frameId);
+        if (!opaque) throw new CdpError('No frame with given id found');
+        opaque.window.location.href = params.url;
+        return { frameId: opaque.id, loaderId: opaque.loaderId };
+      }
       const win = frame.document.defaultView;
       if (!win) throw new CdpError('No frame with given id found');
       win.location.href = params.url;

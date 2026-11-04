@@ -182,11 +182,12 @@ export function registerTarget(ctx: Pick<Context, 'session' | 'frames'>, targets
     if (!parsed) return;
     const { id, method, params } = parsed;
     if (typeof id === 'string' && id.startsWith(OWN_ID_PREFIX)) return;
-    if (method === undefined) entry.pending.delete(id);
     // The iframe's agent is not trusted: only its own children's sessions are its to speak on.
     const own = parsed['sessionId'];
     const onNested = typeof own === 'string' && own !== '';
     if (onNested && !entry.nested.has(own)) return;
+    // Only a reply on this session answers one of its commands: ids are each session's own.
+    if (method === undefined && !onNested) entry.pending.delete(id);
     // The iframe's own children (and theirs): their sessions are the iframe's to route to, not one taken.
     const nested = field(params, 'sessionId');
     if (typeof nested === 'string' && method === 'Target.attachedToTarget' && !entry.nested.has(nested)) {

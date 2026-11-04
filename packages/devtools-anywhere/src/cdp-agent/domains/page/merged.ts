@@ -58,18 +58,20 @@ function nextLink(
 /**
  * Wraps the listener of opaque frame changes: a merged frame navigated is reported with the URL of
  * the document its agent shows (`location.href`, not the iframe's `src`, which a navigation within
- * it leaves), once told. The changes are passed on in order.
+ * it leaves), once told. The changes are passed on in order, till `stop` is called: those still
+ * waiting for a URL then are dropped, as Chrome reports nothing once Page is disabled.
  */
 export function withMergedUrls(
   session: CdpSession,
   listener: (change: OpaqueFrameChange) => void
-): (change: OpaqueFrameChange) => void {
+): { onChange: (change: OpaqueFrameChange) => void; stop: () => void } {
   let queue = Promise.resolve();
+  let stopped = false;
   /** The link each merged frame's URL was last told by: its document's, till it navigates. */
   const told = new WeakMap<Element, ChildLink>();
   // Those linked now show the documents the frames are reported at.
   for (const [, link] of mergedFrames.frames()) told.set(link.owner, link);
-  return change => {
+  const onChange = (change: OpaqueFrameChange) => {
     const { owner } = change.frame;
     const url = change.type === 'navigated' && wasMerged.has(owner) ? nextLink(owner, told.get(owner)) : undefined;
     queue = queue.then(async () => {
@@ -78,9 +80,16 @@ export function withMergedUrls(
         told.set(owner, merged.link);
         return hrefIn(session, merged.ns);
       });
+      if (stopped) return;
       if (href !== undefined) change.frame.url = href;
       listener(change);
     });
+  };
+  return {
+    onChange,
+    stop: () => {
+      stopped = true;
+    },
   };
 }
 
