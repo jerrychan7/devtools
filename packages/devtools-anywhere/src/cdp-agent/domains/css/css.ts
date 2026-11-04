@@ -11,6 +11,7 @@ import { quietly, watchAdopted, watchTrees } from '../../core/adopted';
 import { ForcedPseudoClasses } from './forced-pseudo';
 import { backgroundsBehind } from './color';
 import { Cascade } from './cascade';
+import { ComputedStyleUpdates } from './computed-updates';
 import { RuleView } from './rule-view';
 import { SheetRegistry, isConstructed } from './sheet-registry';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
@@ -26,8 +27,9 @@ const OBSERVED: MutationObserverInit = {
 /**
  * Commands for a merged sandboxed iframe's nodes or style sheets go to its agent
  * (core/merged-frames.ts); its style sheets come in its own CSS.styleSheetAdded, of its frame id.
- * The rest fan out: what they answer without an id (media queries, computed style updates) the
- * iframe's agent answers empty, as the page's does, so the page's answer is the merged one.
+ * The rest fan out: what they answer without an id (media queries) the iframe's agent answers
+ * empty, as the page's does, so the page's answer is the merged one. Computed style updates of
+ * properties are the page's only: a take waits for a change, which the iframe's would hold up.
  */
 const NODE_ID = ['nodeId'];
 const SHEET_ID = ['styleSheetId'];
@@ -40,6 +42,7 @@ mergedFrames.registerRoutes('CSS', {
     'CSS.getPlatformFontsForNode': NODE_ID,
     'CSS.forcePseudoState': NODE_ID,
     'CSS.setEffectivePropertyValueForNode': NODE_ID,
+    'CSS.trackComputedStyleUpdatesForNode': NODE_ID,
     'CSS.getStyleSheetText': SHEET_ID,
     'CSS.setStyleSheetText': SHEET_ID,
     'CSS.collectClassNames': SHEET_ID,
@@ -48,13 +51,7 @@ mergedFrames.registerRoutes('CSS', {
     'CSS.setStyleTexts': ['edits.0.styleSheetId'],
     'CSS.createStyleSheet': ['frameId'],
   },
-  fanOut: [
-    'CSS.enable',
-    'CSS.disable',
-    'CSS.getMediaQueries',
-    'CSS.trackComputedStyleUpdates',
-    'CSS.takeComputedStyleUpdates',
-  ],
+  fanOut: ['CSS.enable', 'CSS.disable', 'CSS.getMediaQueries'],
 });
 
 export function registerCss(ctx: Context) {
@@ -105,6 +102,11 @@ export function registerCss(ctx: Context) {
   sheets.isOwnSheet = sheet => forced.owns(sheet);
   const rules = new RuleView(sheets, nodes);
   const cascade = new Cascade(sheets, forced, nodes, rules);
+  const updates = new ComputedStyleUpdates(
+    nodes,
+    () => [...documents(), ...shadowRoots()],
+    nodeId => session.emit('CSS.computedStyleUpdated', { nodeId })
+  );
 
   // The DOM does not tell which <style> the parser made: those in the document before the
   // parser is done are taken as its own, those added later as a script's. A script that adds
@@ -127,6 +129,8 @@ export function registerCss(ctx: Context) {
     // The companion sheets it adopts are ours, not a change of the page's.
     if (forced.isActive) quietly(() => forced.rebuild());
     ctx.refreshPseudoElements?.();
+    // Rule edits make no DOM mutation for the tracked computed styles to be compared after.
+    updates.check();
   }
   let enabled = false;
   let known = new Set<CSSStyleSheet>();
@@ -354,6 +358,7 @@ export function registerCss(ctx: Context) {
       stopFrames = null;
       stopAdopted?.();
       stopAdopted = null;
+      updates.stop();
     },
 
     async getMatchedStylesForNode(
@@ -538,8 +543,13 @@ export function registerCss(ctx: Context) {
       quietly(() => forced.set(element(params.nodeId), params.forcedPseudoClasses));
       ctx.refreshPseudoElements?.();
     },
-    trackComputedStyleUpdates: () => {},
-    takeComputedStyleUpdates: (): Protocol.CSS.TakeComputedStyleUpdatesResponse => ({ nodeIds: [] }),
+    trackComputedStyleUpdatesForNode(params: Protocol.CSS.TrackComputedStyleUpdatesForNodeRequest) {
+      updates.trackNode(params.nodeId);
+    },
+    trackComputedStyleUpdates(params: Protocol.CSS.TrackComputedStyleUpdatesRequest) {
+      updates.trackProperties(params.propertiesToTrack);
+    },
+    takeComputedStyleUpdates: (): Promise<Protocol.CSS.TakeComputedStyleUpdatesResponse> => updates.take(),
     getEnvironmentVariables: (): Protocol.CSS.GetEnvironmentVariablesResponse => ({
       environmentVariables: environmentVariables(ctx.frames.top.document),
     }),
