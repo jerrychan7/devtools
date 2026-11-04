@@ -51,21 +51,19 @@ function opaqueOwner(doc: Document, url: string): Element | undefined {
 }
 
 /**
- * The owner of the opaque (sandboxed) same-origin frame whose document the record is, as its
- * parent's Resource Timing reports it: Chrome attributes that request to the frame.
+ * How the record stands as the document of a same-origin child frame (iframe, `<object>`,
+ * `<embed>`), as its parent's Resource Timing reports it. One search of the page's frames.
+ * - `opaque`: the owner of the opaque (sandboxed) frame whose document it is. Chrome attributes
+ *   that request to the frame; it has no navigation entry of its own.
+ * - `frameDocument`: the document of a frame that is not opaque. The frame's own Resource Timing
+ *   reports it too, as its navigation, which Chrome attributes to the frame's own loader: that one
+ *   is kept, this one dropped.
  */
 // The top page's document and location are meant: opaqueOwner searches every frame from the top.
-export function opaqueFrameOf(rec: RequestRecord): Element | undefined {
+export function childDocumentOf(rec: RequestRecord): { frameDocument: boolean; opaque: Element | undefined } {
+  if (!isChildDocument(rec)) return { frameDocument: false, opaque: undefined };
   const url = new URL(rec.url, location.href);
-  return isChildDocument(rec) && url.origin === location.origin ? opaqueOwner(document, url.href) : undefined;
-}
-
-/**
- * Whether the record is the document of a same-origin iframe (or `<object>`, `<embed>`) as its
- * parent's Resource Timing reports it. The iframe's own Resource Timing reports it too, as its
- * navigation, which Chrome attributes to the iframe's frame and new loader: that one is kept.
- * Not for a sandboxed iframe whose document is opaque: it has no navigation entry of its own.
- */
-export function isFrameDocument(rec: RequestRecord): boolean {
-  return isChildDocument(rec) && new URL(rec.url, location.href).origin === location.origin && !opaqueFrameOf(rec);
+  if (url.origin !== location.origin) return { frameDocument: false, opaque: undefined };
+  const opaque = opaqueOwner(document, url.href);
+  return { frameDocument: !opaque, opaque };
 }

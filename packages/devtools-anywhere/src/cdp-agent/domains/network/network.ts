@@ -7,7 +7,7 @@ import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
 import { childTargets } from '../../core/child-targets';
 import { mergedFrames } from '../../core/merged-frames';
-import { isFrameDocument, opaqueFrameOf } from './frames';
+import { childDocumentOf } from './frames';
 
 /**
  * What every request id the client sees starts with: '' or `m{ns}.` in a page whose agent is
@@ -178,12 +178,14 @@ export function registerNetwork(ctx: Context) {
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
-    if (isOwnRequest(probe, rec) || isFrameDocument(rec)) return;
+    if (isOwnRequest(probe, rec)) return;
+    const child = childDocumentOf(rec);
+    if (child.frameDocument) return;
     // Merged into the parent's agent, this page's document request is the parent's to report, as
-    // that of its sandboxed iframe (frames.ts, opaqueFrameOf): once, as in Chrome.
+    // that of its sandboxed iframe (frames.ts, childDocumentOf): once, as in Chrome.
     if (childTargets.parentMerged && !rec.frame && rec.initiatorType === 'navigation') return;
     // The document of a sandboxed iframe: of that frame, as in Chrome.
-    const opaque = rec.frame ? undefined : opaqueFrameOf(rec);
+    const opaque = rec.frame ? undefined : child.opaque;
     const frameId = rec.frame?.frameId ?? (opaque ? childTargets.frameIdOf(opaque) : frames.top.id);
     const loaderId =
       rec.frame?.loaderId ?? (opaque && frames.opaqueLoaderId(opaque, rec.wallTime)) ?? frames.top.loaderId;
