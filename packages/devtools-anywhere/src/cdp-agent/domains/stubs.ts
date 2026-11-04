@@ -48,16 +48,6 @@ const NOOPS = {
     'setUserAgentOverride',
   ],
   ServiceWorker: ['enable'],
-  Storage: [
-    'trackCacheStorageForOrigin',
-    'trackIndexedDBForOrigin',
-    'trackIndexedDBForStorageKey',
-    'setStorageBucketTracking',
-    'untrackCacheStorageForOrigin',
-    'untrackCacheStorageForStorageKey',
-    'untrackIndexedDBForOrigin',
-    'untrackIndexedDBForStorageKey',
-  ],
 } satisfies CommandsByDomain;
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */
