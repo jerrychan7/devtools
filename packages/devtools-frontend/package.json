@@ -1,6 +1,6 @@
 {
   "name": "@devtools-anywhere/devtools-frontend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Chrome DevTools frontend built from the official sources for devtools-anywhere",
   "keywords": [
     "chrome-devtools",
