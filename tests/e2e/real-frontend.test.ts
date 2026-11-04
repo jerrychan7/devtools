@@ -875,6 +875,104 @@ test('hidden, DevTools leaves inspect mode and the page gets its clicks back', {
 });
 
 // Last: it reloads the page into shell mode and back.
+/** Shows a view by its id, in the drawer for the drawer's views, as the command menu does. */
+const showView = (id: string) =>
+  frontend.evaluate(async id => {
+    const { ViewManager }: { ViewManager: { ViewManager: { instance(): { showView(id: string): Promise<void> } } } } =
+      await (
+        await import(document.querySelector<HTMLScriptElement>('script[type=module]')?.src ?? '')
+      ).modules['ui/legacy/legacy.js']();
+    await ViewManager.ViewManager.instance().showView(id);
+  }, id);
+
+/** How many elements of the frontend match `selector`, including in shadow DOM. */
+const count = (selector: string) =>
+  frontend.evaluate(selector => {
+    let n = 0;
+    const walk = (root: Document | ShadowRoot) => {
+      n += root.querySelectorAll(selector).length;
+      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+    };
+    walk(document);
+    return n;
+  }, selector);
+
+/** Text of the frontend's text nodes, one per line, without its style sheets. */
+const shownText = () =>
+  frontend.evaluate(() => {
+    const lines: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
+      for (const el of root.querySelectorAll('*:not(style):not(script)'))
+        for (const node of el.childNodes) if (node instanceof Text && node.data.trim()) lines.push(node.data.trim());
+      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+    };
+    walk(document);
+    return lines;
+  });
+
+test('the Animations panel lists the CSS and Web Animations the page runs', { skip }, async () => {
+  await showView('animations');
+  const before = await count('.animation-buffer-preview');
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.textContent =
+      '@keyframes rf-spin { to { transform: rotate(1turn) } } .rf-spin { animation: rf-spin 1s infinite }';
+    document.head.append(style);
+    const css = document.createElement('div');
+    css.className = 'rf-spin';
+    document.body.append(css);
+    const web = document.createElement('div');
+    document.body.append(web);
+    web.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity });
+  });
+  try {
+    await waitFor(async () => (await count('.animation-buffer-preview')) > before);
+  } finally {
+    await page.evaluate(() => {
+      for (const animation of document.getAnimations()) animation.cancel();
+      document.querySelector('.rf-spin')?.classList.remove('rf-spin');
+    });
+  }
+});
+
+test("the Issues panel shows the page's issues", { skip }, async () => {
+  await page.evaluate(() => {
+    const label = document.createElement('label');
+    label.htmlFor = 'rf-no-such-input';
+    label.textContent = 'label';
+    document.body.append(label);
+  });
+  await showView('issues-pane');
+  await waitFor(async () => (await shownText()).some(line => line.includes('Incorrect use of <label for=')));
+});
+
+test("the Accessibility pane shows the selected node's role and name", { skip }, async () => {
+  await showPanel('elements');
+  // Selects the heading in the Elements tree.
+  await waitFor(() =>
+    frontend.evaluate(() => {
+      const find = (root: Document | ShadowRoot): Element | null => {
+        for (const li of root.querySelectorAll('li')) if (li.textContent.includes('real-frontend-marker')) return li;
+        for (const el of root.querySelectorAll('*')) {
+          const found = el.shadowRoot && find(el.shadowRoot);
+          if (found) return found;
+        }
+        return null;
+      };
+      const li = find(document);
+      li?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      return !!li;
+    })
+  );
+  await showView('accessibility.view');
+  await waitFor(async () => {
+    const lines = await shownText();
+    const at = lines.indexOf('Computed properties');
+    const shown = lines.slice(at, at + 30);
+    return at >= 0 && shown.includes('"hello"') && shown.includes('heading');
+  });
+});
+
 test('the toolbar keeps DevTools open across reloads, and reloads the page', { skip }, async () => {
   /** A button of the frontend whose label starts with `label`, and the frontend currently shown. */
   const button = async (label: string) => {
