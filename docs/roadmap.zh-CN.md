@@ -28,6 +28,7 @@
 | 外壳模式下对图片和脚本屏蔽 URL、附加请求头、离线 | 屏蔽 URL、附加请求头、禁用缓存、离线只对探针拦截的 fetch、XHR 生效；文档本身的请求和其他子资源不受影响 | 外壳模式开启 Service Worker 时，对它经手的同域请求（图片、脚本、样式表等）同样生效 |
 | 常驻叠加层的剩余差距 | Grid、Flex、容器查询、scroll-snap 和隔离叠加层是近似绘制：没有 grid 线编号和区域名，对齐后的 grid 偏移、从右到左布局没有处理；Flex 不显示剩余空间分布和间距；容器查询不标出被查询的后代；合并的沙箱 iframe 里的节点没有常驻叠加层 | 在同一层里按计算样式和盒子画出来 |
 | 无障碍事件 | 不发 `Accessibility.loadComplete` 和 `nodesUpdated`：树在每条命令里现算，窗格不会自己刷新 | 对文档用 `MutationObserver`，发出属性变了的节点 |
+| Firefox、Safari 的浏览器默认样式 | 只附带 Chromium 的 `html.css`：页面在 Firefox 或 Safari 里时，Styles 显示的 user agent stylesheet 规则是 Chrome 的，与实际生效的不同 | 按内核加载对应的样式表，匹配逻辑不用改：Firefox 的在 `layout/style/res/`（`html.css`、`forms.css`、`ua.css` 等，MPL-2.0），Safari 用 WebKit 的 `html.css`（LGPL，与 Chromium 同源）。难点：大量 `-moz-` 私有语法会被页面的解析器丢掉，先实测能保留多少规则；没有 CDP 可以逐条对照，只能和各家 DevTools 人工比对或用 `getComputedStyle` 间接校验；只能钉住一个版本作为近似 |
 | 跨域 `<embed>` 文档作为子目标（没做） | 找不到跨域 `<embed>` 的窗口：它没有 `contentWindow`，而跨域时读不了子窗口的 `frameElement`。因此其中的文档不会链接（握手被拒、也不被 ping），DOM 里也不当作跨域 frame；Chrome 会像 iframe 一样给它建子目标 | 用排除法认出它的窗口：页面的子窗口里，不属于其他 owner（iframe、frame、object 的 `contentWindow`，同域 embed）的那些，按文档顺序对应剩下的 embed。没做：页面的子窗口按 frame 插入的顺序排列，不是文档顺序，对应不可靠 |
 
 价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。不做：问题面板里的低对比度，Chrome 自己已经去掉了 `Audits.checkContrast` 和低文本对比度问题。
