@@ -19,7 +19,6 @@ const NOOPS = {
   Accessibility: ['enable'],
   // Some issues are the page's to find (docs/roadmap.md, the Issues panel).
   Audits: ['enable'],
-  Animation: ['enable'],
   // Device mode's size is the shell's (shell-layout.ts).
   Emulation: ['setUserAgentOverride'],
   Inspector: ['enable'],

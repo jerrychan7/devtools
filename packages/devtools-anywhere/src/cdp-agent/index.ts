@@ -7,6 +7,7 @@ import { setSheetIdPrefix } from './domains/css/sheet-registry';
 import { viewProbe } from './core/probe-view';
 import { realmOf } from './core/realm';
 import { CdpSession } from './core/session';
+import { registerAnimation } from './domains/animation/animation';
 import { registerCss } from './domains/css/css';
 import { registerDebugger, setScriptIdPrefix } from './domains/debugger/debugger';
 import { registerDom } from './domains/dom/dom';
@@ -167,5 +168,6 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerInput(ctx);
   registerEmulation(ctx);
   registerWebMcp(ctx);
+  registerAnimation(ctx);
   return ctx.session;
 }

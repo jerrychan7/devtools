@@ -10,7 +10,17 @@ export type Handler = (params: never) => unknown;
 export const errorMessage = (e: unknown) => String(e instanceof Error ? e.message : e);
 
 /** Domains that keep state while enabled; a new frontend instance must start from disabled. */
-const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+const STATEFUL_DOMAINS = [
+  'Runtime',
+  'Network',
+  'Debugger',
+  'CSS',
+  'DOM',
+  'DOMStorage',
+  'Overlay',
+  'WebMCP',
+  'Animation',
+];
 
 /**
  * The calls that end what a frontend started in the page, like a new Chrome session: e.g.
