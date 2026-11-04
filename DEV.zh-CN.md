@@ -185,7 +185,7 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 pnpm --filter @devtools-anywhere/devtools-frontend update
 ```
 
-它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`，并把对应的 Chrome 版本写进各包的 `chrome` 字段。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`；这时 `chrome` 字段要手动填）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`，并把对应的 Chrome 版本写进各包的 `chrome` 字段。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`；这时 `chrome` 字段要手动填）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。`chrome` 字段变了之后还要运行 `node scripts/sync-user-agent-css.ts`：它为浏览器默认样式取回该版本 Chrome 的 `html.css`（`--check` 只检查副本是否对得上；对不上时构建会警告），然后按它的提示更新该目录 `README.md` 里的链接。
 
 ## 3. 开发完成
 

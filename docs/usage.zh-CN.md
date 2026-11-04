@@ -262,7 +262,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 断点、Profiler、内存、性能 | ❌ 不打包这些面板 | 没有 JS API。`debugger;` 不会暂停；外壳模式下改为输出一条带堆栈的警告 |
 | 网络时序 | ❌ | 没有 JS API |
 | 源代码 | ⚠️ | 文档、外链脚本和样式表、图片、字体；不列内联脚本；代码段可用 |
-| 浏览器默认样式 | ⚠️ | Styles 里暂不显示（见[路线图](roadmap.zh-CN.md#其他能在页面里补上的功能)） |
+| 浏览器默认样式 | ⚠️ | Styles 里显示「user agent stylesheet」规则，来自 Chromium 的 `html.css` 副本（`chromium-html.css`，首次使用时从 bundle 旁边加载）。含 Blink 内部选择器的规则不显示，`@supports blink-feature()` 按特性关闭处理，只用 `html.css`（不含 Chrome 的其他默认样式表）；bundle 内联（没有 URL）时不显示。Computed 窗格在 DOM 变动和 DevTools 自己修改样式时刷新，不是每次样式变化都刷新；合并的沙箱 iframe 里的节点不刷新 |
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
 | 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到。没有隔离 world（`Page.createIsolatedWorld`） |
@@ -275,10 +275,21 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。远程客户端的设置在页面重新加载后仍然有效，与 Chrome 一致。参数按 Chrome 的规则检查，报错也与 Chrome 相同，但有两处例外："Invalid parameters" 的 data 不带 Chrome 的 "at position N"（这是 Chrome 内部编码里的字节偏移）；`devicePosture` 的 type 不认识时照常接受，而 Chrome 会不再应答 |
 | Rendering 面板的模拟 | ⚠️ | 「模拟页面处于焦点」做不到：在页面里使用 DevTools 时，焦点真的会离开页面元素，`:focus` 样式随之消失，开启时返回错误。自动深色模式、双指缩放重置同样做不到，返回错误。页面做不到的命令一律返回错误「Not supported in the page: <原因>」，能做但还没做的见[路线图](roadmap.zh-CN.md) |
 | 全屏的页面 | ⚠️ | 有元素全屏时用不了 DevTools，外壳模式下也一样。按 Esc 退出全屏即可 |
+| 无障碍树 | ⚠️ | Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。没有 InlineTextBox、列表标记和 UA shadow 树里的节点；input 的默认名称（如 "Submit"）是英文；不发 `loadComplete`、`nodesUpdated` 事件。由 `accessibility.js`（约 29 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录 |
+| Animations 面板 | ⚠️ | 来自 `getAnimations()` 的 CSS 动画、过渡和 Web Animations：列出、暂停、拖动进度、改时间。调速设在每个动画上，而不是像 Chrome 那样设在时间线上，所以页面读到的 `playbackRate` 是乘过的；只覆盖页面自己和同源 frame 的文档 |
+| 模拟媒体特性 | ⚠️ | `prefers-color-scheme`、`prefers-reduced-motion`、`prefers-reduced-data`、`prefers-reduced-transparency`、`prefers-contrast`、`forced-colors`、`color-gamut` 和媒体类型，通过改写页面的样式表实现。跨域样式表、内联样式和 `matchMedia()` 不受影响；`light-dark()` 和强制颜色选的配色不会变 |
+| 模拟安全区 | ⚠️ | 在页面的样式表里替换 `env(safe-area-inset-*)`：跨域样式表和内联样式不受影响；Styles 里显示的是替换后的值 |
+| 色觉缺陷模拟 | ✅ | 和 Chrome 一样在 `<html>` 上加 SVG 滤镜：会覆盖页面自己在 `<html>` 上的 `filter`，内嵌的面板也会被滤镜，`getComputedStyle` 能看到 |
+| 布局叠加层 | ⚠️ | Grid、Flex、容器查询、scroll-snap、隔离、铰链、刘海和 frame 叠加层，按计算样式近似绘制：grid 没有线编号；隔离模式的拖拽调整大小不跨 iframe |
+| 网络条件 | ⚠️ | 屏蔽 URL、附加请求头、禁用缓存、离线和 UA 覆盖只对探针拦截的 `fetch()`、XHR 生效，文档本身的请求和其他子资源不受影响。XHR 禁用缓存只对同源请求有效；跨源请求附加请求头会触发 CORS 预检；UA 只覆盖页面和已发现的同源 iframe。不支持限速。Reporting API 只有页面能看到的报告 |
+| Application 面板 | ⚠️ | IndexedDB 和 Cache Storage 视图只在本窗口写入时刷新（worker 和其他窗口的看不到）；存储桶是页面的默认桶。Service Worker：能列出、更新、注销；看不到是否在运行，所以在变成 redundant 之前都显示为运行中；调试、启动、停止 worker 返回错误 |
+| 问题面板 | ⚠️ | CSP 违规、弃用、怪异模式和表单问题。CSP 和弃用只有顶层文档的；没有干预，没有低对比度（Chrome 也已没有这项检查）；Cookie、CORS、混合内容只有浏览器知道 |
+| Console 违规提示 | ⚠️ | 由 `long-animation-frame` 条目得出慢 handler 和强制重排的 `[Violation]` 消息，没有行号；浏览器需要支持 long-animation-frame，否则 `Log.startViolationsReport` 返回错误 |
+| 跨域 iframe 里的 `DOM.scrollIntoViewIfNeeded` | ✅ | 会继续滚动父页面，在应答之后异步进行 |
 | 前端与页面同源 | ⚠️ | DevTools 的设置会和页面共用 `localStorage`：前端放在别的源 |
 | 浏览器 | ⚠️ | 页面这边：现代浏览器都行。DevTools 界面：只在 Chrome 上验证过；新版前端可能需要兼容补丁 |
 
-snapDOM（gzip 后约 90 KB）只在投屏和截图时加载。
+snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js` 只在用到无障碍树时加载；`chromium-html.css` 只在显示浏览器默认样式时加载。
 
 ### 截图
 
@@ -294,7 +305,7 @@ snapDOM（gzip 后约 90 KB）只在投屏和截图时加载。
 
 | 包 | 内容 |
 |---|---|
-| `devtools-anywhere` | `probe.iife.js`、`devtools-anywhere.iife.js`（组件）、`devtools-anywhere-service-worker.js`、`snapdom.js`；组件、事件和各属性的 TypeScript 类型。没有可以 import 的模块 |
+| `devtools-anywhere` | `probe.iife.js`、`devtools-anywhere.iife.js`（组件）、`devtools-anywhere-service-worker.js`、`snapdom.js`、`accessibility.js`、`chromium-html.css`；组件、事件和各属性的 TypeScript 类型。没有可以 import 的模块 |
 | `@devtools-anywhere/devtools-frontend` | 前端，英文和中文界面 |
 | `@devtools-anywhere/devtools-frontend-locales` | 其余 80 种界面语言；和前端放在同一目录。缺少的语言退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |

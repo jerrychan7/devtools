@@ -4,6 +4,24 @@
 
 ## Unreleased
 
+- Elements 的 Accessibility 窗格显示无障碍树；`Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors` 的应答与 Chrome 一致，供读取页面结构的工具和 agent 使用。树由 `accessibility.js` 在页面里计算，首次使用时从 bundle 旁边加载；其中打包了 dom-accessibility-api（MIT）。
+- Animations 面板列出页面的 CSS 动画、过渡和 Web Animations，能暂停、拖动进度、改时间和调速。
+- Rendering 面板和设备模式里的模拟媒体特性（`prefers-color-scheme`、减少动画、对比度、强制颜色等）和媒体类型、安全区、色觉缺陷模拟生效：通过改写页面的样式表，以及和 Chrome 相同的 SVG 滤镜实现。
+- Styles 显示浏览器的「user agent stylesheet」规则，来自随包附带的 Chromium `html.css` 副本 `chromium-html.css`；Computed 窗格会自动刷新。
+- 网络：屏蔽 URL、附加请求头、禁用缓存、离线和 UA 覆盖对页面的 `fetch()`、XHR 生效；列出页面能看到的 Reporting API 报告。
+- Application 面板的 IndexedDB 和 Cache Storage 视图在页面写入时刷新；Service workers 视图列出页面的注册，能更新和注销；需要 worker 本身的命令返回错误「Not supported in the page」。
+- Layout 窗格的 Grid、Flex、容器查询、scroll-snap 叠加层，隔离模式，设备模式的铰链和刘海，以及 frame 高亮，都在页面里画出。
+- 问题面板显示 CSP 违规、弃用、怪异模式和表单问题；Console 显示慢 handler 和强制重排的 `[Violation]` 消息。
+- 已链接的跨域 iframe 里的 `DOM.scrollIntoViewIfNeeded` 会和 Chrome 一样继续滚动外层页面。
+
+### 接口变化
+
+公开 API（以 `packages/*/etc/*.public.api.md` 为准）与 0.3.0 相比没有变化。
+
+- `devtools-anywhere` 的 `dist/` 新增两个首次使用时才加载的文件：`accessibility.js`（导出为 `./accessibility.js`）和 `chromium-html.css`；自托管时和 bundle 放在一起。新增依赖 `dom-accessibility-api`。
+- 探针 minify 后从 18948 字节增到 19385 字节。
+- 跨域 iframe 里的探针和父页面之间的消息新增内部事件 `DevtoolsAnywhere.scrollParent`：两边请使用同一版本的探针。
+
 ## 0.3.0
 
 基于 Chrome 156（156.0.8078.80）。

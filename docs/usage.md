@@ -262,7 +262,7 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Breakpoints, Profiler, Memory, Performance | ❌ Panels not included | No JS API. `debugger;` does not pause; in shell mode it logs a warning with its stack |
 | Network timing | ❌ | No JS API |
 | Sources | ⚠️ | Documents, external scripts and style sheets, images, fonts; no inline scripts; snippets work |
-| Browser default styles | ⚠️ | Not shown in Styles yet ([roadmap](roadmap.md#more-that-can-be-filled-in-the-page)) |
+| Browser default styles | ⚠️ | "user agent stylesheet" rules in Styles, from a copy of Chromium's `html.css` (`chromium-html.css`, loaded next to the bundle on first use). Rules with Blink-internal selectors are left out, `@supports blink-feature()` takes the feature-off branch, and only `html.css` is used (not Chrome's other default sheets); with the bundle inlined (no URL), none are shown. The Computed pane refreshes on DOM mutations and DevTools' own edits, not on every style change; not for nodes in merged sandboxed iframes |
 | Event listeners | ⚠️ | Only those added after the probe ran; no source location |
 | WebSocket | ⚠️ | Connections and frames; no handshake headers |
 | Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it. No isolated worlds (`Page.createIsolatedWorld`) |
@@ -275,10 +275,21 @@ Gaps are filled exactly or not at all: nothing approximate is shown as fact.
 | Device mode | ⚠️ | Shell mode only. Sets the size only: no pixel ratio, user agent or touch; its screenshots are snapDOM's, at the page's pixel ratio. `Emulation.setDeviceMetricsOverride` works there from any client (a remote agent too), the last one set applying, as in Chrome; elsewhere it fails. Remote clients' overrides survive page reloads, as in Chrome. The override's params are checked as Chrome checks them, with Chrome's errors, except that "Invalid parameters" data leaves out Chrome's "at position N" (a byte offset in Chrome's own encoding), and a `devicePosture` of an unknown type is taken, where Chrome stops answering |
 | Fullscreen pages | ⚠️ | While an element is fullscreen, DevTools cannot be used, in shell mode too. Esc leaves fullscreen |
 | Rendering panel emulation | ⚠️ | "Emulate a focused page" cannot be done: using DevTools in the page really takes focus from its elements, and their `:focus` styles go; turning it on fails. Auto dark mode and resetting the pinch zoom cannot be done either and fail. Every command the page cannot carry out fails with "Not supported in the page: <why>"; those that could be done but are not yet are in the [roadmap](roadmap.md) |
+| Accessibility tree | ⚠️ | The Elements panel's Accessibility pane and `Accessibility.getPartialAXTree`, `getFullAXTree`, `queryAXTree`, `getRootAXNode`, `getChildAXNodes`, `getAXNodeAndAncestors`: computed in the page from the DOM, ARIA attributes and computed styles, compared with Chrome's. No inline text boxes, list markers or nodes of user-agent shadow trees; the default names of inputs (such as "Submit") are in English; no `loadComplete` or `nodesUpdated` events. Computed by `accessibility.js` (about 29 KB), loaded on first use from next to the bundle: self-hosted, serve it in the same directory |
+| Animations panel | ⚠️ | CSS animations, transitions and Web Animations from `getAnimations()`: listed, paused, seeked, retimed. The playback rate is set on each animation, not on the timeline as in Chrome, so the page reads it multiplied in `playbackRate`; only the page's documents and its same-origin frames |
+| Emulated media | ⚠️ | `prefers-color-scheme`, `prefers-reduced-motion`, `prefers-reduced-data`, `prefers-reduced-transparency`, `prefers-contrast`, `forced-colors`, `color-gamut` and the media type, by rewriting the page's style sheets. Not in cross-origin sheets, inline styles or `matchMedia()`; the colors `light-dark()` and forced colors pick are not changed |
+| Emulated safe area insets | ⚠️ | `env(safe-area-inset-*)` replaced in the page's style sheets: not in cross-origin sheets or inline styles; Styles shows the replaced values |
+| Vision deficiencies | ✅ | SVG filters on `<html>`, as in Chrome: they replace a `filter` of the page's own on `<html>`, apply to an embedded panel too, and `getComputedStyle` sees them |
+| Layout overlays | ⚠️ | Grid, flex, container query, scroll-snap, isolation, hinge, display cutout and frame overlays, drawn approximately from the computed styles: grids have no line labels; isolation mode's resizing does not reach into iframes |
+| Network conditions | ⚠️ | Blocked URLs, extra headers, cache disabled, offline and the user agent override apply to the `fetch()` and XHR the probe hooks only, not the document's own request or other subresources. Disabling the cache of XHR works for same-origin requests only; extra headers on a cross-origin request make it need a CORS preflight; the user agent is overridden in the page and its same-origin iframes found so far. Throttling is not supported. Reporting API: the reports the page sees only |
+| Application panel | ⚠️ | IndexedDB and Cache Storage views refresh on writes of this window only (not workers or other windows); the storage bucket is the page's default one. Service workers: listed, updated and unregistered; whether one is running cannot be seen, so it shows running until redundant; inspecting, starting and stopping workers fail |
+| Issues panel | ⚠️ | CSP violations, deprecations, quirks mode and form issues. CSP and deprecations of the top document only; no interventions, no low contrast (Chrome has no such check either); cookies, CORS and mixed content are the browser's |
+| Console violations | ⚠️ | `[Violation]` messages for slow handlers and forced reflows from `long-animation-frame` entries, without line numbers; the browser needs long-animation-frame, otherwise `Log.startViolationsReport` fails |
+| `DOM.scrollIntoViewIfNeeded` in a cross-origin iframe | ✅ | Scrolls the parent pages on too, asynchronously after the answer |
 | Frontend on the page's origin | ⚠️ | DevTools' settings share the page's `localStorage`: host it on another origin |
 | Browsers | ⚠️ | Page side: any modern browser. DevTools UI: verified in Chrome only; newer frontends may need compatibility patches |
 
-snapDOM (about 90 KB gzip) loads only for the screencast and screenshots.
+snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `accessibility.js` only for the accessibility tree; `chromium-html.css` only for the browser default styles.
 
 ### Screenshots
 
@@ -294,7 +305,7 @@ snapDOM (about 90 KB gzip) loads only for the screencast and screenshots.
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | `probe.iife.js`, `devtools-anywhere.iife.js` (the element), `devtools-anywhere-service-worker.js`, `snapdom.js`; TypeScript types for the element, its events and the attributes. No module to import |
+| `devtools-anywhere` | `probe.iife.js`, `devtools-anywhere.iife.js` (the element), `devtools-anywhere-service-worker.js`, `snapdom.js`, `accessibility.js`, `chromium-html.css`; TypeScript types for the element, its events and the attributes. No module to import |
 | `@devtools-anywhere/devtools-frontend` | The frontend, English and Chinese UI |
 | `@devtools-anywhere/devtools-frontend-locales` | The other 80 UI languages; serve from the frontend's directory. Missing languages fall back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |

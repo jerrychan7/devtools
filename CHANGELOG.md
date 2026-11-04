@@ -4,6 +4,24 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
+- The Accessibility pane in Elements shows the accessibility tree, and `Accessibility.getPartialAXTree`, `getFullAXTree`, `queryAXTree`, `getRootAXNode`, `getChildAXNodes` and `getAXNodeAndAncestors` answer as in Chrome, for tools and agents reading the page's structure. The tree is computed in the page by `accessibility.js`, loaded next to the bundle on first use; it includes dom-accessibility-api (MIT).
+- The Animations panel lists the page's CSS animations, transitions and Web Animations, and pauses, seeks, retimes and changes their speed.
+- Emulated media features (`prefers-color-scheme`, reduced motion, contrast, forced colors, …) and media type, safe area insets and vision deficiencies in the Rendering panel and device mode take effect, by rewriting the page's style sheets and with Chrome's SVG filters.
+- Styles shows the browser's "user agent stylesheet" rules, from a copy of Chromium's `html.css` shipped as `chromium-html.css`; the Computed pane refreshes by itself.
+- Network: blocked URLs, extra headers, disabling the cache, offline and the user agent override apply to the page's `fetch()` and XHR; the Reporting API's reports the page sees are listed.
+- The Application panel's IndexedDB and Cache Storage views refresh on the page's writes, and the Service workers view lists the page's registrations, which it can update and unregister; commands that need the worker itself fail with "Not supported in the page".
+- The Layout pane's grid, flex, container query and scroll-snap overlays, isolation mode, device mode's hinge and display cutout, and frame highlights are drawn in the page.
+- The Issues panel shows CSP violations, deprecations, quirks mode and form issues; the Console shows `[Violation]` messages for slow handlers and forced reflows.
+- `DOM.scrollIntoViewIfNeeded` in a linked cross-origin iframe scrolls the pages holding it too, as in Chrome.
+
+### API changes
+
+Public API, as in `packages/*/etc/*.public.api.md`: unchanged since 0.3.0.
+
+- `devtools-anywhere` ships two more files in `dist/`, loaded on first use: `accessibility.js` (exported as `./accessibility.js`) and `chromium-html.css`; self-hosted, serve them with the bundle. It depends on `dom-accessibility-api` now.
+- The probe grows from 18948 to 19385 bytes minified.
+- The messages between the probe in a cross-origin iframe and its parent gained the internal event `DevtoolsAnywhere.scrollParent`: use the same version of the probe on both sides.
+
 ## 0.3.0
 
 Based on Chrome 156 (156.0.8078.80).

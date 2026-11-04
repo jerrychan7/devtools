@@ -4,29 +4,6 @@
 
 已经讨论过、还没做的事，以及没做的原因。只记录方向和已知的取舍，不承诺时间。做完的条目移到 CHANGELOG。
 
-## 无障碍树（`Accessibility` 域）
-
-**现状**：完全空缺。只有 `Accessibility.enable` 这一个空操作（`cdp-agent/domains/stubs.ts`），让前端启动时不报错。
-
-**影响**：
-
-- Elements 面板侧栏的 Accessibility 窗格（无障碍树、计算出的 role 和 name 及其来源）是空的。
-- 通过 CDP 读页面的自动化工具大多靠 `Accessibility.getFullAXTree` / `queryAXTree` 拿页面结构，在这里拿不到。它们仍然可以用 `Runtime.evaluate` 在页面里执行脚本自己算，所以对 agent 来说不算硬阻塞。
-
-**做法**：在页面里根据 DOM、ARIA 属性和隐式 role 算出 CDP 的 `AXNode`，拿真 Chrome 的 `getFullAXTree` 逐个节点对照测试，和现有的 conformance 测试一样。
-
-- 参考：Blink 的 `third_party/blink/renderer/modules/accessibility/`（BSD），以及规范 HTML-AAM（隐式 role）和 accname 1.2（name 计算）。Blink 的实现依赖布局树，只能照规则用 JS 重写，没法逐行移植。
-- 可用的现成库：[`dom-accessibility-api`](https://github.com/eps1lon/dom-accessibility-api)（MIT，零依赖，minify 后约 15 KB，能直接在浏览器里运行）实现了 accname、`getRole`、`isInaccessible`。name 和 description 的计算可以用它打底，这是最难对齐的部分。
-- 还要自己补的：
-  - role 映射的上下文规则：比如 `header` / `footer` 在 `section` 里是 generic，没有 name 的 `section` 不是 region，`th` 的行表头和列表头，以及没有映射的元素应当是 generic；
-  - 树结构：被忽略的节点、`aria-owns`、文本节点变成 StaticText；
-  - 节点属性：focusable、checked、expanded、level、value 等；
-  - name 的来源列表（`sources`），Accessibility 窗格会展示它。
-
-**拆分**：先做 Elements 窗格用到的 `getPartialAXTree`，再做 `getFullAXTree` / `queryAXTree`。
-
-**体积**：这块代码不该进探针。和 snapDOM 一样，用到时才从 bundle 旁边加载。
-
 ## Android 上通过 ADB 无线调试拿到真正的 CDP
 
 **动机**：页面内的 CDP 有些事情做不到，比如截图（现在是 snapDOM 按 DOM 重新绘制，标注 `approximate`）、真实的网络耗时、性能面板、断点。Android 上的 Chrome 本身有完整的 CDP，打开 Android 系统的「无线调试」（Wireless debugging，Android 11 起）后，电脑就能不插线连上手机里的 Chrome。
@@ -44,33 +21,20 @@
 
 ## 其他能在页面里补上的功能
 
-都能用页面里的标准 API 实现，结果能和 Chrome 对齐。按性价比排序，前三项工作量小。
+都能用页面里的标准 API 实现，结果能和 Chrome 对齐。
 
 | 项目 | 现状 | 页面内的做法 |
 |---|---|---|
-| Animations 面板（`Animation` 域） | `enable` 是空操作 | `document.getAnimations()` 覆盖 CSS 动画、过渡和 Web Animations API；列出、暂停、调速、拖动进度都能对应上 |
-| 色觉缺陷模拟（`setEmulatedVisionDeficiency`） | 空操作 | 在 `<html>` 上加 SVG 滤镜，Chrome 用的也是颜色矩阵 |
-| 网络：屏蔽 URL、禁用缓存、附加请求头、离线 | `setBlockedURLs`、`setCacheDisabled`、`setExtraHTTPHeaders`、`overrideNetworkState` 和 `emulateNetworkConditions` 的离线是空操作 | 对已经拦截的 fetch、XHR 生效；外壳模式下由 Service Worker 覆盖图片和脚本。限速返回错误：页面没法让请求变慢 |
-| 浏览器默认样式 | Styles 里不显示 | 附带一份 Chromium 的 `html.css`（开源），用到时加载，用来匹配出「user agent stylesheet」规则；每次升级 Chrome 都要同步 |
-| Grid / Flex / 容器查询 / scroll-snap 叠加层 | `Overlay.setShow*Overlays` 是空操作 | 在页面里画出来；`getComputedStyle` 返回 grid 解析后的轨道尺寸；和 `highlightNode` 共用叠加层 |
-| 模拟 `prefers-color-scheme`、print 等媒体特性 | `setEmulatedMedia` 是空操作 | 通过 CSSOM 改写 `@media` 条件；限制和强制 `:hover` 相同：对 `@import`、跨域样式表和 `matchMedia` 不生效 |
-| Application 面板自动刷新（`Storage.track*`、`setStorageBucketTracking`） | 空操作，要手动刷新 | 包装 IDB 的写操作和 `caches.put`，发出 `indexedDBContentUpdated` 等事件 |
-| Service Workers 视图 | `ServiceWorker.enable` 是空操作 | 用 `navigator.serviceWorker.getRegistrations()` 列出、注销、更新；不能调试 |
-| 问题面板（`Audits` 域） | `enable` 是空操作 | 报出页面自己能发现的问题，措辞与 Chrome 一致：CSP 违规（`securitypolicyviolation`）、弃用和干预（`ReportingObserver`）、怪异模式、表单问题（缺 label、重复 id、`autocomplete`，从 DOM 算出）、低对比度。Cookie、CORS、混合内容只有浏览器知道，做不到 |
-| 违规提示与长任务（`Log.startViolationsReport`） | 空操作 | `PerformanceObserver` 监听 `longtask`、`long-animation-frame`，在 Console 输出 |
-| 覆盖 user agent（`Emulation` / `Network.setUserAgentOverride`） | 空操作 | 重新定义 `navigator.userAgent`、`platform`、`userAgentData`，并给已经拦截的 fetch、XHR 设置请求头；文档本身的请求和其他子资源改不了 |
-| 计算样式更新（`CSS.trackComputedStyleUpdatesForNode`） | 空操作 | 对被跟踪的节点用 `MutationObserver` 加 `getComputedStyle`，发出 `computedStyleUpdated` |
-| 框架、隔离元素、铰链、刘海叠加层 | `Overlay.highlightFrame`、`setShowIsolatedElements`、`setShowHinge`、`setShowDisplayCutout` 是空操作 | 和 `highlightNode` 画在同一层 |
-| 模拟安全区（safe area） | `Emulation.setSafeAreaInsetsOverride` 是空操作 | 通过 CSSOM 把样式表里的 `env(safe-area-inset-*)` 替换成指定值；限制和模拟媒体特性相同：对 `@import`、跨域样式表不生效 |
-| Reporting API 和请求发起位置 | `Network.enableReportingApi`、`setAttachDebugStack` 是空操作 | 用 `ReportingObserver` 收集页面能看到的报告；在拦截的 fetch、XHR 里记录调用栈 |
-| 跨域 `<embed>` 文档作为子目标 | 找不到跨域 `<embed>` 的窗口：它没有 `contentWindow`，而跨域时读不了子窗口的 `frameElement`。因此其中的文档不会链接（握手被拒、也不被 ping），DOM 里也不当作跨域 frame；Chrome 会像 iframe 一样给它建子目标 | 用排除法认出它的窗口：页面的子窗口里，不属于其他 owner（iframe、frame、object 的 `contentWindow`，同域 embed）的那些，按文档顺序对应剩下的 embed |
-| 跨域 iframe 里的 `DOM.scrollIntoViewIfNeeded` | 只在 iframe 自己的文档里滚动，不会把 iframe 本身滚进外层页面的视口；Chrome 会把区域交给父 frame 继续滚动，节点最终在顶层视口可见 | 子目标把映射到自身视口的区域经 frame 链路发给父端，父端经该 iframe 映射后接着向外滚动 |
+| 外壳模式下对图片和脚本屏蔽 URL、附加请求头、离线 | 屏蔽 URL、附加请求头、禁用缓存、离线只对探针拦截的 fetch、XHR 生效；文档本身的请求和其他子资源不受影响 | 外壳模式开启 Service Worker 时，对它经手的同域请求（图片、脚本、样式表等）同样生效 |
+| 常驻叠加层的剩余差距 | Grid、Flex、容器查询、scroll-snap 和隔离叠加层是近似绘制：没有 grid 线编号和区域名，对齐后的 grid 偏移、从右到左布局没有处理；Flex 不显示剩余空间分布和间距；容器查询不标出被查询的后代；合并的沙箱 iframe 里的节点没有常驻叠加层 | 在同一层里按计算样式和盒子画出来 |
+| 无障碍事件 | 不发 `Accessibility.loadComplete` 和 `nodesUpdated`：树在每条命令里现算，窗格不会自己刷新 | 对文档用 `MutationObserver`，发出属性变了的节点 |
+| 跨域 `<embed>` 文档作为子目标（没做） | 找不到跨域 `<embed>` 的窗口：它没有 `contentWindow`，而跨域时读不了子窗口的 `frameElement`。因此其中的文档不会链接（握手被拒、也不被 ping），DOM 里也不当作跨域 frame；Chrome 会像 iframe 一样给它建子目标 | 用排除法认出它的窗口：页面的子窗口里，不属于其他 owner（iframe、frame、object 的 `contentWindow`，同域 embed）的那些，按文档顺序对应剩下的 embed。没做：页面的子窗口按 frame 插入的顺序排列，不是文档顺序，对应不可靠 |
 
-价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。
+价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。不做：问题面板里的低对比度，Chrome 自己已经去掉了 `Audits.checkContrast` 和低文本对比度问题。
 
 ## 没有效果的命令
 
-已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址、安全隔离状态（COOP、COEP、CSP 是响应头）、浏览器的功能开关、网络限速（设了延迟、吞吐量或丢包就算；都不设或只设离线时返回成功），以及启用只有浏览器才有事件的域：`Autofill`、`Database`（WebSQL）、`HeapProfiler`、`Preload`、`Profiler`。前端不记录服务器错误，这些命令失败时它的各个模型照常启动；Frames 视图不显示隔离状态一节，跳出跟踪视图显示为未启用，与之前编造的回答效果相同。读取类命令同样返回失败而不编造数据，`CSS.getEnvironmentVariables` 则读取页面解析出的 env() 值。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；页面以后能给出事件的域（`Accessibility`、`Animation`、`Audits`、`Log`、`ServiceWorker`）启用时也返回成功；`Inspector.enable` 管的是连接本身，也返回成功。
+已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、需要 worker 本身的 Service Worker 命令（调试、启动、停止 worker，`skipWaiting`，投递推送消息和同步事件）、页面加载时强制更新（关闭时返回成功）、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址、安全隔离状态（COOP、COEP、CSP 是响应头）、浏览器的功能开关、网络限速（设了延迟、吞吐量或丢包就算；都不设或只设离线时返回成功），以及启用只有浏览器才有事件的域：`Autofill`、`Database`（WebSQL）、`HeapProfiler`、`Preload`、`Profiler`。前端不记录服务器错误，这些命令失败时它的各个模型照常启动；Frames 视图不显示隔离状态一节，跳出跟踪视图显示为未启用，与之前编造的回答效果相同。读取类命令同样返回失败而不编造数据，`CSS.getEnvironmentVariables` 则读取页面解析出的 env() 值。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；页面以后能给出事件的域（`Accessibility`、`Log`；`Animation`、`Audits`、`ServiceWorker` 已实现）启用时也返回成功；`Inspector.enable` 管的是连接本身，也返回成功。
 
 ## 从旧版本线发布补丁
 
