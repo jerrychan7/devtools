@@ -5,6 +5,7 @@ import { FAN_OUT_TIMEOUT, mergedFrames, ownerOfId } from '../../core/merged-fram
 import { mapPoints, ownerContentToTop, pointInOwnerContent } from '../../core/geometry';
 import { type FrameOwner, isDocument, isFrameOwner, isShadowRoot } from '../../core/realm';
 import { CdpError } from '../../core/session';
+import { historyOf } from '../../core/history';
 
 /**
  * The DOM of sandboxed iframes merged into the page's agent (core/merged-frames.ts): Chrome keeps
@@ -40,6 +41,25 @@ const BY_NODE = [
   'getNodesForSubtreeByStyle',
   'requestNode',
 ];
+
+/**
+ * The routed commands a frame's agent records in its history (DOM.undo), the domains sharing it
+ * included, as Chrome's InspectorHistory; DOM.moveTo and DOM.copyTo go there by domains/dom/dom.ts.
+ */
+const EDITS = new Set([
+  'DOM.setAttributeValue',
+  'DOM.setAttributesAsText',
+  'DOM.removeAttribute',
+  'DOM.setNodeValue',
+  'DOM.setOuterHTML',
+  'DOM.setNodeName',
+  'DOM.removeNode',
+  'CSS.setStyleSheetText',
+  'CSS.setStyleTexts',
+  'CSS.setRuleSelector',
+  'CSS.addRule',
+  'CSS.setEffectivePropertyValueForNode',
+]);
 
 mergedFrames.registerRoutes('DOM', {
   routeBy: Object.fromEntries(BY_NODE.map(name => [`DOM.${name}`, ['nodeId', 'backendNodeId', 'objectId']])),
@@ -90,13 +110,20 @@ export interface MergedDom {
   pushInside(node: Node, depth: number, pierce: boolean): Promise<void>;
   /** The node at a point of the top viewport in the document of `owner`'s merged frame; undefined if none. */
   nodeAt(owner: Element, x: number, y: number, params: object): Promise<unknown>;
-  /** A command answering quads (`keys` of `result`, or of its `model`), placed in the top viewport. */
+  /**
+   * A command of frame `ns`'s agent answering quads (`quads` of its result, or `content`,
+   * `padding`, `border` and `margin` of its `model`), with them placed in the top viewport.
+   */
   quadsIn(ns: number, method: string, params: object): Promise<unknown>;
   search(params: Protocol.DOM.PerformSearchRequest): Promise<SearchPart[]>;
   /** The node at `path` (pairs, DOM.pushNodeByPathToFrontend's) in `owner`'s merged frame; undefined if not merged. */
   pushPath(owner: Element, path: string[]): Promise<unknown> | undefined;
   /** Follows the frames' (re)loads while the client follows the tree: `resend` the iframe. */
   follow(resend: (owner: FrameOwner) => void): void;
+  /** Records in the page's history an edit frame `ns`'s agent made and recorded in its own (see {@link EDITS}). */
+  recordEdit(ns: number): void;
+  /** Once the frames' agents have done the undo / redo that the page's last replay asked of them. */
+  replayed(): Promise<void>;
   unfollow(): void;
 }
 
@@ -107,7 +134,9 @@ export function mergedDom(ctx: Context): MergedDom {
     for (const [n, link] of mergedFrames.frames()) if (n === ns) return link;
     return undefined;
   };
-  const ask = (ns: number, method: string, params: object) => client().ask(ns, method, params);
+  // A frame that does not answer in time (its thread blocked by an alert, a long task) is as one
+  // that answered an error: the page's own answer goes on without its part.
+  const ask = (ns: number, method: string, params: object) => client().ask(ns, method, params, FAN_OUT_TIMEOUT);
   /** Each merged frame's document as last sent to the client, without children. */
   const roots = new Map<number, DomNode>();
   /** While a first pass looks for the iframes reached: the depth each one's document wants. */
@@ -115,6 +144,30 @@ export function mergedDom(ctx: Context): MergedDom {
   /** While the second pass serializes: the documents fetched for it. */
   let grafted: Map<number, DomNode> | null = null;
   let stopLinked: (() => void) | null = null;
+  /** The links whose closing drops their frame's root (a namespace is not used again). */
+  const watched = new WeakSet<ChildLink>();
+  function keepRoot(ns: number, root: DomNode) {
+    const link = linkOfNs(ns);
+    if (!link) return;
+    roots.set(ns, root);
+    if (watched.has(link)) return;
+    watched.add(link);
+    link.onClose(() => roots.delete(ns));
+  }
+  /** The frames' undo / redo asked by the page's last replay. */
+  let replays: Promise<unknown>[] = [];
+  const replay = (ns: number, method: string) => replays.push(ask(ns, method, {}).catch(() => {}));
+
+  // One history, in edit order, as Chrome's (one InspectorHistory per target): each edit of a
+  // frame's is a step of its own in its agent's history, an action of the page's that undoes or
+  // redoes that step there.
+  function recordEdit(ns: number) {
+    ask(ns, 'DOM.markUndoableState', {}).catch(() => {});
+    historyOf(ctx).record({ undo: () => replay(ns, 'DOM.undo'), redo: () => replay(ns, 'DOM.redo') });
+  }
+  mergedFrames.onRouted((routed, ns, method) => {
+    if (routed === session && EDITS.has(method)) recordEdit(ns);
+  });
 
   nodes.mergedDocument = (owner, depth) => {
     const merged = mergedFrames.linkOf(owner);
@@ -167,7 +220,7 @@ export function mergedDom(ctx: Context): MergedDom {
           const doc = await fetchDocument(ns, depth, pierce, reset).catch(() => undefined);
           if (doc) {
             fetched.set(ns, doc);
-            roots.set(ns, shallow(doc));
+            keepRoot(ns, shallow(doc));
           } else if (reset) roots.delete(ns);
         })
       );
@@ -249,7 +302,7 @@ export function mergedDom(ctx: Context): MergedDom {
       const parts = await Promise.all(
         [...mergedFrames.frames()].map(async ([ns]) => {
           try {
-            const result = await client().ask(ns, 'DOM.performSearch', params, FAN_OUT_TIMEOUT);
+            const result = await ask(ns, 'DOM.performSearch', params);
             const searchId: unknown =
               typeof result === 'object' && result !== null ? Reflect.get(result, 'searchId') : '';
             const count: unknown =
@@ -279,12 +332,20 @@ export function mergedDom(ctx: Context): MergedDom {
           result => {
             const root = nodeIn(result, 'root');
             if (!root || !stopLinked || mergedFrames.linkOf(link.owner)?.link !== link) return;
-            roots.set(ns, root);
+            keepRoot(ns, root);
             if (isFrameOwner(link.owner) && nodes.knownId(link.owner) !== undefined) resend(link.owner);
           },
           () => {}
         );
       });
+    },
+
+    recordEdit,
+
+    async replayed() {
+      const asked = replays;
+      replays = [];
+      await Promise.all(asked);
     },
 
     unfollow() {

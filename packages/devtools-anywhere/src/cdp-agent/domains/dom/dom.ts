@@ -666,18 +666,20 @@ export function registerDom(ctx: Context) {
         const node = merged.nsOf({ backendNodeId: id }) === undefined ? nodes.getByBackendId(id) : undefined;
         return node ? nodes.push(node, parent => emitChildren(parent)) : 0;
       });
-      // Those of merged frames, by their agents.
-      const byFrame = new Map<number, number[]>();
-      for (const id of params.backendNodeIds) {
+      // Those of merged frames, by their agents; each position on its own, as Chrome resolves them.
+      const byFrame = new Map<number, { index: number; id: number }[]>();
+      params.backendNodeIds.forEach((id, index) => {
         const ns = merged.nsOf({ backendNodeId: id });
-        if (ns !== undefined) byFrame.set(ns, [...(byFrame.get(ns) ?? []), id]);
-      }
-      for (const [ns, ids] of byFrame) {
-        const result = await merged.ask(ns, 'DOM.pushNodesByBackendIdsToFrontend', { backendNodeIds: ids });
+        if (ns !== undefined) byFrame.set(ns, [...(byFrame.get(ns) ?? []), { index, id }]);
+      });
+      for (const [ns, entries] of byFrame) {
+        const result = await merged.ask(ns, 'DOM.pushNodesByBackendIdsToFrontend', {
+          backendNodeIds: entries.map(e => e.id),
+        });
         const pushed: unknown = typeof result === 'object' && result !== null ? Reflect.get(result, 'nodeIds') : [];
-        ids.forEach((id, k) => {
+        entries.forEach(({ index }, k) => {
           const nodeId: unknown = Array.isArray(pushed) ? pushed[k] : 0;
-          nodeIds[params.backendNodeIds.indexOf(id)] = typeof nodeId === 'number' ? nodeId : 0;
+          nodeIds[index] = typeof nodeId === 'number' ? nodeId : 0;
         });
       }
       return { nodeIds };
@@ -762,7 +764,11 @@ export function registerDom(ctx: Context) {
     moveTo(params: Protocol.DOM.MoveToRequest): Protocol.DOM.MoveToResponse | Promise<unknown> {
       // Within a merged frame, its agent moves it; not across the iframe (-32000).
       const ns = merged.oneFrame([params.nodeId, params.targetNodeId, params.insertBeforeNodeId]);
-      if (ns !== undefined) return merged.ask(ns, 'DOM.moveTo', params);
+      if (ns !== undefined)
+        return merged.ask(ns, 'DOM.moveTo', params).then(result => {
+          merged.recordEdit(ns);
+          return result;
+        });
       const node = resolveNode(ctx, params);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
@@ -773,7 +779,11 @@ export function registerDom(ctx: Context) {
 
     copyTo(params: Protocol.DOM.CopyToRequest): Protocol.DOM.CopyToResponse | Promise<unknown> {
       const ns = merged.oneFrame([params.nodeId, params.targetNodeId, params.insertBeforeNodeId]);
-      if (ns !== undefined) return merged.ask(ns, 'DOM.copyTo', params);
+      if (ns !== undefined)
+        return merged.ask(ns, 'DOM.copyTo', params).then(result => {
+          merged.recordEdit(ns);
+          return result;
+        });
       const copy = resolveNode(ctx, params).cloneNode(true);
       // The copy is not forced into any pseudo-class state.
       if (isElement(copy))
@@ -955,8 +965,14 @@ export function registerDom(ctx: Context) {
 
     getTopLayerElements: () => ({ nodeIds: [] }),
     markUndoableState: () => history.markUndoableState(),
-    undo: () => history.undo(),
-    redo: () => history.redo(),
+    async undo() {
+      history.undo();
+      await merged.replayed();
+    },
+    async redo() {
+      history.redo();
+      await merged.replayed();
+    },
     hideHighlight: () => session.call('Overlay.hideHighlight'),
     highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => session.call('Overlay.highlightNode', params),
   });

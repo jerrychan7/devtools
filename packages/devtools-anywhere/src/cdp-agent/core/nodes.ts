@@ -88,13 +88,6 @@ export function hasPseudoElement(host: Element, type: PseudoType): boolean {
 }
 
 /**
- * Maps page nodes to CDP node ids and serializes them.
- *
- * Node ids are only valid within one `DOM.getDocument` session, like in Chrome; backend node
- * ids are stable for the node's lifetime. The registry also remembers whose children the
- * client has received, which decides how DOM mutations are reported.
- */
-/**
  * Where node ids and backend node ids start: 0, or `ns * 2^32` in a page whose agent is merged
  * into its parent's (core/merged-frames.ts), which tells the frames' ids apart by it. Set when the
  * merge link is made, before the link carries anything.
@@ -112,6 +105,13 @@ function checked(id: number): number {
   return id;
 }
 
+/**
+ * Maps page nodes to CDP node ids and serializes them.
+ *
+ * Node ids are only valid within one `DOM.getDocument` session, like in Chrome; backend node
+ * ids are stable for the node's lifetime. The registry also remembers whose children the
+ * client has received, which decides how DOM mutations are reported.
+ */
 export class NodeRegistry {
   private ids = new Map<Inspectable, number>();
   private nodes = new Map<number, Inspectable>();
@@ -141,7 +141,7 @@ export class NodeRegistry {
    * to the client, for `depth` (that of the iframe's document: 0 without `pierce`); undefined when
    * none. Set by the DOM domain.
    */
-  mergedDocument: ((owner: FrameOwner, depth: number, pierce: boolean) => DomNode | undefined) | null = null;
+  mergedDocument: ((owner: FrameOwner, depth: number) => DomNode | undefined) | null = null;
   /** Called for every shadow root sent to the client, e.g. to observe its mutations. */
   onShadowRoot: ((root: ShadowRoot) => void) | null = null;
   /**
@@ -370,7 +370,7 @@ export class NodeRegistry {
     if (!frame) {
       if (!isCrossOrigin(owner)) return;
       result.frameId = childTargets.frameIdOf(owner);
-      const merged = this.mergedDocument?.(owner, pierce ? depth : 0, pierce);
+      const merged = this.mergedDocument?.(owner, pierce ? depth : 0);
       if (merged) result.contentDocument = merged;
       return;
     }
