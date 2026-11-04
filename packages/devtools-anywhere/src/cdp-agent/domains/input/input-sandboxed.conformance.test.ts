@@ -137,7 +137,8 @@ test('mouse, keys, wheel and touch over a sandboxed iframe reach its page as in 
   const actual = await run(oursSide);
   assert.deepEqual(actual, expected);
   // One process: unlike a cross-origin iframe's, the iframe's element is hovered in the page too.
-  assert.deepEqual(get(expected['into the iframe'], 'root'), [['pointerover', 'child', 5, 75]]);
+  // Its y is left out: where the iframe's body starts depends on the platform's fonts.
+  assert.deepEqual([get(expected['into the iframe'], 'root')].flat(2).slice(0, 3), ['pointerover', 'child', 5]);
   assert.equal(expected['typed'], 'abc');
   assert.notEqual(expected['scrolled'], 0);
 });
