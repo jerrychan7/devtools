@@ -88,6 +88,7 @@ An iframe sandboxed without `allow-same-origin` has an opaque (`null`) origin: t
 
 - Off by default: `sandboxed` in the parent's `data-frame-origins` (it can be listed with origins) turns it on, and the sandboxed document lists the parent's origin in `data-parent-origins`. The parent's DevTools can run any code in the iframe, and the iframe may load third-party scripts.
 - Only for a `src` of the page's origin, `about:blank` or `srcdoc`. One whose `src` is of another origin is refused, of the same site too (which Chrome keeps in the page's target): shown as elements only, not listed in the frame tree.
+- The check is on the iframe's `src`, not on the document it holds: a sandboxed document has the `null` origin, so the page cannot tell where it came from. Once the iframe navigates (a link followed in it, or its `src` redirected) to another origin, a document there that speaks the probe's handshake is merged too, and what it reports shows up in the page's DevTools. Turn it on only for iframes that stay on your own pages.
 - Without it, or without the probe in the sandboxed document, the iframe is shown as in the [limitations](#limitations).
 
 ## Vite

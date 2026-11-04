@@ -88,6 +88,7 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 
 - 默认关闭：父页面的 `data-frame-origins` 写上 `sandboxed` 才开启（可以和源写在一起），沙箱文档的 `data-parent-origins` 写父页面的源。父页面的 DevTools 能在 iframe 里执行任意代码，而沙箱文档可能加载第三方脚本。
 - 只对 `src` 与页面同源、`about:blank` 或 `srcdoc` 的生效。`src` 跨源的一律拒绝，同站的也一样（Chrome 把它留在页面的 target 里）：只显示为元素，不列在 frame 树里。
+- 校验看的是 iframe 的 `src`，不是它实际装着的文档：沙箱文档的源是 `null`，页面分辨不出它从哪来。iframe 一旦导航到别的源（在框里点了链接，或 `src` 被重定向），那边的文档只要实现了探针的握手，同样会被并入，它回报的内容会出现在页面的 DevTools 里。只对始终停留在自己页面上的 iframe 开启。
 - 没有开启，或者沙箱文档没加载探针时，按[能力边界](#能力边界)里说的显示。
 
 ## Vite
