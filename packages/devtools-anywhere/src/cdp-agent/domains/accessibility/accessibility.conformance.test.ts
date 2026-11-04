@@ -33,8 +33,7 @@ const FIXTURE = `
 <input type=range id=rg min=0 max=10 value=3>
 <textarea id=ta>t</textarea>
 <a id=nolink>no href</a>
-<img id=noalt src=x.png>
-<img id=emptyalt alt="" src=x.png>
+<img id=noalt src=x.png><img id=emptyalt alt="" src=x.png>
 <svg id=svg><title>Svg t</title></svg>
 <div id=own aria-owns="ownee">owner</div><span id=ownee>ownee</span>
 </div>
@@ -87,6 +86,8 @@ before(async () => {
     FIXTURE,
     env.baseUrl
   );
+  // Chrome's whole-tree commands need the domain enabled.
+  await Promise.all([t.ours.send('Accessibility.enable'), t.chrome.send('Accessibility.enable')]);
 });
 after(() => env?.close());
 
@@ -166,4 +167,68 @@ test('without accessibility.js the commands fail', async () => {
     }),
     /Not supported in the page/
   );
+});
+
+/** Roles and names of a list of nodes, without those the page cannot see. */
+const visible = (nodes: Protocol.Accessibility.AXNode[]) =>
+  outline(nodes).filter(s => !/^(ListMarker|MenuListPopup)/.test(s));
+
+describe('the whole tree', () => {
+  test('queryAXTree finds nodes by role and name in a subtree', async () => {
+    const queries = [
+      { role: 'button' },
+      { accessibleName: 'One' },
+      { role: 'textbox', accessibleName: 'Type' },
+      { role: 'heading' },
+      { role: 'none' },
+    ];
+    for (const query of queries) {
+      const [ours, chrome] = await Promise.all(
+        [t.ours, t.chrome].map(async side =>
+          side.send('Accessibility.queryAXTree', { nodeId: await nodeIdOf(side, 'root'), ...query })
+        )
+      );
+      assert.ok(ours && chrome);
+      assert.deepEqual(ours.nodes.map(comparable), chrome.nodes.map(comparable), JSON.stringify(query));
+    }
+  });
+
+  test('getAXNodeAndAncestors', async () => {
+    for (const id of ['th1', 'ownee', 'bb']) {
+      const [ours, chrome] = await Promise.all(
+        [t.ours, t.chrome].map(async side =>
+          side.send('Accessibility.getAXNodeAndAncestors', { nodeId: await nodeIdOf(side, id) })
+        )
+      );
+      assert.ok(ours && chrome);
+      assert.deepEqual(outline(ours.nodes), outline(chrome.nodes), `#${id}`);
+    }
+  });
+
+  test('getRootAXNode and getChildAXNodes walk down to a node', async () => {
+    const walk = async (side: Side) => {
+      const { node: root } = await side.send('Accessibility.getRootAXNode', {});
+      const seen = [outline([root])];
+      // Down the first child each time, from the document to the fixture's first text.
+      let id = root.nodeId;
+      for (let i = 0; i < 5; i++) {
+        const { nodes } = await side.send('Accessibility.getChildAXNodes', { id });
+        seen.push(visible(nodes));
+        const next = nodes[0];
+        if (!next) break;
+        id = next.nodeId;
+      }
+      return seen;
+    };
+    const [ours, chrome] = await Promise.all([walk(t.ours), walk(t.chrome)]);
+    assert.deepEqual(ours, chrome);
+  });
+
+  test('getFullAXTree: the nodes the page can see, breadth first', async () => {
+    const [ours, chrome] = await Promise.all(
+      [t.ours, t.chrome].map(side => side.send('Accessibility.getFullAXTree', { depth: 1 }))
+    );
+    assert.ok(ours && chrome);
+    assert.deepEqual(visible(ours.nodes), visible(chrome.nodes));
+  });
 });

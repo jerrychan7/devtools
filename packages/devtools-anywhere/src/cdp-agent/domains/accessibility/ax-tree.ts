@@ -170,13 +170,14 @@ const displayOf = (node: Node | null) => (node && isElement(node) ? styleOf(node
  * Whether a whitespace-only text node shows: Chrome keeps it as StaticText " " between two inline
  * boxes, as it shows as a space there.
  */
-function isRenderedSpace(text: Text): boolean {
+function isRenderedSpace(text: Text, inTree: (node: Node) => boolean): boolean {
   let prev = text.previousSibling;
   while (prev && isText(prev) && !prev.data.trim()) prev = prev.previousSibling;
   let next = text.nextSibling;
   while (next && isText(next) && !next.data.trim()) next = next.nextSibling;
-  // Not next to an inline-block (a button, a field): Chrome drops the space there.
-  const inline = (node: Node | null) => !!node && (isText(node) || displayOf(node) === 'inline');
+  // Not next to an inline-block (a button, a field), nor to an element left out of the tree:
+  // Chrome drops the space there.
+  const inline = (node: Node | null) => !!node && (isText(node) || (displayOf(node) === 'inline' && inTree(node)));
   return inline(prev) && inline(next);
 }
 
@@ -221,7 +222,8 @@ export class TreeShape {
       const parent = domParent(node);
       if (!parent || (isElement(parent) && (OPAQUE.has(parent.localName) || hiddenReason(parent))))
         return { kind: 'excluded', reason: 'notRendered' };
-      if (!node.data.trim() && !isRenderedSpace(node)) return { kind: 'excluded', reason: 'uninteresting' };
+      if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n)))
+        return { kind: 'excluded', reason: 'uninteresting' };
       const hidden = this.hiddenRoot(node);
       return hidden ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden } : { kind: 'included' };
     }
@@ -230,16 +232,13 @@ export class TreeShape {
     const hiddenBy = hiddenReason(node);
     if (hiddenBy) return { kind: 'excluded', reason: hiddenBy };
     const hidden = this.hiddenRoot(node);
-    if (hidden)
-      return {
-        kind: 'ignored',
-        reason: hidden === node ? 'ariaHiddenElement' : 'ariaHiddenSubtree',
-        hiddenRoot: hidden,
-      };
+    // Chrome leaves the aria-hidden element out and keeps what it hides, ignored.
+    if (hidden === node) return { kind: 'lifted', reason: 'ariaHiddenElement' };
+    if (hidden) return { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden };
     if (node === this.doc.documentElement || node === this.doc.body)
       return { kind: 'ignored', reason: 'uninteresting' };
-    if (/^(tbody|thead|tfoot)$/.test(node.localName) && !node.hasAttribute('role'))
-      return { kind: 'ignored', reason: 'uninteresting' };
+    // An implicit or plain tbody; thead and tfoot are row groups.
+    if (node.localName === 'tbody' && !node.hasAttribute('role')) return { kind: 'ignored', reason: 'uninteresting' };
     const explicit = explicitRole(node);
     if (node.localName === 'img' && node.getAttribute('alt') === '' && !explicit)
       return { kind: 'lifted', reason: 'emptyAlt' };
