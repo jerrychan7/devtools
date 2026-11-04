@@ -129,7 +129,7 @@ test('without chromium-html.css next to the bundle, styles come without user age
         nodeId: await nodeId(send, '#h'),
       })) as Protocol.CSS.GetMatchedStylesForNodeResponse;
       assert.deepEqual(userAgent(styles.matchedCSSRules), []);
-      assert.ok(styles.computedStyle?.length ?? styles.matchedCSSRules);
+      assert.ok(styles.matchedCSSRules);
     }
     assert.equal(asked.length, 1);
   } finally {
