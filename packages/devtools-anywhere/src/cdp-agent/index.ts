@@ -17,6 +17,7 @@ import { registerInput } from './domains/input/input';
 import { hookFrameNetwork } from './domains/network/frames';
 import { registerConditions } from './domains/network/conditions';
 import { registerNetwork, setRequestIdPrefix } from './domains/network/network';
+import { registerReporting } from './domains/network/reporting';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
 import { registerRuntime } from './domains/runtime/runtime';
@@ -156,6 +157,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerRuntime(ctx);
   registerNetwork(ctx);
   registerConditions(ctx.session, probe);
+  registerReporting(ctx.session);
   registerPage(ctx);
   registerDom(ctx);
   registerOverlay(ctx);

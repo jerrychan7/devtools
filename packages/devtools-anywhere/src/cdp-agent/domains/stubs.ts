@@ -26,7 +26,6 @@ const NOOPS = {
     // The page never pauses in a debugger, so there is no message to show.
     'setPausedInDebuggerMessage',
   ],
-  Network: ['enableReportingApi', 'setAttachDebugStack'],
 } satisfies CommandsByDomain;
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */
