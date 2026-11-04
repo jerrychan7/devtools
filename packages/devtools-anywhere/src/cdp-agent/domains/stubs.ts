@@ -27,16 +27,8 @@ const NOOPS = {
   // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear', 'startViolationsReport'],
   Overlay: [
-    'highlightFrame',
     // The page never pauses in a debugger, so there is no message to show.
     'setPausedInDebuggerMessage',
-    'setShowGridOverlays',
-    'setShowFlexOverlays',
-    'setShowScrollSnapOverlays',
-    'setShowContainerQueryOverlays',
-    'setShowIsolatedElements',
-    'setShowHinge',
-    'setShowDisplayCutout',
   ],
   Network: [
     'overrideNetworkState',

@@ -5,9 +5,11 @@ import type { Frame } from '../../core/frames';
 import { mapPoints, ownerContentToTop, parentFrameDocument } from '../../core/geometry';
 import { childTargets } from '../../core/child-targets';
 import { mergedFrames, ownerOfId } from '../../core/merged-frames';
-import { documentOf, isElement, isNode, realmOf } from '../../core/realm';
+import { documentOf, isElement, isFrameOwner, isNode, realmOf } from '../../core/realm';
 import { boxModel, resolveNode } from '../dom/dom';
 import { CdpError } from '../../core/session';
+import { walkFrameOwners } from '../../core/frames';
+import { registerOverlayTools } from './tools';
 
 /**
  * The overlay's z-index: the highest there is. Where popovers are missing, <devtools-anywhere>
@@ -31,13 +33,16 @@ function isRect(quad: number[]) {
 
 type RGBA = Protocol.DOM.RGBA;
 
+/** A highlight's config, with highlightFrame's outline of the content box. */
+type Config = Protocol.Overlay.HighlightConfig & { contentOutlineColor?: RGBA | undefined };
+
 const color = (c: RGBA | undefined, fallback: string) => (c ? `rgba(${c.r},${c.g},${c.b},${c.a ?? 1})` : fallback);
 
 /** Draws highlights in a fixed, click-through layer that the DOM domain hides from the page tree. */
 class Highlighter {
   private layer: HTMLDivElement | null = null;
   /** The highlighted element, redrawn when the page scrolls or the viewport changes, like Chrome. */
-  private current: { el: Element; config: Protocol.Overlay.HighlightConfig } | null = null;
+  private current: { el: Element; config: Config } | null = null;
   private tracking: AbortController | null = null;
   private frame = 0;
   private drawn = 0;
@@ -73,7 +78,7 @@ class Highlighter {
   }
 
   /** Highlights an element's margin, border, padding and content boxes, with a size label. */
-  element(el: Element, config: Protocol.Overlay.HighlightConfig = {}) {
+  element(el: Element, config: Config = {}) {
     this.drawn++;
     if (this.current?.el !== el || !this.tracking) this.track(el);
     this.current = { el, config };
@@ -115,7 +120,7 @@ class Highlighter {
     this.frame = 0;
   }
 
-  private draw(el: Element, config: Protocol.Overlay.HighlightConfig) {
+  private draw(el: Element, config: Config) {
     const id = el.id ? `#${el.id}` : '';
     const cls = el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
     this.paint(boxModel(el), config, `${el.localName}${id}${cls}`);
@@ -125,7 +130,7 @@ class Highlighter {
    * Highlights an element out of reach, a merged sandboxed iframe's, by its box model as its
    * agent reports it, mapped into the top viewport (`m`); `name` is its label's selector.
    */
-  remote(model: Protocol.DOM.BoxModel, m: DOMMatrixReadOnly, config: Protocol.Overlay.HighlightConfig, name: string) {
+  remote(model: Protocol.DOM.BoxModel, m: DOMMatrixReadOnly, config: Config, name: string) {
     this.drawn++;
     this.untrack();
     const map = (q: number[]) => mapPoints(m, q);
@@ -142,7 +147,7 @@ class Highlighter {
     );
   }
 
-  private paint(model: Protocol.DOM.BoxModel, config: Protocol.Overlay.HighlightConfig, name: string) {
+  private paint(model: Protocol.DOM.BoxModel, config: Config, name: string) {
     const layer = this.ensureLayer();
     layer.replaceChildren();
     const boxes: [number[], string][] = [
@@ -152,6 +157,9 @@ class Highlighter {
       [model.content, color(config.contentColor, 'rgba(111,168,220,.66)')],
     ];
     for (const [q, fill] of boxes) layer.appendChild(this.quad(q, fill));
+    // Chrome outlines the content box only when asked (highlightFrame's contentOutlineColor).
+    if (config.contentOutlineColor)
+      layer.appendChild(this.quad(model.content, 'transparent', color(config.contentOutlineColor, '')));
 
     if (config.showInfo === true) {
       const label = document.createElement('div');
@@ -279,6 +287,24 @@ export function registerOverlay(ctx: Context) {
   const highlighter = new Highlighter();
   let stopInspect: (() => void) | null = null;
   const showViewportSize = viewportSizeOnResize();
+  const overlayTools = registerOverlayTools(ctx, Z_INDEX);
+
+  /**
+   * The element holding a frame, as Chrome finds it; none for the top frame, whose highlight is
+   * nothing. A cross-origin or opaque frame's is looked for among the frame owners.
+   */
+  function frameOwner(frameId: string): Element | null {
+    const frame = ctx.frames.byId(frameId);
+    if (frame) return frame.owner ?? null;
+    let found: Element | null = null;
+    for (const { document: doc } of ctx.frames)
+      walkFrameOwners(doc, ctx.frames.shadowRootOf, node => {
+        if (found || !isFrameOwner(node)) return;
+        if (ctx.frames.opaqueOf(node)?.id === frameId || childTargets.frameIdOf(node) === frameId) found = node;
+      });
+    if (!found) throw new CdpError('Invalid frame id');
+    return found;
+  }
 
   /** Element under a pointer event, of any frame, ignoring devtools-anywhere's own UI. */
   function targetOf(event: Event): Element | null {
@@ -408,6 +434,23 @@ export function registerOverlay(ctx: Context) {
       stopInspect?.();
       highlighter.hide();
       showViewportSize(false);
+      overlayTools.clear();
+    },
+
+    ...overlayTools.commands,
+
+    /** Highlights the frame's owner element, its content box only, in the colors given. */
+    highlightFrame(params: Protocol.Overlay.HighlightFrameRequest) {
+      const owner = frameOwner(params.frameId);
+      const none = { r: 0, g: 0, b: 0, a: 0 };
+      if (owner)
+        highlighter.element(owner, {
+          marginColor: none,
+          borderColor: none,
+          paddingColor: none,
+          contentColor: params.contentColor ?? none,
+          contentOutlineColor: params.contentOutlineColor,
+        });
     },
 
     setShowViewportSizeOnResize: (params: Protocol.Overlay.SetShowViewportSizeOnResizeRequest) =>

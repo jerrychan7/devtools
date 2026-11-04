@@ -5,6 +5,7 @@
   "domains/network/frames.ts": 1,
   "domains/network/network.ts": 3,
   "domains/overlay/overlay.ts": 8,
+  "domains/overlay/tools.ts": 4,
   "domains/page/render.ts": 4,
   "domains/page/screencast.ts": 1,
   "domains/page/screenshot.ts": 1,
