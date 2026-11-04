@@ -601,6 +601,14 @@ let shared: SharedForcedPseudoClasses | undefined;
 /** The page's forced states, shared by the sessions. */
 const page = () => (shared ??= new SharedForcedPseudoClasses());
 
+/** Whether `sheet` is a companion of the forced states rather than a sheet of the page. */
+export const isCompanion = (sheet: CSSStyleSheet): boolean => shared?.owns(sheet) ?? false;
+
+/** After the page's rules were rewritten in place (domains/emulation): the companions copy them again. */
+export function pageRulesRewritten() {
+  if (shared?.isActive) shared.schedule();
+}
+
 /**
  * One session's CSS.forcePseudoState, like one of Chrome's CSS agents: it takes back only what it
  * forced (CSS.disable, a removed element), and an element is in every state a session forced.

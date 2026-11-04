@@ -4,6 +4,7 @@ import { queriedAxes } from '../../core/container-query';
 import type { NodeRegistry } from '../../core/nodes';
 import { specificity, splitTopLevel } from '../../core/selectors';
 import type { TreeScope } from './forced-pseudo';
+import { shownMedia } from '../emulation/rewrite';
 import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scopeText, selectorLabel } from './rules';
 import type { SheetRegistry } from './sheet-registry';
 import { sourceSelectors } from './source';
@@ -70,15 +71,22 @@ export class RuleView {
       const type = ruleType(a);
       if (type) ruleTypes.push(type);
       if (isCssom(a, 'CSSStyleRule')) nestingSelectors.push(a.selectorText);
-      else if (isCssom(a, 'CSSMediaRule'))
+      else if (isCssom(a, 'CSSMediaRule')) {
+        // Emulated media rewrite the condition (domains/emulation): the page's is shown, active as rewritten.
+        const text = shownMedia(a.media);
+        const list = mediaList(text, this.sheets.realmOf(sheet));
+        if (text !== a.conditionText) {
+          const live = mediaList(a.conditionText, this.sheets.realmOf(sheet));
+          list.forEach((query, i) => (query.active = live[i]?.active ?? query.active));
+        }
         media.push({
-          text: a.conditionText,
+          text,
           source: 'mediaRule',
           sourceURL: this.sheets.sourceURL(sheet),
           styleSheetId,
-          mediaList: mediaList(a.conditionText, this.sheets.realmOf(sheet)),
+          mediaList: list,
         });
-      else if (isCssom(a, 'CSSSupportsRule'))
+      } else if (isCssom(a, 'CSSSupportsRule'))
         supports.push({ text: a.conditionText, active: CSS.supports(a.conditionText), styleSheetId });
       else if (isCssom(a, 'CSSContainerRule'))
         containerQueries.push({

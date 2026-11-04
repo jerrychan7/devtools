@@ -147,7 +147,9 @@ type CssomName =
   | 'CSSScopeRule'
   | 'CSSStartingStyleRule'
   | 'CSSLayerBlockRule'
-  | 'CSSLayerStatementRule';
+  | 'CSSLayerStatementRule'
+  | 'CSSKeyframesRule'
+  | 'CSSStyleDeclaration';
 
 /**
  * Whether `value` implements the CSSOM interface `name` (or one inheriting from it) in any realm:
