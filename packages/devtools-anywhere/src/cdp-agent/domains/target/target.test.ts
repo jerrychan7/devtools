@@ -272,6 +272,27 @@ test('a command in flight when the document goes away fails, as one sent between
   });
 });
 
+test("a reply on an iframe's nested session leaves the iframe's own command of the same id in flight", async () => {
+  const child = await add('child');
+  await add('grandchild', 'child');
+  send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
+  const s1 = await attached(child);
+  send({ id: 2, method: 'Target.setAutoAttach', params: AUTO_ATTACH, sessionId: s1 });
+  const nested = await message(m => m['method'] === 'Target.attachedToTarget' && m['sessionId'] === s1);
+  const s2 = String(field(nested['params'], 'sessionId'));
+  send({ id: 3, method: 'Runtime.awaitPromise', params: { promiseObjectId: '1' }, sessionId: s1 });
+  await waitFor(async () => ((await received('child')).some(m => m['id'] === 3) ? true : undefined));
+  // Ids are each session's own: a reply of id 3 on the nested session answers nothing on s1.
+  await page.evaluate(s2 => window.__harness?.forge('child', { id: 3, result: {}, sessionId: s2 }), s2);
+  await message(m => m['id'] === 3 && m['sessionId'] === s2);
+  await page.evaluate(() => window.__harness?.navigate('child', false));
+  assert.deepEqual(await message(m => m['id'] === 3 && m['sessionId'] === s1), {
+    id: 3,
+    error: { code: -32000, message: 'Inspected target navigated or closed' },
+    sessionId: s1,
+  });
+});
+
 test('a disabled domain is not set up again on the next document, and what was set up between two is', async () => {
   const child = await add('child');
   send({ id: 1, method: 'Target.setAutoAttach', params: AUTO_ATTACH });
