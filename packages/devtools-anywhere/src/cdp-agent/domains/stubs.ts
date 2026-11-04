@@ -17,11 +17,9 @@ type CommandsByDomain = { [D in DomainOf<Command>]?: MethodOf<Command, D>[] };
  */
 const NOOPS = {
   Accessibility: ['enable'],
-  // Some issues are the page's to find (docs/roadmap.md, the Issues panel).
-  Audits: ['enable'],
   Inspector: ['enable'],
   // The page has no browser log entries, so clearing them is done.
-  Log: ['enable', 'clear', 'startViolationsReport'],
+  Log: ['enable', 'clear'],
   Overlay: [
     // The page never pauses in a debugger, so there is no message to show.
     'setPausedInDebuggerMessage',
