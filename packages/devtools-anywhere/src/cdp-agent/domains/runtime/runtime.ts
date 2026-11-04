@@ -340,11 +340,15 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       const channel = new MessageChannel();
       channel.port1.onmessage = () => {
         channel.port1.close();
-        if (--scope.utilityUsers === 0) {
-          for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
-          utilities.clear();
+        // A frame that went cross-origin meanwhile throws at its properties: the evaluation still ends.
+        try {
+          if (--scope.utilityUsers === 0) {
+            for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
+          }
+        } finally {
+          if (scope.utilityUsers === 0) utilities.clear();
+          resolve();
         }
-        resolve();
       };
       channel.port2.postMessage(null);
     });
