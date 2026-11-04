@@ -22,6 +22,15 @@ Based on Chrome 156 (156.0.8078.80).
 - `CSS.createStyleSheet` fails with "Frame not found" for an unknown `frameId`, as in Chrome.
 - Merged sandboxed iframes, as in Chrome: each new document gets new ids, and a reloaded one's execution contexts are destroyed and not reused, while a document linking again keeps its own; DOM undo and redo cover the page and its merged frames in one history, in the order of the edits, CSS edits in the frames included; a frame not answering within 1 s for its document, a node or a point is taken as not answering; `Page.navigate` takes a sandboxed iframe's `frameId`, merged or not; after `Page.disable`, the frames' queued events are no longer sent.
 
+### API changes
+
+Public API, as in `packages/*/etc/*.public.api.md`: additions only, nothing removed, renamed or changed.
+
+- Probe script attributes (`devtools-anywhere`): `data-frame-origins` (origins of cross-origin iframes this page's DevTools debugs, space-separated; `sandboxed` for its sandboxed iframes) and `data-parent-origins` (origins of the pages that may debug this one in their iframe).
+- Vite plugin options (`@devtools-anywhere/vite-plugin`): `frameOrigins` and `parentOrigins` (arrays), written into those two attributes.
+- CDP: commands the page cannot carry out now fail with -32000 "Not supported in the page: <reason>" instead of succeeding without effect (listed above); `CSS.createStyleSheet` with an unknown `frameId` fails. Other changes to CDP answers and events are behavior fixes towards Chrome, listed above.
+- The messages between the probe, the shell and the remote server gained the internal methods `DevtoolsAnywhere.attach` and `DevtoolsAnywhere.metrics`: use the probe and `@devtools-anywhere/remote-server` of the same version.
+
 ## 0.2.0
 
 Based on Chrome 156 (156.0.8078.80).

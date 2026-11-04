@@ -22,6 +22,15 @@
 - `CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错「Frame not found」，与 Chrome 一致。
 - 并入的沙箱 iframe 与 Chrome 对齐：每个新文档分配新的 id，重新加载时销毁旧的执行上下文且 id 不复用，同一文档重新链接时沿用原来的；DOM 的撤销和重做把页面和并入的 frame 放在同一个历史里，按编辑先后，frame 里的 CSS 编辑也在内；向 frame 取文档、节点或坐标 1 秒内没有应答，按未应答处理；`Page.navigate` 接受沙箱 iframe 的 `frameId`，并入与否都行；`Page.disable` 之后不再发出 frame 排队的事件。
 
+### 接口变化
+
+公开 API（以 `packages/*/etc/*.public.api.md` 为准）只有新增，没有删除、改名或改动。
+
+- 探针脚本属性（`devtools-anywhere`）：新增 `data-frame-origins`（本页 DevTools 可以调试的跨域 iframe 的源，空格分隔；写 `sandboxed` 调试它的沙箱 iframe）和 `data-parent-origins`（可以在 iframe 里调试本页的父页面的源）。
+- Vite 插件选项（`@devtools-anywhere/vite-plugin`）：新增 `frameOrigins` 和 `parentOrigins`（数组），写进上面两个属性。
+- CDP：页面做不到的命令改为报错 -32000「Not supported in the page: <原因>」，不再返回成功却没有效果（见上文）；`CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错。CDP 应答和事件的其他变化都是向 Chrome 对齐的行为修正，见上文。
+- 探针、外壳和远程服务之间的消息新增内部方法 `DevtoolsAnywhere.attach` 和 `DevtoolsAnywhere.metrics`：探针和 `@devtools-anywhere/remote-server` 请使用同一版本。
+
 ## 0.2.0
 
 基于 Chrome 156（156.0.8078.80）。
