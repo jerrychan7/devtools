@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ui entries</title>
+    <script
+      src="/packages/devtools-anywhere/dist/probe.iife.js"
+      data-devtools-frontend-url="/packages/devtools-frontend/dist/anywhere_app.html"
+      data-default-shell-mode="off"
+      data-open-immediately
+    ></script>
+    <style>
+      body {
+        --ui-entries-css: 1;
+      }
+      @keyframes ui-entries-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #ui-entries-spinner {
+        width: 20px;
+        height: 20px;
+      }
+      #ui-entries-spinner.spin {
+        animation: ui-entries-spin 1s linear infinite;
+      }
+      #ui-entries-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+    </style>
+    <script src="assets/ui-entries.js"></script>
+  </head>
+  <body>
+    <h1 id="ui-entries-marker">ui entries</h1>
+    <div id="ui-entries-spinner"></div>
+    <div id="ui-entries-grid"><span>a</span><span>b</span></div>
+    <!-- No id or name: a form issue. -->
+    <input />
+    <button>ui entries button</button>
+  </body>
+</html>
