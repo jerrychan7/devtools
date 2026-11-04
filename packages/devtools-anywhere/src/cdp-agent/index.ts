@@ -15,6 +15,7 @@ import { registerDomDebugger } from './domains/dom-debugger/dom-debugger';
 import { registerEmulation } from './domains/emulation/emulation';
 import { registerInput } from './domains/input/input';
 import { hookFrameNetwork } from './domains/network/frames';
+import { registerConditions } from './domains/network/conditions';
 import { registerNetwork, setRequestIdPrefix } from './domains/network/network';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
@@ -154,6 +155,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerTarget(ctx);
   registerRuntime(ctx);
   registerNetwork(ctx);
+  registerConditions(ctx.session, probe);
   registerPage(ctx);
   registerDom(ctx);
   registerOverlay(ctx);

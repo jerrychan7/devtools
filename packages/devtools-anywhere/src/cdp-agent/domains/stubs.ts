@@ -19,8 +19,6 @@ const NOOPS = {
   Accessibility: ['enable'],
   // Some issues are the page's to find (docs/roadmap.md, the Issues panel).
   Audits: ['enable'],
-  // Device mode's size is the shell's (shell-layout.ts).
-  Emulation: ['setUserAgentOverride'],
   Inspector: ['enable'],
   // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear', 'startViolationsReport'],
@@ -28,15 +26,7 @@ const NOOPS = {
     // The page never pauses in a debugger, so there is no message to show.
     'setPausedInDebuggerMessage',
   ],
-  Network: [
-    'overrideNetworkState',
-    'enableReportingApi',
-    'setCacheDisabled',
-    'setAttachDebugStack',
-    'setExtraHTTPHeaders',
-    'setBlockedURLs',
-    'setUserAgentOverride',
-  ],
+  Network: ['enableReportingApi', 'setAttachDebugStack'],
 } satisfies CommandsByDomain;
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */
@@ -84,13 +74,6 @@ mergedFrames.registerRoutes('Emulation', {
   fanOut: ['Emulation.setEmulatedMedia', 'Emulation.setTouchEmulationEnabled', 'Emulation.setEmitTouchEventsForMouse'],
 });
 
-const NO_THROTTLING = 'Not supported in the page: requests are throttled by the browser';
-
-/** Whether conditions slow requests down; 0 or less is no limit, as in Chrome. */
-function throttles(c: Protocol.Network.NetworkConditions | Protocol.Network.EmulateNetworkConditionsRequest) {
-  return [c.latency, c.downloadThroughput, c.uploadThroughput, c.packetLoss].some(v => (v ?? 0) > 0);
-}
-
 export function registerStubs(session: CdpSession) {
   for (const [domain, methods] of [...Object.entries(NOOPS), ...Object.entries(UNDECLARED_NOOPS)]) {
     session.register(domain, Object.fromEntries(methods.map(method => [method, () => {}])));
@@ -113,17 +96,6 @@ export function registerStubs(session: CdpSession) {
     // and its :focus styles go, which nothing in the page can undo.
     setFocusEmulationEnabled: ({ enabled }: Protocol.Emulation.SetFocusEmulationEnabledRequest) => {
       if (enabled) throw new CdpError('Not supported in the page: focus is given by the browser');
-    },
-  });
-  session.register('Network', {
-    // Throttling cannot be done in the page; going offline can, though not yet (docs/roadmap.md).
-    // The frontend sends these with no throttling on every connection, which succeeds.
-    emulateNetworkConditions: (params: Protocol.Network.EmulateNetworkConditionsRequest) => {
-      if (throttles(params)) throw new CdpError(NO_THROTTLING);
-    },
-    emulateNetworkConditionsByRule: (params: Protocol.Network.EmulateNetworkConditionsByRuleRequest) => {
-      if (params.matchedNetworkConditions.some(throttles)) throw new CdpError(NO_THROTTLING);
-      return { ruleIds: params.matchedNetworkConditions.map((_, i) => `rule-${i}`) };
     },
   });
 }

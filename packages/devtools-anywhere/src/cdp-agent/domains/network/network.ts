@@ -268,6 +268,7 @@ export function registerNetwork(ctx: Context) {
         type: rec.type,
         errorText: rec.errorText ?? '',
         canceled: !!rec.canceled,
+        ...(rec.blockedReason && { blockedReason: rec.blockedReason }),
       } satisfies Protocol.Network.LoadingFailedEvent);
     }
   }

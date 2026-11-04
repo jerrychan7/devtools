@@ -143,6 +143,8 @@ export interface RequestRecord {
   errorText?: string;
   /** Whether a failed request was stopped by the page (abort), not by an error. */
   canceled?: boolean;
+  /** Why DevTools blocked the request (Network.setBlockedURLs). */
+  blockedReason?: 'inspector';
   /** The same-origin iframe document that made the request; none for the top one's. */
   frame?: FrameTag;
 }
@@ -191,6 +193,17 @@ export interface ListenerRecord {
   once: boolean;
 }
 
+/**
+ * What DevTools does to a fetch() or XHR request about to be made (Network.setBlockedURLs,
+ * setExtraHTTPHeaders, setCacheDisabled, offline, the user agent): set by the agent.
+ */
+export interface Intercept {
+  /** Fails the request without making it, with these fields in its record. */
+  fail?: Partial<ProbeRequest>;
+  /** Bypasses the HTTP cache (fetch() only). */
+  noCache?: boolean;
+}
+
 /** @internal */
 export interface Probe {
   version: 1;
@@ -224,6 +237,10 @@ export interface Probe {
   ownUrls: Set<string>;
   /** The page's fetch before it was hooked: DevTools' own requests stay out of the Network panel. */
   fetch: typeof fetch;
+  /** Asked before each hooked fetch() or XHR request is made; set by the agent. */
+  intercept?:
+    | ((url: string, type: RequestType, setHeader: (name: string, value: string) => void) => Intercept | undefined)
+    | undefined;
   /** The page's WebSocket before it was hooked: DevTools' own connections are not recorded. */
   WebSocket: typeof WebSocket;
   /**
