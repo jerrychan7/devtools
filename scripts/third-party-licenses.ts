@@ -5,6 +5,7 @@
 // Inputs:
 //   - the es-module-lexer license (embedded below: the port lives in packages/devtools-anywhere/src/cdp-agent)
 //   - @zumer/snapdom from node_modules
+//   - dom-accessibility-api from node_modules
 //   - the devtools-frontend checkout at packages/devtools-frontend/REVISION, for the DevTools
 //     license and the README.chromium + LICENSE of every library under front_end/third_party
 //     that ends up in packages/devtools-frontend/dist (which must be built: the frontend build
@@ -72,6 +73,12 @@ const require = createRequire(path.join(repo, 'packages/devtools-anywhere/packag
 const snapdomDir = path.dirname(require.resolve('@zumer/snapdom/package.json'));
 const snapdomVersion = (JSON.parse(read(path.join(snapdomDir, 'package.json'))) as { version: string }).version;
 
+// Its exports leave out package.json: from its entry, dist/index.js, up.
+const domAccessibilityDir = path.resolve(path.dirname(require.resolve('dom-accessibility-api')), '..');
+const domAccessibilityVersion = (
+  JSON.parse(read(path.join(domAccessibilityDir, 'package.json'))) as { version: string }
+).version;
+
 const lexer: Component = {
   name: 'es-module-lexer (ported code)',
   version: '3.0.4',
@@ -91,6 +98,16 @@ const snapdom: Component = {
   text: read(path.join(snapdomDir, 'LICENSE')),
   packages: ['devtools-anywhere'],
   note: 'Bundled as dist/snapdom.js, loaded on demand for the screencast.',
+};
+const domAccessibility: Component = {
+  name: 'dom-accessibility-api',
+  version: domAccessibilityVersion,
+  license: 'MIT',
+  copyright: 'Sebastian Silbermann',
+  url: 'https://github.com/eps1lon/dom-accessibility-api',
+  text: read(path.join(domAccessibilityDir, 'LICENSE.md')),
+  packages: ['devtools-anywhere'],
+  note: 'Bundled as dist/accessibility.js, loaded on demand for the Accessibility domain.',
 };
 const devtools: Component = {
   name: 'Chrome DevTools frontend',
@@ -163,7 +180,7 @@ const frontendComponents = frontendLibraries.map(([dir, distPath, copyright]): C
   };
 });
 
-const all = [lexer, snapdom, devtools, ...frontendComponents];
+const all = [lexer, snapdom, domAccessibility, devtools, ...frontendComponents];
 
 const DEV_DEPENDENCIES = `| Dependency | License | Used for |
 | --- | --- | --- |

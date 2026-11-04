@@ -2,7 +2,7 @@
 // `--watch` rebuilds on every change (`pnpm dev`).
 import { context, type BuildOptions } from 'esbuild';
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
+import { ACCESSIBILITY_SCRIPT, BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
 
 const watch = process.argv.includes('--watch');
 // In watch mode the other packages' watchers read this dist/: keep it in place.
@@ -33,6 +33,14 @@ const builds: BuildOptions[] = [
   {
     ...common,
     entryPoints: { [entry(SNAPDOM_SCRIPT)]: '@zumer/snapdom' },
+    format: 'esm',
+    minify: true,
+    outdir: 'dist',
+  },
+  // The accessibility tree's computation, for the Accessibility domain to load on demand.
+  {
+    ...common,
+    entryPoints: { [entry(ACCESSIBILITY_SCRIPT)]: 'src/cdp-agent/domains/accessibility/ax-node.ts' },
     format: 'esm',
     minify: true,
     outdir: 'dist',

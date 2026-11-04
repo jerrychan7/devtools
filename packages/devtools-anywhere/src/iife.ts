@@ -19,7 +19,7 @@ import {
   setBundleUrl,
 } from './element';
 import type { DevtoolsAnywhereApi } from './api';
-import { SNAPDOM_SCRIPT } from './embedder';
+import { ACCESSIBILITY_SCRIPT, SNAPDOM_SCRIPT } from './embedder';
 import { linkFrames } from './frame-links';
 import { connectRemote } from './remote';
 
@@ -38,6 +38,7 @@ if (!('DevtoolsAnywhere' in window)) {
     // DevTools' own code is not one of the page's requests.
     probe.ownUrls.add(script.src);
     probe.ownUrls.add(new URL(SNAPDOM_SCRIPT, script.src).href);
+    probe.ownUrls.add(new URL(ACCESSIBILITY_SCRIPT, script.src).href);
   }
   defineDevtoolsAnywhere();
   if (isShellPage()) {

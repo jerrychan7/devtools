@@ -15,6 +15,7 @@ import {
   storeShellOpen,
   type CdpSession,
   type ParentLink,
+  type AccessibilityLoader,
   type SnapdomLoader,
 } from '../cdp-agent';
 import { connectFrontend, emulateInShell, relayShell } from '../connection';
@@ -54,6 +55,7 @@ import {
   HIDDEN_NOTICE,
   PROBE_SCRIPT,
   SNAPDOM_SCRIPT,
+  ACCESSIBILITY_SCRIPT,
   REQUEST_KEY,
   type DockSide,
   type FrontendNotice,
@@ -69,6 +71,7 @@ let bundleUrl = '';
 export function setBundleUrl(url: string) {
   bundleUrl = url;
   loadSnapdom = () => import(/* @vite-ignore */ new URL(SNAPDOM_SCRIPT, url).href);
+  loadAccessibility = () => import(/* @vite-ignore */ new URL(ACCESSIBILITY_SCRIPT, url).href);
 }
 
 /**
@@ -77,8 +80,16 @@ export function setBundleUrl(url: string) {
  */
 let loadSnapdom: SnapdomLoader = () => Promise.reject(new Error('snapDOM: the bundle URL is not known'));
 
-/** The CDP session of a page, with the screencast's renderer, and in shell mode the shell's device metrics. */
-export const createPageSession = () => emulateInShell(createCdpSession({ loadSnapdom: () => loadSnapdom() }));
+/** The accessibility tree's computation, loaded like snapDOM: the copy next to the bundle (accessibility.js). */
+let loadAccessibility: AccessibilityLoader = () =>
+  Promise.reject(new Error('accessibility.js: the bundle URL is not known'));
+
+/**
+ * The CDP session of a page, with the screencast's renderer and the accessibility tree, and in
+ * shell mode the shell's device metrics.
+ */
+export const createPageSession = () =>
+  emulateInShell(createCdpSession({ loadSnapdom: () => loadSnapdom(), loadAccessibility: () => loadAccessibility() }));
 
 /**
  * Whether the browser has the top layer for popovers. There the toggler and the panel are above

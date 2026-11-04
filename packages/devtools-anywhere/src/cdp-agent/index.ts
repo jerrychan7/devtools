@@ -23,6 +23,7 @@ import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
 import { registerRuntime } from './domains/runtime/runtime';
 import { createRender, type SnapdomLoader } from './domains/page/render';
+import { registerAccessibility, type AccessibilityLoader } from './domains/accessibility/accessibility';
 import { registerScreencast } from './domains/page/screencast';
 import { registerScreenshot } from './domains/page/screenshot';
 import { registerServiceWorker } from './domains/service-worker/service-worker';
@@ -78,6 +79,7 @@ export function setIdNamespace(ns: number): void {
   setRequestIdPrefix(prefix);
 }
 export type { SnapdomLoader } from './domains/page/render';
+export type { AccessibilityLoader } from './domains/accessibility/accessibility';
 
 /** @internal */
 export interface CdpSessionOptions {
@@ -87,6 +89,11 @@ export interface CdpSessionOptions {
    * available.
    */
   loadSnapdom?: SnapdomLoader;
+  /**
+   * Loads accessibility.js, which computes the Accessibility domain's tree. Without it, the
+   * domain's commands fail.
+   */
+  loadAccessibility?: AccessibilityLoader;
 }
 
 /** Whether the probe hooks the iframes the page's frame registry finds. */
@@ -175,5 +182,6 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerWebMcp(ctx);
   registerAnimation(ctx);
   registerAudits(ctx);
+  registerAccessibility(ctx, options.loadAccessibility);
   return ctx.session;
 }

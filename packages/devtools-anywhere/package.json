@@ -36,7 +36,8 @@
     "./devtools-anywhere.iife.js": "./dist/devtools-anywhere.iife.js",
     "./probe.iife.js": "./dist/probe.iife.js",
     "./devtools-anywhere-service-worker.js": "./dist/devtools-anywhere-service-worker.js",
-    "./snapdom.js": "./dist/snapdom.js"
+    "./snapdom.js": "./dist/snapdom.js",
+    "./accessibility.js": "./dist/accessibility.js"
   },
   "scripts": {
     "build": "node build.ts && tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/api-extract.ts",
@@ -44,7 +45,8 @@
     "dev": "node build.ts --watch"
   },
   "dependencies": {
-    "@zumer/snapdom": "^3.3.5"
+    "@zumer/snapdom": "^3.3.5",
+    "dom-accessibility-api": "^0.7.1"
   },
   "devDependencies": {
     "@devtools-anywhere/relay-core": "workspace:*",
