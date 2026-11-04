@@ -20,6 +20,7 @@ import { registerRuntime } from './domains/runtime/runtime';
 import { createRender, type SnapdomLoader } from './domains/page/render';
 import { registerScreencast } from './domains/page/screencast';
 import { registerScreenshot } from './domains/page/screenshot';
+import { registerServiceWorker } from './domains/service-worker/service-worker';
 import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
 import { registerTarget } from './domains/target/target';
@@ -156,6 +157,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerOverlay(ctx);
   registerCss(ctx);
   registerStorage(ctx);
+  registerServiceWorker(ctx.session);
   registerDomDebugger(ctx);
   registerDebugger(ctx);
   const render = options.loadSnapdom && createRender(options.loadSnapdom);

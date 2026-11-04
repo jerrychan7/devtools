@@ -47,7 +47,6 @@ const NOOPS = {
     'setBlockedURLs',
     'setUserAgentOverride',
   ],
-  ServiceWorker: ['enable'],
 } satisfies CommandsByDomain;
 
 /** No-ops the frontend sends that this devtools-protocol version does not declare. */
