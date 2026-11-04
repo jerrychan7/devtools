@@ -159,18 +159,32 @@ test("its console messages and uncaught errors reach the page's session, as in C
       expression: 'console.log("from the frame", 1); setTimeout(() => { throw new Error("frame boom"); })',
       contextId: context['id'],
     });
-    const logged = await waitFor(side, since, e => e.method === 'Runtime.consoleAPICalled');
-    const thrown = await waitFor(side, since, e => e.method === 'Runtime.exceptionThrown');
+    // This very message, not another the page or the probe may log meanwhile.
+    const logged = await waitFor(side, since, e => {
+      const args = get(e.params, 'args');
+      return (
+        e.method === 'Runtime.consoleAPICalled' && Array.isArray(args) && get(args[0], 'value') === 'from the frame'
+      );
+    });
+    // The frame's error, told by its context: ours does not carry its exception (null there).
+    const thrown = await waitFor(
+      side,
+      since,
+      e =>
+        e.method === 'Runtime.exceptionThrown' &&
+        get(get(e.params, 'exceptionDetails'), 'executionContextId') === context['id']
+    );
     const args = get(logged.params, 'args');
     const details = get(thrown.params, 'exceptionDetails');
     results.push({
       type: get(logged.params, 'type'),
       args: Array.isArray(args) ? args.map(a => get(a, 'value')) : args,
       context: get(logged.params, 'executionContextId') === context['id'],
-      thrownContext: get(details, 'executionContextId') === context['id'],
+      thrown: get(details, 'text'),
     });
   }
   assert.deepEqual(results[1], results[0]);
+  assert.equal(results[0]?.context, true);
 });
 
 test('discardConsoleEntries, releaseObjectGroup and Log.clear answer, as in Chrome', async () => {

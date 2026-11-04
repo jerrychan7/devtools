@@ -240,7 +240,8 @@ interface Scope {
 mergedFrames.registerRoutes('Runtime', {
   routeBy: {
     'Runtime.evaluate': ['contextId', 'uniqueContextId'],
-    // An argument of the other side is unknown where the call runs, as across processes in Chrome.
+    // Routed by the target alone: an argument of the other side is in another JavaScript world,
+    // which callFunctionOn rejects with V8's error.
     'Runtime.callFunctionOn': ['objectId', 'executionContextId', 'uniqueContextId'],
     'Runtime.getProperties': ['objectId'],
     'Runtime.releaseObject': ['objectId'],
@@ -340,11 +341,15 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
       const channel = new MessageChannel();
       channel.port1.onmessage = () => {
         channel.port1.close();
-        if (--scope.utilityUsers === 0) {
-          for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
-          utilities.clear();
+        // A frame that went cross-origin meanwhile throws at its properties: the evaluation still ends.
+        try {
+          if (--scope.utilityUsers === 0) {
+            for (const name of utilities.keys()) if (isUtility(win, utilities, name)) Reflect.deleteProperty(win, name);
+          }
+        } finally {
+          if (scope.utilityUsers === 0) utilities.clear();
+          resolve();
         }
-        resolve();
       };
       channel.port2.postMessage(null);
     });
@@ -525,8 +530,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         throw new CdpError('ObjectId, executionContextId and uniqueContextId must mutually exclude each other', -32602);
       if (targets === 0)
         throw new CdpError('Either objectId or executionContextId or uniqueContextId must be specified', -32602);
-      // An object of the other side of a merge (core/merged-frames.ts) is in another world, as for
-      // Chrome, where the sandboxed iframe shares the page's process.
+      // An object of the other side of a merge (core/merged-frames.ts) is in another JavaScript
+      // world: V8's world check, which Chrome applies to the sandboxed iframe's objects too.
       const world = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
       if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== world))
         throw new CdpError('Argument should belong to the same JavaScript world as target object');

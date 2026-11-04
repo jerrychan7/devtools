@@ -79,6 +79,21 @@ function namer(side: Side) {
   };
 }
 
+/**
+ * The code of the error our agent answers `method` with. Puppeteer drops the code of Chrome's
+ * errors; the codes the tests expect were read off Chrome's raw replies.
+ */
+const ourErrorCode = (method: string, params: object) =>
+  t.page.evaluate(
+    (m, p) =>
+      window.__session.call(m, p).then(
+        () => undefined,
+        (e: unknown) => (e instanceof Error && 'code' in e ? e.code : undefined)
+      ),
+    method,
+    params
+  );
+
 const both = async <T>(fn: (side: Side) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 
 describe('execution contexts', () => {
@@ -294,6 +309,8 @@ describe('evaluation in a frame', () => {
     assert.deepEqual(ours.slice(0, 2), chrome.slice(0, 2));
     assert.match(String(ours[2]), /uniqueContextId not found/);
     assert.match(String(chrome[2]), /uniqueContextId not found/);
+    // InvalidParams, unlike an unknown executionContextId.
+    assert.equal(await ourErrorCode('Runtime.evaluate', { expression: '1', uniqueContextId: '1.2' }), -32602);
   });
 
   test('callFunctionOn takes exactly one of objectId, executionContextId and uniqueContextId', async () => {
@@ -318,6 +335,16 @@ describe('evaluation in a frame', () => {
       );
       assert.match(String(side[1]), /Either objectId or executionContextId or uniqueContextId must be specified/);
     }
+    // InvalidParams in Chrome too, both of them.
+    assert.equal(
+      await ourErrorCode('Runtime.callFunctionOn', {
+        functionDeclaration: 'function () {}',
+        objectId: 'nothing',
+        executionContextId: 1,
+      }),
+      -32602
+    );
+    assert.equal(await ourErrorCode('Runtime.callFunctionOn', { functionDeclaration: 'function () {}' }), -32602);
   });
 
   test('a context that is gone is an error, like in Chrome', async () => {

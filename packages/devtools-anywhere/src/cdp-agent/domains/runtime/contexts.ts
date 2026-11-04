@@ -89,8 +89,8 @@ export function executionContexts(frames: FrameRegistry, emit: (method: string, 
       if (contextId !== undefined || uniqueContextId !== undefined) frames.sync();
       if (uniqueContextId !== undefined) {
         const frame = Array.from(frames).find(f => uniqueIdOf(f.executionContextId) === uniqueContextId);
-        // V8's word for an unknown uniqueContextId, unlike an unknown executionContextId.
-        if (!frame) throw new CdpError('uniqueContextId not found');
+        // V8's word for an unknown uniqueContextId, an InvalidParams unlike an unknown executionContextId.
+        if (!frame) throw new CdpError('uniqueContextId not found', -32602);
         return frame;
       }
       if (contextId === undefined) return frames.top;
