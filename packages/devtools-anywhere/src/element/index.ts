@@ -1,4 +1,5 @@
 import {
+  childTargets,
   installProbe,
   SHELL_KEY,
   SHELL_PAGE_ID,
@@ -13,9 +14,10 @@ import {
   storeShellConfig,
   storeShellOpen,
   type CdpSession,
+  type ParentLink,
   type SnapdomLoader,
 } from '../cdp-agent';
-import { connectFrontend, relayShell } from '../connection';
+import { connectFrontend, emulateInShell, relayShell } from '../connection';
 import { SHELL_HANDSHAKE } from '../shell-messages';
 import type { Grip } from '../grip';
 import { isDockSide, isEmbedderRequest } from './request';
@@ -75,8 +77,8 @@ export function setBundleUrl(url: string) {
  */
 let loadSnapdom: SnapdomLoader = () => Promise.reject(new Error('snapDOM: the bundle URL is not known'));
 
-/** The CDP session of a page, with the screencast's renderer. */
-export const createPageSession = () => createCdpSession({ loadSnapdom: () => loadSnapdom() });
+/** The CDP session of a page, with the screencast's renderer, and in shell mode the shell's device metrics. */
+export const createPageSession = () => emulateInShell(createCdpSession({ loadSnapdom: () => loadSnapdom() }));
 
 /**
  * Whether the browser has the top layer for popovers. There the toggler and the panel are above
@@ -640,12 +642,29 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
+/**
+ * Hides a global element, its F12 button and panel, while the page, in a cross-origin iframe, is
+ * debugged from its parent's DevTools (frame-links/); shows it again once the link closes.
+ */
+function hideWhileLinked(element: HTMLElement) {
+  const follow = (link: ParentLink) => {
+    element.style.setProperty('display', 'none', 'important');
+    link.onClose(() => {
+      // Global elements after the first stay hidden.
+      if (!inactiveGlobals.has(element) && !childTargets.parent) element.style.removeProperty('display');
+    });
+  };
+  if (childTargets.parent) follow(childTargets.parent);
+  childTargets.onParent(follow);
+}
+
 /** Creates a global element with the probe's options: only the first one connected works. @internal */
 export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhereElement | null {
   try {
     const element = new DevtoolsAnywhereElement();
     globalElements.add(element);
     globalConfigs.set(element, config);
+    hideWhileLinked(element);
     if (config.frontend && !globals.probeFrontend) {
       globals.probeFrontend = config.frontend;
       customElementsLoading.forEach(load => load());

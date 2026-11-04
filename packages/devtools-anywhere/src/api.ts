@@ -22,6 +22,20 @@ export interface DevtoolsAnywhereApi {
    * registered `devtools-anywhere` itself.
    */
   createGlobalElement(config: GlobalElementConfig): HTMLElement | null;
+  /**
+   * Links the page's agent with those of the cross-origin iframes it trusts, and of its parent
+   * when it is in one that it trusts (the probe's data-frame-origins and data-parent-origins).
+   * Returns a function that stops and closes the links.
+   */
+  linkFrames(options: FrameLinkOptions): () => void;
+}
+
+/** The origins the page trusts across iframes: space-separated lists, as in the probe's attributes. */
+export interface FrameLinkOptions {
+  /** The iframes this page's DevTools may debug (`data-frame-origins`). */
+  frameOrigins?: string | null;
+  /** The pages that may debug this one in their iframe (`data-parent-origins`). */
+  parentOrigins?: string | null;
 }
 
 /** The probe's options for the global element (its `data-*` attributes). */

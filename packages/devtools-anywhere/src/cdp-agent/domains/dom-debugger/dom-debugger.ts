@@ -1,6 +1,11 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
+import { contentDocumentOf, isFrameOwner } from '../../core/realm';
+import { mergedFrames } from '../../core/merged-frames';
+
+/** A merged sandboxed iframe's object (core/merged-frames.ts) is its agent's to list. */
+mergedFrames.registerRoutes('DOMDebugger', { routeBy: { 'DOMDebugger.getEventListeners': ['objectId'] } });
 
 type EventListener = Protocol.DOMDebugger.EventListener;
 
@@ -80,13 +85,8 @@ export function registerDomDebugger(ctx: Context) {
         if (!params.pierce || !(node instanceof Element)) return children;
         const shadowRoot = nodes.shadowRootOf(node);
         if (shadowRoot) children.unshift(shadowRoot);
-        if (node instanceof HTMLIFrameElement || node instanceof HTMLFrameElement) {
-          let doc: Document | null = null;
-          try {
-            doc = node.contentDocument;
-          } catch {}
-          if (doc) children.unshift(doc);
-        }
+        const doc = isFrameOwner(node) ? contentDocumentOf(node) : null;
+        if (doc) children.unshift(doc);
         return children;
       };
       if (target instanceof Node && depth !== 1 && depth !== 0) {

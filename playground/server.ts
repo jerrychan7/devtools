@@ -115,7 +115,7 @@ export interface PlaygroundServer {
 }
 
 export function startServer(port = 0): Promise<PlaygroundServer> {
-  const server = http.createServer(async (req, res) => {
+  const handle: http.RequestListener = async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const delay = Number(url.searchParams.get('delay')) || 0;
     if (delay) await sleep(delay);
@@ -177,18 +177,76 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
     } catch {
       res.writeHead(404).end('not found');
     }
-  });
-  server.on('upgrade', (req, socket) => {
+  };
+  const upgrade = (req: http.IncomingMessage, socket: Duplex) => {
     if (new URL(req.url ?? '/', 'http://localhost').pathname === '/ws/echo') wsEcho(req, socket);
     else socket.destroy();
-  });
+  };
+  const create = () => {
+    const server = http.createServer(handle);
+    server.on('upgrade', upgrade);
+    return server;
+  };
+  return port === 0 ? listenOnLoopback(port, create) : listenOnAll(port, create);
+}
+
+/** Listens on every address at a given port: other devices on the network reach the server too. */
+async function listenOnAll(port: number, create: () => http.Server): Promise<PlaygroundServer> {
+  const server = create();
+  // No host: Node binds '::' and falls back to 0.0.0.0 on a machine without IPv6.
+  const error = await listen(server, port);
+  if (error) throw new Error(`the server cannot listen on port ${port}: ${error}`);
+  return { url: `http://localhost:${port}`, close: () => server.close() };
+}
+
+/** Listens on `host` (every address if omitted) and `port`; resolves with the error code if that fails. */
+function listen(server: http.Server, port: number, host?: string): Promise<string | null> {
   return new Promise(resolve => {
-    server.listen(port, () => {
-      const address = server.address();
-      const actual = typeof address === 'object' && address ? address.port : port;
-      resolve({ url: `http://localhost:${actual}`, close: () => server.close() });
+    const onError = (e: NodeJS.ErrnoException) => resolve(e.code ?? 'error');
+    server.once('error', onError);
+    // Later errors are not swallowed by this listener once listening.
+    server.listen(port, host, () => {
+      server.off('error', onError);
+      resolve(null);
     });
   });
+}
+
+/**
+ * For a free port (the tests): listens on both loopback addresses, 127.0.0.1 and ::1, at one port: the pages reach the server
+ * as localhost and as 127.0.0.1. Not on the wildcard address: macOS lets another process bind
+ * 127.0.0.1 at a port a wildcard socket holds, and that process then gets every connection to
+ * 127.0.0.1 there. Tests running side by side do just that (each Chrome's DevTools port is a free
+ * port on 127.0.0.1), and a page's requests to 127.0.0.1 went to a server that never answered.
+ * Bound to the addresses themselves, the port is the server's alone.
+ */
+async function listenOnLoopback(port: number, create: () => http.Server): Promise<PlaygroundServer> {
+  for (let attempt = 0; ; attempt++) {
+    const v4 = create();
+    const v4Error = await listen(v4, port, '127.0.0.1');
+    if (v4Error) throw new Error(`the server cannot listen on 127.0.0.1:${port}: ${v4Error}`);
+    const address = v4.address();
+    const actual = typeof address === 'object' && address ? address.port : port;
+    const v6 = create();
+    const v6Error = await listen(v6, actual, '::1');
+    // A free port on 127.0.0.1 may be taken on ::1: another one, when the port was ours to pick.
+    if (v6Error === 'EADDRINUSE' && port === 0 && attempt < 10) {
+      v4.close();
+      continue;
+    }
+    // Without IPv6, localhost is 127.0.0.1 alone.
+    if (v6Error && v6Error !== 'EADDRNOTAVAIL' && v6Error !== 'EAFNOSUPPORT') {
+      v4.close();
+      throw new Error(`the server cannot listen on [::1]:${actual}: ${v6Error}`);
+    }
+    return {
+      url: `http://localhost:${actual}`,
+      close: () => {
+        v4.close();
+        if (!v6Error) v6.close();
+      },
+    };
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

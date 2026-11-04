@@ -1,14 +1,15 @@
-import { FRAME_ID, LOADER_ID, installProbe, type CdpSession } from './cdp-agent';
+import { LOADER_ID, frames, installProbe, type CdpSession } from './cdp-agent';
 import {
+  ATTACH_METHOD,
   DETACH_METHOD,
   HELLO_METHOD,
   PAGEHIDE_METHOD,
   REPLACED_CLOSE_CODE,
-  type DetachParams,
+  type SessionParams,
   type HelloParams,
 } from '@devtools-anywhere/relay-core';
 import type { RemoteOptions } from './api';
-import { endSession } from './connection';
+import { announceRemoteClient, endSession, forgetRemoteClient, nameRemoteClient } from './connection';
 /** The tab's target id: the same across reloads, so DevTools stays on it. */
 const ID_KEY = 'devtools-anywhere:remote-id';
 /** Messages kept while the connection is down; the oldest go first. */
@@ -77,7 +78,8 @@ export function connectRemote(
       method: HELLO_METHOD,
       params: {
         loaderId: LOADER_ID,
-        frameId: FRAME_ID,
+        // The top frame's id now: a page in a cross-origin iframe takes its parent's once linked.
+        frameId: frames.top.id,
         url: location.href,
         title: document.title,
         favicon: favicon(),
@@ -115,12 +117,17 @@ export function connectRemote(
     let found = sessions.get(id);
     if (!found) {
       const cdp = idle.pop() ?? createSession();
+      // Its device metrics override is the remote session's, kept across reloads (shell mode).
+      nameRemoteClient(cdp, id);
       found = { cdp, off: cdp.onMessage(message => send(`${id}:${message}`)) };
       sessions.set(id, found);
     }
     return found.cdp;
   }
   function detach(id: string) {
+    // The shell forgets when its client attached, now: the page may be going away, and a session
+    // this instance never served ended while the page was between instances.
+    forgetRemoteClient(id);
     const found = sessions.get(id);
     if (!found) return;
     sessions.delete(id);
@@ -140,12 +147,17 @@ export function connectRemote(
       } catch {
         return;
       }
-      if (typeof message !== 'object' || !message || !('method' in message) || message.method !== DETACH_METHOD) return;
+      if (typeof message !== 'object' || !message || !('method' in message)) return;
+      const attach = message.method === ATTACH_METHOD;
+      if (!attach && message.method !== DETACH_METHOD) return;
       const params = 'params' in message ? message.params : undefined;
       if (typeof params !== 'object' || !params) return;
-      const field = (name: keyof DetachParams): unknown => Reflect.get(params, name);
+      const field = (name: keyof SessionParams): unknown => Reflect.get(params, name);
       const session = field('session');
-      if (session !== undefined) detach(String(session));
+      if (session === undefined) return;
+      // A session's start is its attach time, which a device metrics override's order needs.
+      if (attach) announceRemoteClient(cdpOf(String(session)));
+      else detach(String(session));
       return;
     }
     const colon = data.indexOf(':');

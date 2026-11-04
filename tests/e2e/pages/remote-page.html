@@ -7,12 +7,15 @@
          shell mode, which a probe from the server's origin cannot enter: its frontend is on
          another). `&local` loads the probe from this page's origin, with `data-remote` naming the
          server, so `&panel` enters shell mode; `&shellOff` keeps it out of shell mode, locked;
-         `&serviceWorker` turns on the Service Worker; `&noRemote` leaves `data-remote` out. -->
+         `&serviceWorker` turns on the Service Worker; `&noRemote` leaves `data-remote` out; `&testBuild` loads the tests' build
+         (dist-test/), whose bundle exposes internals as `window.__devtoolsAnywhereTest`. -->
     <script>
       const query = new URLSearchParams(location.search);
       document.write(
         (query.has('local')
-          ? '<script src="/packages/devtools-anywhere/dist/probe.iife.js"' +
+          ? '<script src="/packages/devtools-anywhere/' +
+            (query.has('testBuild') ? 'dist-test' : 'dist') +
+            '/probe.iife.js"' +
             (query.has('noRemote') ? '' : ' data-remote="' + query.get('remote') + '"')
           : '<script src="' + query.get('remote') + 'probe.iife.js" data-remote') +
           (query.has('idInQuery') ? ' data-id-in-query' : '') +

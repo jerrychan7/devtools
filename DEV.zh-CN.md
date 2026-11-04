@@ -2,7 +2,7 @@
 
 [English](DEV.md) | 简体中文
 
-介绍如何搭建开发环境、在实时重新构建下开发各个包，以及改动如何合入或发布。项目做什么见 [README](README.zh-CN.md)，工作原理和设计取舍见[设计文档](docs/design.zh-CN.md)。
+介绍如何搭建开发环境、在实时重新构建下开发各个包，以及改动如何合入或发布。项目做什么见 [README](README.zh-CN.md)，工作原理和设计取舍见[设计文档](docs/design.zh-CN.md)，计划中、还没做的事见[路线图](docs/roadmap.zh-CN.md)。
 
 ## 1. 第一次开发：环境配置
 
@@ -108,6 +108,7 @@ experiments/      验证记录
 - 所有 `postMessage` 都必须校验 `event.origin` 和 `event.source`，否则任意页面都能向 CDP 运行时发送命令。
 - 判断"是否处于外壳内"要通过 postMessage 握手完成，不要直接读取 `window.parent` 上的属性，否则跨域时会抛出 SecurityError。
 - 握手的两端都要有缓冲：devtools 尚未加载完成时，消息不能丢弃。
+- agent 也服务同源 iframe：iframe 里的节点不是顶层页面 `Element` 等类的实例，它的文档也不是全局 `document`。判断节点用 `cdp-agent/core/realm.ts`（按 `nodeType`，或 `realmOf(node)`），查 frame 用 `core/frames.ts`。`pnpm lint` 会按文件把剩下的顶层 realm 用法和 `scripts/check-realms.json` 对比（`scripts/check-realms.ts`），每个文件只许减少、不许增加。确实要用顶层页面的地方（探针、叠加层），运行 `node scripts/check-realms.ts --update`。
 - 前端资源应当支持自托管，不依赖 unpkg、jsdelivr 等第三方 CDN。
 - 使用 Service Worker 注入时：
   - 只处理 `destination === 'iframe'` 的导航请求，其他请求一律放行。
@@ -141,6 +142,8 @@ pnpm typecheck                                # 先构建，再检查所有包�
 测试放在被测代码旁边，命名为 `<名称>.test.ts`；只有跨包的测试放在 `tests/` 下。
 - `*.conformance.test.ts`（在 CDP agent 各个域的旁边）：同一个页面分别通过真实 Chrome 的 CDP 和我们的实现来检查，对比两边的输出。实现或修改 CDP 方法时请在这里加测试：以真实 Chrome 的行为为准，而不是协议文档。它们和页面一样加载构建产物。
 - `tests/e2e/`：连接层、外壳模式、零配置接入、Vite 插件和真实前端。测试打开的页面在 `pages/`（脚本与样式在 `pages/assets/`），替身前端在 `frontends/`。
+
+需要读取包内部状态的测试加载 `packages/devtools-anywhere/dist-test/` 而不是 `dist/`：`build.ts` 在那里把两个脚本再构建一遍（不发布），并设置 `DEVTOOLS_ANYWHERE_TEST`，只有这份构建会把内部状态暴露为 `window.__devtoolsAnywhereTest`（`iife.ts`；类型在 `tests/globals.d.ts`）。测试专用的钩子加在那里、放在 `DEVTOOLS_ANYWHERE_TEST` 之后，不要加进发布的包或其 API。
 
 ### 修改前端
 
@@ -176,7 +179,7 @@ cd devtools-frontend.ignore/devtools-frontend
 git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
-前端跟随稳定版 Chrome，也就是大多数用户手上的版本：每个里程碑一次，在新稳定版发布一两周后，用下面的命令升级：
+前端跟随稳定版 Chrome，也就是大多数用户手上的版本，小版本更新也要跟：每次都会换一个 devtools-frontend 提交。`.github/workflows/chrome-update.yml` 每天检查一次，稳定版 Chrome 的提交与 `REVISION` 不一致时开一个 issue（同时关闭还没处理的旧 issue）。用下面的命令升级：
 
 ```bash
 pnpm --filter @devtools-anywhere/devtools-frontend update
@@ -189,7 +192,7 @@ pnpm --filter @devtools-anywhere/devtools-frontend update
 ### 提交之前
 
 ```bash
-pnpm lint        # oxlint，然后运行 scripts/check-contracts.ts、check-file-size.ts 和 check-dir-size.ts
+pnpm lint        # oxlint，然后运行 scripts/check-contracts.ts、check-realms.ts、check-file-size.ts 和 check-dir-size.ts
 pnpm fmt         # oxfmt：直接改写文件（Markdown 不格式化）
 pnpm typecheck
 pnpm test        # 前端需已构建，真实前端测试才会运行
@@ -210,19 +213,20 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 ### 分支与 PR
 
-`main` 是唯一的长期分支：所有改动都合进这里，发布也在这里打 tag，它应当随时可以发布。不设 `develop` 分支：合进 `main` 不会发布任何东西（只有推送 `vx.y.z` tag 才会，见「发布到 npm」），`main` 本身就存放着已合并、尚未发布的改动。
+`main` 存放已发布的内容：发布在它上面打 tag，只能通过 PR 修改。下一个 minor 的开发放在它的开发分支 `dev/x.y.0` 上（现在是 `dev/0.3.0`），可以随时推送；发布该 minor 时经 `release/x.y.0` 进入 `main`：`dev` → `release` → `main`。
 
 | 分支 | 用途 | 规则 |
 | --- | --- | --- |
-| `main` | 所有开发；发布在它上面打 tag | 只能通过 PR 修改，CI 必须通过，禁止强推 |
-| `feat/…`、`fix/…`、`docs/…`、`ci/…` 等 | 每个分支只做一件事，短期存在；前缀与提交类型一致 | 从 `main` 拉出，通过 PR 合回后删除 |
-| `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 合进 `main`，然后在 `main` 上打 tag |
+| `main` | 已发布的内容；发布在它上面打 tag | 只能通过 PR 修改，CI 必须通过，禁止强推 |
+| `dev/x.y.0` | 下一个 minor x.y.0 的开发 | 上一次发布后从 `main` 拉出；可以直接提交、推送，也可以经 `feat/…` 分支合入；禁止强推 |
+| `feat/…`、`fix/…`、`docs/…`、`ci/…` 等 | 值得单独开 PR 的改动，每个分支只做一件事，短期存在；前缀与提交类型一致 | 从 `dev/x.y.0` 拉出再合回；patch 发布则从 `main` 拉出（见下文）；合入后删除 |
+| `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 从 `dev/x.y.0` 拉出（patch 从 `main` 拉出），合进 `main`，然后在 `main` 上打 tag |
 | `release/x.y` | 只在需要时用来给旧的 minor 打补丁（见「给旧版本打补丁」） | 从 tag `vx.y.0` 拉出，在该 minor 需要补丁期间保留 |
 
-修复不单独设一类分支：和其它改动一样走 `fix/…` 分支合进 `main`，作为 patch 发布。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。
+不能等到下一个 minor 的修复，走从 `main` 拉出的 `fix/…` 分支合进 `main`，从那里作为 patch 发布；然后把 `main` 合并进 `dev/x.y.0`，让修复也进入开发分支。x.y.0 发布后删除 `dev/x.y.0`，再从 `main` 拉出 `dev/x.(y+1).0`。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。推送到 `dev/x.y.0` 不运行，免得开发中的推送排队：由 `release/x.y.0` 的 PR 检查，或者手动在该分支上运行 CI（`gh workflow run ci.yml --ref dev/0.3.0`）。
 
 ```bash
-git switch -c feat/my-change main
+git switch -c feat/my-change dev/0.3.0
 # … 提交 …
 git push -u origin feat/my-change
 gh pr create --fill
@@ -236,7 +240,7 @@ gh pr create --fill
 
 版本号按 semver 表示库本身的变化，从 `0.1.0` 开始：修 bug 升 patch；新功能、或前端升级到新的 Chrome 里程碑（界面会变）升 minor；1.0 之前 minor 也可以有破坏性变更。有值得发布的内容时才发版（攒够一个 minor 的功能、用户在等的修复、新的 Chrome 里程碑），不是每次合并都发。承诺的范围是 README 写明的用法（`@public`）。Chrome 版本不放进版本号：写成 `+chrome156` 会被 npm 丢掉，写成 `-chrome156` 会被当成预发布版。它记在每个发布包 `package.json` 的 `chrome` 字段里（由 `update` 写入），每次发布的说明也在开头写明（「基于 Chrome 156」）。每次发布还会打上 dist-tag `chrome-<里程碑>`，`npm i devtools-anywhere@chrome-156` 就能装到基于该版 Chrome 的最后一个版本。
 
-1. 从 `main` 拉出 `release/x.y.z` 分支，把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。开 PR，CI 通过后合并。
+1. 从 `dev/x.y.0`（patch 则从 `main`）拉出 `release/x.y.z` 分支，把所有 `packages/*/package.json` 的 `version` 改成同一个版本，把 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 里 `Unreleased` 下的内容挪到 `## x.y.z` 下，然后提交（`build: release x.y.z`）。`node scripts/release.ts check x.y.z` 会检查这两项。开 PR，CI 通过后合并。
 2. 在 `main` 上给合并后的提交打 tag 并推送这个 tag：`git switch main && git pull && git tag vx.y.z && git push origin vx.y.z`。
 3. workflow 会检查版本号、构建前端、像 CI 一样跑检查和测试，并打包（pnpm 会把 `workspace:*` 替换成实际版本）。然后在 Actions 页面批准它的 `publish` 任务：它把各包发布到 npm，打上 dist-tag `chrome-<里程碑>`，并发布 GitHub Release，说明是 `CHANGELOG.md` 中该版本的那一节，后面接上 `CHANGELOG.zh-CN.md` 的对应一节。
 

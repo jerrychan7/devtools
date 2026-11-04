@@ -1,0 +1,15 @@
+{
+  "core/history.ts": 1,
+  "domains/css/style.ts": 1,
+  "domains/dom-debugger/dom-debugger.ts": 3,
+  "domains/network/frames.ts": 1,
+  "domains/network/network.ts": 3,
+  "domains/overlay/overlay.ts": 8,
+  "domains/page/render.ts": 4,
+  "domains/page/screencast.ts": 1,
+  "domains/page/screenshot.ts": 1,
+  "domains/storage/storage.ts": 2,
+  "domains/webmcp/webmcp.ts": 21,
+  "probe/index.ts": 8,
+  "probe/shell.ts": 8
+}

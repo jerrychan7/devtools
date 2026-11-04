@@ -1,4 +1,5 @@
 import { FORCE_ATTRIBUTE, isOwn } from './nodes';
+import { documentOf, isDocument, isElement, isHtml, isShadowRoot } from './realm';
 
 /** An edit that can be taken back and done again. */
 export interface Action {
@@ -255,14 +256,14 @@ const patchedAttributes = (el: Element) => Array.from(el.attributes).filter(a =>
 type Unused = Map<string, Digest>;
 
 /** The children of a node without devtools-anywhere's own (the overlay, …), which patching leaves alone. */
-const childrenOf = (node: Node) => Array.from(node.childNodes).filter(n => !(n instanceof Element && isOwn(n)));
+const childrenOf = (node: Node) => Array.from(node.childNodes).filter(n => !(isElement(n) && isOwn(n)));
 const childAt = (node: Node, index: number) => childrenOf(node)[index] ?? null;
 
 function digestOf(node: Node, unused: Unused | null): Digest {
   const children: Digest[] = [];
   let attrsHash = '';
   let key = `${node.nodeType}\0${node.nodeName}\0${node.nodeValue ?? ''}`;
-  if (node instanceof Element) {
+  if (isElement(node)) {
     for (const child of childrenOf(node)) {
       const digest = digestOf(child, unused);
       key += '\0' + digest.hash;
@@ -292,12 +293,15 @@ class Patcher {
   patchNode(node: Node, markup: string) {
     const parent = node.parentNode;
     if (!parent) throw new Error('Node has no parent');
-    const context = node.parentElement ?? (parent instanceof ShadowRoot ? document.body : document.documentElement);
+    // In the node's own document, which is an iframe's for a node in one.
+    const doc = documentOf(node);
+    const context = node.parentElement ?? (isShadowRoot(parent) ? doc.body : doc.documentElement);
+    if (!context) throw new Error('Node has no context to parse in');
     // Parsed in the context of the parent, without running scripts, like a fragment.
     const name = context.localName.includes('-') ? 'div' : context.localName;
-    const parser = document.createElementNS(context.namespaceURI, name);
+    const parser = doc.createElementNS(context.namespaceURI, name);
     parser.innerHTML = markup;
-    const fragment = document.createDocumentFragment();
+    const fragment = doc.createDocumentFragment();
     while (parser.firstChild) fragment.appendChild(parser.firstChild);
 
     const siblings = childrenOf(parent);
@@ -307,8 +311,8 @@ class Patcher {
     const newList = oldList.slice(0, index);
     for (let child = fragment.firstChild; child; child = child.nextSibling) {
       // The parser adds an empty <head> or <body> by itself.
-      if (child instanceof HTMLHeadElement && !child.hasChildNodes() && !lower.includes('</head>')) continue;
-      if (child instanceof HTMLBodyElement && !child.hasChildNodes() && !lower.includes('</body>')) continue;
+      if (isHtml(child, 'head') && !child.hasChildNodes() && !lower.includes('</head>')) continue;
+      if (isHtml(child, 'body') && !child.hasChildNodes() && !lower.includes('</body>')) continue;
       newList.push(digestOf(child, this.unused));
     }
     newList.push(...oldList.slice(index + 1));
@@ -316,9 +320,9 @@ class Patcher {
   }
 
   /** PatchDocument: the document element patched into the one of the parsed markup. */
-  patchDocument(markup: string): boolean {
+  patchDocument(doc: Document, markup: string): boolean {
     const parsed = new DOMParser().parseFromString(markup, 'text/html').documentElement;
-    const root = document.documentElement;
+    const root = doc.documentElement;
     if (!parsed || !root) return false;
     const nd = digestOf(parsed, this.unused);
     this.patchNodeInPlace(digestOf(root, null), nd);
@@ -406,11 +410,11 @@ class Patcher {
         oldMap[i] = null;
       }
       // <head> and <body> cannot be removed.
-      if (od.node instanceof HTMLHeadElement) {
+      if (isHtml(od.node, 'head')) {
         oldHead = od;
         continue;
       }
-      if (od.node instanceof HTMLBodyElement) {
+      if (isHtml(od.node, 'body')) {
         oldBody = od;
         continue;
       }
@@ -441,8 +445,8 @@ class Patcher {
     }
     // <head> and <body> are patched with the new ones.
     for (const nd of newList) {
-      if (oldHead && nd.node instanceof HTMLHeadElement) merges.set(nd, oldHead);
-      if (oldBody && nd.node instanceof HTMLBodyElement) merges.set(nd, oldBody);
+      if (oldHead && isHtml(nd.node, 'head')) merges.set(nd, oldHead);
+      if (oldBody && isHtml(nd.node, 'body')) merges.set(nd, oldBody);
     }
     // 2. Patches the nodes that changed in place.
     for (const [nd, od] of merges) this.patchNodeInPlace(od, nd);
@@ -459,7 +463,7 @@ class Patcher {
       const od = oldList[i];
       if (!m || !od) continue;
       const anchor = childAt(parent, m.index);
-      if (od.node === anchor || od.node instanceof HTMLBodyElement || od.node instanceof HTMLHeadElement) continue;
+      if (od.node === anchor || isHtml(od.node, 'body') || isHtml(od.node, 'head')) continue;
       this.do(insertBefore(parent, od.node, anchor));
     }
   }
@@ -473,7 +477,7 @@ class Patcher {
       return;
     }
     if (old.nodeValue !== node.nodeValue) this.do(setNodeValue(old, node.nodeValue));
-    if (!(old instanceof Element) || !(node instanceof Element)) return;
+    if (!isElement(old) || !isElement(node)) return;
     if (od.attrsHash !== nd.attrsHash) {
       for (let attr = patchedAttributes(old)[0]; attr; attr = patchedAttributes(old)[0])
         this.do(removeAttribute(old, attr.name));
@@ -512,8 +516,9 @@ class Patcher {
 /** Does DOM.setOuterHTML on `node` like Chrome, and returns how to undo it. */
 export function patchOuterHTML(node: Node, markup: string): Action {
   const patcher = new Patcher();
-  if (node.parentNode instanceof Document) {
-    if (!patcher.patchDocument(markup)) throw new Error('Could not parse the document');
+  const parent = node.parentNode;
+  if (parent && isDocument(parent)) {
+    if (!patcher.patchDocument(parent, markup)) throw new Error('Could not parse the document');
   } else patcher.patchNode(node, markup);
   const edits = patcher.edits;
   return {

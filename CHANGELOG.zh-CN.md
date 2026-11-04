@@ -4,6 +4,33 @@
 
 ## Unreleased
 
+## 0.3.0
+
+基于 Chrome 156（156.0.8078.80）。
+
+- 支持同源 iframe，与 Chrome 一致：Elements 能展开；每个 iframe 在 Page 的 frame 树里有自己的 frame，在 Console 的上下文菜单里有自己的执行上下文，带着它的 console 消息和错误；Styles 显示它自己的样式表和媒体条件；Network 的请求标出所属 frame；高亮、检查模式和 Input 都能进入 iframe。shadow tree 里的 iframe 以及同源 `<object>`、`<embed>` 的文档同样是 frame；`Page.getResourceTree` 列出每个 frame 自己的资源。iframe 在 load 事件之前的日志和请求拿不到（srcdoc 和空 iframe 除外），导航要加载完成后才报出。
+- 支持跨域 iframe：iframe 页面也加载探针，并且双方互相信任时（父页面配 `data-frame-origins`，iframe 页面配 `data-parent-origins`；Vite 选项为 `frameOrigins`、`parentOrigins`），它们作为子 target 接入，和 Chrome 的进程外 iframe 一样，通过 `Target.setAutoAttach` 和按 `sessionId` 转发的消息工作，直接嵌入、外壳模式、远程调试都支持。Elements 把它们的文档显示在 `<iframe>` 下（`DOM.getFrameOwner`），Console 里有它们的执行上下文；落在它们上面的输入会转进去，滚轮滚到底会传回父页面。每个接入它们的客户端各有自己的会话，与 Chrome 一致（比如页面上的 DevTools 和远程连入的 agent 同时调试）。导航后 target 保留，iframe 里再嵌的跨域 iframe 逐级接入。
+- 支持没有 `allow-same-origin` 的沙箱 iframe（`src` 与页面同源、`about:blank` 或 `srcdoc`）：沙箱文档加载探针，父页面的 `data-frame-origins` 写 `sandboxed`、沙箱文档的 `data-parent-origins` 写父页面的源时，它并入父页面的 target，和 Chrome 一样留在那里，不开子 target。Elements 把它的文档显示在 `<iframe>` 下，Console 里有它的执行上下文和消息，Network 有它的请求，Sources 有它的脚本，Styles 有它的样式表；高亮、检查模式和 Input 都能进入它。默认关闭；`src` 跨源的仍然拒绝，同站的也一样。其余差异见使用说明的限制。
+- `DOM.getNodeForLocation` 按文档坐标而不是视口坐标计算；`DOM.scrollIntoViewIfNeeded` 对不在视口内的元素滚到居中，与 Chrome 一致。`Input.dispatchMouseEvent` 悬停时按 Chrome 的顺序发出 `pointerout`、`pointerover`、`mouseout`、`mouseover`。
+- `history.pushState`、`replaceState`、hash 变化以及 Navigation API 拦截的导航会发出 `Page.navigatedWithinDocument`，顶层页面和 frame 都是。
+- 探针运行之前页面发出的请求，改为从 Resource Timing 补报（没有调用栈、请求头和请求体），Chrome 同样会报这些请求。
+- `DOM.requestChildNodes` 不再重复发送客户端已有的子节点，与 Chrome 一致：前端请求两次时，展开的 iframe 会变成空白。
+- 外壳模式下重新加载的前端开始一个新会话，与 Chrome 一致。
+- 外壳模式下，页面的任何客户端（远程连入的 agent、`createCdpSession`）都能用 `Emulation.setDeviceMetricsOverride` 和 `clearDeviceMetricsOverride`，不再只限外壳自带的前端：以最后一次设置为准，客户端清除或断开时只撤销自己的设置；远程客户端的设置在页面重新加载后仍然有效，按客户端连上的先后重新应用，与 Chrome 一致。参数按 Chrome 的规则校验，报错相同；非外壳模式下这两条命令返回错误并说明原因。
+- 页面做不到的命令（自动深色模式、开启焦点模拟、双指缩放、后台服务记录、绕过 Service Worker、自动填充地址、安全隔离状态、浏览器功能开关、网络限速、启用性能分析器等只有浏览器才有事件的域等）改为返回错误「Not supported in the page: <原因>」，不再假装成功或编造数据；`CSS.getEnvironmentVariables` 返回页面解析出的 env() 值；能在页面里实现、只是还没做的仍返回成功，并记进路线图。
+- 直接嵌入的前端重新加载后，改为按命令 id 重新从 1 开始来判断，不再看 iframe 的 load 事件：load 晚于新前端的第一批命令，会把它刚启用的东西又关掉。
+- `CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错「Frame not found」，与 Chrome 一致。
+- 并入的沙箱 iframe 与 Chrome 对齐：每个新文档分配新的 id，重新加载时销毁旧的执行上下文且 id 不复用，同一文档重新链接时沿用原来的；DOM 的撤销和重做把页面和并入的 frame 放在同一个历史里，按编辑先后，frame 里的 CSS 编辑也在内；向 frame 取文档、节点或坐标 1 秒内没有应答，按未应答处理；`Page.navigate` 接受沙箱 iframe 的 `frameId`，并入与否都行；`Page.disable` 之后不再发出 frame 排队的事件。
+
+### 接口变化
+
+公开 API（以 `packages/*/etc/*.public.api.md` 为准）只有新增，没有删除、改名或改动。
+
+- 探针脚本属性（`devtools-anywhere`）：新增 `data-frame-origins`（本页 DevTools 可以调试的跨域 iframe 的源，空格分隔；写 `sandboxed` 调试它的沙箱 iframe）和 `data-parent-origins`（可以在 iframe 里调试本页的父页面的源）。
+- Vite 插件选项（`@devtools-anywhere/vite-plugin`）：新增 `frameOrigins` 和 `parentOrigins`（数组），写进上面两个属性。
+- CDP：页面做不到的命令改为报错 -32000「Not supported in the page: <原因>」，不再返回成功却没有效果（见上文）；`CSS.createStyleSheet` 遇到不存在的 `frameId` 时报错。CDP 应答和事件的其他变化都是向 Chrome 对齐的行为修正，见上文。
+- 探针、外壳和远程服务之间的消息新增内部方法 `DevtoolsAnywhere.attach` 和 `DevtoolsAnywhere.metrics`：探针和 `@devtools-anywhere/remote-server` 请使用同一版本。
+
 ## 0.2.0
 
 基于 Chrome 156（156.0.8078.80）。

@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <title>frame geometry</title>
+  </head>
+  <body style="margin: 0; height: 1200px">
+    <button id="fg-btn" style="margin: 20px 0 0 30px; width: 60px; height: 24px">button</button>
+    <input id="fg-field" style="display: block; margin: 10px 0 0 30px; width: 120px; height: 20px" />
+    <div id="fg-turned" style="margin: 10px 0 0 30px; width: 50px; height: 20px; transform: rotate(20deg)"></div>
+    <p id="fg-text" style="margin: 10px 0 0 30px; width: 80px">some words <b id="fg-bold">that wrap</b> over</p>
+    <div id="fg-scroller" style="margin: 10px 0 0 30px; width: 120px; height: 60px; overflow: auto">
+      <div style="height: 300px"><div id="fg-scrolled" style="margin-top: 200px; height: 20px">scrolled</div></div>
+    </div>
+    <iframe
+      id="fg-inner"
+      style="margin: 10px 0 0 30px; width: 160px; height: 90px; border: 3px solid; padding: 4px"
+      srcdoc="<body style='margin:0'><p id='fg-deep' style='margin:6px 0 0 8px;width:60px'>deep</p><button id='fg-deep-btn' style='margin-left:8px'>deep</button></body>"
+    ></iframe>
+    <div id="fg-far" style="position: absolute; top: 1100px; left: 40px; width: 50px; height: 20px">far</div>
+  </body>
+</html>

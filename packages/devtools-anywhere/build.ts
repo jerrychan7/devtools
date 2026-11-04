@@ -6,7 +6,7 @@ import { BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
 
 const watch = process.argv.includes('--watch');
 // In watch mode the other packages' watchers read this dist/: keep it in place.
-if (!watch) rmSync('dist', { recursive: true, force: true });
+if (!watch) for (const dir of ['dist', 'dist-test']) rmSync(dir, { recursive: true, force: true });
 
 /** An entry point's name, for the file it is built to. */
 const entry = (file: string) => file.replace(/\.js$/, '');
@@ -17,6 +17,7 @@ const builds: BuildOptions[] = [
   // No ESM build: the package's runtime is the two scripts, and its index only types.
   {
     ...common,
+    define: { DEVTOOLS_ANYWHERE_TEST: 'false' },
     entryPoints: {
       [entry(BUNDLE_SCRIPT)]: 'src/iife.ts',
       [entry(PROBE_SCRIPT)]: 'src/probe.ts',
@@ -35,6 +36,17 @@ const builds: BuildOptions[] = [
     format: 'esm',
     minify: true,
     outdir: 'dist',
+  },
+  // The two scripts again for the tests, in dist-test/ (not published): the bundle also exposes
+  // internals the tests read in the page, as `window.__devtoolsAnywhereTest`.
+  {
+    ...common,
+    entryPoints: { [entry(BUNDLE_SCRIPT)]: 'src/iife.ts', [entry(PROBE_SCRIPT)]: 'src/probe.ts' },
+    define: { DEVTOOLS_ANYWHERE_TEST: 'true' },
+    format: 'iife',
+    minify: true,
+    outdir: 'dist-test',
+    external: ['@zumer/snapdom'],
   },
 ];
 

@@ -9,13 +9,30 @@ export type Handler = (params: never) => unknown;
 /** Message text of anything thrown. */
 export const errorMessage = (e: unknown) => String(e instanceof Error ? e.message : e);
 
+/** Domains that keep state while enabled; a new frontend instance must start from disabled. */
+const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+
+/**
+ * The calls that end what a frontend started in the page, like a new Chrome session: e.g.
+ * Debugger.enable and CSS.enable only report scripts and style sheets again after a disable.
+ *
+ * @internal
+ */
+export const END_SESSION_CALLS: readonly string[] = [
+  ...STATEFUL_DOMAINS.map(domain => `${domain}.disable`),
+  'Page.stopScreencast',
+];
+
 /** An error answered to the client as a CDP error response. */
 export class CdpError extends Error {
   readonly code: number;
+  /** Details Chrome adds to some errors (what failed to deserialize). */
+  readonly data: string | undefined;
 
-  constructor(message: string, code = -32000) {
+  constructor(message: string, code = -32000, data?: string) {
     super(message);
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -29,6 +46,16 @@ export class CdpSession {
   private domains = new Map<string, Record<string, Handler>>();
   private listeners = new Set<(message: string) => void>();
   private resets = new Set<() => void>();
+  /** Where the client's messages for other sessions (child targets') go, by session id. */
+  private routes = new Map<string, (message: Record<string, unknown>) => void>();
+
+  /**
+   * Looks at each of the client's commands (on this session, not a child target's) before its
+   * handler: a promise it returns is the command's answer instead, its rejection the error;
+   * undefined lets the handler answer. Set by core/merged-frames.ts, which routes the commands for
+   * merged frames to their agents' sessions, and runs others there too.
+   */
+  intercept: ((method: string, params: object) => Promise<unknown> | undefined) | null = null;
 
   /** Adds the handlers of `domain`'s methods, keeping those registered before. */
   register(domain: string, handlers: Record<string, Handler>) {
@@ -54,6 +81,22 @@ export class CdpSession {
     this.resets.forEach(fn => fn());
   }
 
+  /**
+   * Routes the client's messages carrying `sessionId` (a child target's session, flattened as
+   * Chrome does) to `deliver`, as parsed, `sessionId` included; returns its removal.
+   */
+  route(sessionId: string, deliver: (message: Record<string, unknown>) => void): () => void {
+    this.routes.set(sessionId, deliver);
+    return () => {
+      if (this.routes.get(sessionId) === deliver) this.routes.delete(sessionId);
+    };
+  }
+
+  /** Sends the client a message as it is: a child target's, carrying its `sessionId`. */
+  post(message: string) {
+    this.listeners.forEach(fn => fn(message));
+  }
+
   /** Sends the client an event. */
   emit(method: string, params: object) {
     this.send({ method, params });
@@ -75,7 +118,12 @@ export class CdpSession {
       this.send({ error: { code: -32600, message: 'Message must be an object' } });
       return;
     }
-    const { id, method, params } = parsed as { id?: unknown; method?: unknown; params?: object };
+    const { id, method, params, sessionId } = parsed as {
+      id?: unknown;
+      method?: unknown;
+      params?: object;
+      sessionId?: unknown;
+    };
     if (typeof id !== 'string' && (typeof id !== 'number' || !Number.isInteger(id))) {
       this.send({ error: { code: -32600, message: "Message must have integer 'id' property" } });
       return;
@@ -84,12 +132,28 @@ export class CdpSession {
       this.send({ id, error: { code: -32600, message: "Message must have string 'method' property" } });
       return;
     }
+    // Like Chrome's flatten mode, a child target's messages carry its session id; '' is none.
+    if (sessionId !== undefined && typeof sessionId !== 'string') {
+      this.send({ id, error: { code: -32600, message: "Message may have string 'sessionId' property" } });
+      return;
+    }
+    if (sessionId) {
+      const deliver = this.routes.get(sessionId);
+      // Chrome answers without the session id.
+      if (deliver) deliver(parsed as Record<string, unknown>);
+      else this.send({ id, error: { code: -32001, message: 'Session with given id not found.' } });
+      return;
+    }
     try {
-      this.send({ id, result: await this.call(method, params) });
+      const routed = this.intercept?.(method, params ?? {});
+      this.send({ id, result: routed ? ((await routed) ?? {}) : await this.call(method, params) });
     } catch (e) {
       this.send({
         id,
-        error: { code: e instanceof CdpError ? e.code : -32000, message: errorMessage(e) },
+        error:
+          e instanceof CdpError && e.data !== undefined
+            ? { code: e.code, message: errorMessage(e), data: e.data }
+            : { code: e instanceof CdpError ? e.code : -32000, message: errorMessage(e) },
       });
     }
   }

@@ -3,7 +3,10 @@
 // no build is needed. Those modules export only what the other code uses, not what the tests would like:
 // types they do not export are derived from those they do.
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
+import type { ChildTargets } from '../packages/devtools-anywhere/src/cdp-agent/core/child-targets.ts';
+import type { MergedFrames } from '../packages/devtools-anywhere/src/cdp-agent/core/merged-frames.ts';
 import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
+import type { Harness } from '../packages/devtools-anywhere/test-support/child-targets-harness.ts';
 
 type CdpSession = ReturnType<DevtoolsAnywhereApi['createCdpSession']>;
 
@@ -30,6 +33,8 @@ declare global {
     /** The harness's CDP session in the page, and the events it emitted. */
     __session: CdpSession;
     __ours: { method: string; params: unknown }[];
+    /** The page's agent with stand-in cross-origin iframe agents (target.test.ts). */
+    __harness?: Harness;
     /** More CDP sessions in the page (multi-session.test.ts). */
     __sessions?: CdpSession[];
     /** nodeHighlightRequested per session, and the page's moves (multi-session.test.ts). */
@@ -64,5 +69,19 @@ declare global {
     __clicks?: number;
     __devtools?: DevtoolsAnywhereElement;
     resourceLoaded?: boolean;
+    /** Internals the tests' bundle (dist-test/) exposes. */
+    __devtoolsAnywhereTest: { childTargets: ChildTargets; mergedFrames: MergedFrames; shellClients: () => string[] };
+    /** The links frame-links.test.ts has seen, and how many of them have closed. */
+    __links?: { frameId: string; closed: boolean }[];
+    /** A flatten client of the page's agent: its events, and its commands' replies (oopif.conformance.test.ts). */
+    __client?: {
+      log: Record<string, unknown>[];
+      send(method: string, params?: object, sessionId?: string): Promise<Record<string, unknown>>;
+    };
+    /** Flatten clients of the page's agent, each a session of its own (target-clients.conformance.test.ts). */
+    __clients?: {
+      log: Record<string, unknown>[];
+      send(method: string, params?: object, sessionId?: string): Promise<Record<string, unknown>>;
+    }[];
   }
 }

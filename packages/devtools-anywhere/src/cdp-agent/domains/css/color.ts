@@ -1,4 +1,5 @@
 import { parentOf } from '../../core/container-query';
+import { realmOf } from '../../core/realm';
 import { splitTopLevel } from '../../core/selectors';
 
 /** Channels of a computed `rgb()` / `rgba()` color, or null for other notations. */
@@ -66,7 +67,7 @@ export function backgroundsBehind(el: Element, style: CSSStyleDeclaration): stri
     // The topmost opaque layer hides what is below it.
     if (own.some(layer => layer.every(isOpaque))) break;
     node = parentOf(node);
-    if (node) s = getComputedStyle(node);
+    if (node) s = realmOf(node).getComputedStyle(node);
   }
   let opaque = 0;
   layers.forEach((layer, i) => {

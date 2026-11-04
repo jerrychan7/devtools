@@ -94,6 +94,34 @@ test('navigation inside the page updates the address bar', async () => {
   await waitFor(s => s.url.endsWith('?second') && earlyLogs(s).length >= 3);
 });
 
+/** The fake frontend's frame in the shell. */
+const frontendFrame = () => {
+  const frame = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));
+  assert.ok(frame, 'the DevTools frame');
+  return frame;
+};
+
+/** Posts a command from the frontend's window. */
+const fromFrontend = (message: object) =>
+  frontendFrame().evaluate(json => parent.postMessage(json, '*'), JSON.stringify(message));
+
+test("a reloaded frontend is a new session in shell mode too: the previous instance's objects are gone", async () => {
+  await fromFrontend({ id: 300, method: 'Runtime.evaluate', params: { expression: '({ a: 1 })' } });
+  const evaluated = (await waitFor(s => s.received.some(m => m.id === 300))).received.find(m => m.id === 300);
+  const objectId = (evaluated?.result as Protocol.Runtime.EvaluateResponse | undefined)?.result.objectId;
+  assert.ok(objectId);
+  // Until the new instance sets its own, waitFor sees nothing: not the old instance's messages.
+  await frontendFrame().evaluate(() => {
+    delete window.received;
+    location.reload();
+  });
+  // The new instance's Runtime.enable is answered, and replays the page's output.
+  await waitFor(s => s.received.some(m => m.id === 1) && earlyLogs(s).length > 0);
+  await fromFrontend({ id: 301, method: 'Runtime.getProperties', params: { objectId, ownProperties: true } });
+  const answer = (await waitFor(s => s.received.some(m => m.id === 301))).received.find(m => m.id === 301);
+  assert.ok(answer && 'error' in answer, JSON.stringify(answer));
+});
+
 test("closing (DevTools' own close button) hides DevTools; stopping keeping it open leaves shell mode", async () => {
   // What the frontend sends when its toolbar's close button is clicked.
   const devtools = page.frames().find(f => f.parentFrame() === page.mainFrame() && f.url().includes('fake-frontend'));

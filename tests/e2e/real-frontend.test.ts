@@ -238,7 +238,10 @@ test('the Sources panel shows source and Watch, without breakpoints or pausing c
   // Watch stays: without pausing, its expressions are evaluated in the global scope.
   assert.equal(await (await query('[aria-label="Watch"]')).evaluate(el => el === null), false, 'Watch');
   /** The element, once laid out: there is a point to click on. */
-  const laidOut = async (el: ElementHandle<Element> | null) => (el && (await el.boundingBox()) ? el : null);
+  const laidOut = async (el: ElementHandle<Element> | null) => {
+    const box = el && (await el.boundingBox());
+    return box && box.width > 0 && box.height > 0 ? el : null;
+  };
   const addWatch = async () =>
     // asElement() is typed as a handle to any Node; the page function returns an Element or null.
     (await query('[aria-label="Add watch expression"]')).asElement() as ElementHandle<Element> | null;

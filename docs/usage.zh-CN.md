@@ -56,6 +56,40 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 | `data-service-worker` | `serviceWorker`（开 / 关） | 关 | 启用 [Service Worker](#service-worker)。作为属性时可以写它的地址（留空：bundle 同目录） |
 | `data-remote` | `remote` | 关 | 连接[远程调试](#远程调试)服务端：它的地址（留空：探针所在的服务端） |
 | `data-id-in-query` | `idInQuery` | 关 | 配合开启了 `idInQuery` 的服务端 |
+| `data-frame-origins` | `frameOrigins`（数组） | 无 | 本页 DevTools 可以调试的[跨域 iframe](#跨域-iframe) 的源，空格分隔；写 `sandboxed` 调试它的[沙箱 iframe](#沙箱-iframe) |
+| `data-parent-origins` | `parentOrigins`（数组） | 无 | 可以在自己的 iframe 里调试本页的页面的源，空格分隔 |
+
+### 跨域 iframe
+
+页面拿不到跨域 iframe 的文档。如果 iframe 里的页面也加载了探针，并且双方互相信任，就能在父页面的 DevTools 里调试它，和 Chrome 调试进程外 iframe 一样：Elements 里它的文档挂在 `<iframe>` 下，Console 的上下文菜单里有它的执行上下文，请求、样式、高亮和输入也都能用。
+
+```html
+<!-- https://app.example.com -->
+<script src="…/probe.iife.js" data-frame-origins="https://widget.example.net"></script>
+<!-- https://widget.example.net，在上面页面的 iframe 里 -->
+<script src="…/probe.iife.js" data-parent-origins="https://app.example.com"></script>
+```
+
+- 两边的名单都要配，默认都关闭：父页面的 DevTools 能在 iframe 里执行任意代码。
+- 每一项是确切的源，或者 `https://*.example.com`，表示任意层级的子域（不含 `example.com` 本身）；协议和端口要完全一致。单独的 `*` 会被忽略并给出警告。
+- 连上以后，iframe 自己的 F12 按钮和面板会隐藏。
+- iframe 重新加载、或者导航到同样会连接的页面，连接都会保留；iframe 里再嵌的跨域 iframe 也按同样方式逐级连上。
+
+### 沙箱 iframe
+
+没有 `allow-same-origin` 的沙箱 iframe 是不透明源（`null`）：页面拿不到它的文档，Chrome 也不给它开子 target，而是留在页面自己的 target 里。如果沙箱文档也加载了探针，并且父页面允许，它就像在 Chrome 里一样并入父页面的 target：Elements 里它的文档挂在 `<iframe>` 下，Console 里有它的执行上下文和消息，Network 有它的请求，Sources 有它的脚本，Styles 有它的样式表；高亮、检查模式和输入也都能进入它。
+
+```html
+<!-- https://app.example.com -->
+<script src="…/probe.iife.js" data-frame-origins="sandboxed"></script>
+<!-- 沙箱文档，在上面页面的 <iframe sandbox="allow-scripts" src="/widget.html"> 里 -->
+<script src="…/probe.iife.js" data-parent-origins="https://app.example.com"></script>
+```
+
+- 默认关闭：父页面的 `data-frame-origins` 写上 `sandboxed` 才开启（可以和源写在一起），沙箱文档的 `data-parent-origins` 写父页面的源。父页面的 DevTools 能在 iframe 里执行任意代码，而沙箱文档可能加载第三方脚本。
+- 只对 `src` 与页面同源、`about:blank` 或 `srcdoc` 的生效。`src` 跨源的一律拒绝，同站的也一样（Chrome 把它留在页面的 target 里）：只显示为元素，不列在 frame 树里。
+- 校验看的是 iframe 的 `src`，不是它实际装着的文档：沙箱文档的源是 `null`，页面分辨不出它从哪来。iframe 一旦导航到别的源（在框里点了链接，或 `src` 被重定向），那边的文档只要实现了探针的握手，同样会被并入，它回报的内容会出现在页面的 DevTools 里。只对始终停留在自己页面上的 iframe 开启。
+- 没有开启，或者沙箱文档没加载探针时，按[能力边界](#能力边界)里说的显示。
 
 ## Vite
 
@@ -228,14 +262,18 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | 断点、Profiler、内存、性能 | ❌ 不打包这些面板 | 没有 JS API。`debugger;` 不会暂停；外壳模式下改为输出一条带堆栈的警告 |
 | 网络时序 | ❌ | 没有 JS API |
 | 源代码 | ⚠️ | 文档、外链脚本和样式表、图片、字体；不列内联脚本；代码段可用 |
-| 浏览器默认样式 | ❌ | 浏览器不向页面公开 |
+| 浏览器默认样式 | ⚠️ | Styles 里暂不显示（见[路线图](roadmap.zh-CN.md#其他能在页面里补上的功能)） |
 | 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
 | WebSocket | ⚠️ | 连接和帧；没有握手头 |
+| 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到。没有隔离 world（`Page.createIsolatedWorld`） |
+| 沙箱 iframe（没有 `allow-same-origin`） | ⚠️ | [并入](#沙箱-iframe)父页面的 target 后和 Chrome 一样：它的 DOM、样式、执行上下文、console、请求和脚本都显示在父页面里，能高亮、检查和输入。并入后：跨沙箱边界移动或复制节点会报错；`DOM.performSearch` 的结果父页面在前、沙箱在后；沙箱文档重新加载时，新的 `contentDocument` 直接带着子节点数，不发 `childNodeCountUpdated` 和 `scrollableFlagUpdated`；Chrome 为沙箱 iframe 起初的 about:blank 报的执行上下文没有；向沙箱取文档、节点或坐标的请求 1 秒内没有应答，就按沙箱未应答处理（不嫁接它的文档，落在它上面的坐标命中 `<iframe>` 本身）；从 Console 在沙箱里执行的代码，之后抛出的未捕获异常（比如在定时器里）不带异常对象（`exception` 为 null），也没有位置和堆栈：沙箱文档把探针脚本当作跨源脚本，屏蔽了它的错误详情；沙箱页自己脚本的异常不受影响；沙箱脚本的源码由父页面按 URL 重新获取，只能拿到父页面能取到的；检查模式下悬停高亮被 iframe 边界裁剪，`highlightNode` 画的沙箱节点高亮不随滚动更新；沙箱文档导航后 `frameNavigated` 的 `loaderId` 不变；沙箱 frame 导航到没有探针的页面后，父页面仍留着旧文档。未并入（没有开启，或沙箱文档没加载探针）：和 Chrome 一样列在 frame 树里，但它的不透明文档拿不到：只显示为元素，没有它自己的执行上下文和子 frame，请求只有它的文档本身。URL 取 iframe 上次 load 时的 `src`（或 `srcdoc`），不是它的脚本导航去的地址；MIME 类型固定为 text/html；名称取 iframe 的 `name` 属性，不是脚本设的名称。导航要到 load 事件才发现 |
+| 跨域 iframe | ⚠️ | 需要 iframe 页面也加载探针，并且双方都配了[源名单](#跨域-iframe)，否则只显示为元素。要等 iframe 的探针运行后才连上：它的文档本身的请求报在它自己的会话里，而不是父页面的；导航后按 URL 设置的断点不会重新设上。导航后没有重新连接的页面，最多 10 秒后断开 |
 | 跨源样式表 | ⚠️ | 需要 CORS；只读 |
 | 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
 | 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |
 | 截图 | ⚠️ | 见[下文](#截图) |
-| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比 |
+| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。远程客户端的设置在页面重新加载后仍然有效，与 Chrome 一致。参数按 Chrome 的规则检查，报错也与 Chrome 相同，但有两处例外："Invalid parameters" 的 data 不带 Chrome 的 "at position N"（这是 Chrome 内部编码里的字节偏移）；`devicePosture` 的 type 不认识时照常接受，而 Chrome 会不再应答 |
+| Rendering 面板的模拟 | ⚠️ | 「模拟页面处于焦点」做不到：在页面里使用 DevTools 时，焦点真的会离开页面元素，`:focus` 样式随之消失，开启时返回错误。自动深色模式、双指缩放重置同样做不到，返回错误。页面做不到的命令一律返回错误「Not supported in the page: <原因>」，能做但还没做的见[路线图](roadmap.zh-CN.md) |
 | 全屏的页面 | ⚠️ | 有元素全屏时用不了 DevTools，外壳模式下也一样。按 Esc 退出全屏即可 |
 | 前端与页面同源 | ⚠️ | DevTools 的设置会和页面共用 `localStorage`：前端放在别的源 |
 | 浏览器 | ⚠️ | 页面这边：现代浏览器都行。DevTools 界面：只在 Chrome 上验证过；新版前端可能需要兼容补丁 |

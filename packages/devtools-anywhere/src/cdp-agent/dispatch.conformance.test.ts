@@ -70,3 +70,80 @@ test('a malformed message is answered with an invalid request error', async () =
     assert.equal(replies[0]?.error?.message, text, message);
   }
 });
+
+test('a command the page cannot carry out fails with why; one not yet done succeeds', async () => {
+  const reply = (method: string, params: object = {}) =>
+    t.page.evaluate(
+      (m, p) =>
+        window.__session.call(m, p).then(
+          () => 'resolved',
+          (e: Error) => e.message
+        ),
+      method,
+      params
+    );
+  assert.equal(
+    await reply('Emulation.setFocusEmulationEnabled', { enabled: true }),
+    'Not supported in the page: focus is given by the browser'
+  );
+  assert.equal(await reply('Emulation.setFocusEmulationEnabled', { enabled: false }), 'resolved');
+  assert.match(await reply('Target.setRemoteLocations'), /^Not supported in the page: /);
+  assert.match(await reply('BackgroundService.startObserving'), /^Not supported in the page: /);
+  for (const method of [
+    'Autofill.enable',
+    'Database.enable',
+    'HeapProfiler.enable',
+    'Preload.enable',
+    'Profiler.enable',
+    'Network.getSecurityIsolationStatus',
+    'SystemInfo.getFeatureState',
+  ]) {
+    assert.match(await reply(method), /^Not supported in the page: /, method);
+  }
+  const slow = { offline: false, latency: 400, downloadThroughput: 50000, uploadThroughput: 20000 };
+  assert.match(await reply('Network.emulateNetworkConditions', slow), /^Not supported in the page: /);
+  assert.match(
+    await reply('Network.emulateNetworkConditionsByRule', { matchedNetworkConditions: [{ urlPattern: '', ...slow }] }),
+    /^Not supported in the page: /
+  );
+  const none = { offline: false, latency: 0, downloadThroughput: 0, uploadThroughput: 0 };
+  assert.equal(await reply('Network.emulateNetworkConditions', none), 'resolved');
+  assert.equal(await reply('Network.emulateNetworkConditions', { ...none, offline: true }), 'resolved');
+  assert.equal(
+    await reply('Network.emulateNetworkConditionsByRule', { offline: true, matchedNetworkConditions: [] }),
+    'resolved'
+  );
+  for (const method of [
+    'Emulation.setEmulatedMedia',
+    'Emulation.setSafeAreaInsetsOverride',
+    'Network.setBlockedURLs',
+    'Overlay.setPausedInDebuggerMessage',
+    'Audits.enable',
+    'Accessibility.enable',
+    'Animation.enable',
+    'Inspector.enable',
+    'Log.enable',
+    'ServiceWorker.enable',
+    'Log.clear',
+  ]) {
+    assert.equal(await reply(method), 'resolved', method);
+  }
+});
+
+test('CSS.getEnvironmentVariables reads the env() values the page resolves', async () => {
+  const { environmentVariables, children } = await t.page.evaluate(async () => {
+    const before = document.documentElement.children.length;
+    const result = await window.__session.call('CSS.getEnvironmentVariables');
+    const vars =
+      typeof result === 'object' && result && 'environmentVariables' in result ? result.environmentVariables : {};
+    return {
+      environmentVariables: Object.fromEntries(Object.entries(Object(vars)).map(([k, v]) => [k, String(v)])),
+      children: document.documentElement.children.length - before,
+    };
+  });
+  assert.equal(environmentVariables['safe-area-inset-top'], '0px');
+  assert.equal(environmentVariables['no-such-variable'], undefined);
+  for (const value of Object.values(environmentVariables)) assert.match(value, /^-?[\d.]+px$/);
+  // The probe element is gone again.
+  assert.equal(children, 0);
+});

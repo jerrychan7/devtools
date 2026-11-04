@@ -1,3 +1,4 @@
+import { documentOf, isShadowRoot, realmOf, styleOf } from './realm';
 import { splitTopLevel } from './selectors';
 
 /**
@@ -5,7 +6,8 @@ import { splitTopLevel } from './selectors';
  * whether a container query matches. Size features are measured on the content box of the
  * nearest ancestor container of a fitting name and type; style() reads the container's
  * computed custom properties. Conditions that cannot be evaluated (unknown features or units,
- * calc(), scroll-state(), …) are unknown, and an unknown condition does not match.
+ * calc(), scroll-state(), …) are unknown, and an unknown condition does not match. Styles and
+ * viewport units are those of the element's own window (an iframe's, for an element in it).
  */
 
 /** true, false or unknown (null), as in Media Queries' three-valued logic. */
@@ -89,7 +91,7 @@ export function queriedAxes(condition: string): {
 
 export const parentOf = (el: Element): Element | null => {
   const root = el.getRootNode();
-  return el.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+  return el.parentElement ?? (isShadowRoot(root) ? root.host : null);
 };
 
 /**
@@ -100,7 +102,7 @@ function findContainer(start: Element | null, name: string, features: Set<string
   const size = features.size > 0;
   const block = [...features].some(f => BLOCK_FEATURES.has(f));
   for (let el = start; el; el = el.assignedSlot ?? parentOf(el)) {
-    const style = getComputedStyle(el);
+    const style = styleOf(el);
     if (name && !style.containerName.split(/\s+/).includes(name)) continue;
     if (size) {
       const types = style.containerType.split(/\s+/);
@@ -122,7 +124,7 @@ interface Box {
 function contentBox(el: Element): Box | null {
   // No box (display: none on it or an ancestor, display: contents): its size is unknown.
   if (!el.getClientRects().length) return null;
-  const style = getComputedStyle(el);
+  const style = styleOf(el);
   let width = parseFloat(style.width);
   let height = parseFloat(style.height);
   if (Number.isNaN(width) || Number.isNaN(height)) return null;
@@ -141,7 +143,8 @@ function length(value: string, box: Box): number | null {
   if (!m) return null;
   const n = Number(m[1]);
   const unit = (m[2] ?? '').toLowerCase();
-  const fontSize = (el: Element) => parseFloat(getComputedStyle(el).fontSize);
+  const { innerWidth, innerHeight } = realmOf(box.el);
+  const fontSize = (el: Element) => parseFloat(styleOf(el).fontSize);
   switch (unit) {
     case '':
       return n === 0 ? 0 : null;
@@ -150,7 +153,7 @@ function length(value: string, box: Box): number | null {
     case 'em':
       return n * parseFloat(box.style.fontSize);
     case 'rem':
-      return n * fontSize(document.documentElement);
+      return n * fontSize(documentOf(box.el).documentElement);
     case 'vw':
       return (n * innerWidth) / 100;
     case 'vh':
@@ -264,7 +267,7 @@ function styleQuery(inner: string, container: Element | null): Kleene {
   const colon = inner.indexOf(':');
   const name = (colon < 0 ? inner : inner.slice(0, colon)).trim();
   if (!name.startsWith('--')) return null;
-  const actual = getComputedStyle(container).getPropertyValue(name).trim();
+  const actual = styleOf(container).getPropertyValue(name).trim();
   if (colon < 0) return actual !== '';
   return actual === inner.slice(colon + 1).trim();
 }

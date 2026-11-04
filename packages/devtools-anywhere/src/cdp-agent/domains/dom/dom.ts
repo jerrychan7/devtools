@@ -1,9 +1,10 @@
 import type { Protocol } from 'devtools-protocol';
-import { FRAME_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import {
   FORCE_ATTRIBUTE,
   PseudoElement,
   closestOwn,
+  isCrossOrigin,
   isOwn,
   truncateNodeValue,
   visibleAttributes,
@@ -16,15 +17,41 @@ import {
   historyOf,
   patchOuterHTML,
 } from '../../core/history';
+import {
+  type FrameOwner,
+  isDocument,
+  isDocumentFragment,
+  documentOf,
+  isDocumentType,
+  isElement,
+  isFrameOwner,
+  isHtmlElement,
+  isMathMlElement,
+  isNode,
+  isSvg,
+  isSvgElement,
+  isText,
+  realmOf,
+  styleOf,
+  sourceAttribute,
+} from '../../core/realm';
 import { CdpError } from '../../core/session';
+import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames';
+import { childTargets } from '../../core/child-targets';
+import { attachShadowHook } from './attach-shadow';
+import { mergedDom, type SearchPart } from './merged';
 import {
   type Box,
   type Quad,
   hasTransformedAncestor,
+  frameToTop,
+  hitTest,
   isInlineBox,
   lineContentBoxes,
   localToViewport,
+  mapPoints,
   mapQuad,
+  scrollIntoViewIfNeeded,
   svgLayout,
   svgRootLayout,
   unmapRects,
@@ -40,21 +67,21 @@ export function resolveNode({ nodes, objects }: Context, ref: NodeRef): Node {
   else if (ref.backendNodeId) node = nodes.getByBackendId(ref.backendNodeId);
   else if (ref.objectId) node = objects.get(ref.objectId);
   if (node instanceof PseudoElement) throw new CdpError('Not supported for pseudo-elements');
-  if (!(node instanceof Node)) throw new CdpError('Could not find node with given id');
+  if (!isNode(node)) throw new CdpError('Could not find node with given id');
   return node;
 }
 
 /** The element a command refers to. */
 export function resolveElement(ctx: Context, ref: NodeRef): Element {
   const node = resolveNode(ctx, ref);
-  if (!(node instanceof Element)) throw new CdpError('Node is not an Element');
+  if (!isElement(node)) throw new CdpError('Node is not an Element');
   return node;
 }
 
 /** The node a command refers to, which must be able to have children (querySelector, …). */
 function resolveContainer(ctx: Context, ref: NodeRef): ParentNode {
   const node = resolveNode(ctx, ref);
-  if (!(node instanceof Element || node instanceof Document || node instanceof DocumentFragment)) {
+  if (!(isElement(node) || isDocument(node) || isDocumentFragment(node))) {
     throw new CdpError('Not a container node');
   }
   return node;
@@ -76,8 +103,8 @@ const quad = (r: { left: number; top: number; right: number; bottom: number }) =
  * null for plain layouts, where the bounding rectangle is exact.
  */
 function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: number; height: number } | null {
-  if (el instanceof SVGSVGElement && hasTransformedAncestor(el)) return svgRootLayout(el);
-  if (!(el instanceof HTMLElement) || !hasTransformedAncestor(el)) return null;
+  if (isSvg(el, 'svg') && hasTransformedAncestor(el)) return svgRootLayout(el);
+  if (!isHtmlElement(el) || !hasTransformedAncestor(el)) return null;
   const m = localToViewport(el);
   if (!m || (m.is2D && m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1)) return null;
   const width = el.offsetWidth;
@@ -87,7 +114,7 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
   const ys: number[] = [];
   mapQuad(m, { left: 0, top: 0, right: width, bottom: height }).forEach((v, i) => (i % 2 ? ys : xs).push(v));
   // The line boxes of an inline element can fall short of its bounds, when transformed.
-  const inline = getComputedStyle(el).display === 'inline';
+  const inline = styleOf(el).display === 'inline';
   const near = (a: number, b: number, inside: number) => (inline ? (b - a) * inside >= -1 : Math.abs(a - b) <= 1);
   const ok =
     near(Math.min(...xs), rect.left, 1) &&
@@ -98,17 +125,33 @@ function transformedLayout(el: Element, rect: DOMRect): { m: DOMMatrix; width: n
 }
 
 /**
- * Content, padding, border and margin boxes of an element, in viewport coordinates: transformed
- * quads like Chrome's, with the untransformed layout size as width and height.
+ * Content, padding, border and margin boxes of an element, in the top viewport: transformed quads
+ * like Chrome's, with the untransformed layout size as width and height. Like Chrome, those of a
+ * node in an iframe are placed where the iframe shows it.
  */
 export function boxModel(el: Element): Protocol.DOM.BoxModel {
+  const model = boxModelInFrame(el);
+  const m = frameToTop(el.ownerDocument);
+  if (!m) return model;
+  const { content, padding, border, margin } = model;
+  return {
+    ...model,
+    content: mapPoints(m, content),
+    padding: mapPoints(m, padding),
+    border: mapPoints(m, border),
+    margin: mapPoints(m, margin),
+  };
+}
+
+/** {@link boxModel} in the viewport of the element's own document. */
+function boxModelInFrame(el: Element): Protocol.DOM.BoxModel {
   const svg = svgLayout(el);
   if (svg) {
     const { quad: q, width, height } = svg;
     return { content: q, padding: q, border: q, margin: q, width, height };
   }
   const rect = el.getBoundingClientRect();
-  const style = getComputedStyle(el);
+  const style = styleOf(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const side = (prefix: string, suffix = '') => ({
     top: px(`${prefix}-top${suffix}`),
@@ -152,7 +195,22 @@ export function boxModel(el: Element): Protocol.DOM.BoxModel {
   };
 }
 
-/** Quads of an element for DOM.getContentQuads: its border box, or its line boxes; transformed when it is. */
+/**
+ * Quads of a node for DOM.getContentQuads, in the top viewport (through the iframes holding it):
+ * an element's border box or line boxes, transformed when it is, or a text node's line boxes.
+ */
+function contentQuads(node: Element | Text): Quad[] {
+  let quads: Quad[];
+  if (isText(node)) {
+    const range = documentOf(node).createRange();
+    range.selectNodeContents(node);
+    quads = Array.from(range.getClientRects()).map(quad);
+  } else quads = elementQuads(node);
+  const m = frameToTop(documentOf(node));
+  return m ? quads.map(q => mapPoints(m, q)) : quads;
+}
+
+/** Quads of an element in its document's viewport: its border box, or its line boxes; transformed when it is. */
 function elementQuads(el: Element): Quad[] {
   const svg = svgLayout(el);
   if (svg) return [svg.quad];
@@ -182,9 +240,11 @@ function elementQuads(el: Element): Quad[] {
 /**
  * Nodes matched by DOM.performSearch, in the order Chrome collects them: tag names, attributes
  * and text (case-insensitively) in tree order, a shadow tree right after its host (`shadowRootOf`
- * also finds closed ones), then the document's XPath and selector matches.
+ * also finds closed ones), then XPath and selector matches. Like Chrome, each step goes through
+ * the documents of all frames, the top one first.
  */
 function searchNodes(
+  documents: Document[],
   query: string,
   isVisible: (n: Node) => boolean,
   shadowRootOf: (host: Element) => ShadowRoot | null
@@ -192,7 +252,7 @@ function searchNodes(
   const found = new Set<Node>();
   const needle = query.toLowerCase().replace(/^<|>$/g, '');
   const walk = (root: Document | ShadowRoot) => {
-    const walker = document.createTreeWalker(
+    const walker = (isDocument(root) ? root : root.ownerDocument).createTreeWalker(
       root,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
       {
@@ -200,7 +260,7 @@ function searchNodes(
       }
     );
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node instanceof Element) {
+      if (isElement(node)) {
         if (node.localName.includes(needle)) found.add(node);
         else if (Array.from(node.attributes).some(a => `${a.name}="${a.value}"`.toLowerCase().includes(needle)))
           found.add(node);
@@ -211,39 +271,42 @@ function searchNodes(
       }
     }
   };
-  walk(document);
-  try {
-    const result = document.evaluate(query, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-    for (let i = 0; i < result.snapshotLength; i++) {
-      const node = result.snapshotItem(i);
-      if (node && isVisible(node)) found.add(node);
+  documents.forEach(walk);
+  for (const doc of documents) {
+    try {
+      const result = doc.evaluate(query, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      for (let i = 0; i < result.snapshotLength; i++) {
+        const node = result.snapshotItem(i);
+        if (node && isVisible(node)) found.add(node);
+      }
+    } catch {
+      // Not an XPath expression.
     }
-  } catch {
-    // Not an XPath expression.
   }
-  try {
-    document.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
-  } catch {
-    // Not a selector.
+  for (const doc of documents) {
+    try {
+      doc.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
+    } catch {
+      // Not a selector.
+    }
   }
   return Array.from(found);
 }
 
 /** Markup of `node` as DOM.getOuterHTML returns it: without forced pseudo-class markers. */
 function outerHTML(node: Node): string {
-  if (node instanceof Element) {
+  if (isElement(node)) {
     if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`)) return node.outerHTML;
     // Leave out forced pseudo-class markers.
     const copy = node.cloneNode(true);
-    if (!(copy instanceof Element)) return node.outerHTML;
+    if (!isElement(copy)) return node.outerHTML;
     for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
       el.removeAttribute(FORCE_ATTRIBUTE);
     return copy.outerHTML;
   }
   // The whole document, doctype included, like Chrome.
-  if (node instanceof Document || node instanceof DocumentFragment)
-    return Array.from(node.childNodes, outerHTML).join('');
-  if (node instanceof DocumentType) {
+  if (isDocument(node) || isDocumentFragment(node)) return Array.from(node.childNodes, outerHTML).join('');
+  if (isDocumentType(node)) {
     const ids = node.publicId
       ? ` PUBLIC "${node.publicId}"${node.systemId ? ` "${node.systemId}"` : ''}`
       : node.systemId
@@ -254,10 +317,23 @@ function outerHTML(node: Node): string {
   return new XMLSerializer().serializeToString(node);
 }
 
+/**
+ * Whether an iframe still shows its initial empty document while it loads the one of its `src`
+ * or `srcdoc`, which replaces it at its load.
+ */
+function loadsAnotherDocument(owner: FrameOwner, doc: Document): boolean {
+  if (doc.URL !== 'about:blank') return false;
+  if (owner.hasAttribute('srcdoc')) return true;
+  const src = owner.getAttribute(sourceAttribute(owner))?.trim();
+  return !!src && new URL(src, owner.baseURI).href !== 'about:blank';
+}
+
 export function registerDom(ctx: Context) {
   const { session, nodes, objects } = ctx;
   let observer: MutationObserver | null = null;
-  const searches = new Map<string, Node[]>();
+  /** Each search's results: the page's nodes, then each merged frame's part (domains/dom/merged.ts). */
+  const searches = new Map<string, { found: Node[]; parts: SearchPart[] }>();
+  const merged = mergedDom(ctx);
   let searchSeq = 0;
 
   function emitChildren(parent: Node, depth = 1, pierce = false) {
@@ -269,9 +345,20 @@ export function registerDom(ctx: Context) {
     } satisfies Protocol.DOM.SetChildNodesEvent);
   }
 
-  /** The previous visible sibling the client already has: `pending` are not reported yet. */
-  function previousVisibleSibling(node: Node, pending: Set<Node>): Node | null {
-    for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n) && !pending.has(n)) return n;
+  /** Like Chrome's PushChildNodesToFrontend: walks into children the client already has. */
+  function pushChildren(node: Node, depth: number, pierce = false) {
+    if (!isElement(node) && !isDocument(node) && !isDocumentFragment(node)) return;
+    if (!nodes.childrenSent.has(node)) {
+      emitChildren(node, depth === Infinity ? -1 : depth, pierce);
+      return;
+    }
+    if (depth <= 1) return;
+    for (const child of nodes.children(node)) pushChildren(child, depth - 1, pierce);
+  }
+
+  /** The previous visible sibling the client already has: `unsent` tells those it does not. */
+  function previousVisibleSibling(node: Node, unsent: (node: Node) => boolean): Node | null {
+    for (let n = node.previousSibling; n; n = n.previousSibling) if (nodes.isVisible(n) && !unsent(n)) return n;
     return null;
   }
 
@@ -305,8 +392,76 @@ export function registerDom(ctx: Context) {
   }
   ctx.refreshPseudoElements = refreshPseudoElements;
 
+  /**
+   * The element holding a frame: a same-origin iframe's, or a cross-origin one's, whose frame id
+   * is its child target's (the frontend grafts the child target's document under it).
+   */
+  function frameOwner(frameId: string): Element {
+    const frame = ctx.frames.byId(frameId);
+    if (frame?.owner) return frame.owner;
+    if (frame) throw new CdpError('Frame with the given id does not belong to the target.');
+    let found: FrameOwner | undefined;
+    for (const { document: doc } of ctx.frames) {
+      walkFrameOwners(doc, ctx.frames.shadowRootOf, node => {
+        if (!found && isFrameOwner(node) && isCrossOrigin(node) && childTargets.frameIdOf(node) === frameId)
+          found = node;
+      });
+    }
+    if (!found) throw new CdpError('Frame with the given id was not found.');
+    return found;
+  }
+
+  /**
+   * Sends an iframe the client knows again if its frame changed since it was sent: Chrome removes
+   * and inserts it, with its new document (or none, once it is gone or out of reach). An initial
+   * empty document about to be replaced by the iframe's `src` is not sent: the one loaded is.
+   */
+  function resendFrameOwner(owner: FrameOwner, reloaded = false) {
+    const doc = ctx.frames.ofOwner(owner)?.document;
+    if (!reloaded && (doc === nodes.contentDocumentOf(owner) || (doc && loadsAnotherDocument(owner, doc)))) return;
+    const parent = owner.parentNode;
+    const ownerId = nodes.knownId(owner);
+    const parentId = parent ? nodes.knownId(parent) : undefined;
+    if (!parent || ownerId === undefined || parentId === undefined || !nodes.childrenSent.has(parent)) return;
+    session.emit('DOM.childNodeRemoved', { parentNodeId: parentId, nodeId: ownerId });
+    nodes.forget(owner);
+    const previous = previousVisibleSibling(owner, n => nodes.knownId(n) === undefined);
+    session.emit('DOM.childNodeInserted', {
+      parentNodeId: parentId,
+      previousNodeId: previous ? nodes.idOf(previous) : 0,
+      node: nodes.serialize(owner, 0),
+    } satisfies Protocol.DOM.ChildNodeInsertedEvent);
+  }
+
+  /**
+   * Iframes whose frame changed, sent again together in a microtask: after the mutations being
+   * reported, and once for a frame replaced by another (an iframe loads synchronously when it
+   * is inserted or moved, before its mutation is reported).
+   */
+  let changedFrames: Set<FrameOwner> | null = null;
+  function onFrameChange({ type, frame }: FrameChange) {
+    if (!observer || !frame.owner) return;
+    // Each document a frame loads has its own realm.
+    if (type !== 'detached') patchAttachShadow(frame);
+    if (!changedFrames) {
+      const changed = (changedFrames = new Set());
+      queueMicrotask(() => {
+        // Dropped by DOM.disable meanwhile: Chrome sends no DOM event after it.
+        if (changedFrames !== changed) return;
+        changedFrames = null;
+        // Pending mutations first, so that the client has the iframe's current place.
+        flushMutations();
+        changed.forEach(owner => resendFrameOwner(owner));
+      });
+    }
+    changedFrames.add(frame.owner);
+  }
+  let stopFrames: (() => void) | null = null;
+
   /** Reports DOM changes for the parts of the tree the client has received. */
   function onMutations(records: MutationRecord[]) {
+    // Iframes added or removed are registered now, so that they are sent with their frame.
+    if (touchesFrames(records, nodes.shadowRootOf)) ctx.frames.sync();
     reportMutations(records);
     // Attribute and tree changes can make selectors such as `.x::before` start or stop matching.
     // devtools-anywhere's own elements (the highlight layer, …) change nothing on the page.
@@ -319,7 +474,7 @@ export function registerDom(ctx: Context) {
     if (closestOwn(record.target)) return true;
     if (record.type !== 'childList') return false;
     const changed = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
-    return changed.length > 0 && changed.every(n => n instanceof Element && isOwn(n));
+    return changed.length > 0 && changed.every(n => isElement(n) && isOwn(n));
   }
 
   function reportMutations(records: MutationRecord[]) {
@@ -334,7 +489,7 @@ export function registerDom(ctx: Context) {
     for (let i = records.length - 1; i >= 0; i--) {
       const record = records[i];
       const name = record?.attributeName;
-      if (!record || record.type !== 'attributes' || !name || !(record.target instanceof Element)) continue;
+      if (!record || record.type !== 'attributes' || !name || !isElement(record.target)) continue;
       const values = later.get(record.target) ?? new Map<string, string | null>();
       later.set(record.target, values);
       valueAfter.set(record, values.has(name) ? (values.get(name) ?? null) : record.target.getAttribute(name));
@@ -368,14 +523,18 @@ export function registerDom(ctx: Context) {
           // The sibling it was inserted after, as Chrome reports it right away, if the client has it.
           let previous = k ? (record.addedNodes[k - 1] ?? null) : record.previousSibling;
           if (previous && (!nodes.isVisible(previous) || nodes.knownId(previous) === undefined))
-            previous = previousVisibleSibling(node, pending);
+            previous = previousVisibleSibling(node, n => pending.has(n));
+          // Like Chrome, an inserted iframe comes without its frame, which does not exist yet when
+          // Chrome reports it; the iframe is sent again with its document once that is loaded.
+          const owner = isFrameOwner(node) ? node : null;
           session.emit('DOM.childNodeInserted', {
             parentNodeId: targetId,
             previousNodeId: previous ? nodes.idOf(previous) : 0,
-            node: nodes.serialize(node, 0),
+            node: nodes.serialize(node, 0, false, !!owner),
           } satisfies Protocol.DOM.ChildNodeInsertedEvent);
+          if (owner) resendFrameOwner(owner);
         });
-      } else if (record.type === 'attributes' && targetId !== undefined && target instanceof Element) {
+      } else if (record.type === 'attributes' && targetId !== undefined && isElement(target)) {
         const name = record.attributeName;
         if (name === null || name === FORCE_ATTRIBUTE) continue;
         const value = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
@@ -406,41 +565,33 @@ export function registerDom(ctx: Context) {
   function observe() {
     observer?.disconnect();
     observer = new MutationObserver(onMutations);
-    observer.observe(document, OBSERVE);
+    observer.observe(ctx.frames.top.document, OBSERVE);
+    stopFrames ??= ctx.frames.onChange(onFrameChange);
+    // A merged frame's document is its agent's: sent again when the frame links again (reloaded).
+    merged.follow(owner => {
+      flushMutations();
+      resendFrameOwner(owner, true);
+    });
   }
+  // Like shadow roots, the document of each iframe sent is observed (by the same observer, which
+  // keeps the order of changes across documents).
+  nodes.onContentDocument = doc => observer?.observe(doc, OBSERVE);
   // Observing the document does not reach into shadow trees: observe each one sent.
   nodes.onShadowRoot = root => observer?.observe(root, OBSERVE);
   nodes.pushToClient = node => (observer ? nodes.push(node, parent => emitChildren(parent)) : undefined);
 
-  // Shadow roots attached to hosts the client already knows are pushed to it. The prototype is
-  // only patched while the client follows the tree (getDocument until disable).
-  let nativeAttachShadow: typeof Element.prototype.attachShadow | null = null;
-  function pushingAttachShadow(this: Element, init: ShadowRootInit): ShadowRoot {
-    const root = (nativeAttachShadow ?? attachShadowFallback).call(this, init);
-    const hostId = observer ? nodes.knownId(this) : undefined;
-    if (hostId !== undefined) {
-      const serialized = nodes.serialize(root, 0);
-      serialized.shadowRootType = root.mode === 'open' ? 'open' : 'closed';
-      nodes.onShadowRoot?.(root);
-      session.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
-    }
-    return root;
-  }
-  // Kept for a page that grabbed the wrapper before it was removed.
-  const attachShadowFallback = Element.prototype.attachShadow;
-  function patchAttachShadow() {
-    if (nativeAttachShadow) return;
-    nativeAttachShadow = Element.prototype.attachShadow;
-    Element.prototype.attachShadow = pushingAttachShadow;
-  }
-  function unpatchAttachShadow() {
-    if (!nativeAttachShadow) return;
-    // A wrapper installed on top of ours stays, and ours with it: it no longer pushes once the
-    // observer is gone.
-    if (Element.prototype.attachShadow !== pushingAttachShadow) return;
-    Element.prototype.attachShadow = nativeAttachShadow;
-    nativeAttachShadow = null;
-  }
+  // Shadow roots attached to hosts the client already knows are pushed to it, in the top page and
+  // in each frame's document. The prototypes are only patched while the client follows the tree
+  // (getDocument until disable).
+  const attachShadow = attachShadowHook((host, root) => {
+    const hostId = observer ? nodes.knownId(host) : undefined;
+    if (hostId === undefined) return;
+    const serialized = nodes.serialize(root, 0);
+    serialized.shadowRootType = root.mode === 'open' ? 'open' : 'closed';
+    nodes.onShadowRoot?.(root);
+    session.emit('DOM.shadowRootPushed', { hostId, root: serialized } satisfies Protocol.DOM.ShadowRootPushedEvent);
+  });
+  const patchAttachShadow = (frame: Frame) => attachShadow.patch(realmOf(frame.document));
 
   const element = (ref: NodeRef) => resolveElement(ctx, ref);
   const history = historyOf(ctx);
@@ -450,31 +601,48 @@ export function registerDom(ctx: Context) {
     disable() {
       observer?.disconnect();
       observer = null;
-      unpatchAttachShadow();
+      stopFrames?.();
+      stopFrames = null;
+      changedFrames = null;
+      attachShadow.unpatch();
+      merged.unfollow();
       searches.clear();
       history.reset();
     },
 
-    getDocument(params: Protocol.DOM.GetDocumentRequest): Protocol.DOM.GetDocumentResponse {
+    async getDocument(params: Protocol.DOM.GetDocumentRequest): Promise<Protocol.DOM.GetDocumentResponse> {
       nodes.reset();
       searches.clear();
       // Chrome's DiscardFrontendBindings: edits on the old node ids can no longer be undone.
       history.reset();
       observe();
-      patchAttachShadow();
-      return { root: nodes.serialize(document, params.depth ?? 2, params.pierce) };
+      ctx.frames.sync();
+      for (const frame of ctx.frames) patchAttachShadow(frame);
+      const top = ctx.frames.top.document;
+      // With the documents of merged frames, each of whose agents starts a new tree too.
+      const serialize = () => nodes.serialize(top, params.depth ?? 2, params.pierce);
+      return { root: await merged.graft(serialize, !!params.pierce, true) };
     },
 
-    requestChildNodes(params: Protocol.DOM.RequestChildNodesRequest) {
+    async requestChildNodes(params: Protocol.DOM.RequestChildNodesRequest) {
       const depth = params.depth ?? 1;
-      emitChildren(resolveNode(ctx, params), depth === -1 ? -1 : depth, params.pierce);
+      const node = resolveNode(ctx, params);
+      // Like Chrome, children the client has are not sent again unless deeper ones are asked for:
+      // the frontend asks again while its first request is pending, and would replace the nodes it
+      // has (an iframe's grafted document with them) by new ones.
+      // Deeper ones are sent like Chrome: one setChildNodes per parent whose children the client lacks.
+      pushChildren(node, depth === -1 ? Infinity : depth, params.pierce);
+      await merged.pushInside(node, depth, !!params.pierce);
     },
 
-    describeNode(params: Protocol.DOM.DescribeNodeRequest): Protocol.DOM.DescribeNodeResponse {
+    async describeNode(params: Protocol.DOM.DescribeNodeRequest): Promise<Protocol.DOM.DescribeNodeResponse> {
       const node = resolveNode(ctx, params);
-      const described = nodes.serialize(node, params.depth ?? 0, params.pierce);
+      const serialize = () => nodes.serialize(node, params.depth ?? 0, params.pierce);
+      const described = await merged.graft(serialize, !!params.pierce, false);
       // describeNode does not push the node: report a 0 node id unless the client knows it.
-      return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId: FRAME_ID } };
+      // Like Chrome, the frame a node is in; for an iframe, the frame it holds.
+      const frameId = (isFrameOwner(node) && described.frameId) || ctx.frames.ofNode(node).id;
+      return { node: { ...described, nodeId: nodes.knownId(node) ?? 0, frameId } };
     },
 
     resolveNode(params: Protocol.DOM.ResolveNodeRequest): Protocol.DOM.ResolveNodeResponse {
@@ -485,13 +653,36 @@ export function registerDom(ctx: Context) {
       return { nodeId: nodes.push(resolveNode(ctx, params), parent => emitChildren(parent)) };
     },
 
-    pushNodesByBackendIdsToFrontend(params: Protocol.DOM.PushNodesByBackendIdsToFrontendRequest) {
-      return {
-        nodeIds: params.backendNodeIds.map(id => {
-          const node = nodes.getByBackendId(id);
-          return node ? nodes.push(node, parent => emitChildren(parent)) : 0;
-        }),
-      };
+    getFrameOwner(params: Protocol.DOM.GetFrameOwnerRequest): Protocol.DOM.GetFrameOwnerResponse {
+      const owner = frameOwner(params.frameId);
+      const backendNodeId = nodes.backendIdOf(owner);
+      // Like Chrome, a node id only once the client has the document.
+      if (nodes.knownId(ctx.frames.top.document) === undefined) return { backendNodeId };
+      return { backendNodeId, nodeId: nodes.push(owner, parent => emitChildren(parent)) };
+    },
+
+    async pushNodesByBackendIdsToFrontend(params: Protocol.DOM.PushNodesByBackendIdsToFrontendRequest) {
+      const nodeIds = params.backendNodeIds.map(id => {
+        const node = merged.nsOf({ backendNodeId: id }) === undefined ? nodes.getByBackendId(id) : undefined;
+        return node ? nodes.push(node, parent => emitChildren(parent)) : 0;
+      });
+      // Those of merged frames, by their agents; each position on its own, as Chrome resolves them.
+      const byFrame = new Map<number, { index: number; id: number }[]>();
+      params.backendNodeIds.forEach((id, index) => {
+        const ns = merged.nsOf({ backendNodeId: id });
+        if (ns !== undefined) byFrame.set(ns, [...(byFrame.get(ns) ?? []), { index, id }]);
+      });
+      for (const [ns, entries] of byFrame) {
+        const result = await merged.ask(ns, 'DOM.pushNodesByBackendIdsToFrontend', {
+          backendNodeIds: entries.map(e => e.id),
+        });
+        const pushed: unknown = typeof result === 'object' && result !== null ? Reflect.get(result, 'nodeIds') : [];
+        entries.forEach(({ index }, k) => {
+          const nodeId: unknown = Array.isArray(pushed) ? pushed[k] : 0;
+          nodeIds[index] = typeof nodeId === 'number' ? nodeId : 0;
+        });
+      }
+      return { nodeIds };
     },
 
     getAttributes: (params: Protocol.DOM.GetAttributesRequest): Protocol.DOM.GetAttributesResponse => ({
@@ -505,9 +696,9 @@ export function registerDom(ctx: Context) {
 
     setAttributesAsText(params: Protocol.DOM.SetAttributesAsTextRequest) {
       const el = element(params);
-      const parsed = document.createElement('template');
+      const parsed = el.ownerDocument.createElement('template');
       // Parse in the element's namespace, where e.g. SVG's `viewBox` keeps its case.
-      const context = el instanceof SVGElement ? 'svg' : el instanceof MathMLElement ? 'math' : null;
+      const context = isSvgElement(el) ? 'svg' : isMathMlElement(el) ? 'math' : null;
       parsed.innerHTML = context
         ? `<${context}><${context} ${params.text}></${context}></${context}>`
         : `<div ${params.text}></div>`;
@@ -548,7 +739,7 @@ export function registerDom(ctx: Context) {
 
     setNodeName(params: Protocol.DOM.SetNodeNameRequest): Protocol.DOM.SetNodeNameResponse {
       const el = element(params);
-      const renamed = document.createElement(params.name);
+      const renamed = el.ownerDocument.createElement(params.name);
       for (const attr of Array.from(el.attributes))
         if (attr.name !== FORCE_ATTRIBUTE) renamed.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
       history.record(
@@ -570,7 +761,14 @@ export function registerDom(ctx: Context) {
       history.record(editPosition(node, () => node.parentNode?.removeChild(node)));
     },
 
-    moveTo(params: Protocol.DOM.MoveToRequest): Protocol.DOM.MoveToResponse {
+    moveTo(params: Protocol.DOM.MoveToRequest): Protocol.DOM.MoveToResponse | Promise<unknown> {
+      // Within a merged frame, its agent moves it; not across the iframe (-32000).
+      const ns = merged.oneFrame([params.nodeId, params.targetNodeId, params.insertBeforeNodeId]);
+      if (ns !== undefined)
+        return merged.ask(ns, 'DOM.moveTo', params).then(result => {
+          merged.recordEdit(ns);
+          return result;
+        });
       const node = resolveNode(ctx, params);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
@@ -579,10 +777,16 @@ export function registerDom(ctx: Context) {
       return { nodeId: nodes.idOf(node) };
     },
 
-    copyTo(params: Protocol.DOM.CopyToRequest): Protocol.DOM.CopyToResponse {
+    copyTo(params: Protocol.DOM.CopyToRequest): Protocol.DOM.CopyToResponse | Promise<unknown> {
+      const ns = merged.oneFrame([params.nodeId, params.targetNodeId, params.insertBeforeNodeId]);
+      if (ns !== undefined)
+        return merged.ask(ns, 'DOM.copyTo', params).then(result => {
+          merged.recordEdit(ns);
+          return result;
+        });
       const copy = resolveNode(ctx, params).cloneNode(true);
       // The copy is not forced into any pseudo-class state.
-      if (copy instanceof Element)
+      if (isElement(copy))
         for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
           el.removeAttribute(FORCE_ATTRIBUTE);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
@@ -602,54 +806,91 @@ export function registerDom(ctx: Context) {
       return { nodeIds: found.map(node => nodes.push(node, parent => emitChildren(parent))) };
     },
 
-    performSearch(params: Protocol.DOM.PerformSearchRequest): Protocol.DOM.PerformSearchResponse {
+    async performSearch(params: Protocol.DOM.PerformSearchRequest): Promise<Protocol.DOM.PerformSearchResponse> {
       const searchId = String(++searchSeq);
-      const results = searchNodes(
+      ctx.frames.sync();
+      const found = searchNodes(
+        Array.from(ctx.frames, frame => frame.document),
         params.query,
         n => nodes.isVisible(n),
         host => nodes.shadowRootOf(host)
       );
-      searches.set(searchId, results);
-      return { searchId, resultCount: results.length };
+      // Like Chrome, the documents of merged frames too, each searched by its agent, after the page's.
+      const parts = await merged.search(params);
+      searches.set(searchId, { found, parts });
+      return { searchId, resultCount: parts.reduce((n, part) => n + part.count, found.length) };
     },
 
-    getSearchResults(params: Protocol.DOM.GetSearchResultsRequest): Protocol.DOM.GetSearchResultsResponse {
-      const results = searches.get(params.searchId);
-      if (!results) throw new CdpError('No search session with given id found');
-      if (params.fromIndex < 0 || params.toIndex > results.length || params.fromIndex >= params.toIndex)
+    async getSearchResults(
+      params: Protocol.DOM.GetSearchResultsRequest
+    ): Promise<Protocol.DOM.GetSearchResultsResponse> {
+      const search = searches.get(params.searchId);
+      if (!search) throw new CdpError('No search session with given id found');
+      const total = search.parts.reduce((n, part) => n + part.count, search.found.length);
+      if (params.fromIndex < 0 || params.toIndex > total || params.fromIndex >= params.toIndex)
         throw new CdpError('Invalid search result range');
-      return {
-        nodeIds: results
-          .slice(params.fromIndex, params.toIndex)
-          .map(node => nodes.push(node, parent => emitChildren(parent))),
-      };
+      const nodeIds = search.found
+        .slice(params.fromIndex, params.toIndex)
+        .map(node => nodes.push(node, parent => emitChildren(parent)));
+      let start = search.found.length;
+      for (const part of search.parts) {
+        const from = Math.max(params.fromIndex - start, 0);
+        const to = Math.min(params.toIndex - start, part.count);
+        start += part.count;
+        if (from >= to) continue;
+        const result = await merged
+          .ask(part.ns, 'DOM.getSearchResults', { searchId: part.searchId, fromIndex: from, toIndex: to })
+          .catch(() => undefined);
+        const ids: unknown = typeof result === 'object' && result !== null ? Reflect.get(result, 'nodeIds') : undefined;
+        for (let i = from; i < to; i++) {
+          const id: unknown = Array.isArray(ids) ? ids[i - from] : 0;
+          nodeIds.push(typeof id === 'number' ? id : 0);
+        }
+      }
+      return { nodeIds };
     },
 
     discardSearchResults(params: Protocol.DOM.DiscardSearchResultsRequest) {
+      for (const part of searches.get(params.searchId)?.parts ?? [])
+        merged.ask(part.ns, 'DOM.discardSearchResults', { searchId: part.searchId }).catch(() => {});
       searches.delete(params.searchId);
     },
 
-    getBoxModel: (params: Protocol.DOM.GetBoxModelRequest): Protocol.DOM.GetBoxModelResponse => ({
-      model: boxModel(element(params)),
-    }),
-
-    getContentQuads(params: Protocol.DOM.GetContentQuadsRequest): Protocol.DOM.GetContentQuadsResponse {
-      const node = resolveNode(ctx, params);
-      // Chrome also reports the line boxes of a text node.
-      if (node instanceof Text) {
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        return { quads: Array.from(range.getClientRects()).map(quad) };
-      }
-      return { quads: elementQuads(element(params)) };
+    getBoxModel(params: Protocol.DOM.GetBoxModelRequest): Protocol.DOM.GetBoxModelResponse | Promise<unknown> {
+      const ns = merged.nsOf(params);
+      if (ns !== undefined) return merged.quadsIn(ns, 'DOM.getBoxModel', params);
+      return { model: boxModel(element(params)) };
     },
 
-    getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Protocol.DOM.GetNodeForLocationResponse {
+    getContentQuads(
+      params: Protocol.DOM.GetContentQuadsRequest
+    ): Protocol.DOM.GetContentQuadsResponse | Promise<unknown> {
+      const ns = merged.nsOf(params);
+      if (ns !== undefined) return merged.quadsIn(ns, 'DOM.getContentQuads', params);
+      const node = resolveNode(ctx, params);
+      // Chrome also reports the line boxes of a text node.
+      return { quads: contentQuads(isText(node) ? node : element(params)) };
+    },
+
+    async getNodeForLocation(params: Protocol.DOM.GetNodeForLocationRequest): Promise<unknown> {
       // The page's element under devtools-anywhere's own UI, which the page tree does not have.
-      const el = document.elementsFromPoint(params.x, params.y).find(e => !closestOwn(e));
+      // Like Chrome, the point is in the top document, not its viewport, and a point on an iframe
+      // finds the node there in the iframe's document.
+      const top = ctx.frames.top.window;
+      const x = params.x - top.scrollX;
+      const y = params.y - top.scrollY;
+      const hit = hitTest(ctx.frames.top.document, x, y, e => !closestOwn(e));
+      const el = hit?.el;
       if (!el) throw new CdpError('No node found at given location');
+      // On a merged frame's iframe, the node there, found by the frame's agent.
+      const inFrame = await merged.nodeAt(el, hit.x, hit.y, params);
+      if (inFrame) return inFrame;
       const nodeId = nodes.knownId(el);
-      return { backendNodeId: nodes.backendIdOf(el), frameId: FRAME_ID, ...(nodeId !== undefined && { nodeId }) };
+      return {
+        backendNodeId: nodes.backendIdOf(el),
+        frameId: ctx.frames.ofNode(el).id,
+        ...(nodeId !== undefined && { nodeId }),
+      };
     },
 
     collectClassNamesFromSubtree(params: Protocol.DOM.CollectClassNamesFromSubtreeRequest) {
@@ -669,7 +910,7 @@ export function registerDom(ctx: Context) {
     },
 
     scrollIntoViewIfNeeded(params: Protocol.DOM.ScrollIntoViewIfNeededRequest) {
-      element(params).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      scrollIntoViewIfNeeded(element(params), params.rect);
     },
 
     /** Elements whose computed style matches any of the given ones (e.g. the Layout pane's grids). */
@@ -680,7 +921,7 @@ export function registerDom(ctx: Context) {
       const visit = (root: ParentNode) => {
         for (const el of root.querySelectorAll('*')) {
           if (!nodes.isVisible(el) || closestOwn(el)) continue;
-          const style = getComputedStyle(el);
+          const style = styleOf(el);
           if (params.computedStyles.some(({ name, value }) => style.getPropertyValue(name) === value)) found.push(el);
           const shadowRoot = params.pierce && nodes.shadowRootOf(el);
           if (shadowRoot) visit(shadowRoot);
@@ -692,21 +933,30 @@ export function registerDom(ctx: Context) {
 
     /**
      * Finds a node by the path the frontend keeps to select it again after a reload: pairs of
-     * the index among the parent's children (`u`/`a` for a shadow root) and the node name.
+     * the index among the parent's children (`u`/`a` for a shadow root, `d` for an iframe's
+     * document) and the node name.
      */
     pushNodeByPathToFrontend(
       params: Protocol.DOM.PushNodeByPathToFrontendRequest
-    ): Protocol.DOM.PushNodeByPathToFrontendResponse {
+    ): Protocol.DOM.PushNodeByPathToFrontendResponse | Promise<unknown> {
       const parts = params.path.split(',');
-      let node: Node = document;
+      ctx.frames.sync();
+      let node: Node = ctx.frames.top.document;
       for (let i = 0; i + 1 < parts.length; i += 2) {
         const [key = '', name = ''] = [parts[i], parts[i + 1]];
+        // Into a merged frame's document: the rest of the path is its agent's.
+        const inFrame = key === 'd' && isFrameOwner(node) ? merged.pushPath(node, parts.slice(i + 2)) : undefined;
+        if (inFrame) return inFrame;
         const next: Node | null | undefined =
           key === 'u' || key === 'a'
-            ? node instanceof Element
+            ? isElement(node)
               ? nodes.shadowRootOf(node)
               : null
-            : nodes.children(node)[Number(key)];
+            : key === 'd'
+              ? isFrameOwner(node)
+                ? ctx.frames.ofOwner(node)?.document
+                : null
+              : nodes.children(node)[Number(key)];
         if (!next || next.nodeName !== name) throw new CdpError('No node with given path found');
         node = next;
       }
@@ -715,8 +965,14 @@ export function registerDom(ctx: Context) {
 
     getTopLayerElements: () => ({ nodeIds: [] }),
     markUndoableState: () => history.markUndoableState(),
-    undo: () => history.undo(),
-    redo: () => history.redo(),
+    async undo() {
+      history.undo();
+      await merged.replayed();
+    },
+    async redo() {
+      history.redo();
+      await merged.replayed();
+    },
     hideHighlight: () => session.call('Overlay.hideHighlight'),
     highlightNode: (params: Protocol.Overlay.HighlightNodeRequest) => session.call('Overlay.highlightNode', params),
   });

@@ -163,6 +163,16 @@ test('idInQuery goes with remote as data-id-in-query', async () => {
   assert.doesNotMatch(await injected({ remote }), /data-id-in-query/);
 });
 
+test('frameOrigins and parentOrigins go as space-separated data-frame-origins and data-parent-origins', async () => {
+  const tag = await injected({
+    frameOrigins: ['https://a.example', 'https://*.example.com'],
+    parentOrigins: ['http://localhost:5173'],
+  });
+  assert.match(tag, / data-frame-origins="https:\/\/a\.example https:\/\/\*\.example\.com"/);
+  assert.match(tag, / data-parent-origins="http:\/\/localhost:5173"/);
+  assert.doesNotMatch(await injected({ frameOrigins: [] }), /data-frame-origins/);
+});
+
 test('remote goes with the frontend: the page keeps its own DevTools', async () => {
   const tag = await injected({ remote: 'http://127.0.0.1:8080/', devtoolsFrontendUrl: 'http://127.0.0.1:9/app.html' });
   assert.match(tag, / data-remote="http:\/\/127\.0\.0\.1:8080\/"/);

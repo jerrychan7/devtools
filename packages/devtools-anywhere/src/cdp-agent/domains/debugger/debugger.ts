@@ -1,8 +1,38 @@
 import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../../core/session';
-import { EXECUTION_CONTEXT_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import type { RequestRecord } from '../../probe/types';
 import { refetch } from '../network/network';
+import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+
+/**
+ * Merged sandboxed iframes (core/merged-frames.ts): the settings go to every frame's agent, so that
+ * each reports its scripts on enable. Debugger.getScriptSource is the page's handler's (see there).
+ * There are no breakpoints to merge: each agent resolves them to nothing, so the page's answers.
+ */
+mergedFrames.registerRoutes('Debugger', {
+  routeBy: { 'Debugger.getPossibleBreakpoints': ['start.scriptId'] },
+  fanOut: [
+    'Debugger.enable',
+    'Debugger.disable',
+    'Debugger.setAsyncCallStackDepth',
+    'Debugger.setBlackboxPatterns',
+    'Debugger.setPauseOnExceptions',
+    'Debugger.setBreakpointsActive',
+    'Debugger.setSkipAllPauses',
+  ],
+});
+
+/**
+ * What every script id starts with: '' or `m{ns}.` in a page whose agent is merged into its
+ * parent's (core/merged-frames.ts).
+ */
+let idPrefix = '';
+
+/** Sets what the script ids of every session start with (see {@link idPrefix}). */
+export function setScriptIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
 
 /**
  * Lists the page's script files in the Sources panel. Page scripts cannot see the scripts
@@ -13,9 +43,11 @@ import { refetch } from '../network/network';
  * page uses and show in stack traces. The frontend ignore-lists them.
  * There are no breakpoints: the breakpoint commands are accepted and resolve to nothing.
  */
-export function registerDebugger({ session, probe }: Context) {
-  /** Script id per URL, stable for the page's lifetime. */
+export function registerDebugger({ session, probe, frames }: Context) {
+  /** Script id per execution context and URL, stable for the page's lifetime. */
   const ids = new Map<string, string>();
+  /** Script URL per script id. */
+  const urls = new Map<string, string>();
   const sources = new Map<string, Promise<string>>();
   let enabled = false;
   /** Breakpoint ids are unique: the frontend keys its breakpoints by them. */
@@ -23,11 +55,17 @@ export function registerDebugger({ session, probe }: Context) {
   let unsubscribe: (() => void) | null = null;
 
   const isScript = (rec: RequestRecord) => rec.type === 'Script' && rec.state === 'done';
+  /** A request made in a same-origin iframe belongs to that frame's context; the top one's otherwise. */
+  const reportRequest = (rec: RequestRecord) =>
+    report(rec.url, false, ((rec.frame && frames.byId(rec.frame.frameId)) ?? frames.top).executionContextId);
 
-  function report(url: string, isModule: boolean) {
-    if (!/^https?:/.test(url) || ids.has(url)) return;
-    const scriptId = String(ids.size + 1);
-    ids.set(url, scriptId);
+  /** Like Chrome, a script is reported in the execution context of the frame that loaded it. */
+  function report(url: string, isModule: boolean, executionContextId: number) {
+    const key = `${executionContextId} ${url}`;
+    if (!/^https?:/.test(url) || ids.has(key)) return;
+    const scriptId = idPrefix + String(ids.size + 1);
+    ids.set(key, scriptId);
+    urls.set(scriptId, url);
     session.emit('Debugger.scriptParsed', {
       scriptId,
       url,
@@ -36,7 +74,7 @@ export function registerDebugger({ session, probe }: Context) {
       // Unknown until the source is loaded; the frontend reads the real extent from the source.
       endLine: 0,
       endColumn: 0,
-      executionContextId: EXECUTION_CONTEXT_ID,
+      executionContextId,
       hash: '',
       buildId: '',
       isModule,
@@ -45,8 +83,19 @@ export function registerDebugger({ session, probe }: Context) {
   }
 
   function urlOf(scriptId: string) {
-    for (const [url, id] of ids) if (id === scriptId) return url;
+    const url = urls.get(scriptId);
+    if (url) return url;
     throw new CdpError(`No script for id: ${scriptId}`);
+  }
+
+  function sourceOf(url: string): Promise<string> {
+    let source = sources.get(url);
+    if (!source) {
+      source = refetch(probe, url).then(res => res.text());
+      sources.set(url, source);
+      source.catch(() => sources.delete(url));
+    }
+    return source;
   }
 
   session.register('Debugger', {
@@ -55,11 +104,13 @@ export function registerDebugger({ session, probe }: Context) {
         enabled = true;
         // Every script is reported again: the frontend forgets them on disable.
         ids.clear();
-        for (const script of document.querySelectorAll<HTMLScriptElement>('script[src]'))
-          report(script.src, script.type === 'module');
-        for (const rec of probe.requests) if (isScript(rec)) report(rec.url, false);
+        urls.clear();
+        for (const frame of frames)
+          for (const script of frame.document.querySelectorAll<HTMLScriptElement>('script[src]'))
+            report(script.src, script.type === 'module', frame.executionContextId);
+        for (const rec of probe.requests) if (isScript(rec)) reportRequest(rec);
         unsubscribe = probe.onRequest(rec => {
-          if (isScript(rec)) report(rec.url, false);
+          if (isScript(rec)) reportRequest(rec);
         });
       }
       return { debuggerId: 'devtools-anywhere' };
@@ -72,18 +123,35 @@ export function registerDebugger({ session, probe }: Context) {
       sources.clear();
     },
 
-    /** Re-fetches the script, from the HTTP cache when possible. */
+    /**
+     * Re-fetches the script, from the HTTP cache when possible. A merged sandboxed iframe's script
+     * is its agent's, but an opaque origin cannot fetch it (no CORS on the page's own scripts): the
+     * page, of the origin the iframe's document comes from, fetches it then, by the URL that
+     * agent's error gives.
+     */
     async getScriptSource(
       params: Protocol.Debugger.GetScriptSourceRequest
     ): Promise<Protocol.Debugger.GetScriptSourceResponse> {
-      const url = urlOf(params.scriptId);
-      let source = sources.get(url);
-      if (!source) {
-        source = refetch(probe, url).then(res => res.text());
-        sources.set(url, source);
-        source.catch(() => sources.delete(url));
+      const ns = urls.has(params.scriptId) ? undefined : ownerOfId(params.scriptId);
+      if (ns !== undefined) {
+        try {
+          const reply = await mergedFrames.forSession(session).ask(ns, 'Debugger.getScriptSource', params);
+          const scriptSource = typeof reply === 'object' && reply ? Reflect.get(reply, 'scriptSource') : undefined;
+          if (typeof scriptSource === 'string') return { scriptSource };
+          throw new CdpError(`No script for id: ${params.scriptId}`);
+        } catch (e) {
+          if (!(e instanceof CdpError) || e.data === undefined || !/^https?:/.test(e.data)) throw e;
+          return { scriptSource: await sourceOf(e.data) };
+        }
       }
-      return { scriptSource: await source };
+      const url = urlOf(params.scriptId);
+      try {
+        return { scriptSource: await sourceOf(url) };
+      } catch (e) {
+        // Merged into the page's agent: the URL, for the page to fetch.
+        if (idPrefix) throw new CdpError(e instanceof Error ? e.message : String(e), -32000, url);
+        throw e;
+      }
     },
 
     getPossibleBreakpoints: (): Protocol.Debugger.GetPossibleBreakpointsResponse => ({ locations: [] }),

@@ -1,9 +1,48 @@
 import type { Protocol } from 'devtools-protocol';
-import { FRAME_ID, LOADER_ID, type Context } from '../../core/context';
+import type { Context } from '../../core/context';
 import { base64, readBody } from '../../core/body';
 import { CdpError } from '../../core/session';
+import { toTag } from '../../core/objects';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
+import { childTargets } from '../../core/child-targets';
+import { mergedFrames } from '../../core/merged-frames';
+import { childDocumentOf } from './frames';
+
+/**
+ * What every request id the client sees starts with: '' or `m{ns}.` in a page whose agent is
+ * merged into its parent's (core/merged-frames.ts); the probe's ids go out with it.
+ */
+let idPrefix = '';
+
+/** Sets what the request ids of every session start with (see {@link idPrefix}). */
+export function setRequestIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
+
+/**
+ * The commands of a sandboxed iframe merged into this page's agent (core/merged-frames.ts): by
+ * request id to the iframe's agent, which made the request; what sets up the requests reported,
+ * to every one. Network.getCookies stays the page's: the iframe's opaque origin has no cookies,
+ * and Chrome answers with the page's (network-sandboxed.conformance.test.ts).
+ */
+mergedFrames.registerRoutes('Network', {
+  routeBy: {
+    'Network.getResponseBody': ['requestId'],
+    'Network.getRequestPostData': ['requestId'],
+    'Network.replayXHR': ['requestId'],
+  },
+  fanOut: [
+    'Network.enable',
+    'Network.disable',
+    'Network.setExtraHTTPHeaders',
+    'Network.setBlockedURLs',
+    'Network.setCacheDisabled',
+  ],
+});
+
+/** A probe request id as the client sees it. */
+const wireId = (probeId: string) => idPrefix + probeId;
 
 export function parseCookies(): Protocol.Network.Cookie[] {
   if (!document.cookie) return [];
@@ -83,6 +122,10 @@ export async function refetch(probe: Context['probe'], url: string, init?: Reque
   return res;
 }
 
+// By class, not instanceof: a same-origin iframe's socket gives its own realm's Blobs and buffers.
+const isBlob = (value: unknown): value is Blob => toTag(value) === 'Blob';
+const isArrayBuffer = (value: unknown): value is ArrayBuffer => toTag(value) === 'ArrayBuffer';
+
 /**
  * CDP frame of a WebSocket payload: text as is, binary data (converted only now) as base64.
  * Like Chrome, a Blob given to `send()` is reported without its payload.
@@ -90,9 +133,9 @@ export async function refetch(probe: Context['probe'], url: string, init?: Reque
 async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.WebSocketFrame> {
   if (typeof data === 'string') return { opcode: 1, mask, payloadData: data };
   let blob = new Blob();
-  if (data instanceof Blob) {
+  if (isBlob(data)) {
     if (!mask) blob = data;
-  } else if (data instanceof ArrayBuffer) blob = new Blob([data]);
+  } else if (isArrayBuffer(data)) blob = new Blob([data]);
   // A copy: the view may be on a SharedArrayBuffer, which Blob does not take.
   else if (ArrayBuffer.isView(data))
     blob = new Blob([new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()]);
@@ -102,7 +145,8 @@ async function frameOf(data: unknown, mask: boolean): Promise<Protocol.Network.W
   return { opcode: 2, mask, payloadData };
 }
 
-export function registerNetwork({ session, probe }: Context) {
+export function registerNetwork(ctx: Context) {
+  const { session, probe, frames } = ctx;
   let unsubscribe: (() => void) | null = null;
   let unsubscribeSockets: (() => void) | null = null;
   const sent = new Map<string, Set<'request' | 'response' | 'end'>>();
@@ -127,12 +171,24 @@ export function registerNetwork({ session, probe }: Context) {
   let maxPostData = 0;
 
   function find(requestId: string) {
-    return probe.requests.find(r => r.requestId === requestId);
+    // The probe's own id, without the namespace of a merged frame's.
+    const id = idPrefix && requestId.startsWith(idPrefix) ? requestId.slice(idPrefix.length) : requestId;
+    return probe.requests.find(r => r.requestId === id);
   }
 
   /** Emits whichever events of the record's lifecycle have not been sent yet. */
   function emit(rec: RequestRecord) {
     if (isOwnRequest(probe, rec)) return;
+    const child = childDocumentOf(rec);
+    if (child.frameDocument) return;
+    // Merged into the parent's agent, this page's document request is the parent's to report, as
+    // that of its sandboxed iframe (frames.ts, childDocumentOf): once, as in Chrome.
+    if (childTargets.parentMerged && !rec.frame && rec.initiatorType === 'navigation') return;
+    // The document of a sandboxed iframe: of that frame, as in Chrome.
+    const opaque = rec.frame ? undefined : child.opaque;
+    const frameId = rec.frame?.frameId ?? (opaque ? childTargets.frameIdOf(opaque) : frames.top.id);
+    const loaderId =
+      rec.frame?.loaderId ?? (opaque && frames.opaqueLoaderId(opaque, rec.wallTime)) ?? frames.top.loaderId;
     prune(sent, probe.requests, 'end');
     let done = sent.get(rec.requestId);
     if (!done) sent.set(rec.requestId, (done = new Set()));
@@ -159,9 +215,9 @@ export function registerNetwork({ session, probe }: Context) {
       }
       const callFrames = parseStack(rec.stack, 1);
       session.emit('Network.requestWillBeSent', {
-        requestId: rec.requestId,
-        loaderId: LOADER_ID,
-        documentURL: location.href,
+        requestId: wireId(rec.requestId),
+        loaderId,
+        documentURL: rec.frame?.documentURL ?? (opaque ? rec.url : location.href),
         request,
         timestamp: rec.startTime / 1000,
         wallTime: rec.wallTime / 1000,
@@ -169,15 +225,15 @@ export function registerNetwork({ session, probe }: Context) {
         initiator: callFrames.length ? { type: 'script', stack: { callFrames } } : { type: 'other' },
         redirectHasExtraInfo: false,
         type: rec.type,
-        frameId: FRAME_ID,
+        frameId,
       } satisfies Protocol.Network.RequestWillBeSentEvent);
     }
 
     if ((rec.state === 'headers' || rec.state === 'done') && !done.has('response')) {
       done.add('response');
       session.emit('Network.responseReceived', {
-        requestId: rec.requestId,
-        loaderId: LOADER_ID,
+        requestId: wireId(rec.requestId),
+        loaderId,
         timestamp: (rec.responseTime ?? performance.now()) / 1000,
         type: rec.type,
         response: {
@@ -193,21 +249,21 @@ export function registerNetwork({ session, probe }: Context) {
           securityState: 'unknown',
         },
         hasExtraInfo: false,
-        frameId: FRAME_ID,
+        frameId,
       } satisfies Protocol.Network.ResponseReceivedEvent);
     }
 
     if (rec.state === 'done' && !done.has('end')) {
       done.add('end');
       session.emit('Network.loadingFinished', {
-        requestId: rec.requestId,
+        requestId: wireId(rec.requestId),
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         encodedDataLength: rec.encodedDataLength ?? 0,
       } satisfies Protocol.Network.LoadingFinishedEvent);
     } else if (rec.state === 'failed' && !done.has('end')) {
       done.add('end');
       session.emit('Network.loadingFailed', {
-        requestId: rec.requestId,
+        requestId: wireId(rec.requestId),
         timestamp: (rec.endTime ?? performance.now()) / 1000,
         type: rec.type,
         errorText: rec.errorText ?? '',
@@ -219,10 +275,11 @@ export function registerNetwork({ session, probe }: Context) {
   /** Emits whichever events of the socket's lifecycle have not been sent yet. */
   async function emitSocket(rec: SocketRecord, gen: number) {
     if (gen !== generation || isOwnUrl(probe, rec.url)) return;
-    const { requestId } = rec;
+    const { requestId: probeId } = rec;
+    const requestId = wireId(probeId);
     prune(sentSockets, probe.sockets, 'closed');
-    let done = sentSockets.get(requestId);
-    if (!done) sentSockets.set(requestId, (done = new Set()));
+    let done = sentSockets.get(probeId);
+    if (!done) sentSockets.set(probeId, (done = new Set()));
 
     if (!done.has('created')) {
       done.add('created');

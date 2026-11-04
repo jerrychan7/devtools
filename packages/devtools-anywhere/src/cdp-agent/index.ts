@@ -1,14 +1,19 @@
 import type { Context } from './core/context';
-import { NodeRegistry } from './core/nodes';
-import { ObjectRegistry } from './core/objects';
+import { type Frame, frames } from './core/frames';
+import { mergedFrames, NS_STRIDE, nsPrefix } from './core/merged-frames';
+import { NodeRegistry, setNodeIdBase } from './core/nodes';
+import { ObjectRegistry, setObjectIdPrefix } from './core/objects';
+import { setSheetIdPrefix } from './domains/css/sheet-registry';
 import { viewProbe } from './core/probe-view';
+import { realmOf } from './core/realm';
 import { CdpSession } from './core/session';
 import { registerCss } from './domains/css/css';
-import { registerDebugger } from './domains/debugger/debugger';
+import { registerDebugger, setScriptIdPrefix } from './domains/debugger/debugger';
 import { registerDom } from './domains/dom/dom';
 import { registerDomDebugger } from './domains/dom-debugger/dom-debugger';
 import { registerInput } from './domains/input/input';
-import { registerNetwork } from './domains/network/network';
+import { hookFrameNetwork } from './domains/network/frames';
+import { registerNetwork, setRequestIdPrefix } from './domains/network/network';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
 import { registerRuntime } from './domains/runtime/runtime';
@@ -17,10 +22,12 @@ import { registerScreencast } from './domains/page/screencast';
 import { registerScreenshot } from './domains/page/screenshot';
 import { registerStorage } from './domains/storage/storage';
 import { registerStubs } from './domains/stubs';
+import { registerTarget } from './domains/target/target';
 import { registerWebMcp } from './domains/webmcp/webmcp';
 import { installProbe, keep } from './probe';
+import type { Probe } from './probe/types';
 
-export { CdpSession, type Handler } from './core/session';
+export { CdpError, CdpSession, END_SESSION_CALLS, type Handler } from './core/session';
 export { installProbe } from './probe';
 export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
 export {
@@ -37,6 +44,33 @@ export {
 } from './probe/shell';
 export { isTrusted } from './probe/trust';
 export { FRAME_ID, LOADER_ID } from './core/context';
+export { frames } from './core/frames';
+export {
+  childTargets,
+  type ChildLink,
+  type ChildSession,
+  type ChildTargets,
+  type ParentLink,
+} from './core/child-targets';
+export { frameOwners, ownerOfWindow, watchOwner } from './frame-owners';
+export { mergedFrames, type MergedFrames, type RouteTable } from './core/merged-frames';
+
+/**
+ * Puts the ids this page's agent makes from now on in namespace `ns` (core/merged-frames.ts):
+ * called by the handshake when the page, a sandboxed iframe's, is merged into its parent's agent,
+ * before the link carries anything.
+ *
+ * @internal
+ */
+export function setIdNamespace(ns: number): void {
+  setNodeIdBase(ns * NS_STRIDE);
+  frames.setContextIdBase(ns * NS_STRIDE);
+  const prefix = ns ? nsPrefix(ns) : '';
+  setObjectIdPrefix(prefix);
+  setSheetIdPrefix(prefix);
+  setScriptIdPrefix(prefix);
+  setRequestIdPrefix(prefix);
+}
 export type { SnapdomLoader } from './domains/page/render';
 
 /** @internal */
@@ -47,6 +81,33 @@ export interface CdpSessionOptions {
    * available.
    */
   loadSnapdom?: SnapdomLoader;
+}
+
+/** Whether the probe hooks the iframes the page's frame registry finds. */
+let hookingFrames = false;
+
+/**
+ * Has the probe capture the console calls, uncaught errors and requests of each same-origin iframe
+ * document, from the moment the frame registry finds it (on load, for a document that replaced
+ * another): what a document logged before is not captured; its requests from before are, as far
+ * as Resource Timing knows them. For the page's lifetime, like the probe's hooks
+ * of the top page; the registry keeps watching the documents for iframes meanwhile.
+ */
+function hookFrames(probe: Probe) {
+  if (hookingFrames) return;
+  hookingFrames = true;
+  // Iframes in closed shadow trees too, and in shadow trees attached from now on.
+  frames.shadowRootOf = host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null;
+  probe.onShadowRoot(root => frames.watchShadowRoot(root));
+  const hook = (frame: Frame) => {
+    if (frame === frames.top) return;
+    probe.hookWindow(realmOf(frame.document));
+    hookFrameNetwork(probe, frames, frame);
+  };
+  frames.onChange(({ type, frame }) => {
+    if (type !== 'detached') hook(frame);
+  });
+  for (const frame of frames) hook(frame);
 }
 
 /** How many console messages V8 keeps (V8ConsoleMessageStorage's limit). */
@@ -70,12 +131,16 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
     socketEvents: Infinity,
   });
   keep(probe.logs, MAX_CONSOLE_MESSAGES);
+  hookFrames(probe);
   const ctx: Context = {
     session: new CdpSession(),
     objects: new ObjectRegistry(),
-    nodes: new NodeRegistry(host => host.shadowRoot ?? probe.shadowRoots.get(host) ?? null),
+    nodes: new NodeRegistry(frames.shadowRootOf, frames),
     probe: viewProbe(probe),
+    frames,
   };
+  // Commands for the sandboxed iframes merged into this page's agent go to theirs.
+  mergedFrames.attach(ctx.session);
   ctx.session.onReset(() => {
     ctx.probe.close();
     ctx.objects.reset();
@@ -83,6 +148,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
     ctx.nodes.inspected = [];
   });
   registerStubs(ctx.session);
+  registerTarget(ctx);
   registerRuntime(ctx);
   registerNetwork(ctx);
   registerPage(ctx);

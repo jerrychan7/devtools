@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <title>frame network</title>
+    <script>
+      // Requests made while the document is parsed, before the agent hears of it.
+      fetch('/api/echo?n=early-fetch');
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/echo?n=early-xhr');
+      xhr.send();
+    </script>
+  </head>
+  <body>
+    <img src="assets/pixel.png?n=early-img" />
+  </body>
+</html>

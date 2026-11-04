@@ -37,7 +37,8 @@ class InternalEntry {
 }
 
 const TypedArray = Object.getPrototypeOf(Int8Array);
-const toTag = (v: unknown) => Object.prototype.toString.call(v).slice(8, -1);
+/** The class of a value of any realm, as `Object.prototype.toString` names it. */
+export const toTag = (v: unknown) => Object.prototype.toString.call(v).slice(8, -1);
 /** The native getter `proto[key]`; only used inside brand checks, where throwing means "no". */
 const getter = (proto: object, key: PropertyKey) => {
   const get = Object.getOwnPropertyDescriptor(proto, key)?.get;
@@ -190,6 +191,17 @@ export interface WrapOptions {
   table?: { columns?: readonly string[] | undefined } | undefined;
 }
 
+/**
+ * What every object id starts with: '' or, in a page whose agent is merged into its parent's
+ * (core/merged-frames.ts), `m{ns}.`, which tells the frames' objects apart.
+ */
+let idPrefix = '';
+
+/** Sets what the object ids of every session start with (see {@link idPrefix}). */
+export function setObjectIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
+
 /** Turns page values into CDP RemoteObjects and keeps the objects alive by id. */
 export class ObjectRegistry {
   private prefix = Math.floor(Math.random() * 1e9) + '.';
@@ -340,7 +352,7 @@ export class ObjectRegistry {
     if (!byValue) this.ids.set(key, (byValue = new Map()));
     let id = byValue.get(value);
     if (id) return id;
-    id = this.prefix + ++this.seq;
+    id = idPrefix + this.prefix + ++this.seq;
     byValue.set(value, id);
     this.byId.set(id, value);
     if (group) {

@@ -2,7 +2,7 @@
 
 English | [简体中文](DEV.zh-CN.md)
 
-How to set up a development environment, work on the packages with live rebuilds, and get changes merged or released. For what the project does, see the [README](README.md); for how it works and why, the [design](docs/design.md).
+How to set up a development environment, work on the packages with live rebuilds, and get changes merged or released. For what the project does, see the [README](README.md); for how it works and why, the [design](docs/design.md); for what is planned and not done yet, the [roadmap](docs/roadmap.md).
 
 ## 1. First-time setup
 
@@ -108,6 +108,7 @@ experiments/      validation records
 - Every `postMessage` must check `event.origin` and `event.source`; otherwise any page could send CDP commands to the runtime.
 - Detect whether the page is inside the shell through a postMessage handshake rather than reading properties on `window.parent`, which throws a SecurityError across origins.
 - Both ends of the handshake need buffering: messages must not be dropped while DevTools is still loading.
+- The agent serves same-origin iframes too, whose nodes are not instances of the top page's `Element`, … and whose document is not the global `document`. Check nodes with `cdp-agent/core/realm.ts` (by `nodeType`, `realmOf(node)`) and look frames up in `core/frames.ts`. `pnpm lint` counts the remaining uses of the top page's realm per file against `scripts/check-realms.json` (`scripts/check-realms.ts`): a file may have fewer, not more. Where the top page is meant (the probe, the overlay), run `node scripts/check-realms.ts --update`.
 - Frontend assets should be self-hostable, with no dependency on third-party CDNs such as unpkg or jsDelivr.
 - When injecting with a Service Worker:
   - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.
@@ -141,6 +142,8 @@ pnpm typecheck                                # builds, then checks packages, bu
 A test sits next to what it tests, as `<name>.test.ts`; only tests that span packages are under `tests/`.
 - `*.conformance.test.ts` (next to the CDP agent's domains): the same page is inspected through real Chrome's CDP and through ours, and the outputs are compared. When implementing or changing a CDP method, add a test here: real Chrome is the reference, not the protocol documentation. They load the built bundles, as pages do.
 - `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend. The pages they open are in `pages/` (their scripts and styles in `pages/assets/`), the stand-in frontends in `frontends/`.
+
+A test that needs the bundle's internals loads `packages/devtools-anywhere/dist-test/` instead of `dist/`: `build.ts` builds the two scripts there a second time (not published) with `DEVTOOLS_ANYWHERE_TEST` set, and only that build exposes them as `window.__devtoolsAnywhereTest` (`iife.ts`; its type is in `tests/globals.d.ts`). Add a test-only hook there, behind `DEVTOOLS_ANYWHERE_TEST`, never to the published bundle or its API.
 
 ### Working on the frontend
 
@@ -176,7 +179,7 @@ cd devtools-frontend.ignore/devtools-frontend
 git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devtools-frontend/patches/console-reveal-makes-room.patch
 ```
 
-The frontend follows stable Chrome, which is what most users have: once per milestone, a week or two after a new stable release, move to it with
+The frontend follows stable Chrome, which is what most users have, minor updates included: each one ships another devtools-frontend commit. `.github/workflows/chrome-update.yml` checks every day and opens an issue when stable Chrome's commit is not the one in `REVISION` (closing an older one not done yet). Move to it with
 
 ```bash
 pnpm --filter @devtools-anywhere/devtools-frontend update
@@ -189,7 +192,7 @@ It builds the devtools-frontend commit the current stable Chrome ships (on its m
 ### Before committing
 
 ```bash
-pnpm lint        # oxlint, then scripts/check-contracts.ts, check-file-size.ts and check-dir-size.ts
+pnpm lint        # oxlint, then scripts/check-contracts.ts, check-realms.ts, check-file-size.ts and check-dir-size.ts
 pnpm fmt         # oxfmt: formats in place (Markdown is not formatted)
 pnpm typecheck
 pnpm test        # with the frontend built, so the real-frontend tests run
@@ -210,19 +213,20 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 
 ### Branches and pull requests
 
-`main` is the only long-lived branch: it is where all work lands and what releases are tagged from, and it should always be releasable. There is no `develop` branch: merging into `main` does not release anything (only a pushed `vx.y.z` tag does, see "Releasing to npm"), so `main` itself holds what is merged and not yet released.
+`main` holds what is released: releases are tagged on it, and it changes only through pull requests. Work for the next minor goes on its development branch, `dev/x.y.0` (now `dev/0.3.0`), pushed freely; it reaches `main` through `release/x.y.0` when that minor is released: `dev` → `release` → `main`.
 
 | Branch | For | Rules |
 | --- | --- | --- |
-| `main` | All development; releases are tagged on it | Changed through pull requests only, CI must pass, no force pushes |
-| `feat/…`, `fix/…`, `docs/…`, `ci/…`, … | One change each, short-lived; the prefix is the commit type | Branched from `main`, merged back through a pull request and deleted |
-| `release/x.y.z` | The pull request that prepares release x.y.z (version and changelog) | Merged into `main`, then the tag goes on `main` |
+| `main` | What is released; releases are tagged on it | Changed through pull requests only, CI must pass, no force pushes |
+| `dev/x.y.0` | Development of the next minor x.y.0 | Branched from `main` after the previous release; committed to and pushed directly, or through `feat/…` branches; no force pushes |
+| `feat/…`, `fix/…`, `docs/…`, `ci/…`, … | One change each, short-lived, when it deserves a pull request of its own; the prefix is the commit type | Branched from `dev/x.y.0` and merged back, or from `main` for a patch release (see below), then deleted |
+| `release/x.y.z` | The pull request that prepares release x.y.z (version and changelog) | Branched from `dev/x.y.0` (or from `main` for a patch), merged into `main`, then the tag goes on `main` |
 | `release/x.y` | Patches to an older minor, only when needed (see "Patching an older release") | Branched from the tag `vx.y.0`, kept while that minor is patched |
 
-A fix is not a branch type of its own: it goes through a `fix/…` branch into `main` like any change, and is released as a patch. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: lint, typecheck, the frontend build and all the tests.
+A fix that should not wait for the next minor goes through a `fix/…` branch from `main` into `main` and is released as a patch from there; then `main` is merged into `dev/x.y.0`, so the fix is there too. Once x.y.0 is released, `dev/x.y.0` is deleted and `dev/x.(y+1).0` branched from `main`. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: lint, typecheck, the frontend build and all the tests. Pushes to `dev/x.y.0` are not checked, so that work in progress does not queue runs: the `release/x.y.0` pull request checks them, or run CI on the branch by hand (`gh workflow run ci.yml --ref dev/0.3.0`).
 
 ```bash
-git switch -c feat/my-change main
+git switch -c feat/my-change dev/0.3.0
 # … commits …
 git push -u origin feat/my-change
 gh pr create --fill
@@ -236,7 +240,7 @@ All packages share one version number and are released together, by `.github/wor
 
 Versions are semver for the library itself, starting at `0.1.0`: a fix is a patch; a new feature, or moving the frontend to a new Chrome milestone (its UI changes), is a minor; before 1.0 a minor may also break. Releases are cut when there is something worth releasing (features that add up to a minor, a fix users are waiting for, a new Chrome milestone), not on every merge. What is promised is what the README documents (`@public`). The Chrome version is not in the version number, where npm would drop it (`+chrome156`) or take it for a prerelease (`-chrome156`): each published package's `package.json` has it as `chrome`, which `update` writes, and each release says it first (`Based on Chrome 156`). Each release also gets the dist-tag `chrome-<milestone>`, so that `npm i devtools-anywhere@chrome-156` installs the last release on that Chrome.
 
-1. On a branch `release/x.y.z` from `main`, set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`). `node scripts/release.ts check x.y.z` checks both. Open a pull request and merge it once CI passes.
+1. On a branch `release/x.y.z` from `dev/x.y.0` (from `main` for a patch), set the same `version` in every `packages/*/package.json`, move the `Unreleased` notes in `CHANGELOG.md` and `CHANGELOG.zh-CN.md` under `## x.y.z`, and commit (`build: release x.y.z`). `node scripts/release.ts check x.y.z` checks both. Open a pull request and merge it once CI passes.
 2. Tag the merged commit on `main` and push the tag: `git switch main && git pull && git tag vx.y.z && git push origin vx.y.z`.
 3. The workflow checks the version, builds the frontend, runs the checks and tests as CI does and packs the packages (pnpm replaces `workspace:*` with the real version). Then approve its `publish` job in the Actions tab: it publishes the packages to npm, tags them `chrome-<milestone>`, and publishes the GitHub release with that version's section of `CHANGELOG.md` followed by that of `CHANGELOG.zh-CN.md`.
 

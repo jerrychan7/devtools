@@ -381,6 +381,43 @@ describe('Runtime exceptions of commands', () => {
     assert.equal(await t.page.evaluate(() => 'keys' in window), false);
   });
 
+  test('evaluations running at once lose the utilities after a timer', async () => {
+    // Ours only: run at once, both sides would see each other's utilities on the shared window.
+    // Measured in Chrome: 'function' before the timer, 'undefined' after it (0ms and 50ms).
+    const run = (ms: number) =>
+      t.ours.send('Runtime.evaluate', {
+        expression: `const before = typeof $; await new Promise(r => setTimeout(r, ${ms})); [before, typeof $]`,
+        replMode: true,
+        includeCommandLineAPI: true,
+        returnByValue: true,
+      });
+    const results = await Promise.all([run(20), run(50)]);
+    assert.deepEqual(
+      results.map(r => r.result.value),
+      [
+        ['function', 'undefined'],
+        ['function', 'undefined'],
+      ]
+    );
+    assert.equal(await t.page.evaluate(() => '$' in window), false);
+  });
+
+  test('the utilities stay after a microtask await, gone after a timer', async () => {
+    // One side after the other: ours has removed its utilities before Chrome's run.
+    const params = {
+      // No declarations: both sides share the window, so a second `const` would clash.
+      expression: '[(await Promise.resolve(), typeof $), (await new Promise(r => setTimeout(r, 20)), typeof $)]',
+      replMode: true,
+      includeCommandLineAPI: true,
+      returnByValue: true,
+    };
+    const ours = await t.ours.send('Runtime.evaluate', params);
+    assert.equal(await t.page.evaluate(() => '$' in window), false);
+    const chrome = await t.chrome.send('Runtime.evaluate', params);
+    assert.deepEqual(chrome.result.value, ['function', 'undefined']);
+    assert.deepEqual(ours.result.value, chrome.result.value);
+  });
+
   test('callFunctionOn passes objectId, value and unserializableValue arguments', async () => {
     const [{ result: o }, { result: c }] = await Promise.all([
       t.ours.send('Runtime.evaluate', { expression: '({ n: 1 })' }),

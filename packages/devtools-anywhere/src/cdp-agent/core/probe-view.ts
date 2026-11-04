@@ -1,9 +1,13 @@
 // The probe records raw facts only, to stay small; this turns them into the entries and
 // records the domains use, once DevTools connects.
 import type { ConsoleEntry, ConsoleType, LogEntry, Probe, ProbeLog, ProbeRequest, RequestRecord } from '../probe/types';
+import { toTag } from './objects';
 
 /** The probe as the domains see it: log entries and request records in their final form. */
-export interface ProbeView extends Omit<Probe, 'logs' | 'requests' | 'onLog' | 'onRequest' | 'limits' | 'WebSocket'> {
+export interface ProbeView extends Omit<
+  Probe,
+  'logs' | 'requests' | 'onLog' | 'onRequest' | 'limits' | 'WebSocket' | 'hookWindow'
+> {
   readonly logs: LogEntry[];
   readonly requests: RequestRecord[];
   onLog(listener: (entry: LogEntry) => void): () => void;
@@ -50,6 +54,7 @@ function consoleEntry(call: Extract<ProbeLog, { kind: 'console' }>): Omit<Consol
     type,
     args: entryArgs,
     time,
+    inDocument: call.inDocument,
   });
   const warn = (text: string) => entry('warning', [text]);
   // Counters and timers: the probe put the label string first.
@@ -79,6 +84,9 @@ function consoleEntry(call: Extract<ProbeLog, { kind: 'console' }>): Omit<Consol
   }
 }
 
+/** Whether `value` is a Headers object of any realm: a same-origin iframe's fetch() gives its own. */
+const isHeaders = (value: object): value is Headers => toTag(value) === 'Headers';
+
 function headersToObject(headers: Record<string, string> | Headers | string): Record<string, string> {
   const obj: Record<string, string> = {};
   if (typeof headers === 'string') {
@@ -86,7 +94,7 @@ function headersToObject(headers: Record<string, string> | Headers | string): Re
       const i = line.indexOf(':');
       if (i > 0) obj[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
     }
-  } else if (headers instanceof Headers) headers.forEach((v, k) => (obj[k] = v));
+  } else if (isHeaders(headers)) headers.forEach((v, k) => (obj[k] = v));
   else Object.assign(obj, headers);
   return obj;
 }
@@ -278,6 +286,7 @@ export function viewProbe(probe: Probe): ProbeView {
     listeners: probe.listeners,
     ownUrls: probe.ownUrls,
     fetch: probe.fetch,
+    hookNetwork: probe.hookNetwork,
     tools: probe.tools,
     bodyLimits(totalSize, resourceSize) {
       maxTotal = totalSize;

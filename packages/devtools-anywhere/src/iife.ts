@@ -2,8 +2,15 @@
 // earlier), registers <devtools-anywhere>, and exposes the API as `window.DevtoolsAnywhere`.
 // Inside the page iframe of shell mode, it connects the page's CDP session to the shell and shows
 // the shell element's F12 button in the page.
-import { createCdpSession, installProbe, isShellPage, setShellScriptUrl } from './cdp-agent';
-import { connectFrontend, connectToShell } from './connection';
+import {
+  childTargets,
+  createCdpSession,
+  installProbe,
+  isShellPage,
+  mergedFrames,
+  setShellScriptUrl,
+} from './cdp-agent';
+import { connectFrontend, connectToShell, emulateInShell, shellClients } from './connection';
 import {
   createGlobalElement,
   createPageSession,
@@ -13,7 +20,11 @@ import {
 } from './element';
 import type { DevtoolsAnywhereApi } from './api';
 import { SNAPDOM_SCRIPT } from './embedder';
+import { linkFrames } from './frame-links';
 import { connectRemote } from './remote';
+
+/** Set by the build: true in the tests' bundle (dist-test/) alone. */
+declare const DEVTOOLS_ANYWHERE_TEST: boolean;
 
 // The probe loads this bundle inside the shell's page iframe, and the page may load it
 // again itself: only the first copy runs.
@@ -37,8 +48,12 @@ if (!('DevtoolsAnywhere' in window)) {
   const api: DevtoolsAnywhereApi = {
     connectFrontend,
     connectRemote: (serverUrl, options) => connectRemote(createPageSession, serverUrl, options),
-    createCdpSession,
+    createCdpSession: options => emulateInShell(createCdpSession(options)),
     createGlobalElement,
+    linkFrames: options => linkFrames(options, createPageSession),
   };
   Object.assign(window, { DevtoolsAnywhere: api });
+  // What the tests read in the page; not in the published bundle.
+  if (DEVTOOLS_ANYWHERE_TEST)
+    Object.assign(window, { __devtoolsAnywhereTest: { childTargets, mergedFrames, shellClients } });
 }

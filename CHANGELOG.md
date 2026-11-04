@@ -4,6 +4,33 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
+## 0.3.0
+
+Based on Chrome 156 (156.0.8078.80).
+
+- Same-origin iframes, as in Chrome: Elements expands them; each has its frame in the Page tree and its execution context in the Console's context menu, with its console messages and errors; Styles shows its own sheets and media; Network tags its requests with its frame; highlighting, inspect mode and Input reach into it. Iframes in shadow trees and same-origin `<object>` and `<embed>` documents are frames too; `Page.getResourceTree` lists each frame's own resources. Logs and requests an iframe makes before its load event are missing (except for srcdoc and blank iframes), and its navigations are reported once loaded.
+- Cross-origin iframes whose page loads the probe too, when each side trusts the other (`data-frame-origins` in the parent, `data-parent-origins` in the iframe; the Vite options `frameOrigins` and `parentOrigins`): they are child targets, as Chrome's out-of-process iframes, through `Target.setAutoAttach` and messages routed by `sessionId`, in every setup (embedded, shell mode, remote). Elements shows their document under the `<iframe>` (`DOM.getFrameOwner`), the Console their contexts; input over them reaches them, and wheels chain back to the parent. Each client attaching them gets a session of its own, as in Chrome (the page's DevTools and a remote agent at once). Their targets survive navigations, and iframes in them link level by level.
+- Sandboxed iframes without `allow-same-origin` (with a `src` of the page's origin, `about:blank` or `srcdoc`) whose document loads the probe, when the parent lists `sandboxed` in `data-frame-origins` and the document the parent's origin in `data-parent-origins`: they are merged into the parent's target, as Chrome keeps them there, with no child target. Elements shows their document under the `<iframe>`, the Console their context and messages, Network their requests, Sources their scripts, Styles their sheets; highlighting, inspect mode and Input reach into them. Off by default; those with a `src` of another origin, same-site too, are still refused. The remaining gaps are in the usage guide's limitations.
+- `DOM.getNodeForLocation` takes document coordinates, not viewport ones, and `DOM.scrollIntoViewIfNeeded` centers an element that is out of view, as in Chrome. Hovering with `Input.dispatchMouseEvent` sends `pointerout`, `pointerover`, `mouseout`, `mouseover` in Chrome's order.
+- `Page.navigatedWithinDocument` for `history.pushState`, `replaceState`, fragment changes and navigations the Navigation API intercepts, in the top page and in frames.
+- Requests the page made before the probe ran are reported from Resource Timing (without stack, headers or body), as Chrome reports them too.
+- `DOM.requestChildNodes` no longer sends children the client already has, as in Chrome: the frontend asking twice emptied an expanded iframe.
+- In shell mode, a reloaded frontend starts a new session, as in Chrome.
+- In shell mode, `Emulation.setDeviceMetricsOverride` and `clearDeviceMetricsOverride` work from any client of the page (a remote agent, a `createCdpSession`), not only the shell's frontend: the last override set applies, and a client's clear or end only lifts its own; a remote client's override survives page reloads, re-applied in the order the clients attached, as in Chrome. Their parameters are checked with Chrome's errors; outside shell mode the two commands fail, saying so.
+- Commands the page cannot carry out (auto dark mode, turning focus emulation on, the pinch zoom, background services, bypassing the Service Worker, autofill addresses, the security isolation status, browser feature flags, network throttling, enabling domains whose events only the browser has such as the profilers, …) fail with "Not supported in the page: <why>" instead of succeeding without effect or answering with made-up data; `CSS.getEnvironmentVariables` returns the env() values the page resolves; those that could be done in the page still succeed, and are listed in the roadmap.
+- An embedded frontend that reloads is told by its command ids starting again, not by its frame's load event, which comes after its first commands: what it enabled at once is no longer ended by the load.
+- `CSS.createStyleSheet` fails with "Frame not found" for an unknown `frameId`, as in Chrome.
+- Merged sandboxed iframes, as in Chrome: each new document gets new ids, and a reloaded one's execution contexts are destroyed and not reused, while a document linking again keeps its own; DOM undo and redo cover the page and its merged frames in one history, in the order of the edits, CSS edits in the frames included; a frame not answering within 1 s for its document, a node or a point is taken as not answering; `Page.navigate` takes a sandboxed iframe's `frameId`, merged or not; after `Page.disable`, the frames' queued events are no longer sent.
+
+### API changes
+
+Public API, as in `packages/*/etc/*.public.api.md`: additions only, nothing removed, renamed or changed.
+
+- Probe script attributes (`devtools-anywhere`): `data-frame-origins` (origins of cross-origin iframes this page's DevTools debugs, space-separated; `sandboxed` for its sandboxed iframes) and `data-parent-origins` (origins of the pages that may debug this one in their iframe).
+- Vite plugin options (`@devtools-anywhere/vite-plugin`): `frameOrigins` and `parentOrigins` (arrays), written into those two attributes.
+- CDP: commands the page cannot carry out now fail with -32000 "Not supported in the page: <reason>" instead of succeeding without effect (listed above); `CSS.createStyleSheet` with an unknown `frameId` fails. Other changes to CDP answers and events are behavior fixes towards Chrome, listed above.
+- The messages between the probe, the shell and the remote server gained the internal methods `DevtoolsAnywhere.attach` and `DevtoolsAnywhere.metrics`: use the probe and `@devtools-anywhere/remote-server` of the same version.
+
 ## 0.2.0
 
 Based on Chrome 156 (156.0.8078.80).

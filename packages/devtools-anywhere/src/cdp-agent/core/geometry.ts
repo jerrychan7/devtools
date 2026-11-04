@@ -1,3 +1,14 @@
+import {
+  contentDocumentOf,
+  isFrameOwner,
+  isHtmlElement,
+  isShadowRoot,
+  isSvg,
+  isSvgElement,
+  realmOf,
+  styleOf,
+} from './realm';
+
 /** A CDP quad: x1 y1 … x4 y4, clockwise from the top left. */
 export type Quad = number[];
 
@@ -11,18 +22,13 @@ export interface Box {
 export const rectQuad = (r: Box): Quad => [r.left, r.top, r.right, r.top, r.right, r.bottom, r.left, r.bottom];
 
 /** The quad of `box` (in an element's local, untransformed coordinates) mapped through `m`. */
-export function mapQuad(m: DOMMatrixReadOnly, box: Box): Quad {
-  const corners: [number, number][] = [
-    [box.left, box.top],
-    [box.right, box.top],
-    [box.right, box.bottom],
-    [box.left, box.bottom],
-  ];
-  return corners.flatMap(([x, y]) => {
-    const p = m.transformPoint(new DOMPoint(x, y));
-    return [p.x / p.w, p.y / p.w];
-  });
-}
+export const mapQuad = (m: DOMMatrixReadOnly, box: Box): Quad => mapPoints(m, rectQuad(box));
+
+/** An SVG element with a bounding box and screen CTM (`SVGGraphicsElement`), of any realm. */
+const isSvgGraphics = (el: Element): el is SVGGraphicsElement => isSvgElement(el) && 'getBBox' in el;
+
+/** An SVG shape (`SVGGeometryElement`), of any realm. */
+const isSvgGeometry = (el: Element): el is SVGGeometryElement => isSvgGraphics(el) && 'getTotalLength' in el;
 
 const isTransformed = (style: CSSStyleDeclaration) =>
   style.transform !== 'none' ||
@@ -33,7 +39,7 @@ const isTransformed = (style: CSSStyleDeclaration) =>
 
 /** Whether the element or an ancestor is transformed: a cheap check before following the layout. */
 export function hasTransformedAncestor(el: Element): boolean {
-  for (let a: Element | null = el; a; a = a.parentElement) if (isTransformed(getComputedStyle(a))) return true;
+  for (let a: Element | null = el; a; a = a.parentElement) if (isTransformed(styleOf(a))) return true;
   return false;
 }
 
@@ -67,7 +73,7 @@ function parts(v: string): string[] {
 }
 
 /** The element's own transform, about its transform origin, or null without one. */
-function ownTransform(el: Element, style = getComputedStyle(el)): DOMMatrix | null {
+function ownTransform(el: Element, style = styleOf(el)): DOMMatrix | null {
   const hasTransform = style.transform !== 'none';
   if (!isTransformed(style)) return null;
   // Composes translate, rotate, scale and transform in the order CSS applies them.
@@ -75,8 +81,8 @@ function ownTransform(el: Element, style = getComputedStyle(el)): DOMMatrix | nu
   const translate = style.getPropertyValue('translate');
   if (translate && translate !== 'none') {
     const [x = '0', y = '0', z = '0'] = parts(translate);
-    const w = el instanceof HTMLElement ? el.offsetWidth : 0;
-    const h = el instanceof HTMLElement ? el.offsetHeight : 0;
+    const w = isHtmlElement(el) ? el.offsetWidth : 0;
+    const h = isHtmlElement(el) ? el.offsetHeight : 0;
     m = m.translate(length(x, w), length(y, h), parseFloat(z) || 0);
   }
   const rotate = style.getPropertyValue('rotate');
@@ -135,7 +141,8 @@ function documentPosition(el: HTMLElement): { x: number; y: number } {
     dx = Math.min(...q.filter((_, i) => i % 2 === 0));
     dy = Math.min(...q.filter((_, i) => i % 2 === 1));
   }
-  return { x: rect.left - dx + scrollX, y: rect.top - dy + scrollY };
+  const win = realmOf(el);
+  return { x: rect.left - dx + win.scrollX, y: rect.top - dy + win.scrollY };
 }
 
 /**
@@ -146,11 +153,13 @@ function documentPosition(el: HTMLElement): { x: number; y: number } {
  * (SVG, …): callers fall back to the bounding rectangle.
  */
 export function localToViewport(el: Element): DOMMatrix | null {
-  if (!(el instanceof HTMLElement)) return null;
-  const scrolling = document.scrollingElement;
+  if (!isHtmlElement(el)) return null;
+  const doc = el.ownerDocument;
+  const win = realmOf(el);
+  const scrolling = doc.scrollingElement;
   let m = new DOMMatrix();
   // Each element's computed style is read once, as the node and then as the container.
-  for (let node: HTMLElement = el, style = getComputedStyle(el); ;) {
+  for (let node: HTMLElement = el, style = styleOf(el); ;) {
     const own = ownTransform(node, style);
     if (own) m = own.multiply(m);
     const container = node.offsetParent;
@@ -165,17 +174,17 @@ export function localToViewport(el: Element): DOMMatrix | null {
           x -= a.scrollLeft;
           y -= a.scrollTop;
         }
-    if (!(container instanceof HTMLElement)) {
+    if (!isHtmlElement(container)) {
       // The viewport, or the document for the root elements.
       if (position === 'fixed') return flatten(new DOMMatrix().translate(x, y).multiply(m));
-      if (node === document.body || node === document.documentElement) {
+      if (node === doc.body || node === doc.documentElement) {
         const origin = documentPosition(node);
-        return flatten(new DOMMatrix().translate(origin.x - scrollX, origin.y - scrollY).multiply(m));
+        return flatten(new DOMMatrix().translate(origin.x - win.scrollX, origin.y - win.scrollY).multiply(m));
       }
       return null;
     }
-    const containerStyle = getComputedStyle(container);
-    if (container === document.body || container === document.documentElement) {
+    const containerStyle = styleOf(container);
+    if (container === doc.body || container === doc.documentElement) {
       // Offsets from a static body are relative to the document, from a positioned one to its
       // border box (Chrome).
       if (containerStyle.position === 'static') {
@@ -201,10 +210,210 @@ export function localToViewport(el: Element): DOMMatrix | null {
   }
 }
 
+/** The `<iframe>` or `<frame>` showing a document, if its parent is within reach (same origin). */
+function frameElementOf(doc: Document): Element | null {
+  try {
+    return doc.defaultView?.frameElement ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Maps the viewport of the document in a frame owner to the owner's viewport: to its content
+ * box, where the browser draws the document (already scrolled within it), transformed like the
+ * owner.
+ */
+function frameContentToViewport(owner: Element): DOMMatrix {
+  const style = styleOf(owner);
+  const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
+  const rect = owner.getBoundingClientRect();
+  const placed =
+    (hasTransformedAncestor(owner) && localToViewport(owner)) || new DOMMatrix().translate(rect.left, rect.top);
+  return placed.translate(owner.clientLeft + px('padding-left'), owner.clientTop + px('padding-top'));
+}
+
+/**
+ * Maps the viewport of a frame's document to the top one, through each `<iframe>` holding it.
+ * Null for the top document.
+ */
+export function frameToTop(doc: Document): DOMMatrix | null {
+  let m: DOMMatrix | null = null;
+  for (let owner = frameElementOf(doc); owner; owner = frameElementOf(owner.ownerDocument)) {
+    const step = frameContentToViewport(owner);
+    m = m ? step.multiply(m) : step;
+  }
+  return m;
+}
+
+/**
+ * Maps the viewport of the document a frame owner shows to the top viewport, through the owner and
+ * the iframes holding it: for a document out of reach, e.g. a merged sandboxed frame's.
+ */
+export function ownerContentToTop(owner: Element): DOMMatrix {
+  const step = frameContentToViewport(owner);
+  const m = frameToTop(owner.ownerDocument);
+  return m ? m.multiply(step) : step;
+}
+
+/** A quad (or any list of x, y pairs) mapped through `m`. */
+export function mapPoints(m: DOMMatrixReadOnly, q: Quad): Quad {
+  const out: Quad = [];
+  for (let i = 0; i + 1 < q.length; i += 2) {
+    const p = m.transformPoint(new DOMPoint(q[i], q[i + 1]));
+    out.push(p.x / p.w, p.y / p.w);
+  }
+  return out;
+}
+
+/** The point (x, y) mapped through the inverse of `m`. */
+function unmapPoint(m: DOMMatrix, x: number, y: number): { x: number; y: number } {
+  const [px = NaN, py = NaN] = mapPoints(m.inverse(), [x, y]);
+  return { x: px, y: py };
+}
+
+/** A point of the top viewport in the viewport of a frame's document. */
+export function pointInFrame(doc: Document, x: number, y: number): { x: number; y: number } {
+  const m = frameToTop(doc);
+  return m ? unmapPoint(m, x, y) : { x, y };
+}
+
+/**
+ * A point of a frame owner's viewport in the viewport of the document it shows: for a cross-origin
+ * iframe, whose document is out of reach, the point its own page sees.
+ */
+export function pointInOwnerContent(owner: Element, x: number, y: number): { x: number; y: number } {
+  return unmapPoint(frameContentToViewport(owner), x, y);
+}
+
+/** The document a frame owner (`<iframe>`, `<object>`, …) shows, when within reach (same origin). */
+export function frameDocumentOf(el: Element): Document | null {
+  return isFrameOwner(el) ? contentDocumentOf(el) : null;
+}
+
+/**
+ * The topmost elements at a point of `doc`'s viewport that `accept` takes, looking into the
+ * documents of same-origin iframes like Chrome's hit testing: the element in `doc`, then, if it is
+ * an iframe, the element there in its document at the point mapped into its viewport, and so on.
+ * The path ends at an iframe where its document has nothing (its border and padding), and is
+ * empty where `doc` has nothing (outside its viewport). Each point is in its element's viewport.
+ */
+export function hitPath(
+  doc: Document,
+  x: number,
+  y: number,
+  accept: (el: Element) => boolean = () => true
+): { el: Element; x: number; y: number }[] {
+  const path: { el: Element; x: number; y: number }[] = [];
+  for (let d: Document | null = doc, p = { x, y }; d;) {
+    const el = d.elementsFromPoint(p.x, p.y).find(accept);
+    if (!el) break;
+    path.push({ el, ...p });
+    d = frameDocumentOf(el);
+    if (d) p = unmapPoint(frameContentToViewport(el), p.x, p.y);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) break;
+  }
+  return path;
+}
+
+/** The innermost element of {@link hitPath}: the node Chrome finds at a point. */
+export function hitTest(
+  doc: Document,
+  x: number,
+  y: number,
+  accept?: (el: Element) => boolean
+): { el: Element; x: number; y: number } | null {
+  const path = hitPath(doc, x, y, accept);
+  return path[path.length - 1] ?? null;
+}
+
+/** The document holding the iframe that shows a same-origin frame's document; null for the top one. */
+export function parentFrameDocument(doc: Document): Document | null {
+  return frameElementOf(doc)?.ownerDocument ?? null;
+}
+
+/**
+ * How far to scroll along one axis to expose `lo`…`hi` in the visible `vlo`…`vhi`, like Blink's
+ * "center if needed": not at all when it is visible (or covers the visible part), to the nearest
+ * edge when partly visible, to the center when hidden.
+ */
+function exposeDelta(lo: number, hi: number, vlo: number, vhi: number): number {
+  if ((lo >= vlo && hi <= vhi) || (lo <= vlo && hi >= vhi)) return 0;
+  if (hi <= vlo || lo >= vhi) return (lo + hi) / 2 - (vlo + vhi) / 2;
+  return lo < vlo ? lo - vlo : hi - vhi;
+}
+
+/** Scrolls `scroller` by the amount exposing `rect` in `visible`; returns the box where `rect` is then. */
+function expose(scroller: Element | Window, rect: Box, visible: Box): Box {
+  const dx = exposeDelta(rect.left, rect.right, visible.left, visible.right);
+  const dy = exposeDelta(rect.top, rect.bottom, visible.top, visible.bottom);
+  if (!dx && !dy) return rect;
+  const position = () =>
+    'scrollX' in scroller ? [scroller.scrollX, scroller.scrollY] : [scroller.scrollLeft, scroller.scrollTop];
+  const [x0 = 0, y0 = 0] = position();
+  scroller.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+  const [x1 = 0, y1 = 0] = position();
+  return {
+    left: rect.left - x1 + x0,
+    top: rect.top - y1 + y0,
+    right: rect.right - x1 + x0,
+    bottom: rect.bottom - y1 + y0,
+  };
+}
+
+/** The parent of an element in the flat tree: a slotted element's slot, a shadow root's host. */
+function flatParent(el: Element): Element | null {
+  const root = el.getRootNode();
+  return el.assignedSlot ?? el.parentElement ?? (isShadowRoot(root) ? root.host : null);
+}
+
+/**
+ * Scrolls an element into view like Chrome's DOM.scrollIntoViewIfNeeded: each scroll container
+ * holding it (up the flat tree, out of shadow trees), the viewport of its document and then those
+ * of the documents of the iframes holding that one, from the inside out, each by itself "center
+ * if needed" ({@link exposeDelta}). `part` is the area to expose, relative to the element's border
+ * box; the whole of it by default.
+ */
+export function scrollIntoViewIfNeeded(
+  el: Element,
+  part?: { x: number; y: number; width: number; height: number }
+): void {
+  const r = el.getBoundingClientRect();
+  let rect: Box = part
+    ? {
+        left: r.left + part.x,
+        top: r.top + part.y,
+        right: r.left + part.x + part.width,
+        bottom: r.top + part.y + part.height,
+      }
+    : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  let doc = el.ownerDocument;
+  let from: Element | null = flatParent(el);
+  for (;;) {
+    for (let a = from; a && a !== doc.documentElement && a !== doc.body; a = flatParent(a)) {
+      const style = styleOf(a);
+      const clips = (v: string) => v !== 'visible' && v !== 'clip';
+      if (!clips(style.overflowX) && !clips(style.overflowY)) continue;
+      const box = a.getBoundingClientRect();
+      const left = box.left + a.clientLeft;
+      const top = box.top + a.clientTop;
+      rect = expose(a, rect, { left, top, right: left + a.clientWidth, bottom: top + a.clientHeight });
+    }
+    const root = doc.documentElement;
+    const win = doc.defaultView;
+    if (win) rect = expose(win, rect, { left: 0, top: 0, right: root.clientWidth, bottom: root.clientHeight });
+    const owner = frameElementOf(doc);
+    if (!owner) return;
+    rect = boundsOf(mapPoints(frameContentToViewport(owner), rectQuad(rect)));
+    doc = owner.ownerDocument;
+    from = flatParent(owner);
+  }
+}
+
 /** The nearest HTML ancestor of an SVG element, which the SVG layout is placed in. */
 function htmlAncestor(el: Element): HTMLElement | null {
   let a: Element | null = el.parentElement;
-  while (a && !(a instanceof HTMLElement)) a = a.parentElement;
+  while (a && !isHtmlElement(a)) a = a.parentElement;
   return a;
 }
 
@@ -244,23 +453,18 @@ function svgToViewport(
  * times √2 for square caps, or the miter limit for miter joins of paths and polylines.
  */
 function strokeOutset(el: SVGGraphicsElement): number {
-  if (!(el instanceof SVGGeometryElement)) return 0;
-  const style = getComputedStyle(el);
+  if (!isSvgGeometry(el)) return 0;
+  const style = styleOf(el);
   const width = parseFloat(style.strokeWidth) || 0;
   if (style.stroke === 'none' || width <= 0) return 0;
-  if (el instanceof SVGRectElement || el instanceof SVGCircleElement || el instanceof SVGEllipseElement)
-    return width / 2;
+  if (isSvg(el, 'rect') || isSvg(el, 'circle') || isSvg(el, 'ellipse')) return width / 2;
   let factor = style.strokeLinecap === 'square' ? Math.SQRT2 : 1;
-  if (!(el instanceof SVGLineElement) && style.strokeLinejoin === 'miter')
+  if (!isSvg(el, 'line') && style.strokeLinejoin === 'miter')
     factor = Math.max(factor, parseFloat(style.strokeMiterlimit) || 4);
   return (width / 2) * factor;
 }
 
-const isContainer = (el: Element) =>
-  el instanceof SVGGElement ||
-  el instanceof SVGSVGElement ||
-  el instanceof SVGAElement ||
-  el instanceof SVGSwitchElement;
+const isContainer = (el: Element) => isSvg(el, 'g') || isSvg(el, 'svg') || isSvg(el, 'a') || isSvg(el, 'switch');
 
 /** The bounds of the quad. */
 function boundsOf(q: Quad): Box {
@@ -277,7 +481,7 @@ function strokeBox(el: SVGGraphicsElement, svg: DOMMatrix, ancestors = new Map<E
     // A degenerate container (scale(0)) has no inverse: its children add nothing.
     const children = Number.isFinite(inverse.m11) ? Array.from(el.children) : [];
     for (const child of children) {
-      if (!(child instanceof SVGGraphicsElement) || getComputedStyle(child).display === 'none') continue;
+      if (!isSvgGraphics(child) || styleOf(child).display === 'none') continue;
       const mapping = svgToViewport(child, ancestors);
       // Like Chrome, a child under a non-invertible transform (scale(0)) adds nothing.
       if (!mapping || !Number.isFinite(mapping.svg.inverse().m11)) continue;
@@ -304,12 +508,12 @@ function strokeBox(el: SVGGraphicsElement, svg: DOMMatrix, ancestors = new Map<E
  * user space, rounded).
  */
 export function svgLayout(el: Element): { quad: Quad; width: number; height: number } | null {
-  if (!(el instanceof SVGGraphicsElement) || (el instanceof SVGSVGElement && !el.ownerSVGElement)) return null;
+  if (!isSvgGraphics(el) || (isSvg(el, 'svg') && !el.ownerSVGElement)) return null;
   const ancestors = new Map<Element, DOMMatrix | null>();
   const mapping = svgToViewport(el, ancestors);
   if (!mapping) return null;
   const q = mapQuad(mapping.m, strokeBox(el, mapping.svg, ancestors));
-  if (el instanceof SVGTextElement) {
+  if (isSvg(el, 'text')) {
     const b = el.getBBox();
     return { quad: q, width: Math.round(b.x + b.width), height: Math.round(b.y + b.height) };
   }
@@ -344,10 +548,10 @@ function viewBoxTransform(svg: SVGSVGElement, width: number, height: number): DO
 
 /** The border box mapping and size of an outermost <svg>, from its user space mapping. */
 export function svgRootLayout(el: Element): { m: DOMMatrix; width: number; height: number } | null {
-  if (!(el instanceof SVGSVGElement) || el.ownerSVGElement) return null;
+  if (!isSvg(el, 'svg') || el.ownerSVGElement) return null;
   const mapping = svgToViewport(el);
   if (!mapping) return null;
-  const style = getComputedStyle(el);
+  const style = styleOf(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const left = px('border-left-width') + px('padding-left');
   const top = px('border-top-width') + px('padding-top');
@@ -376,7 +580,7 @@ export function untransformedBoxes(el: Element): Box[] | null {
     // Switching the transforms off can shrink a scroller's scrollable overflow and clamp its
     // position, which queues a scroll event the page would see even if the position is put back.
     if ((a.scrollLeft || a.scrollTop) && !fillsScrollEnd(a, [el, ...animated])) return null;
-    if (isTransformed(getComputedStyle(a))) animated.push(a);
+    if (isTransformed(styleOf(a))) animated.push(a);
   }
   const animations = animated.map(a => {
     const animation = a.animate([off, off], { duration: 1, fill: 'both' });
@@ -384,7 +588,7 @@ export function untransformedBoxes(el: Element): Box[] | null {
     return animation;
   });
   try {
-    if (animated.some(a => getComputedStyle(a).transform !== 'matrix(1, 0, 0, 1, 0, 0)')) return null;
+    if (animated.some(a => styleOf(a).transform !== 'matrix(1, 0, 0, 1, 0, 0)')) return null;
     const origin = el.getBoundingClientRect();
     return Array.from(el.getClientRects(), r => ({
       left: r.left - origin.left,
@@ -459,28 +663,18 @@ export function unmapRects(m: DOMMatrix, rects: DOMRect[]): Box[] | null {
   });
 }
 
-const replaced = [
-  HTMLImageElement,
-  HTMLVideoElement,
-  HTMLCanvasElement,
-  HTMLIFrameElement,
-  HTMLEmbedElement,
-  HTMLObjectElement,
-  HTMLInputElement,
-  HTMLTextAreaElement,
-  HTMLSelectElement,
-];
+const replaced = new Set(['img', 'video', 'canvas', 'iframe', 'embed', 'object', 'input', 'textarea', 'select']);
 
 /** Whether the element lays out as line boxes: an inline, non-replaced element. */
 export const isInlineBox = (el: Element) =>
-  el instanceof HTMLElement && getComputedStyle(el).display === 'inline' && !replaced.some(type => el instanceof type);
+  isHtmlElement(el) && styleOf(el).display === 'inline' && !replaced.has(el.localName);
 
 /**
  * Chrome's quads of an inline element's line boxes leave out its padding and border: on both block
  * sides of every line, at the start of the first line and the end of the last.
  */
 export function lineContentBoxes(el: Element, boxes: Box[]): Box[] {
-  const style = getComputedStyle(el);
+  const style = styleOf(el);
   const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
   const edge = (side: string) => px(`padding-${side}`) + px(`border-${side}-width`);
   const vertical = style.writingMode !== 'horizontal-tb';

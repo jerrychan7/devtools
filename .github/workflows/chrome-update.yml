@@ -1,0 +1,84 @@
+# Checks every day whether stable Chrome ships another devtools-frontend commit than the one pinned
+# in packages/devtools-frontend/REVISION, minor versions included (DEV.md, "Working on the
+# frontend"), and opens an issue for it. It builds nothing: the update itself is done by hand.
+#
+# Chromium Dash's JSON endpoint (the one build.ts --latest reads) has no documentation nor promise:
+# its answer is checked, and a run fails, rather than passes, when it is not what is expected.
+name: Chrome update
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: chrome-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            packages/devtools-frontend/REVISION
+            packages/devtools-frontend/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Stable Chrome
+        id: stable
+        run: |
+          curl -fsS --retry 3 --max-time 30 \
+            'https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1' > release.json
+          node -e '
+            const [release] = JSON.parse(require("fs").readFileSync("release.json", "utf8"));
+            const version = release?.version, devtools = release?.hashes?.devtools;
+            if (!/^\d+(\.\d+){3}$/.test(version ?? "") || !/^[0-9a-f]{40}$/.test(devtools ?? ""))
+              throw new Error("Chromium Dash answered without a version or a devtools commit");
+            console.log(`version=${version}\ndevtools=${devtools}`);
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue if it ships another frontend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.stable.outputs.version }}
+          DEVTOOLS: ${{ steps.stable.outputs.devtools }}
+        run: |
+          pinned=$(tr -d '[:space:]' < packages/devtools-frontend/REVISION)
+          chrome=$(node -p "require('./packages/devtools-frontend/package.json').chrome")
+          echo "Pinned: Chrome $chrome, devtools $pinned. Stable: Chrome $VERSION, devtools $DEVTOOLS."
+          [ "$pinned" = "$DEVTOOLS" ] && exit 0
+
+          title="Update the DevTools frontend to Chrome $VERSION"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"Update the DevTools frontend to Chrome\"" \
+            --json number,title --jq '.[] | "\(.number)\t\(.title)"')
+          if printf '%s\n' "$open" | cut -f2 | grep -qxF "$title"; then
+            echo "Already open: $title"
+            exit 0
+          fi
+
+          new=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$(cat <<EOF
+          Stable Chrome is now $VERSION, which ships devtools-frontend [\`$DEVTOOLS\`](https://chromium.googlesource.com/devtools/devtools-frontend/+/$DEVTOOLS); \`REVISION\` pins \`$pinned\` (Chrome $chrome).
+
+          \`\`\`bash
+          pnpm --filter @devtools-anywhere/devtools-frontend update
+          \`\`\`
+
+          Then as in DEV.md, "Working on the frontend": the patches, \`pnpm test\`, \`pnpm licenses:update\`, and the changelogs.
+
+          Opened by \`.github/workflows/chrome-update.yml\`.
+          EOF
+          )")
+          echo "Opened $new"
+
+          # An older update not done yet is replaced by this one.
+          printf '%s\n' "$open" | while IFS=$'\t' read -r number old; do
+            [ -n "$number" ] || continue
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" --reason "not planned" --comment "Superseded by $new."
+          done

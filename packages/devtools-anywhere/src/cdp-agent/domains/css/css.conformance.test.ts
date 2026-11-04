@@ -155,7 +155,9 @@ describe('CSS', () => {
   });
 
   test('adding a rule to the inspector style sheet', async () => {
-    const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', { frameId: 'x' });
+    const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', {
+      frameId: (await t.ours.send('Page.getResourceTree')).frameTree.frame.id,
+    });
     const { rule } = await t.ours.send('CSS.addRule', {
       styleSheetId,
       ruleText: 'span { outline: 1px solid red; }',
@@ -171,7 +173,9 @@ describe('CSS', () => {
   });
 
   test('an added rule is taken back by undo after undo and redo', async () => {
-    const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', { frameId: 'x' });
+    const { styleSheetId } = await t.ours.send('CSS.createStyleSheet', {
+      frameId: (await t.ours.send('Page.getResourceTree')).frameTree.frame.id,
+    });
     const count = () =>
       t.page.evaluate(
         () =>

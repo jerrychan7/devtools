@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <title>frame link parent</title>
+    <script>
+      // The probe, with data-frame-origins from the query (`frameOrigins`), parsed as a script tag of
+      // the page so that it finds its attributes.
+      const query = new URLSearchParams(location.search);
+      const origins = query.get('frameOrigins');
+      document.write(
+        '<script src="/packages/devtools-anywhere/dist-test/probe.iife.js" data-no-panel' +
+          (origins === null ? '' : ` data-frame-origins="${origins}"`) +
+          '></' +
+          'script>'
+      );
+    </script>
+  </head>
+  <body style="margin: 0">
+    <p id="parent">parent page</p>
+    <!-- The child's URL is in the query (`child`): the server's port is only known at run time. -->
+    <iframe id="child" style="width: 400px; height: 300px; border: 0"></iframe>
+    <script>
+      // A sandboxed iframe when the query has `sandbox` (its value the attribute's).
+      if (query.get('sandbox') !== null) document.getElementById('child').setAttribute('sandbox', query.get('sandbox'));
+      if (query.get('child')) document.getElementById('child').src = query.get('child');
+    </script>
+  </body>
+</html>

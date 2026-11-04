@@ -40,4 +40,19 @@ export type ProbeScriptAttributes = {
   'data-remote'?: string | true;
   /** Connects to the remote server's URL itself, the target in the query. */
   'data-id-in-query'?: true;
+  /**
+   * The origins of the cross-origin iframes this page's DevTools may debug, space-separated: an
+   * iframe whose page has the probe too, and trusts this page (`data-parent-origins`), is
+   * debugged from here, as Chrome debugs an out-of-process iframe. Each entry is an origin
+   * (`https://app.example.com`) or every subdomain of a host, at any depth
+   * (`https://*.example.com`, not `https://example.com` itself), with the scheme and port exact;
+   * `*` alone, or elsewhere, is ignored with a warning. None by default.
+   */
+  'data-frame-origins'?: string;
+  /**
+   * The origins of the pages that may debug this page when it is in their iframe, space-separated,
+   * in the same form as `data-frame-origins`, which they must set too. While linked, this page's
+   * own F12 button and panel are hidden. None by default.
+   */
+  'data-parent-origins'?: string;
 };

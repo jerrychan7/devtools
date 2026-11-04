@@ -15,9 +15,11 @@ export interface DevtoolsAnywhereOptions {
     defaultShellMode?: 'on' | 'off';
     devtoolsFrontendPath?: string;
     devtoolsFrontendUrl?: string;
+    frameOrigins?: string[];
     idInQuery?: boolean;
     noToggler?: boolean;
     openImmediately?: boolean;
+    parentOrigins?: string[];
     remote?: string;
     serviceWorker?: boolean;
     shellModeLocked?: boolean;

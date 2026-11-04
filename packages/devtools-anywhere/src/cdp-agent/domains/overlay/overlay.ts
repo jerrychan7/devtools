@@ -1,7 +1,13 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../../core/nodes';
+import type { Frame } from '../../core/frames';
+import { mapPoints, ownerContentToTop, parentFrameDocument } from '../../core/geometry';
+import { childTargets } from '../../core/child-targets';
+import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+import { documentOf, isElement, isNode, realmOf } from '../../core/realm';
 import { boxModel, resolveNode } from '../dom/dom';
+import { CdpError } from '../../core/session';
 
 /**
  * The overlay's z-index: the highest there is. Where popovers are missing, <devtools-anywhere>
@@ -34,6 +40,15 @@ class Highlighter {
   private current: { el: Element; config: Protocol.Overlay.HighlightConfig } | null = null;
   private tracking: AbortController | null = null;
   private frame = 0;
+  private drawn = 0;
+
+  /**
+   * Bumped by every highlight and hide, in the order the commands arrive: a highlight awaited
+   * elsewhere (a merged frame's) draws only if nothing came after it, as in Chrome.
+   */
+  get generation(): number {
+    return this.drawn;
+  }
 
   private ensureLayer(): HTMLDivElement {
     if (this.layer?.isConnected) return this.layer;
@@ -46,6 +61,7 @@ class Highlighter {
   }
 
   hide() {
+    this.drawn++;
     this.untrack();
     this.layer?.remove();
     this.layer = null;
@@ -58,8 +74,9 @@ class Highlighter {
 
   /** Highlights an element's margin, border, padding and content boxes, with a size label. */
   element(el: Element, config: Protocol.Overlay.HighlightConfig = {}) {
+    this.drawn++;
+    if (this.current?.el !== el || !this.tracking) this.track(el);
     this.current = { el, config };
-    this.track();
     this.draw(el, config);
   }
 
@@ -72,10 +89,17 @@ class Highlighter {
     });
   };
 
-  private track() {
-    if (this.tracking) return;
+  private track(el: Element) {
+    if (this.tracking) this.tracking.abort();
     this.tracking = new AbortController();
     const options = { capture: true, passive: true, signal: this.tracking.signal };
+    // Scrolling in the iframes holding the element moves it too, and does not reach the top window.
+    for (
+      let doc = documentOf(el), parent = parentFrameDocument(doc);
+      parent;
+      doc = parent, parent = parentFrameDocument(doc)
+    )
+      realmOf(doc).addEventListener('scroll', this.redraw, options);
     addEventListener('scroll', this.redraw, options);
     addEventListener('resize', this.redraw, options);
     // Pinch zoom and the on-screen keyboard move the visual viewport only.
@@ -92,7 +116,33 @@ class Highlighter {
   }
 
   private draw(el: Element, config: Protocol.Overlay.HighlightConfig) {
-    const model = boxModel(el);
+    const id = el.id ? `#${el.id}` : '';
+    const cls = el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
+    this.paint(boxModel(el), config, `${el.localName}${id}${cls}`);
+  }
+
+  /**
+   * Highlights an element out of reach, a merged sandboxed iframe's, by its box model as its
+   * agent reports it, mapped into the top viewport (`m`); `name` is its label's selector.
+   */
+  remote(model: Protocol.DOM.BoxModel, m: DOMMatrixReadOnly, config: Protocol.Overlay.HighlightConfig, name: string) {
+    this.drawn++;
+    this.untrack();
+    const map = (q: number[]) => mapPoints(m, q);
+    this.paint(
+      {
+        ...model,
+        margin: map(model.margin),
+        border: map(model.border),
+        padding: map(model.padding),
+        content: map(model.content),
+      },
+      config,
+      name
+    );
+  }
+
+  private paint(model: Protocol.DOM.BoxModel, config: Protocol.Overlay.HighlightConfig, name: string) {
     const layer = this.ensureLayer();
     layer.replaceChildren();
     const boxes: [number[], string][] = [
@@ -105,9 +155,7 @@ class Highlighter {
 
     if (config.showInfo === true) {
       const label = document.createElement('div');
-      const id = el.id ? `#${el.id}` : '';
-      const cls = el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
-      label.textContent = `${el.localName}${id}${cls}  ${model.width} × ${model.height}`;
+      label.textContent = `${name}  ${model.width} × ${model.height}`;
       const border = bounds(model.border);
       const top = border.top > 24 ? border.top - 22 : border.bottom + 2;
       label.style.cssText = `position:absolute;left:${Math.max(border.left, 0)}px;top:${top}px;padding:2px 6px;
@@ -148,16 +196,47 @@ class Highlighter {
   }
 
   area(x: number, y: number, width: number, height: number, fill: string, outline?: string) {
+    this.drawn++;
     this.untrack();
     const layer = this.ensureLayer();
     layer.replaceChildren(this.rect(x, y, width, height, fill, outline));
   }
 
   areaQuad(q: number[], fill: string, outline?: string) {
+    this.drawn++;
     this.untrack();
     const layer = this.ensureLayer();
     layer.replaceChildren(this.quad(q, fill, outline));
   }
+}
+
+const isQuad = (q: unknown): q is number[] => Array.isArray(q) && q.every(n => typeof n === 'number');
+
+function isBoxModel(value: unknown): value is Protocol.DOM.BoxModel {
+  if (typeof value !== 'object' || value === null) return false;
+  return ['margin', 'border', 'padding', 'content'].every(key => isQuad(Reflect.get(value, key)));
+}
+
+/** A described node's label selector (`p#id.a.b`), as Chrome's from the element itself. */
+function labelOf(described: unknown): string {
+  const node = typeof described === 'object' && described !== null ? Reflect.get(described, 'node') : undefined;
+  const name = typeof node === 'object' && node !== null ? Reflect.get(node, 'localName') : undefined;
+  const list = typeof node === 'object' && node !== null ? Reflect.get(node, 'attributes') : undefined;
+  const attributes: unknown[] = Array.isArray(list) ? list : [];
+  let id = '';
+  let cls = '';
+  for (let i = 0; i + 1 < attributes.length; i += 2) {
+    const value = attributes[i + 1];
+    if (typeof value !== 'string') continue;
+    if (attributes[i] === 'id' && value) id = `#${value}`;
+    if (attributes[i] === 'class')
+      cls = value
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(c => `.${c}`)
+        .join('');
+  }
+  return `${typeof name === 'string' ? name : ''}${id}${cls}`;
 }
 
 /** Shows the viewport size in the top right corner for a moment after each resize, like Chrome. */
@@ -187,15 +266,23 @@ function viewportSizeOnResize() {
   };
 }
 
+/**
+ * A merged sandboxed iframe's agent inspects its own document, which this page's input does not
+ * reach, and hides what it highlighted; its nodes' highlights are drawn here (`highlightMerged`).
+ */
+mergedFrames.registerRoutes('Overlay', {
+  fanOut: ['Overlay.enable', 'Overlay.disable', 'Overlay.setInspectMode', 'Overlay.hideHighlight'],
+});
+
 export function registerOverlay(ctx: Context) {
   const { session, nodes } = ctx;
   const highlighter = new Highlighter();
   let stopInspect: (() => void) | null = null;
   const showViewportSize = viewportSizeOnResize();
 
-  /** Element under a pointer event, ignoring devtools-anywhere's own UI. */
+  /** Element under a pointer event, of any frame, ignoring devtools-anywhere's own UI. */
   function targetOf(event: Event): Element | null {
-    const el = event.target instanceof Element ? event.target : null;
+    const el = isNode(event.target) && isElement(event.target) ? event.target : null;
     return el && !closestOwn(el) ? el : null;
   }
 
@@ -209,6 +296,13 @@ export function registerOverlay(ctx: Context) {
       frame = 0;
       const el = next;
       if (!el || (el === hovered && highlighter.showing(el))) return;
+      // Over a merged sandboxed iframe's content (its border at most reaches this page): its agent,
+      // in inspect mode too (fanned out), highlights and requests its own node there.
+      if (childTargets.linkOf(el)?.merged) {
+        highlighter.hide();
+        hovered = el;
+        return;
+      }
       highlighter.element(el, config);
       if (el === hovered) return;
       hovered = el;
@@ -242,25 +336,70 @@ export function registerOverlay(ctx: Context) {
     };
     const listening = new AbortController();
     const options = { capture: true, signal: listening.signal };
-    window.addEventListener('pointermove', onMove, options);
-    // Chrome consumes the whole input event, so the page sees nothing derived from it either:
-    // no enter/leave/over/out, nor dblclick, contextmenu or auxclick from the eaten presses.
-    for (const type of 'mousemove mouseover mouseout mouseenter mouseleave pointerover pointerout pointerenter pointerleave pointerdown mousedown pointerup mouseup dblclick contextmenu auxclick'.split(
-      ' '
-    ))
-      window.addEventListener(type, swallow, options);
-    window.addEventListener('click', onClick, options);
-    // The page gets no touch input either, like in Chrome's inspect mode.
-    const touchOptions = { ...options, passive: false };
-    window.addEventListener('touchstart', swallow, touchOptions);
-    window.addEventListener('touchmove', swallow, touchOptions);
-    window.addEventListener('touchend', swallow, touchOptions);
+    // Like Chrome, the nodes of same-origin iframes are inspected too: their input goes to their
+    // own windows, each listened to (again once it loads another document).
+    const listen = ({ window: win }: Frame) => {
+      win.addEventListener('pointermove', onMove, options);
+      // Chrome consumes the whole input event, so the page sees nothing derived from it either:
+      // no enter/leave/over/out, nor dblclick, contextmenu or auxclick from the eaten presses.
+      for (const type of 'mousemove mouseover mouseout mouseenter mouseleave pointerover pointerout pointerenter pointerleave pointerdown mousedown pointerup mouseup dblclick contextmenu auxclick'.split(
+        ' '
+      ))
+        win.addEventListener(type, swallow, options);
+      win.addEventListener('click', onClick, options);
+      // The page gets no touch input either, like in Chrome's inspect mode.
+      const touchOptions = { ...options, passive: false };
+      win.addEventListener('touchstart', swallow, touchOptions);
+      win.addEventListener('touchmove', swallow, touchOptions);
+      win.addEventListener('touchend', swallow, touchOptions);
+    };
+    // A merged sandboxed iframe's agent hears nothing once the pointer leaves the iframe for the
+    // page, whose agent highlights from then on: this one's highlight goes.
+    if (childTargets.parentMerged)
+      ctx.frames.top.window.addEventListener(
+        'mouseout',
+        event => {
+          if (event.relatedTarget !== null) return;
+          cancelAnimationFrame(frame);
+          frame = 0;
+          next = hovered = null;
+          highlighter.hide();
+        },
+        options
+      );
+    const unwatch = ctx.frames.onChange(({ type, frame }) => {
+      if (type !== 'detached') listen(frame);
+    });
+    for (const frame of ctx.frames) listen(frame);
     stopInspect = () => {
+      unwatch();
       listening.abort();
       cancelAnimationFrame(frame);
       highlighter.hide();
       stopInspect = null;
     };
+  }
+
+  /**
+   * Highlights a node of a merged sandboxed iframe: like Chrome, on the page, over the iframe and
+   * beyond its edges, by the box model the iframe's agent reports, placed by the iframe's content box.
+   */
+  async function highlightMerged(ns: number, params: Protocol.Overlay.HighlightNodeRequest) {
+    const link = [...mergedFrames.frames()].find(([n]) => n === ns)?.[1];
+    // Gone: the page's own handler answers as for any unknown id.
+    if (!link) throw new CdpError('No node with given id found');
+    const ids = { nodeId: params.nodeId, backendNodeId: params.backendNodeId, objectId: params.objectId };
+    const client = mergedFrames.forSession(session);
+    const generation = highlighter.generation;
+    const [box, described] = await Promise.all([
+      client.ask(ns, 'DOM.getBoxModel', ids),
+      client.ask(ns, 'DOM.describeNode', ids),
+    ]);
+    const model = typeof box === 'object' && box !== null ? Reflect.get(box, 'model') : undefined;
+    if (!isBoxModel(model)) throw new CdpError('Could not compute box model.');
+    // Hidden or highlighted again while asking: that later command stands, as in Chrome.
+    if (highlighter.generation !== generation) return;
+    highlighter.remote(model, ownerContentToTop(link.owner), params.highlightConfig, labelOf(described));
   }
 
   session.register('Overlay', {
@@ -275,9 +414,12 @@ export function registerOverlay(ctx: Context) {
       showViewportSize(params.show),
 
     highlightNode(params: Protocol.Overlay.HighlightNodeRequest) {
+      const ns = ownerOfId(params.nodeId) ?? ownerOfId(params.backendNodeId) ?? ownerOfId(params.objectId);
+      if (ns !== undefined) return highlightMerged(ns, params);
       const node = resolveNode(ctx, params);
-      const el = node instanceof Element ? node : node.parentElement;
+      const el = isElement(node) ? node : node.parentElement;
       if (el) highlighter.element(el, params.highlightConfig);
+      return undefined;
     },
 
     highlightRect(params: Protocol.Overlay.HighlightRectRequest) {

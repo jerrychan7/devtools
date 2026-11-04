@@ -1,10 +1,11 @@
 import type { Protocol } from 'devtools-protocol';
-import { FRAME_ID } from '../../core/context';
+import { isCssom, isHtml, isShadowRoot } from '../../core/realm';
+import type { FrameRegistry } from '../../core/frames';
 import { isOwn } from '../../core/nodes';
 import { CdpError } from '../../core/session';
 import { adoptedOf } from '../../core/adopted';
 import { type TreeScope } from './forced-pseudo';
-import { type Entry, type StyleRule, importedLayer, layerKeys, selectorLabel } from './rules';
+import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from './rules';
 import { type StyleOrigin, buildStyle } from './style';
 
 /**
@@ -13,6 +14,17 @@ import { type StyleOrigin, buildStyle } from './style';
  * so ranges the client sends back keep pointing at the same rule even if the page adds or
  * removes rules in between.
  */
+/**
+ * What every style sheet id starts with: '' or `m{ns}.` in a page whose agent is merged into its
+ * parent's (core/merged-frames.ts).
+ */
+let idPrefix = '';
+
+/** Sets what the style sheet ids of every session start with (see {@link idPrefix}). */
+export function setSheetIdPrefix(prefix: string): void {
+  idPrefix = prefix;
+}
+
 export class SheetRegistry {
   private sheetIds = new WeakMap<CSSStyleSheet, string>();
   /** Weak, so that sheets the page drops can be collected. */
@@ -20,24 +32,34 @@ export class SheetRegistry {
   private ruleIds = new WeakMap<StyleRule, number>();
   private nextRuleId = new WeakMap<CSSStyleSheet, number>();
   private seq = 0;
-  inspectorSheet: CSSStyleSheet | null = null;
+  /** Inspector style sheets (CSS.createStyleSheet), in any frame. */
+  private inspectorSheets = new WeakSet<CSSStyleSheet>();
+  /** The inspector style sheet each document reuses (one made without `force`). */
+  private inspectorOfDocument = new WeakMap<Document, CSSStyleSheet>();
   /** Whether a sheet is ours rather than the page's (forced pseudo-class companions). */
   isOwnSheet: (sheet: CSSStyleSheet) => boolean = () => false;
   /** Whether a <style> came from the HTML parser rather than from a script. */
   fromParser: (style: HTMLStyleElement) => boolean = () => true;
 
-  private fetch: typeof window.fetch;
+  private fetch: typeof globalThis.fetch;
   private shadowRoots: () => ShadowRoot[];
+  private frames: FrameRegistry;
 
-  constructor(fetch: typeof window.fetch, shadowRoots: () => ShadowRoot[]) {
+  constructor(fetch: typeof globalThis.fetch, shadowRoots: () => ShadowRoot[], frames: FrameRegistry) {
     this.fetch = fetch;
     this.shadowRoots = shadowRoots;
+    this.frames = frames;
+  }
+
+  /** The window whose document the sheet belongs to ({@link realmOfSheet}). */
+  realmOf(sheet: CSSStyleSheet): Window & typeof globalThis {
+    return realmOfSheet(sheet, this.frames);
   }
 
   idOf(sheet: CSSStyleSheet): string {
     let id = this.sheetIds.get(sheet);
     if (!id) {
-      id = `sheet-${++this.seq}`;
+      id = `${idPrefix}sheet-${++this.seq}`;
       this.sheetIds.set(sheet, id);
       this.sheets.set(id, new WeakRef(sheet));
     }
@@ -52,7 +74,26 @@ export class SheetRegistry {
     const id = this.idOf(sheet);
     this.sheetIds.set(replacement, id);
     this.sheets.set(id, new WeakRef(replacement));
-    if (this.inspectorSheet === sheet) this.inspectorSheet = replacement;
+    if (!this.inspectorSheets.has(sheet)) return;
+    this.inspectorSheets.add(replacement);
+    const doc = replacement.ownerNode?.ownerDocument;
+    if (doc && this.inspectorOfDocument.get(doc) === sheet) this.inspectorOfDocument.set(doc, replacement);
+  }
+
+  isInspector(sheet: CSSStyleSheet): boolean {
+    return this.inspectorSheets.has(sheet);
+  }
+
+  /** The inspector style sheet `doc` reuses, while its <style> is in the document. */
+  inspectorOf(doc: Document): CSSStyleSheet | null {
+    const sheet = this.inspectorOfDocument.get(doc);
+    return sheet?.ownerNode?.isConnected ? sheet : null;
+  }
+
+  /** Takes `sheet` for an inspector style sheet of `doc`, the one it reuses unless `force`d. */
+  addInspector(sheet: CSSStyleSheet, doc: Document, force: boolean) {
+    this.inspectorSheets.add(sheet);
+    if (!force) this.inspectorOfDocument.set(doc, sheet);
   }
 
   get(styleSheetId: string): CSSStyleSheet {
@@ -65,18 +106,19 @@ export class SheetRegistry {
   }
 
   /**
-   * The document and the shadow roots with their top-level style sheets in cascade order: those
-   * of <style> and <link>, then adopted ones.
+   * The documents of the frames and the shadow roots with their top-level style sheets in
+   * cascade order: those of <style> and <link>, then adopted ones. Like Chrome, each same-origin
+   * iframe's document has sheets of its own, which apply only to it.
    */
   trees(): { tree: TreeScope; sheets: CSSStyleSheet[] }[] {
     if (this.memo?.trees) return this.memo.trees;
     const result: { tree: TreeScope; sheets: CSSStyleSheet[] }[] = [];
-    for (const tree of [document, ...this.shadowRoots()]) {
+    for (const tree of [...Array.from(this.frames, f => f.document), ...this.shadowRoots()]) {
       const list: CSSStyleSheet[] = [];
       for (const sheet of Array.from(tree.styleSheets)) {
         // devtools-anywhere's own sheets are not the page's.
         const owner = sheet.ownerNode;
-        if (owner && isOwn(owner) && sheet !== this.inspectorSheet) continue;
+        if (owner && isOwn(owner) && !this.isInspector(sheet)) continue;
         list.push(sheet);
       }
       for (const sheet of adoptedOf(tree)) if (!this.isOwnSheet(sheet)) list.push(sheet);
@@ -111,7 +153,7 @@ export class SheetRegistry {
       const visit = (sheet: CSSStyleSheet) => {
         result.push({ sheet, tree });
         for (const rule of this.rulesOf(sheet))
-          if (rule instanceof CSSImportRule && rule.styleSheet) visit(rule.styleSheet);
+          if (isCssom(rule, 'CSSImportRule') && rule.styleSheet) visit(rule.styleSheet);
       };
       sheets.forEach(visit);
     }
@@ -135,7 +177,7 @@ export class SheetRegistry {
     try {
       return Array.from(sheet.cssRules);
     } catch {
-      const copy = sheet instanceof CSSStyleSheet ? this.copies.get(sheet) : null;
+      const copy = isCssom(sheet, 'CSSStyleSheet') ? this.copies.get(sheet) : null;
       return copy ? Array.from(copy.cssRules) : [];
     }
   }
@@ -202,28 +244,28 @@ export class SheetRegistry {
     };
     const visit = (rules: CSSRule[], layer: string[]) => {
       for (const rule of rules) {
-        if (rule instanceof CSSStyleRule) {
+        if (isCssom(rule, 'CSSStyleRule')) {
           this.ruleId(sheet, rule);
           result.push({ rule, layer });
           visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSNestedDeclarations) {
+        } else if (isCssom(rule, 'CSSNestedDeclarations')) {
           this.ruleId(sheet, rule);
           result.push({ rule, layer });
-        } else if (rule instanceof CSSMediaRule) {
-          if (onlyActive && !matchMedia(rule.conditionText).matches) continue;
+        } else if (isCssom(rule, 'CSSMediaRule')) {
+          if (onlyActive && !this.realmOf(sheet).matchMedia(rule.conditionText).matches) continue;
           visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSSupportsRule) {
+        } else if (isCssom(rule, 'CSSSupportsRule')) {
           if (onlyActive && !CSS.supports(rule.conditionText)) continue;
           visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSStartingStyleRule) {
+        } else if (isCssom(rule, 'CSSStartingStyleRule')) {
           if (!onlyActive) visit(this.rulesOf(rule), layer);
-        } else if (rule instanceof CSSLayerBlockRule) {
+        } else if (isCssom(rule, 'CSSLayerBlockRule')) {
           const path = [...layer, ...layerKeys(rule.name, rule)];
           declare(path);
           visit(this.rulesOf(rule), path);
-        } else if (rule instanceof CSSLayerStatementRule) {
+        } else if (isCssom(rule, 'CSSLayerStatementRule')) {
           for (const name of rule.nameList) declare([...layer, ...layerKeys(name, rule)]);
-        } else if (rule instanceof CSSGroupingRule) {
+        } else if (isCssom(rule, 'CSSGroupingRule')) {
           visit(this.rulesOf(rule), layer);
         }
       }
@@ -251,26 +293,33 @@ export class SheetRegistry {
     return lines.join('\n');
   }
 
+  /** The URL the rules of a sheet come from: its own, or the base URL of its document. */
+  sourceURL(sheet: CSSStyleSheet): string {
+    return sheet.href ?? sheet.ownerNode?.baseURI ?? this.realmOf(sheet).document.baseURI;
+  }
+
   origin(sheet: CSSStyleSheet): StyleOrigin {
-    return sheet === this.inspectorSheet ? 'inspector' : 'regular';
+    return this.isInspector(sheet) ? 'inspector' : 'regular';
   }
 
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
     const text = this.text(sheet);
     const lines = text.split('\n');
-    const isInspector = sheet === this.inspectorSheet;
+    const isInspector = this.isInspector(sheet);
     const constructed = isConstructed(sheet);
     // Like Chrome, sheets in shadow trees, constructed ones and those of a <style> a script
-    // inserted have no source URL and are not inline.
+    // inserted have no source URL and are not inline. The others name the frame they are in, and
+    // inline ones the base URL of its document: like Chrome, that of the parent for a srcdoc
+    // iframe (Chrome takes the base URL the sheet was parsed with, ours is the current one).
     const owner = sheet.ownerNode;
     const local =
       constructed ||
-      owner?.getRootNode() instanceof ShadowRoot ||
-      (owner instanceof HTMLStyleElement && !this.fromParser(owner));
+      (owner && isShadowRoot(owner.getRootNode())) ||
+      (isHtml(owner, 'style') && !this.fromParser(owner));
     return {
       styleSheetId: this.idOf(sheet),
-      frameId: FRAME_ID,
-      sourceURL: sheet.href ?? (isInspector || local ? '' : location.href),
+      frameId: this.frames.ofWindow(this.realmOf(sheet)).id,
+      sourceURL: sheet.href ?? (isInspector || local || !owner ? '' : owner.baseURI),
       origin: this.origin(sheet),
       title: sheet.title ?? '',
       disabled: sheet.disabled,

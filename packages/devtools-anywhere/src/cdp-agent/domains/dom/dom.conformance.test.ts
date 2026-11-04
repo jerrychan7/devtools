@@ -76,6 +76,55 @@ describe('DOM', () => {
     assert.deepEqual(diffSubset(ours.nodes, chrome.nodes), []);
   });
 
+  test('requestChildNodes again: children the client has are not sent again, unless deeper', async () => {
+    // Set up on its own so the counts below do not depend on what earlier tests left behind.
+    [{ root: ourRoot }, { root: chromeRoot }] = await both('DOM.getDocument', { depth: 1 });
+    const html = (r: DomNode) => {
+      const node = r.children?.find(n => n.nodeName === 'HTML');
+      assert.ok(node);
+      return node.nodeId;
+    };
+    const request = (params: Omit<Protocol.DOM.RequestChildNodesRequest, 'nodeId'> = {}) =>
+      Promise.all([
+        t.ours.send('DOM.requestChildNodes', { nodeId: html(ourRoot), ...params }),
+        t.chrome.send('DOM.requestChildNodes', { nodeId: html(chromeRoot), ...params }),
+      ]);
+    const counts = async () =>
+      Promise.all([t.ours.events('DOM.setChildNodes'), t.chrome.events('DOM.setChildNodes')]).then(([o, c]) => [
+        o.length,
+        c.length,
+      ]);
+    await t.chrome.clear();
+    await t.ours.clear();
+    await request();
+    await waitForBoth(t, 'DOM.setChildNodes');
+    // The frontend asks again once it has them: Chrome sends nothing new.
+    await t.chrome.clear();
+    await t.ours.clear();
+    await request();
+    await new Promise(r => setTimeout(r, 200));
+    assert.deepEqual(await counts(), [0, 0]);
+    // Deeper: like Chrome, one event per parent whose children the client lacks (head, body).
+    await request({ depth: 2 });
+    await waitForBoth(t, 'DOM.setChildNodes');
+    await new Promise(r => setTimeout(r, 200));
+    const [ours, chrome] = await Promise.all([
+      t.ours.events('DOM.setChildNodes'),
+      t.chrome.events('DOM.setChildNodes'),
+    ]);
+    assert.equal(ours.length, chrome.length);
+    for (const [i, event] of ours.entries()) {
+      const peer = chrome[i];
+      assert.ok(peer);
+      const [{ node: ourParent }, { node: chromeParent }] = await Promise.all([
+        t.ours.send('DOM.describeNode', { nodeId: event.parentId }),
+        t.chrome.send('DOM.describeNode', { nodeId: peer.parentId }),
+      ]);
+      assert.deepEqual(diffSubset(ourParent, chromeParent), []);
+      assert.deepEqual(diffSubset(event.nodes, peer.nodes), []);
+    }
+  });
+
   describe('mutations', () => {
     before(async () => {
       [{ root: ourRoot }, { root: chromeRoot }] = await both('DOM.getDocument', { depth: -1 });

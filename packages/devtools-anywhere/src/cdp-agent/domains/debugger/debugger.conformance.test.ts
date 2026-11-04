@@ -21,7 +21,7 @@ const addScript = (query: string) =>
 
 before(async () => {
   env = await launch();
-  t = await openPage(env, ['Debugger.scriptParsed']);
+  t = await openPage(env, ['Debugger.scriptParsed', 'Runtime.executionContextCreated']);
   await addScript('before');
   await t.chrome.send('Debugger.enable');
   await t.ours.send('Debugger.enable');
@@ -110,4 +110,34 @@ test('breakpoint commands are accepted', async () => {
     start: { scriptId: '1', lineNumber: 0 },
   });
   assert.deepEqual(possible.locations, []);
+});
+
+test("a same-origin iframe's script is reported in the iframe's context", async () => {
+  await t.page.evaluate(
+    () =>
+      new Promise(resolve => {
+        const frame = document.createElement('iframe');
+        frame.name = 'in-frame';
+        frame.srcdoc = '<script src="/packages/devtools-anywhere/test-support/assets/resource.js?in-frame"></script>';
+        frame.onload = resolve;
+        document.body.append(frame);
+      })
+  );
+  /** The id of the context Runtime announces for the iframe, and the one its script is reported in. */
+  const contexts = async (side: Side) => {
+    const parsedInFrame = await waitParsed(side, 'in-frame');
+    const { frameTree } = await side.send('Page.getFrameTree');
+    const frameId = frameTree.childFrames?.find(child => child.frame.name === 'in-frame')?.frame.id;
+    assert.ok(frameId);
+    await side.send('Runtime.enable');
+    const created = (await side.events('Runtime.executionContextCreated')).filter(
+      e => e.context.auxData?.['frameId'] === frameId && e.context.auxData['isDefault'] === true
+    );
+    return { frame: created.at(-1)?.context.id, script: parsedInFrame.executionContextId };
+  };
+  for (const side of [t.chrome, t.ours]) {
+    const { frame, script } = await contexts(side);
+    assert.equal(typeof frame, 'number');
+    assert.equal(script, frame);
+  }
 });

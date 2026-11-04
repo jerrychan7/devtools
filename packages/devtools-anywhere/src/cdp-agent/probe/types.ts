@@ -28,6 +28,8 @@ export interface ConsoleEntry {
   time: number;
   /** Raw `Error().stack` taken inside the console wrapper. */
   stack?: string | undefined;
+  /** The same-origin iframe document whose console or window it came from; none for the top page. */
+  inDocument?: Document | undefined;
 }
 
 export interface ExceptionEntry {
@@ -36,6 +38,8 @@ export interface ExceptionEntry {
   error: unknown;
   time: number;
   stack?: string | undefined;
+  /** The same-origin iframe document whose console or window it came from; none for the top page. */
+  inDocument?: Document | undefined;
   url?: string;
   line?: number;
   column?: number;
@@ -57,6 +61,8 @@ export interface ConsoleCall {
   time: number;
   /** Raw `Error().stack` taken inside the console wrapper. */
   stack?: string | undefined;
+  /** The same-origin iframe document whose console or window it came from; none for the top page. */
+  inDocument?: Document | undefined;
   /** count: the new count; timeLog and timeEnd: the timer's start, if it exists. */
   fact?: number | undefined;
 }
@@ -137,6 +143,18 @@ export interface RequestRecord {
   errorText?: string;
   /** Whether a failed request was stopped by the page (abort), not by an error. */
   canceled?: boolean;
+  /** The same-origin iframe document that made the request; none for the top one's. */
+  frame?: FrameTag;
+}
+
+/**
+ * Which document of a same-origin iframe a request belongs to, as the CDP agent names it: taken
+ * when the request starts, so a request keeps the document that made it after a navigation.
+ */
+export interface FrameTag {
+  frameId: string;
+  loaderId: string;
+  documentURL: string;
 }
 
 /** Something that happened on a WebSocket after it was created. */
@@ -189,6 +207,13 @@ export interface Probe {
   /** Subscribes to WebSocket creation and every later change. */
   onSocket(listener: (record: SocketRecord) => void): () => void;
   clearLogs(): void;
+  /**
+   * Captures the console calls and uncaught errors of a same-origin iframe's document, as for the
+   * top page; entries name the document. Records its shadow roots too, as {@link shadowRoots}.
+   * Once per window: called again for one already hooked (one kept across a navigation, as from
+   * the initial about:blank), it does nothing. What the document logged before is not captured.
+   */
+  hookWindow(win: Window & typeof globalThis): void;
   /** Every shadow root attached since the probe ran, including closed ones. */
   shadowRoots: WeakMap<Element, ShadowRoot>;
   /** Subscribes to shadow roots being attached. */
@@ -201,6 +226,12 @@ export interface Probe {
   fetch: typeof fetch;
   /** The page's WebSocket before it was hooked: DevTools' own connections are not recorded. */
   WebSocket: typeof WebSocket;
+  /**
+   * Hooks the network APIs of a same-origin iframe's window like the top one's: its requests are
+   * recorded here, tagged with what `frame` returns when each starts. Called again for a window
+   * already hooked (one kept across a navigation), it only replaces `frame`.
+   */
+  hookNetwork(win: Window & typeof globalThis, frame: () => FrameTag): void;
   /** WebMCP tools registered with `document.modelContext.registerTool`, by name. */
   tools: Map<string, ToolRecord>;
   /**

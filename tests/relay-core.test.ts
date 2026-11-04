@@ -45,3 +45,113 @@ for (const [name, next] of [
     assert.ok(!relay.delivered.some(message => message.includes('"method":"Debugger.enable"')));
   });
 }
+
+/** The relay with the page's messages to the session too. */
+class PageRelay extends FakeRelay {
+  fromPage(data: object) {
+    this.pageMessage(this.session, JSON.stringify(data));
+  }
+}
+
+const json = (messages: string[]) => messages.map(message => JSON.parse(message) as unknown);
+
+test("a child target's messages pass through as they are, its responses back to the frontend", () => {
+  const relay = new PageRelay();
+  relay.say('l1');
+  const command = { id: 1, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: 'S1' };
+  relay.fromClient(command);
+  assert.deepEqual(json(relay.delivered), [command]);
+  relay.fromPage({ id: 1, result: {}, sessionId: 'S1' });
+  relay.fromPage({ method: 'Runtime.consoleAPICalled', params: {}, sessionId: 'S2' });
+  assert.deepEqual(json(relay.received), [
+    { id: 1, result: {}, sessionId: 'S1' },
+    { method: 'Runtime.consoleAPICalled', params: {}, sessionId: 'S2' },
+  ]);
+});
+
+test("a new page instance replays none of a child target's enables, and detaches the page's child targets", () => {
+  const relay = new PageRelay();
+  relay.say('l1');
+  relay.fromClient({ id: 1, method: 'Page.enable' });
+  relay.fromClient({ id: 2, method: 'Runtime.enable', sessionId: 'S1' });
+  relay.fromClient({ id: 3, method: 'Debugger.enable', sessionId: 'S1' });
+  const info = (targetId: string) => ({ targetId, type: 'iframe', title: '', url: '', attached: true });
+  relay.fromPage({ method: 'Target.attachedToTarget', params: { sessionId: 'S1', targetInfo: info('F1') } });
+  // The child's own child: its parent's to detach, which goes with the page.
+  relay.fromPage({
+    method: 'Target.attachedToTarget',
+    params: { sessionId: 'S2', targetInfo: info('F2') },
+    sessionId: 'S1',
+  });
+  relay.fromPage({ method: 'Target.attachedToTarget', params: { sessionId: 'S3', targetInfo: info('F3') } });
+  relay.fromPage({ method: 'Target.detachedFromTarget', params: { sessionId: 'S3', targetId: 'F3' } });
+  relay.hide();
+  relay.fromClient({ id: 4, method: 'Runtime.evaluate', sessionId: 'S1' });
+  relay.received.length = 0;
+  relay.delivered.length = 0;
+  relay.say('l2');
+  const received = json(relay.received);
+  assert.deepEqual(received[0], { method: 'Target.detachedFromTarget', params: { sessionId: 'S1', targetId: 'F1' } });
+  assert.equal(received.filter(m => JSON.stringify(m).includes('detachedFromTarget')).length, 1);
+  assert.deepEqual(
+    json(relay.delivered).map(m => Reflect.get(Object(m), 'method')),
+    ['Page.enable']
+  );
+});
+
+test("a child target's commands between page instances fail, and none is held", () => {
+  const relay = new PageRelay();
+  relay.say('l1');
+  relay.fromClient({ id: 1, method: 'Debugger.enable', sessionId: 'S1' });
+  relay.hide();
+  relay.fromClient({ id: 2, method: 'Debugger.enable', sessionId: 'S1' });
+  const error = { code: -32000, message: 'Inspected target navigated or closed' };
+  assert.deepEqual(json(relay.received), [
+    { id: 1, error },
+    { id: 2, error },
+  ]);
+  relay.delivered.length = 0;
+  relay.say('l2');
+  assert.deepEqual(relay.delivered, []);
+});
+
+test('a new page instance is sent the device metrics override the page took, not one it rejected or cleared', () => {
+  const resent = (relay: PageRelay) =>
+    json(relay.delivered.splice(0)).filter(
+      message =>
+        typeof message === 'object' &&
+        message !== null &&
+        'method' in message &&
+        message.method === 'Emulation.setDeviceMetricsOverride'
+    );
+  const relay = new PageRelay();
+  relay.say('l1');
+  const taken = { width: 400, height: 600, deviceScaleFactor: 1, mobile: false };
+  relay.fromClient({ id: 1, method: 'Emulation.setDeviceMetricsOverride', params: taken });
+  relay.fromPage({ id: 1, result: {} });
+  relay.fromClient({ id: 2, method: 'Emulation.setDeviceMetricsOverride', params: { width: -5 } });
+  relay.fromPage({ id: 2, error: { code: -32602, message: 'Width and height values must be positive' } });
+  relay.delivered.length = 0;
+  relay.say('l2');
+  assert.deepEqual(
+    resent(relay).map(message =>
+      typeof message === 'object' && message !== null ? Reflect.get(message, 'params') : undefined
+    ),
+    [taken]
+  );
+  relay.fromClient({ id: 3, method: 'Emulation.clearDeviceMetricsOverride' });
+  relay.say('l3');
+  assert.deepEqual(resent(relay), []);
+});
+
+test('a device metrics override cleared before its answer is not sent to a new page instance', () => {
+  const relay = new PageRelay();
+  relay.say('l1');
+  relay.fromClient({ id: 1, method: 'Emulation.setDeviceMetricsOverride', params: { width: 400, height: 600 } });
+  relay.fromClient({ id: 2, method: 'Emulation.clearDeviceMetricsOverride' });
+  relay.fromPage({ id: 1, result: {} });
+  relay.fromPage({ id: 2, result: {} });
+  relay.delivered.length = 0;
+  relay.say('l2');
+  assert.ok(!relay.delivered.some(body => body.includes('Emulation.setDeviceMetricsOverride')));
+});
