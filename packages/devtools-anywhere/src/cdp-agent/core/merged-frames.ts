@@ -32,11 +32,14 @@ import { CdpError, type CdpSession } from './session';
  *     errors are ignored (each waited for {@link FAN_OUT_TIMEOUT} ms at most, so that what they
  *     report on enable comes before the client's answer). The last params of each are kept, a
  *     `.disable` dropping its `.enable`, and sent again to a merged frame linked later (a reload).
- * - Ids: a merged frame's agent makes its ids in namespace `ns` (1, 2, …, given by the handshake):
+ * - Ids: a merged frame's agent makes its ids in namespace `ns` (1, 2, …, given by the handshake,
+ *   a new one for each document, so that no id of a document gone is taken again, as in Chrome):
  *   integers (nodeId, backendNodeId, executionContextId) from `ns * 2^32`, strings (objectId,
  *   styleSheetId, scriptId, requestId) prefixed `m{ns}.`; frame ids are the page's own for the
  *   iframe. {@link ownerOfId} tells which: the page's own ids are below 2^32 and unprefixed.
- * - Events of a merged frame's agent reach the client as they are, on the page's session.
+ * - Events of a merged frame's agent reach the client as they are, on the page's session. When its
+ *   link closes (the document goes), the contexts it announced are destroyed for the clients that
+ *   enabled Runtime, as Chrome does when a frame navigates: its agent, gone, cannot.
  * - Grafting (a result that must include the merged frames', as DOM.getDocument's iframe
  *   contentDocument): the domain asks each frame's agent itself, on the client's session with it,
  *   `mergedFrames.forSession(session).ask(ns, method, params)`, for `ns` of
@@ -78,6 +81,8 @@ interface Channel {
   readonly link: ChildLink;
   readonly session: ChildSession;
   readonly pending: Map<string, { resolve(value: unknown): void; reject(error: unknown): void }>;
+  /** The execution contexts its agent announced and has not destroyed: id → uniqueId. */
+  readonly contexts: Map<number, unknown>;
 }
 
 /** What one client has with the merged frames. */
@@ -120,8 +125,6 @@ export class MergedFrames {
   readonly #targets: ChildTargets;
   /** The links by namespace. */
   readonly #links = new Map<number, ChildLink>();
-  /** Each element's namespace, kept across its documents: they are the one frame. */
-  readonly #nsOf = new WeakMap<Element, number>();
   #nsSeq = 0;
   readonly #routes = new Map<string, readonly string[]>();
   readonly #fanOut = new Set<string>();
@@ -132,11 +135,12 @@ export class MergedFrames {
     this.#targets = targets;
   }
 
-  /** The namespace of an element's merged frame, the same for each of its documents. */
-  nsFor(owner: Element): number {
-    let ns = this.#nsOf.get(owner);
-    if (ns === undefined) this.#nsOf.set(owner, (ns = ++this.#nsSeq));
-    return ns;
+  /**
+   * A namespace for the next merged document: a new one each time, a frame's next document
+   * included, whose ids then never are those of the one before (Chrome takes none again).
+   */
+  nextNs(): number {
+    return ++this.#nsSeq;
   }
 
   /**
@@ -149,9 +153,9 @@ export class MergedFrames {
     this.#targets.addMerged(link);
     link.onClose(() => {
       if (this.#links.get(ns) === link) this.#links.delete(ns);
-      for (const state of this.#clients.values()) {
+      for (const [session, state] of this.#clients) {
         const channel = state.channels.get(ns);
-        if (channel?.link === link) this.#drop(state, ns, channel);
+        if (channel?.link === link) this.#gone(session, state, ns, channel);
       }
     });
     for (const [session, state] of this.#clients) if (state.kept.size) this.#channel(session, state, ns);
@@ -286,31 +290,67 @@ export class MergedFrames {
     if (!link) return undefined;
     const open = state.channels.get(ns);
     if (open?.link === link) return open;
-    if (open) this.#drop(state, ns, open);
-    const channel: Channel = { link, session: link.openSession(), pending: new Map() };
+    if (open) this.#gone(session, state, ns, open);
+    const channel: Channel = { link, session: link.openSession(), pending: new Map(), contexts: new Map() };
     state.channels.set(ns, channel);
     channel.session.onMessage(message => {
-      const id = message.includes(OWN_ID_PREFIX) ? parse(message)?.['id'] : undefined;
-      const waiting = typeof id === 'string' ? channel.pending.get(id) : undefined;
+      const parsed = parse(message);
+      const id = parsed?.['id'];
       if (typeof id === 'string' && id.startsWith(OWN_ID_PREFIX)) {
+        const waiting = channel.pending.get(id);
         if (!waiting) return;
         channel.pending.delete(id);
-        const reply = parse(message);
-        const error = reply?.['error'];
+        const error = parsed?.['error'];
         if (typeof error === 'object' && error !== null) waiting.reject(errorOf(error));
-        else waiting.resolve(reply?.['result']);
+        else waiting.resolve(parsed?.['result']);
         return;
       }
       // An event: the client's, on the page's session, as Chrome sends the frame's.
-      if (!message.includes('"id"') || parse(message)?.['id'] === undefined) session.post(message);
+      if (id !== undefined) return;
+      this.#trackContexts(channel, parsed);
+      session.post(message);
     });
     channel.session.onClose(() => {
-      if (state.channels.get(ns) === channel) this.#drop(state, ns, channel);
+      if (state.channels.get(ns) === channel) this.#gone(session, state, ns, channel);
     });
     // Set up as the client set up the page, in order: the frame starts from nothing.
     for (const [method, params] of state.kept)
       channel.session.send(JSON.stringify({ id: `${OWN_ID_PREFIX}m${++ownSeq}`, method, params }));
     return channel;
+  }
+
+  /** Follows the execution contexts a frame's agent announces, for {@link #destroyContexts}. */
+  #trackContexts(channel: Channel, event: Record<string, unknown> | undefined): void {
+    const method = event?.['method'];
+    const params = event?.['params'];
+    if (typeof params !== 'object' || params === null) return;
+    if (method === 'Runtime.executionContextCreated') {
+      const context: unknown = Reflect.get(params, 'context');
+      if (typeof context !== 'object' || context === null) return;
+      const id = Reflect.get(context, 'id');
+      if (typeof id === 'number') channel.contexts.set(id, Reflect.get(context, 'uniqueId'));
+    } else if (method === 'Runtime.executionContextDestroyed') {
+      const id = Reflect.get(params, 'executionContextId');
+      if (typeof id === 'number') channel.contexts.delete(id);
+    } else if (method === 'Runtime.executionContextsCleared') channel.contexts.clear();
+  }
+
+  /**
+   * Drops a client's session with a frame whose document is gone (its link or session closed): the
+   * contexts its agent announced are destroyed for the client, if it enabled Runtime, as Chrome
+   * tells of a frame navigated; the agent, gone, cannot.
+   */
+  #gone(session: CdpSession, state: ClientState, ns: number, channel: Channel): void {
+    this.#drop(state, ns, channel);
+    if (!state.kept.has('Runtime.enable')) return;
+    for (const [executionContextId, executionContextUniqueId] of channel.contexts)
+      session.post(
+        JSON.stringify({
+          method: 'Runtime.executionContextDestroyed',
+          params: { executionContextId, executionContextUniqueId },
+        })
+      );
+    channel.contexts.clear();
   }
 
   #drop(state: ClientState, ns: number, channel: Channel): void {
