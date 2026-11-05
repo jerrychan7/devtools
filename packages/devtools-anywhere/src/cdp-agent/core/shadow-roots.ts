@@ -1,6 +1,6 @@
 import type { FrameRegistry } from './frames';
 import { isOwn } from './nodes';
-import { documentOf, isElement, isShadowRoot } from './realm';
+import { documentOf, isDocument, isElement, isNode, isShadowRoot } from './realm';
 
 /**
  * The shadow roots in the frames' documents, in tree order, for the domains that look into
@@ -13,8 +13,10 @@ import { documentOf, isElement, isShadowRoot } from './realm';
  *   or one given a declarative shadow root by `setHTMLUnsafe` or the parser (`<template
  *   shadowrootmode>` does not go through `attachShadow`); a host removed takes its roots out (so
  *   they are not kept alive nor asked for animations). Other elements leave the list as it is.
- *   Not covered: the streaming parser attaching a declarative root to a host it inserted in an
- *   earlier task with no element added after it; the next host inserted catches it up;
+ *   While a document is parsed, a declarative root the streaming parser attaches to a host it
+ *   inserted in an earlier chunk is only seen with the next host inserted, or at the latest when
+ *   parsing ends: the document reaching `interactive` (DOMContentLoaded) and `complete` (load)
+ *   drops the list;
  * - the frame tree changing drops it: a new same-origin iframe's document may already hold shadow
  *   roots;
  * - `attachShadow` on a connected host adds the new root (and its subtree) without walking again.
@@ -29,6 +31,17 @@ export class ShadowRootTracker {
   #stop: (() => void)[] = [];
   /** Documents and shadow roots the observer watches. */
   #observed = new WeakSet<Node>();
+  /** Documents still loading, whose `readystatechange` drops the list. */
+  #documents = new Set<Document>();
+  readonly #ready = (event: Event) => {
+    this.#cache = null;
+    const doc = event.currentTarget;
+    // Nothing more to wait for: not kept alive until release.
+    if (isNode(doc) && isDocument(doc) && doc.readyState === 'complete') {
+      doc.removeEventListener('readystatechange', this.#ready);
+      this.#documents.delete(doc);
+    }
+  };
 
   constructor(
     private readonly frames: FrameRegistry,
@@ -74,6 +87,8 @@ export class ShadowRootTracker {
       this.#observer = null;
       this.#stop.forEach(stop => stop());
       this.#stop = [];
+      for (const doc of this.#documents) doc.removeEventListener('readystatechange', this.#ready);
+      this.#documents.clear();
       this.#cache = null;
     };
   }
@@ -110,6 +125,10 @@ export class ShadowRootTracker {
     if (!this.#observer || this.#observed.has(tree)) return;
     this.#observed.add(tree);
     this.#observer.observe(tree, { childList: true, subtree: true });
+    if (isShadowRoot(tree) || tree.readyState === 'complete') return;
+    // `readystatechange` comes just before DOMContentLoaded, then just before load (on the window).
+    tree.addEventListener('readystatechange', this.#ready);
+    this.#documents.add(tree);
   }
 
   /**
