@@ -469,6 +469,58 @@ describe('what a world keeps from the page', () => {
     assert.deepEqual(result[0], result[1]);
     assert.deepEqual(result[0]?.[1], { __sameName: 'page', __pageOnly: 'page' });
   });
+
+  test('typeof of a name in parentheses, before a postfix operator, or not ASCII', async () => {
+    const [ours, chrome] = await both(async side => {
+      const id = await world(side, 'conformance-typeof-forms');
+      return valueIn(
+        side,
+        `[typeof(nope), typeof ((nope)), typeof (nope) === 'undefined', (() => { let pi = 1; return [typeof pi++, pi]; })(), typeof ñope, typeof ñope2 === typeof undefined]`,
+        id
+      );
+    });
+    assert.deepEqual(ours, chrome);
+  });
+
+  test("the page sees its own methods during a world's call, and keeps those it replaces then", async () => {
+    await t.page.evaluate(() => {
+      const node = document.body.appendChild(document.createElement('div'));
+      node.id = 'rewrapped';
+      node.addEventListener('click', () => {
+        const page = window as unknown as Record<string, unknown>;
+        const click = HTMLElement.prototype.click;
+        page['seenClick'] = [click.name, click.length, String(click).includes('[native code]')];
+        // The page replaces the method while the world's call runs.
+        page['ownClick'] = HTMLElement.prototype.click = function click(this: HTMLElement) {
+          return Reflect.apply(click, this, []);
+        };
+      });
+    });
+    const result = [];
+    for (const side of [t.ours, t.chrome]) {
+      const id = await world(side, 'conformance-rewrapped');
+      const { root } = await side.send('DOM.getDocument');
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#rewrapped' });
+      const { object } = await side.send('DOM.resolveNode', { nodeId, executionContextId: id });
+      await t.page.evaluate(() => {
+        (window as unknown as Record<string, unknown>)['nativeClick'] = HTMLElement.prototype.click;
+      });
+      await side.send('Runtime.callFunctionOn', {
+        objectId: object.objectId ?? '',
+        functionDeclaration: 'function () { this.click(); }',
+      });
+      result.push(
+        await t.page.evaluate(() => {
+          const page = window as unknown as Record<string, unknown>;
+          const kept = HTMLElement.prototype.click === page['ownClick'];
+          HTMLElement.prototype.click = page['nativeClick'] as () => void;
+          return [page['seenClick'], kept];
+        })
+      );
+    }
+    assert.deepEqual(result[0], result[1]);
+    assert.deepEqual(result[0], [['click', 0, true], true]);
+  });
 });
 
 describe('sessions', () => {
