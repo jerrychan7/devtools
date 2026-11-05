@@ -176,6 +176,8 @@ function startOf(animation: Animation): number | null {
  * Animation: the Animations panel, from `getAnimations()` of each document in the page, which has
  * the CSS animations and transitions and those of the Web Animations API. The page has no event for
  * an animation starting, so the documents are looked at on every frame while the domain is enabled.
+ * The probe tells of those made with `animate()` or `new Animation()` too, which getAnimations()
+ * misses when they have no target, one out of the document, or end before the next frame.
  *
  * The playback rate Chrome sets on the documents' timelines is set on each animation instead, so
  * the page reads the product of its own rate and the panel's in `playbackRate`; what the panel is
@@ -186,10 +188,9 @@ export function registerAnimation(ctx: Context) {
   /** The animations that change on their own (running, paused, pending): looked at every frame. */
   const awake = new Map<string, Tracked>();
   /**
-   * The cancelled and released ones, kept only while the page keeps them: a page that runs for long
-   * makes and drops animations without end. Still found by id, as in Chrome, and woken when the page
-   * plays them again (back in `getAnimations()`). Finished ones stay awake: one the page cancels is
-   * in no `getAnimations()`.
+   * The finished, cancelled and released ones, kept only while the page keeps them: a page that runs
+   * for long makes and drops animations without end. Still found by id, as in Chrome, and woken when
+   * the page plays them again (back in `getAnimations()`, or through the probe's `play()` hook).
    * Chrome keeps every one until disable: here one the page dropped, and the garbage collector took,
    * is no longer found by id (Could not find animation, as for a released one): a trade, so that
    * the domain does not keep alive every animation and target a long-running page ever made.
@@ -202,6 +203,7 @@ export function registerAnimation(ctx: Context) {
   let seq = 0;
   let rate = 1;
   let frame = 0;
+  let stopAnimations: (() => void) | null = null;
 
   const current = (t: Tracked) => {
     const value = t.animation.currentTime;
@@ -291,12 +293,16 @@ export function registerAnimation(ctx: Context) {
     return list;
   };
 
-  /** Starts tracking an animation, or wakes one the page plays again. */
-  const track = (animation: Animation) => {
+  /**
+   * Starts tracking an animation, or wakes one the page plays again or cancels: any the probe tells
+   * of, which the next frame lets sleep again if it has still ended. Without the probe's hooks (an
+   * older probe), a finished one cancelled, or one out of getAnimations() played again, goes unseen.
+   */
+  const track = (animation: Animation, told = false) => {
     const known = tracked.get(animation);
     if (known) {
       // Finished ones with `fill: forwards` stay in getAnimations(): only one that runs again wakes.
-      if (animation.playState !== 'finished' && animation.playState !== 'idle') wake(known);
+      if (told || (animation.playState !== 'finished' && animation.playState !== 'idle')) wake(known);
       return;
     }
     const t: Tracked = {
@@ -339,14 +345,14 @@ export function registerAnimation(ctx: Context) {
     }
   };
 
-  /** Reports a cancel (Chrome reports one even before the start), and lets cancelled ones sleep. */
+  /** Reports a cancel (Chrome reports one even before the start), and lets ended ones sleep. */
   const settle = (t: Tracked) => {
     const state = t.animation.playState;
-    if (state !== 'idle') {
+    if (state !== 'idle' && state !== 'finished') {
       t.canceled = false;
       return;
     }
-    if (!t.canceled) {
+    if (state === 'idle' && !t.canceled) {
       t.canceled = true;
       t.start = null;
       if (!t.released) session.emit('Animation.animationCanceled', { id: t.id });
@@ -398,6 +404,8 @@ export function registerAnimation(ctx: Context) {
     frame = 0;
     stopShadowRoots?.();
     stopShadowRoots = null;
+    stopAnimations?.();
+    stopAnimations = null;
     // Every animation slowed down gets its own rate back: cancelled and released ones too.
     if (rate !== 1) setRate(1);
     awake.clear();
@@ -409,6 +417,7 @@ export function registerAnimation(ctx: Context) {
   session.register('Animation', {
     enable: () => {
       stopShadowRoots ??= ctx.shadowRoots.acquire();
+      stopAnimations ??= ctx.probe.onAnimation(animation => track(animation, true));
       if (!frame) loop();
     },
     disable: stop,

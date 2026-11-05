@@ -283,6 +283,7 @@ export function viewProbe(probe: Probe): ProbeView {
     clearLogs: () => probe.clearLogs(),
     shadowRoots: probe.shadowRoots,
     onShadowRoot: listener => probe.onShadowRoot(listener),
+    onAnimation: listener => probe.onAnimation(listener),
     listeners: probe.listeners,
     ownUrls: probe.ownUrls,
     fetch: probe.fetch,

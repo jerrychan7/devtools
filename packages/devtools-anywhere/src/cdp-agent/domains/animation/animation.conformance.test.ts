@@ -218,8 +218,6 @@ describe('Animation', () => {
   });
 
   test("shadow roots already in a new iframe's document are looked into, as in Chrome", async () => {
-    // A Web Animation named by its id: an iframe's CSS animations are not told apart from Web
-    // Animations yet (`instanceof` against the top window's classes), whichever tree they are in.
     await announced(
       `(() => {
         const iframe = document.createElement('iframe');
@@ -533,6 +531,48 @@ async function onEachSide<T>(steps: (t: TestPage, side: Side) => Promise<T>): Pr
 }
 
 describe('Animation, beyond getAnimations()', () => {
+  test('animations without a target, out of the document, or over at once are announced, as in Chrome', async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 0).id = 'zero';
+        const loose = new Animation(new KeyframeEffect(null, { opacity: [0, 1] }, 10000));
+        loose.id = 'loose';
+        loose.play();
+        document.createElement('div').animate({ opacity: [0, 1] }, 10000).id = 'detached';
+        new Animation(null).id = 'unplayed';
+      });
+      await sleep(300);
+      return reports(side);
+    });
+    assert.deepEqual(ours, chrome);
+  });
+
+  test('an animation cancelled before it started is reported cancelled, as in Chrome', async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() =>
+        document.body
+          .appendChild(document.createElement('div'))
+          .animate({ opacity: [0, 1] }, 1000)
+          .cancel()
+      );
+      await sleep(200);
+      const sameTask = await reports(side);
+      await t.page.evaluate(
+        () =>
+          new Promise(resolve => {
+            const div = document.body.appendChild(document.createElement('div'));
+            const animation = div.animate({ opacity: [0, 1] }, 1000);
+            requestAnimationFrame(() => resolve(animation.cancel()));
+          })
+      );
+      await sleep(200);
+      // Cancelled in a task between animate() and the next frame, Chrome reports a start too, while
+      // still pending, which the page cannot tell apart from a cancel in that frame: not compared.
+      return { sameTask, nextFrame: await reports(side) };
+    });
+    assert.deepEqual(ours, chrome);
+  });
+
   test('an animation played again after a cancel or its end keeps its id, as in Chrome', async () => {
     const [chrome, ours] = await onEachSide(async (t, side) => {
       await t.page.evaluate(() => {

@@ -40,6 +40,7 @@ export function installProbe(): Probe {
   const socketListeners = new Set<(record: SocketRecord) => void>();
 
   const shadowRootListeners = new Set<(root: ShadowRoot) => void>();
+  const animationListeners = new Set<(animation: Animation) => void>();
   const hooked = new WeakSet<Console>();
   const probe: Probe = {
     version: 1,
@@ -76,11 +77,16 @@ export function installProbe(): Probe {
       hookDebugger(add, win);
       hookErrors(add, win);
       hookShadowRoots(probe.shadowRoots, shadowRootListeners, win);
+      hookAnimations(animationListeners, win);
     },
     shadowRoots: new WeakMap(),
     onShadowRoot(listener) {
       shadowRootListeners.add(listener);
       return () => void shadowRootListeners.delete(listener);
+    },
+    onAnimation(listener) {
+      animationListeners.add(listener);
+      return () => void animationListeners.delete(listener);
     },
     listeners: new WeakMap(),
     ownUrls: new Set(),
@@ -102,6 +108,7 @@ export function installProbe(): Probe {
   hookDebugger(addLog);
   hookErrors(addLog);
   hookShadowRoots(probe.shadowRoots, shadowRootListeners, w);
+  hookAnimations(animationListeners, w);
   // The network hooks' own listeners are not the page's.
   const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
@@ -247,6 +254,43 @@ function hookShadowRoots(
     for (const listener of listeners) listener(root);
     return root;
   };
+}
+
+/**
+ * Tells of every animation made with `animate()` or `new Animation()`, as they are made: those
+ * `getAnimations()` never lists (no target, a target out of the document, finished or cancelled
+ * before anyone looked) are in Chrome's Animations panel too. Nothing is kept here.
+ */
+function hookAnimations(listeners: Set<(animation: Animation) => void>, w: Window & typeof globalThis) {
+  const ctor = w.Animation;
+  const proto = w.Element.prototype;
+  const animate = proto.animate;
+  if (!ctor || !animate) return;
+  const tell = (animation: Animation) => {
+    for (const listener of listeners) listener(animation);
+    return animation;
+  };
+  // Proxies of the page's functions, not functions of our own: their name and length stay the
+  // page's, and calls without `new`, or on another `this`, throw as before. `toString()` keeps the
+  // native form but loses the name: "function () { [native code] }" for "function animate() {...}".
+  proto.animate = new Proxy(animate, { apply: (f, self, args) => tell(Reflect.apply(f, self, args)) });
+  // And on play() and cancel(): ended ones are not looked at every frame, and getAnimations() may
+  // miss them.
+  const animProto = ctor.prototype;
+  for (const name of ['play', 'cancel'] as const)
+    animProto[name] = new Proxy(animProto[name], {
+      apply: (f, self, args) => {
+        Reflect.apply(f, self, args);
+        tell(self);
+      },
+    });
+  // Subclasses and `instanceof` work through it; `constructor` names it, so that
+  // `animation.constructor === Animation` holds as before.
+  const proxy = new Proxy(ctor, {
+    construct: (target, args, newTarget) => tell(Reflect.construct(target, args, newTarget)),
+  });
+  Object.defineProperty(animProto, 'constructor', { value: proxy });
+  w.Animation = proxy;
 }
 
 // ---- WebMCP ----

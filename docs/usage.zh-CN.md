@@ -276,7 +276,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | Rendering 面板的模拟 | ⚠️ | 「模拟页面处于焦点」做不到：在页面里使用 DevTools 时，焦点真的会离开页面元素，`:focus` 样式随之消失，开启时返回错误。自动深色模式、双指缩放重置同样做不到，返回错误。页面做不到的命令一律返回错误「Not supported in the page: <原因>」，能做但还没做的见[路线图](roadmap.zh-CN.md) |
 | 全屏的页面 | ⚠️ | 有元素全屏时用不了 DevTools，外壳模式下也一样。按 Esc 退出全屏即可 |
 | 无障碍树 | ⚠️ | Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。没有 InlineTextBox、列表标记和 UA shadow 树里的节点；input 的默认名称（如 "Submit"）是英文；不发 `loadComplete`、`nodesUpdated` 事件。由 `accessibility.js`（约 29 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录 |
-| Animations 面板 | ⚠️ | 来自 `getAnimations()` 的 CSS 动画、过渡和 Web Animations：列出、暂停、拖动进度、改时间。调速设在每个动画上，而不是像 Chrome 那样设在时间线上，所以页面读到的 `playbackRate` 是乘过的；只覆盖页面自己和同源 frame 的文档 |
+| Animations 面板 | ⚠️ | 来自 `getAnimations()` 的 CSS 动画、过渡和 Web Animations，以及用 `animate()` 或 `new Animation()` 创建的动画（无 target、不在文档中、立即结束的）：列出、暂停、拖动进度、改时间。调速设在每个动画上，而不是像 Chrome 那样设在时间线上，所以页面读到的 `playbackRate` 是乘过的；`getAnimations()` 之外已结束的动画若不是通过 `play()` 重新开始，则看不到；只覆盖页面自己和同源 frame 的文档 |
 | 模拟媒体特性 | ⚠️ | `prefers-color-scheme`、`prefers-reduced-motion`、`prefers-reduced-data`、`prefers-reduced-transparency`、`prefers-contrast`、`forced-colors`、`color-gamut` 和媒体类型，通过改写页面的样式表实现。跨域样式表、内联样式和 `matchMedia()` 不受影响；`light-dark()` 和强制颜色选的配色不会变 |
 | 模拟安全区 | ⚠️ | 在页面的样式表里替换 `env(safe-area-inset-*)`：跨域样式表和内联样式不受影响；Styles 里显示的是替换后的值 |
 | 色觉缺陷模拟 | ✅ | 和 Chrome 一样在 `<html>` 上加 SVG 滤镜：会覆盖页面自己在 `<html>` 上的 `filter`，内嵌的面板也会被滤镜，`getComputedStyle` 能看到 |
