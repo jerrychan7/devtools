@@ -640,6 +640,37 @@ describe('Animation, beyond getAnimations()', () => {
     assert.equal(ours, chrome);
   });
 
+  test('seeking plays a finished animation and stops at the end of the effect, as in Chrome', async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const add = (id: string, timing: KeyframeAnimationOptions) => {
+          const div = document.body.appendChild(document.createElement('div'));
+          Reflect.set(window, `__${id}`, div.animate({ opacity: [0, 1] }, timing));
+        };
+        add('ended', { duration: 100 });
+        add('long', { duration: 1000, delay: 100, endDelay: 50 });
+      });
+      await sleep(400);
+      const state = (id: string) =>
+        t.page.evaluate(n => {
+          const animation = Reflect.get(window, n) as Animation;
+          return [animation.playState, Math.round(Number(animation.currentTime))];
+        }, `__${id}`);
+      // Chrome takes `currentTimes` as seconds (see above): only times past the end compare.
+      await side.send('Animation.seekAnimations', { animations: ['1'], currentTimes: [1e6] });
+      const ended = await state('ended');
+      await side.send('Animation.seekAnimations', { animations: ['2'], currentTimes: [1e6] });
+      const long = await state('long');
+      await t.page.evaluate(() => (Reflect.get(window, '__long') as Animation).pause());
+      // Paused for good: one still pending pause takes the time of the frame it is paused in.
+      await sleep(100);
+      await side.send('Animation.seekAnimations', { animations: ['2'], currentTimes: [1e6] });
+      return { ended, long, paused: await state('long') };
+    });
+    assert.deepEqual(chrome, { ended: ['finished', 100], long: ['finished', 1150], paused: ['paused', 1150] });
+    assert.deepEqual(ours, chrome);
+  });
+
   test("a rate the page set that is still pending survives the panel's rate, as in Chrome", async () => {
     const [chrome, ours] = await onEachSide(async (t, side) => {
       await t.page.evaluate(() => {

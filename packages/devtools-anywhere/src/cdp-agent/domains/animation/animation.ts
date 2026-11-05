@@ -490,8 +490,14 @@ export function registerAnimation(ctx: Context) {
       // reads its own scrubber then, which it starts as it seeks: told in the very next frame, it
       // finds the scrubber not started yet and shows "Replay". Chrome's report comes later, across
       // processes, so this one waits two frames.
+      // As in Chrome, one not paused is played first (a finished or cancelled one starts over), and
+      // the time stops at the end of the effect; a negative one is kept.
       for (const [i, t] of list.entries()) {
-        t.animation.currentTime = currentTimes?.[i] ?? currentTime ?? 0;
+        const { animation } = t;
+        if (animation.playState !== 'paused') animation.play();
+        const time = currentTimes?.[i] ?? currentTime ?? 0;
+        const end = animation.effect?.getComputedTiming().endTime;
+        animation.currentTime = typeof end === 'number' ? Math.min(time, end) : time;
         t.hold = 2;
         wake(t);
       }
