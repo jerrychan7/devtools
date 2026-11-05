@@ -1,6 +1,5 @@
 {
   "core/nodes/history.ts": 1,
-  "domains/css/sheets/sheet-text.ts": 1,
   "domains/css/style.ts": 1,
   "domains/css/user-agent/user-agent.ts": 1,
   "domains/dom-debugger/dom-debugger.ts": 3,

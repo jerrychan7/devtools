@@ -14,7 +14,7 @@ import { Cascade } from './matching/cascade';
 import { ComputedStyleUpdates } from './computed/computed-updates';
 import { UserAgentStyles, userAgentSheetUrl } from './user-agent/user-agent';
 import { RuleView } from './matching/rule-view';
-import { RANGE_MISMATCH, SheetRegistry, isConstructed } from './sheets/sheet-registry';
+import { OUT_OF_BOUNDS, RANGE_MISMATCH, STYLE_MISMATCH, SheetRegistry, isConstructed } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
 import { outline } from './sheets/css-outline';
 import { editedBy, ownEdit, watchCssom, watchRealms } from './sheets/cssom-watch';
@@ -54,6 +54,7 @@ mergedFrames.registerRoutes('CSS', {
     'CSS.setMediaText': SHEET_ID,
     'CSS.setSupportsText': SHEET_ID,
     'CSS.setContainerQueryText': SHEET_ID,
+    'CSS.setContainerQueryConditionText': SHEET_ID,
     'CSS.setScopeText': SHEET_ID,
     'CSS.setKeyframeKey': SHEET_ID,
     'CSS.addRule': SHEET_ID,
@@ -346,6 +347,7 @@ export function registerCss(ctx: Context) {
   function atPrelude(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, is: (r: CSSRule) => boolean): CSSRule {
     const source = sheets.sourceOf(sheet);
     const offsets = source && offsetsOf(source, range);
+    if (source && !offsets) throw new CdpError(OUT_OF_BOUNDS);
     for (const [r, node] of source?.nodes ?? [])
       if (is(r) && node.preludeStart === offsets?.[0] && node.preludeEnd === offsets[1]) return r;
     throw new CdpError(RANGE_MISMATCH);
@@ -491,7 +493,10 @@ export function registerCss(ctx: Context) {
           if (by === sheets) return;
           // Another session's edit: like Chrome, this one keeps the text it had and sends no
           // styleSheetChanged, but reports sheets added or removed (setStyleSheetText's @import).
-          if (by) return void syncSheets();
+          if (by) {
+            sheets.texts.editedElsewhere(sheet);
+            return void syncSheets();
+          }
           if (text === undefined) sheets.texts.invalidate(sheet);
           else sheets.texts.set(sheet, text);
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
@@ -601,7 +606,16 @@ export function registerCss(ctx: Context) {
     },
 
     setStyleTexts(params: Protocol.CSS.SetStyleTextsRequest): Protocol.CSS.SetStyleTextsResponse {
-      const styles = params.edits.map(applyEdit);
+      const styles = params.edits.map((edit, i) => {
+        try {
+          return applyEdit(edit);
+        } catch (e) {
+          // Like Chrome, a range that is no style's names the edit.
+          if (e instanceof CdpError && e.message === STYLE_MISMATCH)
+            throw new CdpError(`Failed applying edit #${i}: ${e.message}`);
+          throw e;
+        }
+      });
       stylesChanged();
       return { styles };
     },
@@ -645,13 +659,28 @@ export function registerCss(ctx: Context) {
       const sheet = sheets.get(params.styleSheetId);
       const rule = setPrelude(sheet, params.range, params.text, r => isCssom(r, 'CSSSupportsRule'));
       if (!isCssom(rule, 'CSSSupportsRule')) throw new CdpError(RANGE_MISMATCH);
-      rules.supportsSet.set(rule, params.text);
+      // As measured in Chrome 156: a condition given otherwise than it is serialized is answered as
+      // given and without its range from then on, and so are the @media around it.
+      if (params.text !== rule.conditionText) {
+        rules.supportsSet.set(rule, params.text);
+        for (let p = rule.parentRule; p; p = p.parentRule) rules.rangeless.add(p);
+      }
       return { supports: rules.supports(sheet, rule) };
     },
 
     setContainerQueryText(
       params: Protocol.CSS.SetContainerQueryTextRequest
     ): Protocol.CSS.SetContainerQueryTextResponse {
+      const sheet = sheets.get(params.styleSheetId);
+      const rule = setPrelude(sheet, params.range, params.text, r => isCssom(r, 'CSSContainerRule'));
+      if (!isCssom(rule, 'CSSContainerRule')) throw new CdpError(RANGE_MISMATCH);
+      return { containerQuery: rules.container(sheet, rule) };
+    },
+
+    // The condition of an @container, the name included: like setContainerQueryText (Chrome 157).
+    setContainerQueryConditionText(
+      params: Protocol.CSS.SetContainerQueryConditionTextRequest
+    ): Protocol.CSS.SetContainerQueryConditionTextResponse {
       const sheet = sheets.get(params.styleSheetId);
       const rule = setPrelude(sheet, params.range, params.text, r => isCssom(r, 'CSSContainerRule'));
       if (!isCssom(rule, 'CSSContainerRule')) throw new CdpError(RANGE_MISMATCH);
@@ -671,6 +700,12 @@ export function registerCss(ctx: Context) {
       const rule = atPrelude(sheet, params.range, r => isCssom(r, 'CSSKeyframeRule'));
       if (!isCssom(rule, 'CSSKeyframeRule')) throw new CdpError(RANGE_MISMATCH);
       const old = rule.keyText;
+      // Chrome's error for a key the parser does not take.
+      const alone = new CSSStyleSheet();
+      ownEdit(() => alone.replaceSync(`@keyframes x { ${params.keyText} {} }`));
+      const parsed = alone.cssRules[0];
+      if (!isCssom(parsed, 'CSSKeyframesRule') || parsed.cssRules.length !== 1)
+        throw new CdpError('SyntaxError Keyframe key text is not valid.');
       editSheet(
         sheet,
         splice(sheet, params.range, params.keyText),
@@ -720,7 +755,7 @@ export function registerCss(ctx: Context) {
         // Where the text is inserted, as written: after the rules before it, in the innermost group
         // rule (not a style rule: addRule does not nest) around it.
         const offset = offsetsOf(source, params.location)?.[0];
-        if (offset === undefined) throw new CdpError(RANGE_MISMATCH);
+        if (offset === undefined) throw new CdpError(OUT_OF_BOUNDS);
         const around = (r: CSSRule) => {
           const node = source.nodes.get(r);
           return !!node && node.blockStart >= 0 && node.blockStart < offset && offset < node.blockEnd;

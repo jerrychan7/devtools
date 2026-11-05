@@ -6,7 +6,7 @@ import { specificity, splitTopLevel } from '../../../core/style/selectors';
 import type { TreeScope } from './forced-pseudo';
 import { shownMedia } from '../../emulation/rewrite';
 import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scopeText, selectorLabel } from './rules';
-import type { SheetRegistry } from '../sheets/sheet-registry';
+import type { SheetRegistry, Styled } from '../sheets/sheet-registry';
 import { rangeOf, selectorSpans, sourceStyle } from '../sheets/sheet-text';
 import { type CSSStyle, buildStyle } from '../style';
 
@@ -20,10 +20,12 @@ export class RuleView {
     this.nodes = nodes;
   }
 
-  ruleStyle(sheet: CSSStyleSheet, rule: StyleRule): CSSStyle {
+  ruleStyle(sheet: CSSStyleSheet, rule: Styled): CSSStyle {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
     if (source && node) return sourceStyle(this.sheets.idOf(sheet), rule.style, source, node);
+    if (isCssom(rule, 'CSSKeyframeRule'))
+      return buildStyle(this.sheets.idOf(sheet), rule.style, 0, rule.keyText.length + 3);
     const line = this.sheets.ruleId(sheet, rule);
     return buildStyle(this.sheets.idOf(sheet), rule.style, line, selectorLabel(rule).length + 3);
   }
@@ -76,7 +78,9 @@ export class RuleView {
       text,
       source: 'mediaRule',
       sourceURL: this.sheets.sourceURL(sheet),
-      ...(source && node && { range: rangeOf(source, node.preludeStart, node.preludeEnd) }),
+      ...(source &&
+        node &&
+        !this.rangeless.has(rule) && { range: rangeOf(source, node.preludeStart, node.preludeEnd) }),
       styleSheetId: this.sheets.idOf(sheet),
       mediaList: list,
     };
@@ -86,7 +90,9 @@ export class RuleView {
   private at(sheet: CSSStyleSheet, rule: CSSRule): { range?: Protocol.CSS.SourceRange } {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
-    return source && node ? { range: rangeOf(source, node.preludeStart, node.preludeEnd) } : {};
+    return source && node && !this.rangeless.has(rule)
+      ? { range: rangeOf(source, node.preludeStart, node.preludeEnd) }
+      : {};
   }
 
   /**
@@ -94,6 +100,8 @@ export class RuleView {
    * without its range, from then on (@container and @scope are normalized, with their range).
    */
   readonly supportsSet = new WeakMap<CSSRule, string>();
+  /** At-rules Chrome reports without the range of their condition since (see setSupportsText). */
+  readonly rangeless = new WeakSet<CSSRule>();
 
   supports(sheet: CSSStyleSheet, rule: CSSSupportsRule): Protocol.CSS.CSSSupports {
     const text = rule.conditionText;

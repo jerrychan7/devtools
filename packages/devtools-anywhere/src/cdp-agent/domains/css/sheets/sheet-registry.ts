@@ -8,9 +8,17 @@ import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
 import { type SheetSource, SheetTexts, offsetsOf, selectorSpans, styleSpan } from './sheet-text';
+import { type CssRule, outline } from './css-outline';
+import { lineStarts } from './text-lines';
 
 /** Chrome's error for a range that is not that of what an edit changes. */
 export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing source range";
+/** Chrome's, for a style's range (setStyleTexts), and for a range past the text's end. */
+export const STYLE_MISMATCH = "NotFoundError Source range didn't match existing style source range";
+export const OUT_OF_BOUNDS = 'Specified range is out of bounds';
+
+/** A rule with a style of its own (setStyleTexts edits it). */
+export type Styled = StyleRule | CSSKeyframeRule;
 
 /**
  * Tracks the page's style sheets. Every style rule gets a stable id within its sheet, which
@@ -298,16 +306,45 @@ export class SheetRegistry {
    * The rule whose style (`style`) or selectors (`selector`) are at `range`: in the text the
    * sheet was written in, or in the serialized one, where a rule's line is its id.
    */
-  findRule(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, at: 'style' | 'selector'): StyleRule {
+  findRule(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, at: 'style' | 'selector'): Styled {
     const source = this.sourceOf(sheet);
+    // A text this session has, whose rules no longer pair with the sheet's (another session
+    // replaced them). As measured in Chrome 156, the style rules of the old text stand for those
+    // of the sheet in order: the n-th one's range is the n-th style rule's, if there is one.
+    const old = !source && this.texts.unpaired(sheet) ? this.texts.textOf(sheet) : null;
+    if (old !== null) {
+      const fail = () => new CdpError(at === 'style' ? STYLE_MISMATCH : RANGE_MISMATCH);
+      const offsets = offsetsOf({ text: old, lines: lineStarts(old), nodes: new Map(), top: [] }, range);
+      if (!offsets) throw new CdpError(OUT_OF_BOUNDS);
+      const written: CssRule[] = [];
+      const walk = (list: CssRule[]) =>
+        list.forEach(n => {
+          if (n.kind === 'qualified' && n.blockStart >= 0) written.push(n);
+          walk(n.rules);
+        });
+      walk(outline(old));
+      const n = written.findIndex(node => {
+        const spans = selectorSpans(old, node);
+        const [s, e] = at === 'style' ? styleSpan(old, node) : [spans[0]?.[0], spans[spans.length - 1]?.[1]];
+        return s === offsets[0] && e === offsets[1];
+      });
+      const rule = n < 0 ? undefined : this.entries(sheet).filter(e => isCssom(e.rule, 'CSSStyleRule'))[n]?.rule;
+      if (!rule) throw fail();
+      return rule;
+    }
     if (!source) {
       const entry = this.entries(sheet).find(e => this.ruleIds.get(e.rule) === range.startLine);
       if (!entry) throw new CdpError('No rule at given range');
       return entry.rule;
     }
     const offsets = offsetsOf(source, range);
+    if (!offsets) throw new CdpError(OUT_OF_BOUNDS);
     for (const [rule, node] of source.nodes) {
-      if (!offsets || !(isCssom(rule, 'CSSStyleRule') || isCssom(rule, 'CSSNestedDeclarations'))) continue;
+      const styled =
+        isCssom(rule, 'CSSStyleRule') ||
+        isCssom(rule, 'CSSNestedDeclarations') ||
+        (at === 'style' && isCssom(rule, 'CSSKeyframeRule'));
+      if (!styled) continue;
       // Selectors are only tokenized for a rule whose prelude starts there.
       if (at === 'selector' && node.preludeStart !== offsets[0]) continue;
       const spans = at === 'selector' ? selectorSpans(source.text, node) : [];
@@ -315,7 +352,7 @@ export class SheetRegistry {
         at === 'style' ? styleSpan(source.text, node) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
       if (start === offsets[0] && end === offsets[1] && (at === 'style' || node.kind === 'qualified')) return rule;
     }
-    throw new CdpError(RANGE_MISMATCH);
+    throw new CdpError(at === 'style' ? STYLE_MISMATCH : RANGE_MISMATCH);
   }
 
   /** The text the sheet was written in, with its rules in it; null when unknown. */

@@ -67,7 +67,10 @@ function install(realm: Window & typeof globalThis) {
   if (realm.CSSKeyframesRule)
     for (const name of ['appendRule', 'deleteRule']) hook(realm.CSSKeyframesRule.prototype, name, changed);
   for (const name of ['setProperty', 'removeProperty']) hook(realm.CSSStyleDeclaration.prototype, name, changed);
-  // Every property of a style (`color`, `cssText`, …), a rule's selector, a keyframe's key.
+  // A style's setters (in Chrome 156 `cssText` and `cssFloat`: `color` and the like are no
+  // accessors), a rule's selector, a keyframe's key. Inline styles share the prototype: while
+  // watching, each of their `cssText` writes goes through the proxy too, which only looks for a
+  // parent rule.
   // A style's properties may be on an interface of its own (CSSStyleProperties) above it.
   const styles: object[] = [];
   for (let p: unknown = Object.getPrototypeOf(realm.document.createElement('div').style); ;) {

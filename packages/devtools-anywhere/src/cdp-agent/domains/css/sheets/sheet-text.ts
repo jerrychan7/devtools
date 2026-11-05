@@ -90,6 +90,26 @@ export class SheetTexts {
     this.stale = new WeakSet();
   }
 
+  /**
+   * Another session edited the sheet. Like Chrome, this one keeps the text it had; its rules are
+   * paired with it again (the edit may have replaced some), and where they no longer pair, its
+   * ranges match none.
+   */
+  editedElsewhere(sheet: CSSStyleSheet): void {
+    const rec = this.recorded.get(sheet);
+    if (rec) delete rec.source;
+  }
+
+  /** The text recorded for the sheet, paired or not. */
+  textOf(sheet: CSSStyleSheet): string | null {
+    return this.recorded.get(sheet)?.text ?? null;
+  }
+
+  /** Whether the sheet has a text whose rules do not pair with the sheet's. */
+  unpaired(sheet: CSSStyleSheet): boolean {
+    return !this.stale.has(sheet) && this.recorded.get(sheet)?.source === null;
+  }
+
   /** The text of the sheet with its rules paired, or null. */
   source(sheet: CSSStyleSheet): SheetSource | null {
     if (this.stale.has(sheet)) return null;
@@ -217,6 +237,9 @@ function shift(node: CssRule, delta: number) {
  * The source after `[start, end)` of its text was replaced by `insert`, the CSSOM changed the
  * same way: only the top-level rule around the change is outlined and paired again, the others
  * moved. null when the change is not inside one rule or does not leave it one rule.
+ *
+ * The old source is changed in place, and gives up its `top` and `nodes` to the new one: callers
+ * replace it right away and must not use it again (SheetTexts.splice does).
  */
 function respliced(source: SheetSource, start: number, end: number, insert: string): SheetSource | null {
   const k = source.top.findIndex(([, n]) => n.start <= start && end <= n.end);
@@ -361,11 +384,10 @@ export function sourceStyle(
   const { text } = source;
   const [from, to] = styleSpan(text, node);
   const last = node.decls.length - 1;
-  // The top page's: any realm knows the same properties.
-  const known = document.createElement('div').style;
-  // Like Chrome, a comment is a disabled declaration only of a property it knows.
+  // Like Chrome, a comment is a disabled declaration only of a property it knows: the rule's style
+  // has an attribute for each (`margin-top`, …).
   const shown = node.decls.filter(
-    d => d.kind === 'decl' || text.startsWith('--', d.start) || text.slice(d.start, d.nameEnd).toLowerCase() in known
+    d => d.kind === 'decl' || text.startsWith('--', d.start) || text.slice(d.start, d.nameEnd).toLowerCase() in decl
   );
   const written = shown.map((d): Written => {
     const [start, span] = declSpan(text, d);
