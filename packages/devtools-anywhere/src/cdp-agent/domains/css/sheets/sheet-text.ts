@@ -33,8 +33,6 @@ interface Recorded {
   unchecked: boolean;
   /** Paired lazily; null when pairing failed. */
   source?: SheetSource | null;
-  /** Another session edited the sheet since this one recorded its text. */
-  elsewhere?: boolean;
 }
 
 /** The rules as serialized, but @import (which replaceSync() leaves out). */
@@ -95,32 +93,6 @@ export class SheetTexts {
   reset(): void {
     this.recorded = new WeakMap();
     this.stale = new WeakSet();
-  }
-
-  /**
-   * Another session edited the sheet. Like Chrome, this one keeps the text it had; its rules are
-   * paired with it again (the edit may have replaced some), and where they no longer pair, its
-   * ranges match none.
-   */
-  editedElsewhere(sheet: CSSStyleSheet): void {
-    const rec = this.recorded.get(sheet);
-    if (!rec) return;
-    delete rec.source;
-    rec.elsewhere = true;
-  }
-
-  /** The text recorded for the sheet, paired or not. */
-  textOf(sheet: CSSStyleSheet): string | null {
-    return this.recorded.get(sheet)?.text ?? null;
-  }
-
-  /**
-   * Whether another session edited the sheet and its rules no longer pair with the text this
-   * session keeps. A text that never paired is not one: its sheet is served serialized.
-   */
-  unpaired(sheet: CSSStyleSheet): boolean {
-    const rec = this.recorded.get(sheet);
-    return !this.stale.has(sheet) && rec?.elsewhere === true && rec.source === null;
   }
 
   /** The text of the sheet with its rules paired, or null. */

@@ -144,7 +144,7 @@ export function watchRealms(docs: Document[]): void {
 
 /**
  * Tells every session of an edit session `by` made to a sheet, its text now `text` (undefined:
- * not known). Like Chrome, the others keep the text they had and send no styleSheetChanged.
+ * not known). Unlike Chrome, the others take that text too and send styleSheetChanged.
  */
 export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefined): void {
   for (const listener of listeners)

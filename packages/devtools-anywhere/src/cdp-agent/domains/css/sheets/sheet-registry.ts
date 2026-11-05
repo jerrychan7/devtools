@@ -8,8 +8,6 @@ import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
 import { type SheetSource, SheetTexts, namespaceText, offsetsOf, selectorSpans, styleSpan } from './sheet-text';
-import { type CssRule, outline } from './css-outline';
-import { lineStarts } from './text-lines';
 
 /** Chrome's error for a range that is not that of what an edit changes. */
 export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing source range";
@@ -316,33 +314,6 @@ export class SheetRegistry {
   findRule(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, at: 'style' | 'selector'): Styled {
     assertOrdered(range);
     const source = this.sourceOf(sheet);
-    // A text this session has, whose rules no longer pair with the sheet's (another session
-    // replaced them). As measured in Chrome 156, the style rules of the old text stand for those
-    // of the sheet in order: the n-th one's range is the n-th style rule's, if there is one.
-    const old = !source && this.texts.unpaired(sheet) ? this.texts.textOf(sheet) : null;
-    if (old !== null) {
-      const fail = () => new CdpError(at === 'style' ? STYLE_MISMATCH : RANGE_MISMATCH);
-      const offsets = offsetsOf(
-        { text: old, lines: lineStarts(old), nodes: new Map(), top: [], namespaces: '' },
-        range
-      );
-      if (!offsets) throw new CdpError(OUT_OF_BOUNDS);
-      const written: CssRule[] = [];
-      const walk = (list: CssRule[]) =>
-        list.forEach(n => {
-          if (n.kind === 'qualified' && n.blockStart >= 0) written.push(n);
-          walk(n.rules);
-        });
-      walk(outline(old));
-      const n = written.findIndex(node => {
-        const spans = selectorSpans(old, node);
-        const [s, e] = at === 'style' ? styleSpan(old, node) : [spans[0]?.[0], spans[spans.length - 1]?.[1]];
-        return s === offsets[0] && e === offsets[1];
-      });
-      const rule = n < 0 ? undefined : this.entries(sheet).filter(e => isCssom(e.rule, 'CSSStyleRule'))[n]?.rule;
-      if (!rule) throw fail();
-      return rule;
-    }
     if (!source) {
       const entry = this.entries(sheet).find(e => this.ruleIds.get(e.rule) === range.startLine);
       if (!entry) throw new CdpError('No rule at given range');
@@ -371,14 +342,9 @@ export class SheetRegistry {
     return this.texts.source(sheet);
   }
 
-  /**
-   * The text of a sheet: the one it was written in, or one serialized from its rules. As in
-   * Chrome 156, after another session replaced the rules this one keeps the text it had.
-   */
+  /** The text of a sheet: the one it was written in, or one serialized from its rules. */
   text(sheet: CSSStyleSheet): string {
-    const source = this.sourceOf(sheet);
-    if (source) return source.text;
-    return (this.texts.unpaired(sheet) ? this.texts.textOf(sheet) : null) ?? this.serialized(sheet);
+    return this.sourceOf(sheet)?.text ?? this.serialized(sheet);
   }
 
   /**

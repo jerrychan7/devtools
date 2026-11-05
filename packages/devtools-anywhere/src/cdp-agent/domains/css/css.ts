@@ -499,19 +499,18 @@ export function registerCss(ctx: Context) {
       stopCssom = watchCssom(
         (sheet, text, by) => {
           if (by === sheets) return;
-          // Another session's edit: like Chrome, this one keeps the text it had and sends no
-          // styleSheetChanged, but reports sheets added or removed (setStyleSheetText's @import).
-          if (by) {
-            sheets.texts.editedElsewhere(sheet);
-            return void syncSheets();
-          }
+          // Another session's edit is taken like the page's, with the text it wrote: unlike
+          // Chrome (where the other sessions keep the text they had and hear nothing), every
+          // session serves the same text, and is sent styleSheetChanged to fetch it again.
           if (text === undefined) sheets.texts.invalidate(sheet);
           else sheets.texts.set(sheet, text);
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
           // Adopted in the same task, not reported yet: like Chrome, added then changed. Looking
           // through every tree's adopted sheets costs about 1.3 µs a write: a sheet with an owner
           // node (a <style> added in the same task) is none, one already found is not looked for.
-          else if (!sheet.ownerNode && !changedUnseen.has(sheet) && adopted(sheet)) changedUnseen.add(sheet);
+          else if (!by && !sheet.ownerNode && !changedUnseen.has(sheet) && adopted(sheet)) changedUnseen.add(sheet);
+          // Sheets the other session added or removed (setStyleSheetText's @import).
+          if (by) syncSheets();
         },
         () => documents().map(realmOf)
       );

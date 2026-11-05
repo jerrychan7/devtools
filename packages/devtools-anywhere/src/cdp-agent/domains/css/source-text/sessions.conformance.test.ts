@@ -1,5 +1,7 @@
 // Edits of one client seen by another, and what setStyleSheetText does to the page's CSSOM
-// objects, compared with Chrome (each side on a page of its own).
+// objects, compared with Chrome (each side on a page of its own). Unlike Chrome, where the other
+// clients keep the text they had and hear nothing, ours all take the new text and are sent
+// styleSheetChanged.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
@@ -25,7 +27,7 @@ const CSS = `@import url(/packages/devtools-anywhere/test-support/assets/frame.c
 setUpAndTearDown(
   async () => {
     env = await launch();
-    const [a, b] = [await openPage(env, []), await openPage(env, [])];
+    const [a, b] = [await openPage(env, ['CSS.styleSheetChanged']), await openPage(env, [])];
     for (const t of [a, b])
       await t.page.evaluate(css => {
         const s = document.createElement('style');
@@ -119,7 +121,7 @@ async function each<T>(fn: (s: (typeof sides)[number]) => Promise<T>): Promise<[
   return [await fn(a), await fn(b)];
 }
 
-test("one client's edit sends the other no styleSheetChanged either", async () => {
+test("one client's edit: unlike Chrome, the other is sent styleSheetChanged and takes the new text", async () => {
   const [ours, chrome] = await each(async ({ side, other, otherText }) => {
     const { root } = await side.send('DOM.getDocument', {});
     const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#s1' });
@@ -132,9 +134,11 @@ test("one client's edit sends the other no styleSheetChanged either", async () =
     await new Promise(r => setTimeout(r, 200));
     return { events: await other(), otherText: await otherText() };
   });
-  assert.deepEqual(ours, chrome);
-  // The other client keeps the text it had.
-  assert.equal(ours.otherText, CSS);
+  assert.deepEqual(chrome, { events: [], otherText: CSS });
+  assert.deepEqual(ours, {
+    events: ['CSS.styleSheetChanged'],
+    otherText: CSS.replace('.s1 { color: red }', '.s1 { color: blue }'),
+  });
 });
 
 test('setStyleSheetText keeps the sheet, replaces its rules: those the page held are detached', async () => {
@@ -163,46 +167,83 @@ test('setStyleSheetText keeps the sheet, replaces its rules: those the page held
     });
     return { objects, other: await other() };
   });
-  assert.deepEqual(ours, chrome);
+  // The other client is told of the sheet removed (the @import's), and with ours, of the change.
+  assert.deepEqual(ours.objects, chrome.objects);
+  assert.deepEqual(chrome.other, ['CSS.styleSheetRemoved']);
+  assert.deepEqual(ours.other, ['CSS.styleSheetChanged', 'CSS.styleSheetRemoved']);
 });
 
-test("after another client's setStyleSheetText, this one's getStyleSheetText gives what Chrome's does", async () => {
-  const [ours, chrome] = await each(async ({ side, otherText }) => {
+test("after another client's setStyleSheetText, this one serves the new text (Chrome: the old one)", async () => {
+  const [ours, chrome] = await each(async ({ side, other, otherText }) => {
     const before = await otherText();
     const { sheet } = await matched(side, '#s1');
     const text = '.s1 { color: olive }\n.s3 { top: 3px }';
     await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text });
+    await new Promise(r => setTimeout(r, 200));
     const after = await otherText();
-    return { after, kept: after === before, isNew: after === text };
+    return {
+      kept: after === before,
+      isNew: after === text,
+      changed: (await other()).includes('CSS.styleSheetChanged'),
+    };
   });
-  assert.deepEqual(ours, chrome);
+  assert.deepEqual(chrome, { kept: true, isNew: false, changed: false });
+  assert.deepEqual(ours, { kept: false, isNew: true, changed: true });
 });
 
 /** A field of a reply, as `unknown` goes. */
 const field = (value: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>((v, k) => (v && typeof v === 'object' ? Reflect.get(v, k) : undefined), value);
 
-test('after another client replaced the rules, an edit with the ranges of the old text goes as in Chrome', async () => {
-  const [ours, chrome] = await each(async ({ side, otherCall }) => {
-    const root = field(await otherCall('DOM.getDocument', {}), 'root', 'nodeId');
-    const nodeId = field(await otherCall('DOM.querySelector', { nodeId: root, selector: '#s1' }), 'nodeId');
-    const found = field(await otherCall('CSS.getMatchedStylesForNode', { nodeId }), 'matchedCSSRules');
-    const rule = Array.isArray(found)
-      ? found.map(m => field(m, 'rule')).find(r => field(r, 'selectorList', 'text') === '.s1')
-      : undefined;
-    const edit = {
-      styleSheetId: field(rule, 'styleSheetId'),
-      range: field(rule, 'style', 'range'),
-      text: ' color: pink ',
-    };
-    // This client replaces the rules: the other's range is of rules gone.
-    const { sheet } = await matched(side, '#s1');
-    await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text: '.s0 { top: 0 }\n.s1 { color: green }' });
-    return otherCall('CSS.setStyleTexts', { edits: [edit] }).then(
-      () => 'ok',
-      // Ours come through page.evaluate, with where they were thrown on the next lines.
-      (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
-    );
+/** The other client's rule for `.s1`: its sheet and style range. */
+async function otherRule(otherCall: Call): Promise<{ styleSheetId: unknown; range: unknown }> {
+  const root = field(await otherCall('DOM.getDocument', {}), 'root', 'nodeId');
+  const nodeId = field(await otherCall('DOM.querySelector', { nodeId: root, selector: '#s1' }), 'nodeId');
+  const found = field(await otherCall('CSS.getMatchedStylesForNode', { nodeId }), 'matchedCSSRules');
+  const rule = Array.isArray(found)
+    ? found.map(m => field(m, 'rule')).find(r => field(r, 'selectorList', 'text') === '.s1')
+    : undefined;
+  return { styleSheetId: field(rule, 'styleSheetId'), range: field(rule, 'style', 'range') };
+}
+
+/** Our side: Chrome's other client keeps the old text, so there is nothing to compare. */
+function ours() {
+  const [a] = sides;
+  assert.ok(a);
+  return a;
+}
+
+test('after another client replaced the rules, this one edits the new text in place, with its ranges', async () => {
+  const { side, otherCall } = ours();
+  const { sheet } = await matched(side, '#s1');
+  await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text: '.s0 { top: 0 }\n.s1 { color: green }\n' });
+  const { styleSheetId, range } = await otherRule(otherCall);
+  assert.deepEqual(range, { startLine: 1, startColumn: 5, endLine: 1, endColumn: 19 });
+  await otherCall('CSS.setStyleTexts', { edits: [{ styleSheetId, range, text: ' color: pink ' }] });
+  const edited = '.s0 { top: 0 }\n.s1 { color: pink }\n';
+  // Not serialized: both clients serve the text as written, edited where the range was.
+  assert.equal(field(await otherCall('CSS.getStyleSheetText', { styleSheetId }), 'text'), edited);
+  assert.equal((await side.send('CSS.getStyleSheetText', { styleSheetId: sheet })).text, edited);
+});
+
+test("the other client's addRule: this one takes the text and is sent styleSheetChanged", async () => {
+  const { side, otherCall } = ours();
+  const { sheet } = await matched(side, '#s1');
+  await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text: '.s1 { color: green }\n' });
+  await side.clear();
+  const { styleSheetId } = await otherRule(otherCall);
+  await otherCall('CSS.addRule', {
+    styleSheetId,
+    ruleText: '.s9 { left: 9px }',
+    location: { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 },
   });
-  assert.equal(ours, chrome);
+  await new Promise(r => setTimeout(r, 200));
+  assert.ok((await side.events('CSS.styleSheetChanged')).some(e => e.styleSheetId === sheet));
+  assert.equal(
+    (await side.send('CSS.getStyleSheetText', { styleSheetId: sheet })).text,
+    '.s1 { color: green }\n.s9 { left: 9px }'
+  );
+  // Ranges of the text as written.
+  const { rules } = await matched(side, '#s1');
+  assert.ok(rules.length > 0);
 });
