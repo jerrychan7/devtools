@@ -136,5 +136,18 @@ export function quietly<T>(fn: () => T): T {
   }
 }
 
+/**
+ * The native accessors of a tree's `adoptedStyleSheets`: those our hooks call, so that a wrapper
+ * the page put over them since does not see our own changes; the prototype's while not hooked.
+ */
+export function nativeAdopted(
+  tree: Tree
+): { get: (this: Tree) => unknown; set: (this: Tree, v: unknown) => void } | null {
+  const hooked = natives.get(protoOf(tree));
+  if (hooked) return hooked;
+  const d = Object.getOwnPropertyDescriptor(protoOf(tree), 'adoptedStyleSheets');
+  return d?.get && d.set ? { get: d.get, set: d.set } : null;
+}
+
 /** The adopted style sheets of a tree, read without notifying. */
 export const adoptedOf = read;
