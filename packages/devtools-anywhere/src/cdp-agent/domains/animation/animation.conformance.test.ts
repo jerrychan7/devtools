@@ -301,3 +301,47 @@ describe('Animation', () => {
     assert.deepEqual(messages[1], messages[0]);
   });
 });
+
+describe('Animation, which animations are told apart', () => {
+  let t: TestPage;
+  before(async () => {
+    assert.ok(env);
+    t = await openPage(env, [...EVENTS]);
+    for (const side of [t.chrome, t.ours]) await side.send('Animation.enable');
+  });
+
+  /** Runs `code` (with `add(className, tag)`) and gives each side's new animations. */
+  async function run(code: string, count: number) {
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    await t.page.evaluate(
+      `(() => { const add = (cls, tag = 'div') => document.body.appendChild(Object.assign(document.createElement(tag), { className: cls, textContent: 'hello' })); ${code} })()`
+    );
+    const list = (side: Side) =>
+      until(async () => {
+        const all = (await side.events('Animation.animationStarted')).map(e => e.animation);
+        return all.length >= count ? all : undefined;
+      }, `${count} animations`);
+    return { chrome: await list(t.chrome), ours: await list(t.ours) };
+  }
+
+  test('animations of a same-origin iframe match Chrome', async () => {
+    const got = await run(
+      `const f = document.body.appendChild(document.createElement('iframe'));
+       f.srcdoc = '<style>@keyframes fk { to { left: 1px } } div { position: relative; animation: fk 5s ease-in }'
+         + ' p { transition: width 5s; width: 1px }</style><div>x</div><p>y</p><script>'
+         + 'document.body.animate([{ opacity: 0 }, { opacity: 1 }], 5000).id = "fw";'
+         + 'const p = document.querySelector("p"); p.getBoundingClientRect(); p.style.width = "9px"<' + '/script>'`,
+      3
+    );
+    for (const name of ['fk', 'fw', 'width']) {
+      const chrome = got.chrome.find(a => a.name === name);
+      const ours = got.ours.find(a => a.name === name);
+      assert.ok(chrome, `Chrome announces ${name}`);
+      assert.ok(ours, `we announce ${name}`);
+      assert.deepEqual(diffSubset(ours, chrome), [], name);
+      assert.equal('cssId' in ours, 'cssId' in chrome, name);
+      assert.equal('keyframesRule' in (ours.source ?? {}), 'keyframesRule' in (chrome.source ?? {}), name);
+      assert.equal('backendNodeId' in (ours.source ?? {}), 'backendNodeId' in (chrome.source ?? {}), name);
+    }
+  });
+});

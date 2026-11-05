@@ -20,12 +20,33 @@ interface Tracked {
   hold: number;
 }
 
+/**
+ * Whether `value` has the getter `name` of `proto`, the brand check of a Web IDL interface. Unlike
+ * `instanceof`, it holds across realms: an animation of a same-origin iframe is a `CSSAnimation` of
+ * the iframe's window, not of the top page's.
+ */
+function hasGetter(proto: object | undefined, name: string, value: object): boolean {
+  const get = proto && Object.getOwnPropertyDescriptor(proto, name)?.get;
+  if (!get) return false;
+  try {
+    get.call(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const isCssAnimation = (a: Animation): a is CSSAnimation =>
+  typeof CSSAnimation === 'function' && hasGetter(CSSAnimation.prototype, 'animationName', a);
+const isCssTransition = (a: Animation): a is CSSTransition =>
+  typeof CSSTransition === 'function' && hasGetter(CSSTransition.prototype, 'transitionProperty', a);
+const isKeyframeEffect = (e: AnimationEffect | null): e is KeyframeEffect =>
+  !!e && typeof KeyframeEffect === 'function' && hasGetter(KeyframeEffect.prototype, 'pseudoElement', e);
+
 /** The animation's type and name, as Chrome names them. */
 function kindOf(animation: Animation): [Protocol.Animation.Animation['type'], string] {
-  if (typeof CSSAnimation === 'function' && animation instanceof CSSAnimation)
-    return ['CSSAnimation', animation.animationName];
-  if (typeof CSSTransition === 'function' && animation instanceof CSSTransition)
-    return ['CSSTransition', animation.transitionProperty];
+  if (isCssAnimation(animation)) return ['CSSAnimation', animation.animationName];
+  if (isCssTransition(animation)) return ['CSSTransition', animation.transitionProperty];
   return ['WebAnimation', animation.id];
 }
 
@@ -96,7 +117,7 @@ export function registerAnimation(ctx: Context) {
       type,
     };
     const effect = animation.effect;
-    if (effect instanceof KeyframeEffect) {
+    if (isKeyframeEffect(effect)) {
       const timing = effect.getComputedTiming();
       const source: Protocol.Animation.AnimationEffect = {
         delay: timing.delay ?? 0,
