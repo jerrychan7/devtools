@@ -82,6 +82,70 @@ export class RuleView {
     };
   }
 
+  /** Where an at-rule's prelude (its condition, name) is written, when the sheet's text is known. */
+  private at(sheet: CSSStyleSheet, rule: CSSRule): { range?: Protocol.CSS.SourceRange } {
+    const source = this.sheets.sourceOf(sheet);
+    const node = source?.nodes.get(rule);
+    return source && node ? { range: rangeOf(source, node.preludeStart, node.preludeEnd) } : {};
+  }
+
+  /**
+   * The conditions setSupportsText gave @supports rules. Chrome reports such a condition as given,
+   * without its range, from then on (@container and @scope are normalized, with their range).
+   */
+  readonly supportsSet = new WeakMap<CSSRule, string>();
+
+  supports(sheet: CSSStyleSheet, rule: CSSSupportsRule): Protocol.CSS.CSSSupports {
+    const text = rule.conditionText;
+    const given = this.supportsSet.get(rule);
+    const styleSheetId = this.sheets.idOf(sheet);
+    if (given !== undefined) return { text: given, active: CSS.supports(text), styleSheetId };
+    return { text, active: CSS.supports(text), ...this.at(sheet, rule), styleSheetId };
+  }
+
+  container(sheet: CSSStyleSheet, rule: CSSContainerRule): Protocol.CSS.CSSContainerQuery {
+    return {
+      text: rule.containerQuery,
+      ...this.at(sheet, rule),
+      styleSheetId: this.sheets.idOf(sheet),
+      ...(rule.containerName && { name: rule.containerName }),
+      ...queriedAxes(rule.containerQuery),
+      conditionText: rule.conditionText,
+    };
+  }
+
+  scope(sheet: CSSStyleSheet, rule: CSSScopeRule): Protocol.CSS.CSSScope {
+    return { text: scopeText(rule), ...this.at(sheet, rule), styleSheetId: this.sheets.idOf(sheet) };
+  }
+
+  /** A keyframe's key, and where it is written. */
+  keyText(sheet: CSSStyleSheet, rule: CSSKeyframeRule): Protocol.CSS.Value {
+    return { text: rule.keyText, ...this.at(sheet, rule) };
+  }
+
+  /** An @keyframes as Chrome reports it for an animation: its name and its keyframes. */
+  keyframes(sheet: CSSStyleSheet, rule: CSSKeyframesRule): Protocol.CSS.CSSKeyframesRule {
+    const styleSheetId = this.sheets.idOf(sheet);
+    const source = this.sheets.sourceOf(sheet);
+    return {
+      animationName: { text: rule.name, ...this.at(sheet, rule) },
+      keyframes: Array.from(rule.cssRules)
+        .filter((k): k is CSSKeyframeRule => isCssom(k, 'CSSKeyframeRule'))
+        .map(k => {
+          const node = source?.nodes.get(k);
+          return {
+            styleSheetId,
+            origin: this.sheets.origin(sheet),
+            keyText: this.keyText(sheet, k),
+            style:
+              source && node
+                ? sourceStyle(styleSheetId, k.style, source, node)
+                : buildStyle(styleSheetId, k.style, 0, k.keyText.length + 3),
+          };
+        }),
+    };
+  }
+
   /** A rule with the at-rules and style rules around it, in the fields Chrome reports them in. */
   cssRule(sheet: CSSStyleSheet, rule: StyleRule, tree?: TreeScope): Protocol.CSS.CSSRule {
     const styleSheetId = this.sheets.idOf(sheet);
@@ -100,31 +164,16 @@ export class RuleView {
     const layers: Protocol.CSS.CSSLayer[] = [];
     const scopes: Protocol.CSS.CSSScope[] = [];
     const ruleTypes: Protocol.CSS.CSSRuleType[] = [];
-    // Where an at-rule's condition is written.
-    const source = this.sheets.sourceOf(sheet);
-    const at = (a: CSSRule) => {
-      const node = source?.nodes.get(a);
-      return source && node ? { range: rangeOf(source, node.preludeStart, node.preludeEnd) } : {};
-    };
     for (const a of ancestors) {
       const type = ruleType(a);
       if (type) ruleTypes.push(type);
       if (isCssom(a, 'CSSStyleRule')) nestingSelectors.push(a.selectorText);
       else if (isCssom(a, 'CSSMediaRule')) media.push(this.media(sheet, a));
-      else if (isCssom(a, 'CSSSupportsRule'))
-        supports.push({ text: a.conditionText, active: CSS.supports(a.conditionText), ...at(a), styleSheetId });
-      else if (isCssom(a, 'CSSContainerRule'))
-        containerQueries.push({
-          text: a.containerQuery,
-          ...at(a),
-          styleSheetId,
-          ...(a.containerName && { name: a.containerName }),
-          ...queriedAxes(a.containerQuery),
-          conditionText: a.conditionText,
-        });
+      else if (isCssom(a, 'CSSSupportsRule')) supports.push(this.supports(sheet, a));
+      else if (isCssom(a, 'CSSContainerRule')) containerQueries.push(this.container(sheet, a));
       // Chrome lists layers outermost first, unlike the other at-rules.
-      else if (isCssom(a, 'CSSLayerBlockRule')) layers.unshift({ text: a.name, ...at(a), styleSheetId });
-      else if (isCssom(a, 'CSSScopeRule')) scopes.push({ text: scopeText(a), ...at(a), styleSheetId });
+      else if (isCssom(a, 'CSSLayerBlockRule')) layers.unshift({ text: a.name, ...this.at(sheet, a), styleSheetId });
+      else if (isCssom(a, 'CSSScopeRule')) scopes.push(this.scope(sheet, a));
     }
     if (nestingSelectors.length) result.nestingSelectors = nestingSelectors;
     // Like Chrome, these are sent even when empty.

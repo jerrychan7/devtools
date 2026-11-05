@@ -52,6 +52,10 @@ mergedFrames.registerRoutes('CSS', {
     'CSS.collectClassNames': SHEET_ID,
     'CSS.setRuleSelector': SHEET_ID,
     'CSS.setMediaText': SHEET_ID,
+    'CSS.setSupportsText': SHEET_ID,
+    'CSS.setContainerQueryText': SHEET_ID,
+    'CSS.setScopeText': SHEET_ID,
+    'CSS.setKeyframeKey': SHEET_ID,
     'CSS.addRule': SHEET_ID,
     'CSS.setStyleTexts': ['edits.0.styleSheetId'],
     'CSS.createStyleSheet': ['frameId'],
@@ -335,6 +339,73 @@ export function registerCss(ctx: Context) {
     );
   }
 
+  /**
+   * The rule `is` picks whose prelude (condition, key) is at `range`: only the text the sheet was
+   * written in has ranges for them.
+   */
+  function atPrelude(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, is: (r: CSSRule) => boolean): CSSRule {
+    const source = sheets.sourceOf(sheet);
+    const offsets = source && offsetsOf(source, range);
+    for (const [r, node] of source?.nodes ?? [])
+      if (is(r) && node.preludeStart === offsets?.[0] && node.preludeEnd === offsets[1]) return r;
+    throw new CdpError(RANGE_MISMATCH);
+  }
+
+  /**
+   * Writes a group rule's condition as given. Its CSSOM has no setter for it (@supports,
+   * @container, @scope): the rule is replaced by one parsed from its text with the new condition.
+   */
+  function setPrelude(
+    sheet: CSSStyleSheet,
+    range: Protocol.CSS.SourceRange,
+    text: string,
+    is: (r: CSSRule) => boolean
+  ): CSSRule {
+    assertEditable(sheet);
+    let current = atPrelude(sheet, range, is);
+    const source = sheets.sourceOf(sheet);
+    const node = source?.nodes.get(current);
+    const parent = current.parentRule ?? current.parentStyleSheet;
+    if (!source || !node || !(isCssom(parent, 'CSSGroupingRule') || isCssom(parent, 'CSSStyleSheet')))
+      throw new CdpError(RANGE_MISMATCH);
+    const before = source.text.slice(node.start, node.end);
+    const after =
+      source.text.slice(node.start, node.preludeStart) + text + source.text.slice(node.preludeEnd, node.end);
+    const swap = (ruleText: string) => {
+      const i = Array.from(parent.cssRules).indexOf(current);
+      parent.deleteRule(i);
+      parent.insertRule(ruleText, i);
+      current = parent.cssRules[i] ?? current;
+    };
+    // The rule objects change: the text is paired again whole.
+    editSheet(
+      sheet,
+      splice(sheet, range, text),
+      () => swap(after),
+      () => swap(before)
+    );
+    stylesChanged();
+    return current;
+  }
+
+  /** The @keyframes of the element's animations, as Chrome: the last of each name, in their order. */
+  function keyframesOf(el: Element, pseudo: PseudoType | null): Protocol.CSS.CSSKeyframesRule[] {
+    const value = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null).animationName;
+    const names = [...new Set(value.split(',').map(n => n.trim()))].filter(n => n && n !== 'none');
+    if (!names.length) return [];
+    const found = new Map<string, { sheet: CSSStyleSheet; rule: CSSKeyframesRule }>();
+    const walk = (sheet: CSSStyleSheet, list: CSSRule[]) => {
+      for (const rule of list)
+        if (isCssom(rule, 'CSSKeyframesRule')) found.set(rule.name, { sheet, rule });
+        else if (isCssom(rule, 'CSSGroupingRule')) walk(sheet, sheets.rulesOf(rule));
+    };
+    for (const sheet of sheets.all()) walk(sheet, sheets.rulesOf(sheet));
+    return names.flatMap(name => {
+      const f = found.get(name);
+      return f ? [rules.keyframes(f.sheet, f.rule)] : [];
+    });
+  }
+
   async function matchedStyles(
     el: Element,
     pseudo: PseudoType | null
@@ -352,7 +423,7 @@ export function registerCss(ctx: Context) {
           matchedCSSRules: cascade.matchedRules(el, pseudo),
           pseudoElements: [],
           inherited: cascade.inheritedEntries(el),
-          cssKeyframesRules: [],
+          cssKeyframesRules: keyframesOf(el, pseudo),
         };
       }
       const pseudoElements = PSEUDO_TYPES.map(type => ({
@@ -363,7 +434,7 @@ export function registerCss(ctx: Context) {
         matchedCSSRules: cascade.matchedRules(el),
         pseudoElements,
         inherited: cascade.inheritedEntries(el.assignedSlot ?? parentOf(el)),
-        cssKeyframesRules: [],
+        cssKeyframesRules: keyframesOf(el, null),
       };
       const style = cascade.inlineStyle(el);
       if (style) result.inlineStyle = style;
@@ -555,14 +626,8 @@ export function registerCss(ctx: Context) {
     setMediaText(params: Protocol.CSS.SetMediaTextRequest): Protocol.CSS.SetMediaTextResponse {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
-      // The @media whose condition is at the range, which only the text the sheet was written in has.
-      const source = sheets.sourceOf(sheet);
-      const offsets = source && offsetsOf(source, params.range);
-      let rule: CSSMediaRule | undefined;
-      for (const [r, node] of source?.nodes ?? [])
-        if (isCssom(r, 'CSSMediaRule') && node.preludeStart === offsets?.[0] && node.preludeEnd === offsets[1])
-          rule = r;
-      if (!rule) throw new CdpError(RANGE_MISMATCH);
+      const rule = atPrelude(sheet, params.range, r => isCssom(r, 'CSSMediaRule'));
+      if (!isCssom(rule, 'CSSMediaRule')) throw new CdpError(RANGE_MISMATCH);
       const media = rule.media;
       const old = media.mediaText;
       editSheet(
@@ -574,6 +639,47 @@ export function registerCss(ctx: Context) {
       );
       stylesChanged();
       return { media: rules.media(sheet, rule) };
+    },
+
+    setSupportsText(params: Protocol.CSS.SetSupportsTextRequest): Protocol.CSS.SetSupportsTextResponse {
+      const sheet = sheets.get(params.styleSheetId);
+      const rule = setPrelude(sheet, params.range, params.text, r => isCssom(r, 'CSSSupportsRule'));
+      if (!isCssom(rule, 'CSSSupportsRule')) throw new CdpError(RANGE_MISMATCH);
+      rules.supportsSet.set(rule, params.text);
+      return { supports: rules.supports(sheet, rule) };
+    },
+
+    setContainerQueryText(
+      params: Protocol.CSS.SetContainerQueryTextRequest
+    ): Protocol.CSS.SetContainerQueryTextResponse {
+      const sheet = sheets.get(params.styleSheetId);
+      const rule = setPrelude(sheet, params.range, params.text, r => isCssom(r, 'CSSContainerRule'));
+      if (!isCssom(rule, 'CSSContainerRule')) throw new CdpError(RANGE_MISMATCH);
+      return { containerQuery: rules.container(sheet, rule) };
+    },
+
+    setScopeText(params: Protocol.CSS.SetScopeTextRequest): Protocol.CSS.SetScopeTextResponse {
+      const sheet = sheets.get(params.styleSheetId);
+      const rule = setPrelude(sheet, params.range, params.text, r => isCssom(r, 'CSSScopeRule'));
+      if (!isCssom(rule, 'CSSScopeRule')) throw new CdpError(RANGE_MISMATCH);
+      return { scope: rules.scope(sheet, rule) };
+    },
+
+    setKeyframeKey(params: Protocol.CSS.SetKeyframeKeyRequest): Protocol.CSS.SetKeyframeKeyResponse {
+      const sheet = sheets.get(params.styleSheetId);
+      assertEditable(sheet);
+      const rule = atPrelude(sheet, params.range, r => isCssom(r, 'CSSKeyframeRule'));
+      if (!isCssom(rule, 'CSSKeyframeRule')) throw new CdpError(RANGE_MISMATCH);
+      const old = rule.keyText;
+      editSheet(
+        sheet,
+        splice(sheet, params.range, params.keyText),
+        () => (rule.keyText = params.keyText),
+        () => (rule.keyText = old),
+        params.range
+      );
+      stylesChanged();
+      return { keyText: rules.keyText(sheet, rule) };
     },
 
     createStyleSheet(params: Protocol.CSS.CreateStyleSheetRequest): Protocol.CSS.CreateStyleSheetResponse {

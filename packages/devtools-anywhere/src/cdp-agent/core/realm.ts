@@ -149,6 +149,7 @@ type CssomName =
   | 'CSSLayerBlockRule'
   | 'CSSLayerStatementRule'
   | 'CSSKeyframesRule'
+  | 'CSSKeyframeRule'
   | 'CSSStyleDeclaration';
 
 /**
