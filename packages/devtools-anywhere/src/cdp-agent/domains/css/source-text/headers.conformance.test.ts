@@ -93,7 +93,10 @@ test('<link> and @import: the file; an @import after rules makes no sheet', asyn
   // in its cache (the test server sends `no-store`).
   const file = '.narrow {\n  letter-spacing: 1px;\n}\n';
   const imported = (list: { text: string; length?: number }[]) =>
-    list.map(s => (s.text.startsWith('.narrow') ? { ...s, text: file, length: file.length } : s));
+    list
+      .map(s => (s.text.startsWith('.narrow') ? { ...s, text: file, length: file.length } : s))
+      // The two may come in either order.
+      .sort((a, b) => a.text.localeCompare(b.text));
   assert.ok(ours.some(s => s.text === file));
   assert.deepEqual(imported(ours), imported(chrome));
 });
