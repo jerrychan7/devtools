@@ -297,3 +297,62 @@ test('the Animations panel scrolls the page with the scrubber of a scroll(root) 
   );
   assert.ok(top < 3000, `scrolled to ${top}px`);
 });
+
+test(
+  'the Animations panel follows the page scrolling the scroller of a scroll-driven animation',
+  { skip },
+  async () => {
+    // The panel listens for the scroller's scroll events in an isolated world
+    // (Page.createIsolatedWorld), told by a binding (Runtime.addBinding, Runtime.bindingCalled).
+    await showView('animations');
+    /** Clicks, or reads the text or transform of, the panel's last match of `selector`, shadow DOM included. */
+    const last = (selector: string, read: string) =>
+      frontend.evaluate(
+        (selector, read) => {
+          const all: Element[] = [];
+          const walk = (root: Document | ShadowRoot) => {
+            all.push(...root.querySelectorAll(selector));
+            for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+          };
+          walk(document);
+          const el = all.at(-1);
+          if (!(el instanceof HTMLElement)) return null;
+          if (read === 'click') return el.click();
+          return read === 'text' ? el.textContent : el.style.transform;
+        },
+        selector,
+        read
+      );
+    // Its group is then the panel's only one: groups of earlier tests may go meanwhile.
+    await last('[title="Clear all"], [aria-label="Clear all"]', 'click');
+    await waitFor(async () => (await count('.animation-buffer-preview')) === 0);
+    await page.evaluate(() => {
+      const scroller = document.body.appendChild(document.createElement('div'));
+      scroller.id = 'rf-followed';
+      scroller.style.cssText = 'height: 100px; overflow: scroll';
+      scroller.innerHTML =
+        '<style>@keyframes rf-follow { to { opacity: 0.5 } } #rf-following { height: 1000px; animation: rf-follow linear; animation-timeline: scroll(nearest) }</style><div id="rf-following"></div>';
+    });
+    const currentTime = () => last('.animation-timeline-current-time', 'text');
+    const scrubber = () => last('.animation-scrubber', 'transform');
+    try {
+      await waitFor(async () => (await count('.animation-buffer-preview')) > 0);
+      await last('.animation-buffer-preview', 'click');
+      await waitFor(async () => (await currentTime()) === '0px');
+      const start = await scrubber();
+      // The page scrolls by itself: the time and the scrubber follow.
+      await page.evaluate(() => document.getElementById('rf-followed')?.scrollTo(0, 450));
+      await waitFor(async () => (await currentTime()) === '450px');
+      await waitFor(async () => (await scrubber()) !== start);
+      // The page sees nothing of the panel's listener: no global, no property on the scroller.
+      const leaked = await page.evaluate(() =>
+        [...Object.keys(window), ...Object.keys(document.getElementById('rf-followed') ?? {})].filter(key =>
+          key.startsWith('__devtools')
+        )
+      );
+      assert.deepEqual(leaked, []);
+    } finally {
+      await page.evaluate(() => document.getElementById('rf-followed')?.remove());
+    }
+  }
+);
