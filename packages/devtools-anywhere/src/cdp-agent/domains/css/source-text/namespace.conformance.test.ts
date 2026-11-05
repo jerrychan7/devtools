@@ -38,6 +38,29 @@ async function added(css: string, html = ''): Promise<{ at: string; ids: [string
 const text = (side: Side, styleSheetId: string) =>
   side.send('CSS.getStyleSheetText', { styleSheetId }).then(r => r.text);
 
+const XHTML = '@namespace h url(http://www.w3.org/1999/xhtml);';
+
+test('a selector with a namespace prefix matches in the namespace it is declared with', () =>
+  same(
+    `${XHTML}\nh|p.n20 { top: 1px }\n*|p.n20 { left: 1px }\n|p.n20 { right: 1px }\n[h|title].n20 { order: 1 }\np.n20 { bottom: 1px }`,
+    '<p class="n20" title="a">x</p>',
+    '.n20'
+  ));
+
+test('with a default namespace, a selector without a prefix matches only in it', () =>
+  same(
+    '@namespace url(http://www.w3.org/2000/svg);\np.n21 { top: 1px }\n.n21 { left: 1px }\n*.n21 { right: 1px }\n*|p.n21 { bottom: 1px }',
+    '<p class="n21">x</p>',
+    '.n21'
+  ));
+
+test('a prefixed selector matches SVG elements, with combinators too', () =>
+  same(
+    `${SVG}\n${XHTML}\nsvg|rect.n22 { top: 1px }\nrect.n22 { left: 1px }\nh|div svg|rect.n22 { right: 1px }\nh|rect.n22 { bottom: 1px }\nsvg|svg > .n22 { order: 1 }`,
+    '<svg><rect class="n22"/></svg>',
+    '.n22'
+  ));
+
 /** The text of the sheet with `css` and the rules of it matching `target`, on both sides. */
 async function same(css: string, html: string, target: string) {
   const at = await addStyle(t, css, html);

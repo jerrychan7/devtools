@@ -8,6 +8,8 @@ import type { RuleView } from './rule-view';
 import { type Entry, type StyleRule, ancestorsOf, resolveSelector, sheetApplies } from './rules';
 import type { SheetRegistry } from '../sheets/sheet-registry';
 import { hostMatcher } from './host';
+import { matchInNamespaces } from './namespaces';
+import { namespaceText } from '../sheets/sheet-text';
 import type { UserAgentStyles } from '../user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
 
@@ -159,6 +161,29 @@ export class Cascade {
     return null;
   }
   /**
+   * Whether `el` matches each selector (but those in @scope) of the rules in `group` of the sheets
+   * declaring namespaces, by sheet and selector: Element.matches() does not know them.
+   */
+  private namespaceMatches(el: Element, pseudo: PseudoType | null, group: Candidate[]) {
+    const bySheet = new Map<CSSStyleSheet, { tree: TreeScope; hosts: Set<string> }>();
+    for (const { sheet, tree, scope, selectors } of group) {
+      if (scope) continue;
+      let entry = bySheet.get(sheet);
+      if (!entry) bySheet.set(sheet, (entry = { tree, hosts: new Set() }));
+      for (const s of selectors) if (s.pseudo === pseudo) entry.hosts.add(s.host);
+    }
+    const result = new Map<CSSStyleSheet, Map<string, boolean>>();
+    for (const [sheet, { tree, hosts }] of bySheet) {
+      const namespaces = namespaceText(this.sheets.rulesOf(sheet));
+      if (!namespaces || !hosts.size) continue;
+      const list = [...hosts];
+      const matched = matchInNamespaces(el, tree, namespaces, list);
+      result.set(sheet, new Map(list.map((h, i) => [h, matched[i] ?? false])));
+    }
+    return result;
+  }
+
+  /**
    * Rules matching `el`, or with `pseudo`, its pseudo-element, in cascade order (lowest
    * priority first). Selectors ending in a pseudo-element only match that pseudo-element.
    */
@@ -191,7 +216,8 @@ export class Cascade {
       if (isShadowRoot(slotTree)) groups.push([byTree.get(slotTree), 'slotted', slot, -depth++]);
     }
     groups.push([ownShadow ? byTree.get(ownShadow) : undefined, 'host', null, -depth]);
-    for (const [group, kind, slot, rank] of groups)
+    for (const [group, kind, slot, rank] of groups) {
+      const inNamespaces = kind === 'own' ? this.namespaceMatches(el, pseudo, group ?? []) : null;
       for (const candidate of group ?? []) {
         const { sheet, tree, rule, order, layer, containers, scope, selectors } = candidate;
         let proximity = Infinity;
@@ -204,7 +230,8 @@ export class Cascade {
               const host = hostMatcher(s.host);
               return host !== null && host(el);
             }
-            if (!scope) return el.matches(s.host);
+            const declared = inNamespaces?.get(sheet)?.get(s.host);
+            if (!scope) return declared ?? el.matches(s.host);
             // `:scope` is the root: Element.matches for the root itself, querySelectorAll below it,
             // once the element matches the selector with any root.
             const anyRoot = s.host.replace(/:scope(?![\w-])/g, ':is(*)');
@@ -233,6 +260,7 @@ export class Cascade {
           rank,
         });
       }
+    }
     // Context, then layers, then specificity, then scope proximity (nearer roots win), then order of
     // appearance. Inspector rules win over regular ones of equal specificity, as they come last.
     const userAgent = this.userAgent?.matchedRules(el, pseudo) ?? [];
