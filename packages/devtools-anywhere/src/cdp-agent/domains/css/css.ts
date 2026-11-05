@@ -117,22 +117,25 @@ export function registerCss(ctx: Context) {
     : null;
   const cascade = new Cascade(sheets, forced, nodes, rules, userAgent);
   ctx.matchingStyles = (el, pseudo) => {
-    type Declared = { name: string; value: string; important?: boolean; disabled?: boolean };
-    const declares = (properties: Declared[]) => (name: string) => {
-      const found = properties.filter(p => p.name === name && !p.disabled && p.value !== '');
-      return found.length ? (found.some(p => p.important) ? 'important' : 'normal') : null;
-    };
+    // As Chrome reads them, with getPropertyValue: a longhand of a shorthand with var() is empty.
+    const declares = (decl: CSSStyleDeclaration) => (name: string) =>
+      decl.getPropertyValue(name) === ''
+        ? null
+        : decl.getPropertyPriority(name) === 'important'
+          ? 'important'
+          : 'normal';
     const styles: MatchingStyle[] = [];
-    if (!pseudo && el.hasAttribute('style')) {
-      const inline = cascade.inlineStyle(el);
-      if (inline) styles.push({ rule: null, declares: declares(inline.cssProperties) });
-    }
+    // Like Chrome's element->style(), there even without a style attribute.
+    const inline = (el as Partial<ElementCSSInlineStyle>).style;
+    if (!pseudo && inline) styles.push({ rule: null, declares: declares(inline) });
     for (const { rule } of cascade.matchedRules(el, pseudo).reverse()) {
-      if (rule.origin === 'user-agent' || !rule.styleSheetId) continue;
-      if (!sheets.get(rule.styleSheetId).ownerNode) continue;
+      if (rule.origin === 'user-agent' || !rule.styleSheetId || !rule.style.range) continue;
+      const sheet = sheets.get(rule.styleSheetId);
+      if (!sheet.ownerNode) continue;
+      const decl = sheets.findRule(sheet, rule.style.range, 'style').style;
       // Nested declarations, which have no selectors of their own, are not style rules.
       const own = rule.selectorList.selectors.length ? `${rule.styleSheetId}\n${rule.selectorList.text}` : null;
-      styles.push({ rule: own, declares: declares(rule.style.cssProperties) });
+      styles.push({ rule: own, declares: declares(decl) });
     }
     return styles;
   };
