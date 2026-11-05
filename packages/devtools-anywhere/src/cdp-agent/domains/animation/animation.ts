@@ -12,8 +12,10 @@ interface Tracked {
   animation: Animation;
   /** Whether `animationStarted` was sent: an animation is announced once it is no longer pending. */
   started: boolean;
-  /** Its own playback rate, before the domain's rate (`setPlaybackRate`) is applied. */
+  /** Its own playback rate, as the page set it, before the domain's rate (`setPlaybackRate`) is applied. */
   rate: number;
+  /** `playbackRate` as last written or seen: another value is the page's doing. */
+  seen: number;
   /** The start time last reported. */
   start: number | null;
   /** Frames to wait before reporting a seek's new start time (see `seekAnimations`). */
@@ -310,6 +312,7 @@ export function registerAnimation(ctx: Context) {
       animation,
       started: false,
       rate: animation.playbackRate,
+      seen: 0,
       start: null,
       hold: 0,
       // Chrome reports a cancel on the change to idle: one made idle (`new Animation()`) never had it.
@@ -319,13 +322,42 @@ export function registerAnimation(ctx: Context) {
     tracked.set(animation, t);
     collected.register(t, t.id);
     awake.set(t.id, t);
-    if (rate !== 1) animation.playbackRate = t.rate * rate;
+    t.seen = t.rate;
+    syncRate(t);
     session.emit('Animation.animationCreated', { id: t.id });
   };
 
-  /** Reports what the page changed: the start (Chrome's `animationStarted`), the start time. */
+  /**
+   * Takes a playback rate other than the one last written or seen as the page's, and applies the
+   * domain's to it; whether the page changed it. `reverse()` negates the rate it reads, the
+   * domain's included; any other value is one the page set (one equal to the negated rate is taken
+   * for `reverse()` as well).
+   *
+   * Not while pending: a rate the page set with `reverse()` or `updatePlaybackRate()` is pending
+   * until the animation is ready, `playbackRate` still reads the old one, and writing it would drop
+   * the page's. The domain's rate is applied once the animation is ready, a frame late at most.
+   */
+  const syncRate = (t: Tracked): boolean => {
+    const { animation } = t;
+    if (animation.pending) return false;
+    const now = animation.playbackRate;
+    const changed = now !== t.seen;
+    if (changed) t.rate = now === -t.seen ? -t.rate : now;
+    const wanted = t.rate * rate;
+    if (now !== wanted) {
+      // The start time this moves is the domain's doing, not the page's.
+      const known = startOf(animation) === t.start;
+      animation.playbackRate = wanted;
+      if (known) t.start = startOf(animation) ?? t.start;
+    }
+    t.seen = animation.playbackRate;
+    return changed;
+  };
+
+  /** Reports what the page changed: the start (Chrome's `animationStarted`), the start time, the rate. */
   const check = (t: Tracked) => {
     const { animation } = t;
+    const rated = syncRate(t);
     if (t.released) return;
     if (!t.started) {
       if (animation.pending || animation.playState === 'idle') return;
@@ -339,8 +371,8 @@ export function registerAnimation(ctx: Context) {
       return;
     }
     const start = startOf(animation);
-    if (start !== null && start !== t.start) {
-      t.start = start;
+    if ((start !== null && start !== t.start) || rated) {
+      t.start = start ?? t.start;
       session.emit('Animation.animationUpdated', { animation: describe(t) });
     }
   };
@@ -392,11 +424,15 @@ export function registerAnimation(ctx: Context) {
   const quietly = (t: Tracked, change: () => void) => {
     change();
     t.start = startOf(t.animation) ?? t.start;
+    t.seen = t.animation.playbackRate;
   };
 
   const setRate = (value: number) => {
+    const list = all();
+    // What the page changed is the page's under the old rate.
+    list.forEach(check);
     rate = value;
-    for (const t of all()) quietly(t, () => (t.animation.playbackRate = t.rate * rate));
+    for (const t of list) syncRate(t);
   };
 
   const stop = () => {
@@ -406,8 +442,16 @@ export function registerAnimation(ctx: Context) {
     stopShadowRoots = null;
     stopAnimations?.();
     stopAnimations = null;
-    // Every animation slowed down gets its own rate back: cancelled and released ones too.
-    if (rate !== 1) setRate(1);
+    // Every animation slowed down gets its own rate back: cancelled and released ones too, and
+    // pending ones once they are ready (or cancelled), not to drop a rate the page set meanwhile.
+    rate = 1;
+    for (const t of all()) {
+      if (!t.animation.pending) syncRate(t);
+      else {
+        const restore = () => void syncRate(t);
+        t.animation.ready.then(restore, restore);
+      }
+    }
     awake.clear();
     asleep.clear();
     tracked = new WeakMap();

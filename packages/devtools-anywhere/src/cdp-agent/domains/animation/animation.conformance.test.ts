@@ -600,6 +600,28 @@ describe('Animation, beyond getAnimations()', () => {
     assert.deepEqual(ours, chrome);
   });
 
+  test("the page's own playback rate is reported, and kept after disable, as in Chrome", async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        Reflect.set(window, '__rate', div.animate({ opacity: [0, 1] }, 10000));
+      });
+      await sleep(200);
+      await side.clear();
+      await t.page.evaluate(() => (Reflect.get(window, '__rate') as Animation).reverse());
+      await sleep(200);
+      const reversed = (await side.events('Animation.animationUpdated')).map(e => e.animation.playbackRate);
+      await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
+      await t.page.evaluate(() => ((Reflect.get(window, '__rate') as Animation).playbackRate = 2));
+      await sleep(200);
+      await side.send('Animation.disable');
+      const after = await t.page.evaluate(() => (Reflect.get(window, '__rate') as Animation).playbackRate);
+      return { reversed, after };
+    });
+    assert.deepEqual(chrome, { reversed: [-1], after: 2 });
+    assert.deepEqual(ours, chrome);
+  });
+
   test('disable gives a cancelled animation its own rate back, as in Chrome', async () => {
     // Chrome sets the rate on the timeline, not on the animation: the page reads its own throughout.
     const [chrome, ours] = await onEachSide(async (t, side) => {
@@ -616,5 +638,26 @@ describe('Animation, beyond getAnimations()', () => {
     });
     assert.equal(chrome, 1);
     assert.equal(ours, chrome);
+  });
+
+  test("a rate the page set that is still pending survives the panel's rate, as in Chrome", async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        Reflect.set(window, '__pending', div.animate({ opacity: [0, 1] }, 10000));
+      });
+      await sleep(200);
+      await side.clear();
+      // The rate is set while the reverse is pending, in the same frame as a rule (not guaranteed).
+      await t.page.evaluate(() => (Reflect.get(window, '__pending') as Animation).updatePlaybackRate(-2));
+      await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
+      await sleep(300);
+      const reported = (await side.events('Animation.animationUpdated')).map(e => e.animation.playbackRate);
+      await side.send('Animation.disable');
+      const after = await t.page.evaluate(() => (Reflect.get(window, '__pending') as Animation).playbackRate);
+      return { reported: reported.at(-1), after };
+    });
+    assert.deepEqual(chrome, { reported: -2, after: -2 });
+    assert.deepEqual(ours, chrome);
   });
 });
