@@ -1419,6 +1419,37 @@ describe('Animation, play state changes', () => {
     assert.ok(chrome.finished >= 6, `finished at ${chrome.finished}`);
     assert.deepEqual(ours, chrome);
   });
+  test('a cancel or pause before the start reports no start (Chrome: only when a frame ran before it)', async () => {
+    const make = (name: string) =>
+      `window.${name} = document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 1000);`;
+    const [chrome, ours] = await steps([
+      ['cancel in a timer', `${make('c')} setTimeout(() => c.cancel())`],
+      ['pause in a timer', `${make('p')} setTimeout(() => p.pause())`],
+      ['cancel in a microtask', `${make('m')} Promise.resolve().then(() => m.cancel())`],
+      ['pause in the next frame', `${make('f')} requestAnimationFrame(() => f.pause())`],
+      [
+        'pause an unplayed one in a timer',
+        `window.u = new Animation(new KeyframeEffect(document.body, { opacity: [0, 1] }, 1000)); setTimeout(() => u.pause())`,
+      ],
+    ]);
+    // Chrome sends a start before the cancel only when a frame's animation update ran before the
+    // timer, which depends on the frame timing of the run (see `track`): either sequence is taken
+    // from it. Ours never sends one.
+    for (const [step, id] of [
+      ['cancel in a timer', 1],
+      ['pause in a timer', 2],
+    ] as const) {
+      const without = [`Created ${id}`, `Canceled ${id}`];
+      const withStart = [`Created ${id}`, `Started ${id}`, `Canceled ${id}`];
+      assert.ok(
+        [without, withStart].some(list => JSON.stringify(list) === JSON.stringify(chrome[step])),
+        `${step}: ${JSON.stringify(chrome[step])}`
+      );
+      assert.deepEqual(ours[step], without, step);
+      chrome[step] = without;
+    }
+    assert.deepEqual(ours, chrome);
+  });
   test("an error of the domain's own listener fails none of the page's calls (ours)", async () => {
     assert.ok(env);
     const t = await openPage(env, [...EVENTS]);

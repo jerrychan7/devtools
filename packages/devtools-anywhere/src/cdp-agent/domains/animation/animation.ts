@@ -401,6 +401,14 @@ export function registerAnimation(ctx: Context) {
    */
   const track = (animation: Animation, told = false) => {
     const known = tracked.get(animation);
+    // Cancelled or paused before it started, Chrome reports a start (running, at 0) before the
+    // cancel only when a frame's animation update ran since the animation was made; one cancelled
+    // in the page's rAF callbacks of that frame gets none (measured, both timed in the page with
+    // performance.now()). None is sent here: our frame loop is a rAF callback of the same frame as
+    // the page's, and ahead of them, so seeing the animation there does not tell a cancel in the
+    // page's callbacks from one in a later task. Telling them apart would need the probe to wrap
+    // the page's requestAnimationFrame, for this one event. So where a frame came before a timer
+    // that cancels it, Chrome sends a start that is missing here.
     if (known) {
       // Finished ones with `fill: forwards` stay in getAnimations(): only one that runs again wakes.
       if (told || (animation.playState !== 'finished' && animation.playState !== 'idle')) wake(known);
