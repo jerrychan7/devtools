@@ -558,16 +558,39 @@ describe('Animation', () => {
     for (const side of [t.chrome, t.ours]) {
       await reset(t);
       await side.send('Animation.enable');
-      await side.send('Animation.disable');
-      await side.clear();
+      // Running, and known to the domain, when it is disabled: then changed by the page frame by
+      // frame, as a poll left running would report.
       await t.page.evaluate(() => {
         const div = document.body.appendChild(document.createElement('div'));
-        const animation = div.animate({ opacity: [0, 1] }, 10000);
+        const animation = div.animate({ opacity: [0, 1] }, 100000);
         animation.id = 'off';
-        animation.pause();
-        animation.play();
-        animation.cancel();
+        Reflect.set(window, '__off', animation);
       });
+      await until(
+        async () => (await side.events('Animation.animationStarted')).find(e => e.animation.name === 'off'),
+        'the animation'
+      );
+      await side.send('Animation.disable');
+      await side.clear();
+      for (const change of [
+        'reverse()',
+        'currentTime = 5000',
+        'startTime = document.timeline.currentTime - 1000',
+        'playbackRate = 2',
+        'pause()',
+        'play()',
+        'finish()',
+      ]) {
+        await t.page.evaluate(`window.__off.${change}`);
+        await settle(t, side);
+      }
+      // And one started meanwhile, then cancelled.
+      await t.page.evaluate(() => {
+        const animation = document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000);
+        Reflect.set(window, '__off2', animation);
+      });
+      await settle(t, side);
+      await t.page.evaluate(() => (Reflect.get(window, '__off2') as Animation).cancel());
       await settle(t, side);
       const all = [];
       for (const method of EVENTS) all.push(...(await side.events(method)));
