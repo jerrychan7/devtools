@@ -255,15 +255,20 @@ export function registerAnimation(ctx: Context) {
           else if (t.animation.playState === 'paused') t.animation.play();
         });
     },
-    seekAnimations: ({ animations, currentTime }: Protocol.Animation.SeekAnimationsRequest) => {
+    seekAnimations: ({ animations, currentTime, currentTimes }: Protocol.Animation.SeekAnimationsRequest) => {
+      // The panel sends one time per animation, `currentTimes`; Chrome's messages.
+      if ((currentTime === undefined) === (currentTimes === undefined))
+        throw new CdpError('Only one of current_time or current_times may be set.');
+      if (currentTimes && currentTimes.length !== animations.length)
+        throw new CdpError('current_times should be the same size as animation_ids.');
       const list = animations.map(find);
       // Not quietly: a running animation seeked gets a new start time, which Chrome reports with
       // `animationUpdated`, and the panel's play button waits for it to show it playing. The panel
       // reads its own scrubber then, which it starts as it seeks: told in the very next frame, it
       // finds the scrubber not started yet and shows "Replay". Chrome's report comes later, across
       // processes, so this one waits two frames.
-      for (const t of list) {
-        t.animation.currentTime = currentTime ?? 0;
+      for (const [i, t] of list.entries()) {
+        t.animation.currentTime = currentTimes?.[i] ?? currentTime ?? 0;
         t.hold = 2;
       }
     },

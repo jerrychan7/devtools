@@ -964,6 +964,35 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
     await waitFor(() => count('devtools-button[title="Pause timeline"]'));
     await click('devtools-button[title="Pause timeline"]');
     await waitFor(() => count('devtools-button[title="Play timeline"]'));
+    // Dragging the scrubber seeks the page's animation along: to about half the 1.2 s timeline.
+    const header = await frontend.evaluate(() => {
+      const find = (root: Document | ShadowRoot): Element | null => {
+        const hit = root.querySelector('.animation-grid-header');
+        if (hit) return hit;
+        for (const el of root.querySelectorAll('*')) {
+          const found = el.shadowRoot && find(el.shadowRoot);
+          if (found) return found;
+        }
+        return null;
+      };
+      const rect = find(document)?.getBoundingClientRect();
+      return rect && { x: rect.x, y: rect.y + rect.height / 2, width: rect.width };
+    });
+    assert.ok(header);
+    const frame = await (await frontend.frameElement())?.boundingBox();
+    assert.ok(frame);
+    const y = frame.y + header.y;
+    await page.mouse.move(frame.x + header.x + 20, y);
+    await page.mouse.down();
+    await page.mouse.move(frame.x + header.x + header.width / 2, y, { steps: 5 });
+    await page.mouse.up();
+    const time = await waitFor(async () => {
+      const value = await page.evaluate(() =>
+        Number(document.getElementById('rf-shadow-spin')?.shadowRoot?.getAnimations()[0]?.currentTime)
+      );
+      return value > 300 ? value : null;
+    });
+    assert.ok(time < 1200, `seeked to ${time} ms`);
   } finally {
     await page.evaluate(() => document.getElementById('rf-shadow-spin')?.remove());
   }

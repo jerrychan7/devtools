@@ -128,8 +128,42 @@ describe('Animation', () => {
       const paused = await updates();
       results[side === t.chrome ? 'chrome' : 'ours'] = { running, paused };
     }
-    assert.deepEqual(results.chrome, { running: ['running'], paused: [] });
-    assert.deepEqual(results.ours, results.chrome);
+    assert.deepEqual(results['chrome'], { running: ['running'], paused: [] });
+    assert.deepEqual(results['ours'], results['chrome']);
+  });
+
+  test('seeking each animation to its own time, and the errors, match Chrome', async () => {
+    const results: unknown[] = [];
+    for (const side of [t.chrome, t.ours]) {
+      await t.page.evaluate(() => document.getAnimations().forEach(a => a.cancel()));
+      await side.clear();
+      const prefix = side === t.chrome ? 'm' : 'n';
+      await t.page.evaluate(ADD(prefix));
+      const all = await started(side, 3);
+      const names = [`${prefix}k`, `${prefix}web`];
+      const ids = names.map(n => all.get(n)?.id ?? '');
+      await side.send('Animation.setPaused', { animations: ids, paused: true });
+      await side.send('Animation.seekAnimations', { animations: ids, currentTimes: [700, 1500] });
+      const times = [];
+      for (const name of names) times.push((await stateOf(t, name)).map(s => Math.round(s.currentTime)));
+      const error = (params: Omit<Protocol.Animation.SeekAnimationsRequest, 'animations'>) =>
+        side.send('Animation.seekAnimations', { animations: ids, ...params }).then(
+          () => 'none',
+          (e: unknown) => (e instanceof Error ? e.message.replace(/^.*\): /, '') : String(e))
+        );
+      results.push({
+        times,
+        neither: await error({}),
+        both: await error({ currentTime: 1, currentTimes: [1, 1] }),
+        short: await error({ currentTimes: [1] }),
+      });
+    }
+    // Chrome 156 takes `currentTimes` as seconds (700 → 700000 ms; the Web Animation, 1500 s, ends at
+    // 30250 ms), against the protocol and its own source, which say milliseconds; the panel sends
+    // milliseconds, so its scrubber only works with milliseconds. The errors are Chrome's.
+    const [chrome, ours] = results;
+    assert.deepEqual({ ...Object(ours), times: [[700], [1500]] }, ours);
+    assert.deepEqual({ ...Object(chrome), times: Object(ours).times }, ours);
   });
 
   test('animations in shadow trees are announced, as in Chrome', async () => {
