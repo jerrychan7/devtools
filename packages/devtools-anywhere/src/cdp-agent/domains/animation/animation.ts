@@ -292,6 +292,24 @@ export function registerAnimation(ctx: Context) {
     return timeline ? (value / 100) * ((timeline.endOffset ?? 0) - (timeline.startOffset ?? 0)) * MS_PER_PX : value;
   };
 
+  /**
+   * What `getCurrentTime` answers, as Chrome does (measured): null for an idle one, though the
+   * protocol has a number; for one that runs or is finished, the time of its timeline since its
+   * start time, which goes on past the end (400 for a finished animation of 100ms started 400ms
+   * ago) and leaves out its own rate (-4683 where the page reads 9366 at a rate of -2), the
+   * documents' rate (the domain's, here on the animation) in. A paused one's current time, and a
+   * scroll-driven one's (see `current`), as reported in its events.
+   */
+  const timeOf = (t: Tracked): number | null => {
+    const { animation } = t;
+    if (animation.playState === 'idle') return null;
+    const start = startOf(animation);
+    const now = animation.timeline?.currentTime;
+    if (animation.playState === 'paused' || start === null || typeof now !== 'number' || scrollDriven(animation))
+      return current(t);
+    return (now - start) * rate;
+  };
+
   const describe = (t: Tracked): Protocol.Animation.Animation => {
     const { animation } = t;
     const realm = realmOfAnimation(animation);
@@ -587,7 +605,7 @@ export function registerAnimation(ctx: Context) {
     disable: stop,
     getPlaybackRate: () => ({ playbackRate: rate }),
     setPlaybackRate: ({ playbackRate }: Protocol.Animation.SetPlaybackRateRequest) => setRate(playbackRate),
-    getCurrentTime: ({ id }: Protocol.Animation.GetCurrentTimeRequest) => ({ currentTime: current(find(id)) }),
+    getCurrentTime: ({ id }: Protocol.Animation.GetCurrentTimeRequest) => ({ currentTime: timeOf(find(id)) }),
     setPaused: ({ animations, paused }: Protocol.Animation.SetPausedRequest) => {
       const list = animations.map(find);
       for (const t of list) {

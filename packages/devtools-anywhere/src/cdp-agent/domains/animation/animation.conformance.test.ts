@@ -1388,4 +1388,35 @@ describe('Animation, play state changes', () => {
     assert.deepEqual(chrome['pause'], ['Canceled 1']);
     assert.deepEqual(ours, chrome);
   });
+
+  test('getCurrentTime: null once cancelled, the time since the start once finished, as in Chrome', async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const add = () => document.body.appendChild(document.createElement('div'));
+        add().animate({ opacity: [0, 1] }, 100);
+        Reflect.set(window, '__r', add().animate({ opacity: [0, 1] }, 10000));
+        Reflect.set(window, '__c', add().animate({ opacity: [0, 1] }, 10000));
+      });
+      await sleep(400);
+      await t.page.evaluate(() => {
+        (Reflect.get(window, '__r') as Animation).playbackRate = -2;
+        (Reflect.get(window, '__c') as Animation).cancel();
+      });
+      await sleep(300);
+      const time = async (id: string) => (await side.send('Animation.getCurrentTime', { id })).currentTime;
+      const [finished, reversed, canceled] = [await time('1'), await time('2'), await time('3')];
+      const page = await t.page.evaluate(() => Number((Reflect.get(window, '__r') as Animation).currentTime));
+      return {
+        // About 700ms after the start of each.
+        finished: Math.round(finished / 100),
+        // The rate left out: the time since the start, not the page's current time.
+        reversed: Math.round(reversed / 100),
+        reversedPage: Math.round(page / 100),
+        canceled,
+      };
+    });
+    assert.equal(chrome.canceled, null);
+    assert.ok(chrome.finished >= 6, `finished at ${chrome.finished}`);
+    assert.deepEqual(ours, chrome);
+  });
 });
