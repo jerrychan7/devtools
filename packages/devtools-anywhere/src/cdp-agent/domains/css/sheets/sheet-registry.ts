@@ -46,6 +46,14 @@ export function setSheetIdPrefix(prefix: string): void {
  * serialized from the same rules (a rule on the line of its id) are the same in all.
  */
 const ruleIds = new WeakMap<StyleRule, number>();
+/**
+ * Copies of cross-origin sheets, whose rules page scripts cannot read: the CSS text is fetched
+ * again (which needs CORS headers) and parsed. null: the fetch failed. Shared by every session,
+ * like the texts, which are paired with the copies' rules.
+ */
+const copies = new WeakMap<CSSStyleSheet, CSSStyleSheet | null>();
+/** Fetches in progress, whichever session started them. */
+const loading = new Map<CSSStyleSheet, Promise<void>>();
 const nextRuleId = new WeakMap<CSSStyleSheet, number>();
 
 export class SheetRegistry {
@@ -182,18 +190,11 @@ export class SheetRegistry {
     return Array.from(new Set(this.scoped().map(s => s.sheet)));
   }
 
-  /**
-   * Copies of cross-origin sheets, whose rules page scripts cannot read: the CSS text is
-   * fetched again (which needs CORS headers) and parsed. null: the fetch failed.
-   */
-  private copies = new WeakMap<CSSStyleSheet, CSSStyleSheet | null>();
-  private loading = new Map<CSSStyleSheet, Promise<void>>();
-
   rulesOf(sheet: CSSStyleSheet | CSSGroupingRule): CSSRule[] {
     try {
       return Array.from(sheet.cssRules);
     } catch {
-      const copy = isCssom(sheet, 'CSSStyleSheet') ? this.copies.get(sheet) : null;
+      const copy = isCssom(sheet, 'CSSStyleSheet') ? copies.get(sheet) : null;
       return copy ? Array.from(copy.cssRules) : [];
     }
   }
@@ -204,7 +205,7 @@ export class SheetRegistry {
       void sheet.cssRules;
       return false;
     } catch {
-      return !!this.copies.get(sheet);
+      return !!copies.get(sheet);
     }
   }
 
@@ -214,7 +215,7 @@ export class SheetRegistry {
       void sheet.cssRules;
       return false;
     } catch {
-      return !this.copies.get(sheet);
+      return !copies.get(sheet);
     }
   }
 
@@ -225,7 +226,13 @@ export class SheetRegistry {
   loadCopies(onLoaded: (sheet: CSSStyleSheet) => void): Promise<void> {
     for (const sheet of this.all()) {
       const href = sheet.href;
-      if (!href || this.texts.has(sheet) || this.copies.has(sheet) || this.loading.has(sheet)) continue;
+      if (!href || this.texts.has(sheet) || copies.has(sheet)) continue;
+      // Another session's fetch: this one is told of the copy too.
+      const pending = loading.get(sheet);
+      if (pending) {
+        void pending.then(() => copies.get(sheet) && onLoaded(sheet));
+        continue;
+      }
       let readable = true;
       try {
         void sheet.cssRules;
@@ -238,18 +245,18 @@ export class SheetRegistry {
           if (!readable) {
             const copy = new CSSStyleSheet();
             copy.replaceSync(text);
-            this.copies.set(sheet, copy);
+            copies.set(sheet, copy);
           }
           this.texts.set(sheet, text, true);
           // A readable sheet's rules were there already: only a copy brings new ones.
           if (!readable) onLoaded(sheet);
         })
         // Not tried again: a readable sheet keeps its serialized text.
-        .catch(() => void this.copies.set(sheet, null))
-        .finally(() => this.loading.delete(sheet));
-      this.loading.set(sheet, load);
+        .catch(() => void copies.set(sheet, null))
+        .finally(() => loading.delete(sheet));
+      loading.set(sheet, load);
     }
-    return Promise.all(this.loading.values()).then(() => {});
+    return Promise.all(loading.values()).then(() => {});
   }
 
   ruleId(sheet: CSSStyleSheet, rule: StyleRule): number {

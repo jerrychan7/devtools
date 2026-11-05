@@ -229,9 +229,14 @@ export function registerCss(ctx: Context) {
     void syncSheets();
   }
 
-  /** Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in. */
+  /**
+   * Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in, if CSS
+   * is still enabled (the fetch, its own or another session's, may end after CSS.disable).
+   */
   const loadCopies = () =>
-    sheets.loadCopies(sheet => session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) }));
+    sheets.loadCopies(sheet => {
+      if (enabled) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
+    });
 
   const element = (nodeId: number) => resolveElement(ctx, { nodeId });
 
