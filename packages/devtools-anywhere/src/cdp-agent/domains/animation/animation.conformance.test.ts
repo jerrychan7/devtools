@@ -557,7 +557,9 @@ describe('Animation, which animations are told apart', () => {
       style.textContent =
         '@keyframes j1 { to { left: 10px } } .ja { animation: j1 5s } .jb { animation: j1 5s }' +
         ' .jt { transition: width 5s; width: 1px } .jt.jh { width: 20px } .jt.jw { width: 30px !important }' +
-        ' .ju { transition: width 5s } .jv { transition: width 5s; width: 1px }';
+        ' .ju { transition: width 5s } .jv { transition: width 5s; width: 1px }' +
+        ' .jcol { transition: color 5s } .jz { outline: 0 } .jp.jred { color: red }' +
+        ' .jva { --d: 5s; animation: j1 var(--d) } .jvc { --d: 5s; animation: j1 var(--d) } .jmb { animation: j1 5s }';
       document.head.append(style);
       const other = document.createElement('style');
       other.textContent = '.jc { animation: j1 5s }';
@@ -583,6 +585,21 @@ describe('Animation, which animations are told apart', () => {
         `const e = add('ju'); e.style.width = '1px'; e.getBoundingClientRect(); e.style.width = '9px'`,
         1,
       ],
+      // No rule declares color: Chrome falls back to the (empty) inline style, which counts for nothing.
+      [
+        'inherited color',
+        `const p = add('jp'); p.append(Object.assign(document.createElement('div'), { className: 'jcol' })); p.getBoundingClientRect(); p.classList.add('jred')`,
+        1,
+      ],
+      [
+        'inherited color, another class',
+        `const p = add('jp'); p.append(Object.assign(document.createElement('div'), { className: 'jcol jz' })); p.getBoundingClientRect(); p.classList.add('jred')`,
+        1,
+      ],
+      // Longhands of a shorthand with var() read empty in Chrome, as if not declared.
+      ['var() in rule a', `add('jva')`, 1],
+      ['var() in rule c', `add('jvc')`, 1],
+      ['no var()', `add('jmb')`, 1],
       ['width in the same rule', `const e = add('jv'); e.getBoundingClientRect(); e.style.width = '9px'`, 1],
     ];
     for (const [label, code, count] of steps) {
