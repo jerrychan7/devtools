@@ -23,6 +23,22 @@ export interface World {
   document: Document;
   /** Runs code with the world's globals (the code's own `var`s stay in it, not in the world). */
   evaluate: (code: string) => unknown;
+  /**
+   * The property names the world's code assigns or deletes (`.name =`, `['name'] =`, `delete x.name`)
+   * and its string arguments: what it may write on nodes, kept for it (see PageWorlds.callOn).
+   */
+  names: Set<string>;
+  /** The names its code applies `typeof` to: looked up as in the page, so that one not defined is 'undefined'. */
+  typeofNames: Set<string>;
+}
+
+/** Notes the property names `code` writes, and the names it applies `typeof` to. */
+function noteNames(world: World, code: string): void {
+  const assigned = /\.\s*([A-Za-z_$][\w$]*)\s*(?:[-+*/%&|^]|\*\*|<<|>>>?|&&|\|\||\?\?)?=(?![=>])/g;
+  for (const [, name] of code.matchAll(assigned)) world.names.add(name as string);
+  for (const [, , name] of code.matchAll(/\[\s*(['"`])([^'"`]+)\1\s*\]\s*=(?![=>])/g)) world.names.add(name as string);
+  for (const [, name] of code.matchAll(/\bdelete\s+[\w$.]*\.([A-Za-z_$][\w$]*)/g)) world.names.add(name as string);
+  for (const [, name] of code.matchAll(/\btypeof\s+([A-Za-z_$][\w$]*)/g)) world.typeofNames.add(name as string);
 }
 
 /** The names the world's code reads as its global (names, not the top realm's window: scripts/check-realms.ts counts it). */
@@ -46,7 +62,7 @@ class PageWorlds {
   #names = new Map<Frame, string[]>();
   #worlds = new Map<number, World>();
   /** Each world's own globals. */
-  #globals = new WeakMap<World, object>();
+  #globals = new WeakMap<World, { global: object; scope: object }>();
   /** What each world's global shows. */
   #targets = new WeakMap<object, object>();
   /** The properties a world's calls left on page objects, kept apart from the page's. */
@@ -110,19 +126,28 @@ class PageWorlds {
   }
 
   #make(frame: Frame, name: string): World {
-    const world: World = { id: this.#frames.newContextId(), name, frame, document: frame.document, evaluate: () => 0 };
+    const world: World = {
+      id: this.#frames.newContextId(),
+      name,
+      frame,
+      document: frame.document,
+      evaluate: () => 0,
+      names: new Set(),
+      typeofNames: new Set(),
+    };
     const win = realmOf(frame.document);
     let run: ((code: string) => unknown) | undefined;
     // Compiled on first use, not here: a page whose CSP forbids eval still gets its worlds (as in
     // Chrome), whose code then fails like the page's own context's, with an EvalError.
     world.evaluate = code => {
+      noteNames(world, code);
       if (!run) {
         // Indirect eval of the frame's window makes the function there, without declaring anything;
         // direct eval within it then looks global names up in the world's global first.
         const make = Reflect.apply(Reflect.get(win, 'eval'), undefined, [
           '(function (g) { with (g) return function () { return eval(arguments[0]); }; })',
         ]) as (global: unknown) => (code: string) => unknown;
-        run = make(this.global(world));
+        run = make(this.#scope(world));
       }
       // The top-level `this` is the world's global too.
       return Reflect.apply(run, this.global(world), [code]);
@@ -138,41 +163,69 @@ class PageWorlds {
    * The window's methods are bound to it, as the scope calls them with the proxy as `this`.
    */
   global(world: World): object {
+    return this.#proxies(world).global;
+  }
+
+  /** The object of the world's `with` scope (see {@link global}). */
+  #scope(world: World): object {
+    return this.#proxies(world).scope;
+  }
+
+  #proxies(world: World): { global: object; scope: object } {
     const existing = this.#globals.get(world);
     if (existing) return existing;
     const target = realmOf(world.document);
     const own = new Map<PropertyKey, unknown>();
     const bound = new Map<PropertyKey, { fn: Function; bound: Function }>();
-    const global: object = new Proxy(Object.create(null) as object, {
-      get: (_, key) => {
-        if (own.has(key)) return own.get(key);
-        if (GLOBAL_NAMES.includes(key)) return global;
-        const result: unknown = Reflect.get(target, key);
-        // A method, bound to the window: one of its prototypes (even one the page or the agent
-        // wrapped), or a function without `prototype` (the window's own operations, setTimeout, …).
-        // Constructors (the window's `Event`, …) and the page's own functions stay as they are.
-        if (typeof result !== 'function' || key === 'constructor') return result;
-        if (Object.hasOwn(result, 'prototype') && Object.hasOwn(target, key)) return result;
-        let entry = bound.get(key);
-        if (entry?.fn !== result) bound.set(key, (entry = { fn: result, bound: result.bind(target) }));
-        return entry.bound;
-      },
-      set: (_, key, val) => (own.set(key, val), true),
-      has: (_, key) => typeof key === 'string' && !UNSCOPED.includes(key),
-      deleteProperty: (_, key) => (own.delete(key), true),
+    const read = (key: PropertyKey): unknown => {
+      if (own.has(key)) return own.get(key);
+      if (GLOBAL_NAMES.includes(key)) return global;
+      const result: unknown = Reflect.get(target, key);
+      // A method, bound to the window: one of its prototypes (even one the page or the agent
+      // wrapped), or a function without `prototype` (the window's own operations, setTimeout, …).
+      // Constructors (the window's `Event`, …) and the page's own functions stay as they are.
+      if (typeof result !== 'function' || key === 'constructor') return result;
+      if (Object.hasOwn(result, 'prototype') && Object.hasOwn(target, key)) return result;
+      let entry = bound.get(key);
+      if (entry?.fn !== result) bound.set(key, (entry = { fn: result, bound: result.bind(target) }));
+      return entry.bound;
+    };
+    const known = (key: PropertyKey) => own.has(key) || key in target;
+    const traps = {
+      set: (_: object, key: PropertyKey, val: unknown) => (own.set(key, val), true),
+      deleteProperty: (_: object, key: PropertyKey) => (own.delete(key), true),
       getPrototypeOf: () => Reflect.getPrototypeOf(target),
       // Configurable whatever the page's says: the proxy's own target has none of them.
-      getOwnPropertyDescriptor: (_, key) => {
+      getOwnPropertyDescriptor: (_: object, key: PropertyKey) => {
         const desc = own.has(key)
           ? { value: own.get(key), writable: true, enumerable: true }
           : Reflect.getOwnPropertyDescriptor(target, key);
         return desc && { ...desc, configurable: true };
       },
       ownKeys: () => [...new Set([...Reflect.ownKeys(target), ...(own.keys() as Iterable<string | symbol>)])],
+    };
+    // What the code sees as globalThis, window, self: the names that exist, like a window.
+    const global: object = new Proxy(Object.create(null) as object, {
+      ...traps,
+      get: (_, key) => read(key),
+      has: (_, key) => known(key),
     });
-    this.#globals.set(world, global);
+    // The `with` scope also finds the names that exist nowhere, so that assigning one makes a global
+    // of the world rather than the page's; reading one throws Chrome's ReferenceError. Those the
+    // code applies `typeof` to are left to the page's scope, where one not defined is 'undefined'.
+    const scope: object = new Proxy(Object.create(null) as object, {
+      ...traps,
+      get: (_, key) => {
+        if (typeof key === 'symbol' || known(key) || GLOBAL_NAMES.includes(key)) return read(key);
+        throw new target.ReferenceError(`${key} is not defined`);
+      },
+      has: (_, key) =>
+        !UNSCOPED.includes(key) && (known(key) || (typeof key === 'string' && !world.typeofNames.has(key))),
+    });
+    const proxies = { global, scope };
+    this.#globals.set(world, proxies);
     this.#targets.set(global, target);
-    return global;
+    return proxies;
   }
 
   unwrap(value: unknown): unknown {
@@ -181,40 +234,55 @@ class PageWorlds {
 
   /**
    * Calls `fn` in `world` on `self`. A node stays the page's node (DOM methods take it, identity
-   * holds), but the properties the world left on it are there only during the call's synchronous
-   * part: before it, the world's are put back; after it, those added or changed are kept for the
-   * world and the page's restored. Code of the world running later (a listener, after an `await`)
-   * reads them from the node only during its own call (Chrome keeps them in the world all along).
+   * holds), but the properties the world keeps on it are on the node only while the world's code
+   * runs on it: put back before the call, taken back after its synchronous part, and again after
+   * the promise it returns settles (what it writes after an `await` is on the node until then).
+   * Taken back are the properties the world had, and those the call added or changed whose names
+   * its code or string arguments mention; the others (a page listener's, run by `this.click()`)
+   * stay the page's. During the call, the page's code it runs sees the world's properties.
    */
   callOn(world: World, self: unknown, fn: Function, args: unknown[]): unknown {
     if (self === realmOf(world.document)) return Reflect.apply(fn, this.global(world), args);
     if (!isNode(self)) return Reflect.apply(fn, self, args);
+    for (const arg of args) if (typeof arg === 'string') world.names.add(arg);
     let byObject = this.#expandos.get(world);
     if (!byObject) this.#expandos.set(world, (byObject = new WeakMap()));
     const kept = byObject.get(self) ?? new Map<PropertyKey, PropertyDescriptor>();
     byObject.set(self, kept);
-    const pageOwn = Object.getOwnPropertyDescriptors(self) as Record<PropertyKey, PropertyDescriptor>;
-    for (const [key, desc] of kept) Reflect.defineProperty(self, key, { ...desc, configurable: true });
-    const before = Object.getOwnPropertyDescriptors(self) as Record<PropertyKey, PropertyDescriptor>;
-    try {
-      return Reflect.apply(fn, self, args);
-    } finally {
-      const after = Object.getOwnPropertyDescriptors(self) as Record<PropertyKey, PropertyDescriptor>;
-      const keys = new Set([...Reflect.ownKeys(before), ...Reflect.ownKeys(after)]);
-      for (const key of keys) {
+    const node: object = self;
+    type Descriptors = Record<PropertyKey, PropertyDescriptor>;
+    const snapshot = () => Object.getOwnPropertyDescriptors(node) as Descriptors;
+    /** Takes back what the world wrote since `before` (`keep`: also what it had), giving the page `pageOwn` back. */
+    const takeBack = (before: Descriptors, pageOwn: Descriptors, keep: boolean) => {
+      const after = snapshot();
+      for (const key of new Set([...Reflect.ownKeys(before), ...Reflect.ownKeys(after)])) {
         const was = before[key as string];
         const now = after[key as string];
         const changed = !was || !now || was.value !== now.value || was.get !== now.get || was.set !== now.set;
-        // The world's: set or changed by the call, or set by it before and left as is.
-        if (changed || kept.has(key)) {
-          if (now) kept.set(key, now);
-          else kept.delete(key);
-          const page = pageOwn[key as string];
-          if (page) Reflect.defineProperty(self, key, page);
-          else Reflect.deleteProperty(self, key);
-        }
+        const written = changed && typeof key === 'string' && world.names.has(key);
+        if (!written && !(keep && kept.has(key))) continue;
+        if (now) kept.set(key, now);
+        else kept.delete(key);
+        const page = pageOwn[key as string];
+        if (page) Reflect.defineProperty(node, key, page);
+        else Reflect.deleteProperty(node, key);
       }
+    };
+    const pageOwn = snapshot();
+    for (const [key, desc] of kept) Reflect.defineProperty(node, key, { ...desc, configurable: true });
+    const before = snapshot();
+    let value: unknown;
+    try {
+      value = Reflect.apply(fn, node, args);
+    } finally {
+      takeBack(before, pageOwn, true);
     }
+    if (typeof (value as PromiseLike<unknown> | null)?.then === 'function') {
+      const settled = snapshot();
+      const later = () => takeBack(settled, settled, false);
+      Promise.resolve(value).then(later, later);
+    }
+    return value;
   }
 
   /** Puts the bindings that name it in a world, or in the default context of a frame's document. */
