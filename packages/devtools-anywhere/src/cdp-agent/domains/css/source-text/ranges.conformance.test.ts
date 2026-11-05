@@ -3,6 +3,7 @@
 // error recovery and line breaks.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
 import { addStyle, both } from '../../../../../test-support/css-source.ts';
@@ -86,6 +87,37 @@ test('error recovery: unknown at-rules, bad declarations', () =>
     '<p class="e2">x</p>',
     '.e2'
   ));
+
+test('escapes ending a selector, comments in values and not of properties, disabled !important', () =>
+  same(
+    `.k\\31  { color: red; /* FIXME: a note */ margin: 0 /*!*/ ; /* padding: 1px !important; */ }
+.k\\31, .k1 { top: 1px }`,
+    '<p class="k1">x</p>',
+    '.k1'
+  ));
+
+test('relative selector lists in nested rules', () =>
+  same(
+    `.p1 { a, img { color: red } }
+.p1 { a:any-link, img[usemap] { top: 1px } & b, i { left: 1px } }`,
+    '<div class="p1"><a href="#">x</a><b>y</b></div>',
+    'a'
+  ));
+
+test("Chrome's user agent style sheet, whole: the text as written and the rules in it", async () => {
+  const css = readFileSync(new URL('../user-agent/html.css', import.meta.url), 'utf8');
+  const at = await addStyle(
+    t,
+    css,
+    '<input><button></button><a href="#">a</a><dialog></dialog><table><tr><td>x</td></tr></table>'
+  );
+  for (const target of ['input', 'button', 'a', 'dialog', 'td']) {
+    const { ours, chrome } = await both(t, `${at} ${target}`);
+    assert.equal(ours.text, css);
+    assert.equal(ours.text, chrome.text);
+    assert.deepEqual(ours.rules, chrome.rules, target);
+  }
+});
 
 test('line breaks: CR LF, CR, FF, U+2028 and characters outside the BMP', () =>
   same(
