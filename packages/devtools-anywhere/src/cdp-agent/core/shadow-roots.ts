@@ -43,11 +43,19 @@ export class ShadowRootTracker {
     }
   };
 
+  readonly #frames: FrameRegistry;
+  readonly #shadowRootOf: (host: Element) => ShadowRoot | null;
+  readonly #onShadowRoot: (listener: (root: ShadowRoot) => void) => () => void;
+
   constructor(
-    private readonly frames: FrameRegistry,
-    private readonly shadowRootOf: (host: Element) => ShadowRoot | null,
-    private readonly onShadowRoot: (listener: (root: ShadowRoot) => void) => () => void
-  ) {}
+    frames: FrameRegistry,
+    shadowRootOf: (host: Element) => ShadowRoot | null,
+    onShadowRoot: (listener: (root: ShadowRoot) => void) => () => void
+  ) {
+    this.#frames = frames;
+    this.#shadowRootOf = shadowRootOf;
+    this.#onShadowRoot = onShadowRoot;
+  }
 
   /** Listeners told, once per microtask at most, that the list went stale. */
   #staleListeners = new Set<() => void>();
@@ -80,9 +88,9 @@ export class ShadowRootTracker {
       this.#observer = new MutationObserver(records => this.#changed(records));
       this.#observed = new WeakSet();
       this.#stop = [
-        this.frames.onChange(() => {
+        this.#frames.onChange(() => {
           // Documents of removed iframes, or navigated away from, while loading never complete.
-          const current = new Set(Array.from(this.frames, f => f.document));
+          const current = new Set(Array.from(this.#frames, f => f.document));
           for (const doc of this.#documents)
             if (!current.has(doc)) {
               doc.removeEventListener('readystatechange', this.#ready);
@@ -90,7 +98,7 @@ export class ShadowRootTracker {
             }
           this.#stale();
         }),
-        this.onShadowRoot(root => {
+        this.#onShadowRoot(root => {
           const cache = this.#cache;
           // A detached host: inserting it drops the list. A document no frame has (yet): its frame
           // being found drops the list, through the frames.onChange listener above. FrameRegistry
@@ -100,7 +108,7 @@ export class ShadowRootTracker {
           // to onChange, which this tracker does while acquired.
           if (!cache || !root.host.isConnected || isOwn(root.host)) return;
           const doc = documentOf(root.host);
-          if (!Array.from(this.frames).some(f => f.document === doc)) return;
+          if (!Array.from(this.#frames).some(f => f.document === doc)) return;
           // The probe reports a root as attachShadow returns it, so no list holds it yet.
           const added = [root];
           this.#watch(root);
@@ -134,7 +142,7 @@ export class ShadowRootTracker {
     if (pending?.length) this.#changed(pending);
     if (this.#cache) return this.#cache;
     const roots: ShadowRoot[] = [];
-    for (const frame of this.frames) {
+    for (const frame of this.#frames) {
       this.#watch(frame.document);
       this.#visit(frame.document, roots);
     }
@@ -146,7 +154,7 @@ export class ShadowRootTracker {
     const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (!isElement(node) || isOwn(node)) continue;
-      const shadowRoot = this.shadowRootOf(node);
+      const shadowRoot = this.#shadowRootOf(node);
       if (!shadowRoot) continue;
       roots.push(shadowRoot);
       // The document's observer does not see into shadow trees.
@@ -193,7 +201,7 @@ export class ShadowRootTracker {
     };
     const [ca, cb] = [chain(a), chain(b)];
     if (ca[0] !== cb[0]) {
-      const docs = Array.from(this.frames, f => f.document);
+      const docs = Array.from(this.#frames, f => f.document);
       return docs.indexOf(documentOf(a)) < docs.indexOf(documentOf(b));
     }
     let i = 0;
@@ -213,7 +221,7 @@ export class ShadowRootTracker {
     if (!isElement(node)) return false;
     const walker = documentOf(node).createTreeWalker(node, NodeFilter.SHOW_ELEMENT);
     for (let n: Node | null = node; n; n = walker.nextNode())
-      if (isElement(n) && !isOwn(n) && (this.shadowRootOf(n) || n.matches('template[shadowrootmode]'))) return true;
+      if (isElement(n) && !isOwn(n) && (this.#shadowRootOf(n) || n.matches('template[shadowrootmode]'))) return true;
     return false;
   }
 }
