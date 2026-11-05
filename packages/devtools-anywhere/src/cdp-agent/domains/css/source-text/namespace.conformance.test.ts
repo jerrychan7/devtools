@@ -141,9 +141,9 @@ test('addRule at the line of @namespace rules: the rule goes in after them, its 
 
 /**
  * Inserts `rule` at `index` of the <style> in `at` through the CSSOM: from then on its text is
- * serialized. Ours puts each style rule on the line of its id, the @namespace rules on line 0;
- * Chrome joins the rules' texts and lags behind the CSSOM, so the texts are not compared as a
- * whole, only where the @namespace rules are.
+ * serialized, as Chrome serializes a sheet it first sees changed: each rule's text followed by a
+ * line break. Chrome lags behind the CSSOM for a sheet whose text it knew, splicing the rules'
+ * texts into it: not followed, so the texts of these sheets are not compared with Chrome's.
  */
 const insert = (at: string, rule: string, index: number) =>
   t.page.evaluate(
@@ -155,29 +155,20 @@ const insert = (at: string, rule: string, index: number) =>
     index
   );
 
-test('@namespace in a sheet served serialized: on line 0, the style rules after it', async () => {
+const SVG_URL = '@namespace svg url("http://www.w3.org/2000/svg");';
+
+test('@namespace in a sheet served serialized: each rule on a line, edited where it is', async () => {
   const { at, ids } = await added(`${SVG}\n.n8 { color: red }`, '<p class="n8">x</p>');
-  await insert(at, '.n8 { top: 1px }', 1);
-  const [ours, chrome] = [await text(t.ours, ids[0]), await text(t.chrome, ids[1])];
-  assert.ok(chrome.startsWith('@namespace svg'));
-  // Style rules are on the lines of their ids, given in the order they are first seen.
-  const [first, ...lines] = ours.split('\n');
-  assert.equal(first, '@namespace svg url("http://www.w3.org/2000/svg");');
-  assert.deepEqual(lines.toSorted(), ['.n8 { color: red; }', '.n8 { top: 1px; }']);
-  const line = lines.indexOf('.n8 { top: 1px; }') + 1;
+  await insert(at, '.n8 { top: 1px }', 2);
+  assert.equal(await text(t.ours, ids[0]), `${SVG_URL}\n.n8 { color: red; }\n.n8 { top: 1px; }\n`);
   const res = await t.ours.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(t.ours, `${at} .n8`) });
-  const top = res.matchedCSSRules?.map(m => m.rule).find(r => r.style.cssText === 'top: 1px;');
+  const top = res.matchedCSSRules?.map(m => m.rule).find(r => r.style.cssText === ' top: 1px; ');
   assert.ok(top?.style.range);
-  assert.deepEqual(top.selectorList.selectors[0]?.range, {
-    startLine: line,
-    startColumn: 0,
-    endLine: line,
-    endColumn: 3,
-  });
+  assert.deepEqual(top.selectorList.selectors[0]?.range, { startLine: 2, startColumn: 0, endLine: 2, endColumn: 3 });
   await t.ours.send('CSS.setStyleTexts', {
-    edits: [{ styleSheetId: ids[0], range: top.style.range, text: 'top: 2px' }],
+    edits: [{ styleSheetId: ids[0], range: top.style.range, text: 'top: 2px;' }],
   });
-  assert.equal((await text(t.ours, ids[0])).split('\n')[line], '.n8 { top: 2px; }');
+  assert.equal((await text(t.ours, ids[0])).split('\n')[2], '.n8 {top: 2px;}');
 
   // addRule at line 0 puts the rule after the @namespace rules.
   await t.ours.send('CSS.addRule', {
@@ -185,31 +176,43 @@ test('@namespace in a sheet served serialized: on line 0, the style rules after 
     ruleText: '.n9 { left: 1px }',
     location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
   });
-  assert.deepEqual((await cssom(at)).slice(0, 2), [
-    '@namespace svg url("http://www.w3.org/2000/svg");',
-    '.n9 { left: 1px; }',
-  ]);
+  assert.deepEqual((await cssom(at)).slice(0, 2), [SVG_URL, '.n9 { left: 1px; }']);
 });
 
 test('a sheet of @namespace rules only, served serialized: they are its text', async () => {
   const { at, ids } = await added(`${SVG}\n`);
   await insert(at, '@namespace h url(http://www.w3.org/1999/xhtml)', 1);
-  assert.ok((await text(t.chrome, ids[1])).startsWith('@namespace svg'));
+  assert.equal(await text(t.ours, ids[0]), `${SVG_URL}\n@namespace h url("http://www.w3.org/1999/xhtml");\n`);
+});
+
+test('@import before @namespace, served serialized: the @import rule too', async () => {
+  const { at, ids } = await added(`@import url("data:text/css,.zz{}");\n${SVG}\n.n10 { color: red }`);
+  await insert(at, '@media all { .n10 { top: 1px } }', 3);
   assert.equal(
     await text(t.ours, ids[0]),
-    '@namespace svg url("http://www.w3.org/2000/svg"); @namespace h url("http://www.w3.org/1999/xhtml");'
+    `@import url("data:text/css,.zz{}");\n${SVG_URL}\n.n10 { color: red; }\n@media all {\n  .n10 { top: 1px; }\n}\n`
   );
 });
 
-test('@import before @namespace, served serialized: the @namespace rules on line 0', async () => {
-  const { at, ids } = await added(`@import url("data:text/css,.zz{}");\n${SVG}\n.n10 { color: red }`);
-  await insert(at, '.n10 { top: 1px }', 2);
-  const chrome = await text(t.chrome, ids[1]);
-  assert.ok(chrome.startsWith('@import') && chrome.includes('@namespace svg'));
-  // The serialized text leaves @import out, as it always has.
-  const [first, ...lines] = (await text(t.ours, ids[0])).split('\n');
-  assert.equal(first, '@namespace svg url("http://www.w3.org/2000/svg");');
-  assert.deepEqual(lines.toSorted(), ['.n10 { color: red; }', '.n10 { top: 1px; }']);
+test('a sheet Chrome first sees changed through the CSSOM: its text and rules as in Chrome', async () => {
+  await t.ours.clear();
+  await t.chrome.clear();
+  await t.page.evaluate(() => {
+    const div = document.createElement('div');
+    div.id = 'n23';
+    div.innerHTML = '<p class="n23">x</p>';
+    document.body.append(div);
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(
+      '@namespace svg url(http://www.w3.org/2000/svg);\n.n23 { color: red }\n@media all { .n23 { top: 1px } }'
+    );
+    sheet.insertRule('#n23 .n23 { left: 1px }', 3);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  });
+  await waitForBoth(t, 'CSS.styleSheetAdded');
+  const { ours, chrome } = await both(t, '#n23 .n23');
+  assert.equal(ours.text, chrome.text);
+  assert.deepEqual(ours.rules, chrome.rules);
 });
 
 const outcome = (p: Promise<unknown>) =>

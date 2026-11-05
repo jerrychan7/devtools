@@ -125,16 +125,21 @@ export class SheetTexts {
     this.unseenAt = ++this.tick;
   }
 
-  /** The text of the sheet with its rules (as `rulesOf` gives them) paired, or null. */
+  /**
+   * The text of the sheet with its rules (as `rulesOf` gives them) paired, or null. Once the page
+   * changed the sheet through the CSSOM, the text is serialized from its rules as Chrome does:
+   * each rule's text, @import ones included, followed by a line break.
+   */
   source(sheet: CSSStyleSheet, rulesOf: (sheet: CSSStyleSheet) => CSSRule[]): SheetSource | null {
-    if (this.stale.has(sheet)) return null;
+    if (this.stale.has(sheet)) return this.serialize(sheet, rulesOf(sheet));
     let rec = this.recorded.get(sheet);
     const owner = sheet.ownerNode;
     if (!rec && isHtml(owner, 'style') && owner.sheet === sheet) {
       this.set(sheet, owner.textContent, true);
       rec = this.recorded.get(sheet);
     }
-    if (!rec) return null;
+    // A constructed sheet whose text went unseen (made before anyone watched) is serialized too.
+    if (!rec) return !owner && !sheet.ownerRule && !sheet.href ? this.serialize(sheet, rulesOf(sheet)) : null;
     if (rec.seen !== this.unseenTimes) {
       rec.seen = this.unseenTimes;
       rec.unchecked = true;
@@ -149,11 +154,24 @@ export class SheetTexts {
       ownEdit(() => alone.replaceSync(text));
       if (snapshot(Array.from(alone.cssRules)) !== snapshot(rules)) {
         this.invalidate(sheet);
-        return null;
+        return this.serialize(sheet, rules);
       }
     }
     if (rec.source === undefined) rec.source = pair(rec.text, rules);
     return rec.source;
+  }
+
+  /**
+   * Takes the text serialized from the sheet's rules for its own, from the generation the page's
+   * change started (not a new one); null when its rules do not pair with it.
+   */
+  private serialize(sheet: CSSStyleSheet, rules: CSSRule[]): SheetSource | null {
+    const text = rules.map(r => `${r.cssText}\n`).join('');
+    const source = pair(text, rules);
+    if (!source) return null;
+    this.stale.delete(sheet);
+    this.recorded.set(sheet, { text, unchecked: false, source, seen: this.unseenTimes });
+    return source;
   }
 }
 

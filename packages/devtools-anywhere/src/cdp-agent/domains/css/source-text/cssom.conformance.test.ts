@@ -114,3 +114,25 @@ test('replaceSync, adopt and replaceSync in one task: added, then changed, as in
   ];
   assert.deepEqual(await counts(t.ours), await counts(t.chrome));
 });
+
+test('a constructed sheet changed before CSS.enable: served serialized as in Chrome', async () => {
+  for (const side of [t.ours, t.chrome]) await side.send('CSS.disable');
+  await t.page.evaluate(() => {
+    const s = new CSSStyleSheet();
+    s.replaceSync('.pre3 { color: red }\n@media all { .pre3 { top: 1px } }');
+    s.insertRule('@layer x { .pre3 { left: 1px } }', 1);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, s];
+  });
+  const texts = [];
+  for (const side of [t.ours, t.chrome]) {
+    await side.clear();
+    await side.send('CSS.enable');
+    const added = await side.events('CSS.styleSheetAdded');
+    for (const { header } of added) {
+      const r = await side.send('CSS.getStyleSheetText', { styleSheetId: header.styleSheetId });
+      if (r.text.includes('.pre3')) texts.push(r.text);
+    }
+  }
+  assert.equal(texts.length, 2);
+  assert.equal(texts[0], texts[1]);
+});
