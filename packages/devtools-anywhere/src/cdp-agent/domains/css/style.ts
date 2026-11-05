@@ -80,49 +80,49 @@ export function appliedProperties(decl: CSSStyleDeclaration, list: Declaration[]
   return [...normal, ...important];
 }
 
+/** A declaration as written in a style's text, and where. */
+export interface Written {
+  name: string;
+  /** Without `!important`. */
+  value: string;
+  /** The value shown, `!important` as written; by default the value and ` !important`. */
+  shown?: string;
+  important: boolean;
+  disabled: boolean;
+  text: string;
+  range: Protocol.CSS.SourceRange;
+}
+
 /**
- * Serializes declarations as `name: value;` separated by spaces, the text the client edits;
- * disabled ones as `/* name: value; *\/`. Each declared property gets a range; longhands of
- * shorthands follow without one.
+ * The properties of a style: each written declaration with its range, those of shorthands with
+ * their longhands, then the longhands the style holds, without ranges.
  */
-export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: number, column: number): CSSStyle {
+export function styleOf(
+  styleSheetId: string,
+  decl: CSSStyleDeclaration,
+  written: Written[],
+  cssText: string,
+  range: Protocol.CSS.SourceRange
+): CSSStyle {
   const cssProperties: CSSProperty[] = [];
   const shorthandEntries: Protocol.CSS.ShorthandEntry[] = [];
   const probe = document.createElement('div').style;
-  const source = sources.get(decl);
-  const list =
-    source && source.applied === decl.cssText
-      ? declarations(source.text)
-      : splitTopLevel(decl.cssText, ';').map(raw => ({ raw, disabled: false }));
-  let text = '';
-  for (const { raw, disabled } of list) {
-    const colon = raw.indexOf(':');
-    if (colon < 0) continue;
-    const name = raw.slice(0, colon).trim();
-    let value = raw.slice(colon + 1).trim();
-    if (!name) continue;
-    const important = /!\s*important$/i.test(value);
-    if (important) value = value.replace(/\s*!\s*important$/i, '');
-    const declText = `${name}: ${value}${important ? ' !important' : ''};`;
+  for (const { name, value, shown: asWritten, important, disabled, text, range } of written) {
     // Whether the browser accepts the declaration.
-    probe.cssText = declText;
+    probe.cssText = `${name}: ${value}${important ? ' !important' : ''};`;
     const parsedOk = probe.length > 0;
-    const propertyText = disabled ? `/* ${declText} */` : declText;
-    if (text) text += ' ';
-    const start = column + text.length;
-    text += propertyText;
     // Like Chrome, values of !important declarations keep the flag.
-    const shown = important ? `${value} !important` : value;
+    const shown = asWritten ?? (important ? `${value} !important` : value);
     const property: CSSProperty = {
       name,
       value: shown,
       ...(important && { important }),
       implicit: false,
-      text: propertyText,
+      text,
       // Like Chrome, only reported when false.
       ...(!parsedOk && { parsedOk }),
       disabled,
-      range: { startLine: line, startColumn: start, endLine: line, endColumn: start + propertyText.length },
+      range,
     };
     cssProperties.push(property);
     if (disabled || !parsedOk) continue;
@@ -138,12 +138,49 @@ export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line
       property.longhandProperties = longhands;
     }
   }
+  const list = written.map(w => ({ raw: `${w.name}:${w.value}`, disabled: w.disabled }));
   cssProperties.push(...appliedProperties(decl, list));
-  return {
-    styleSheetId,
-    cssProperties,
-    shorthandEntries,
-    cssText: text,
-    range: { startLine: line, startColumn: column, endLine: line, endColumn: column + text.length },
-  };
+  return { styleSheetId, cssProperties, shorthandEntries, cssText, range };
+}
+
+/**
+ * Serializes declarations as `name: value;` separated by spaces, the text the client edits;
+ * disabled ones as `/* name: value; *\/`, on `line` from `column`.
+ */
+export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: number, column: number): CSSStyle {
+  const source = sources.get(decl);
+  const list =
+    source && source.applied === decl.cssText
+      ? declarations(source.text)
+      : splitTopLevel(decl.cssText, ';').map(raw => ({ raw, disabled: false }));
+  let text = '';
+  const written: Written[] = [];
+  for (const { raw, disabled } of list) {
+    const colon = raw.indexOf(':');
+    if (colon < 0) continue;
+    const name = raw.slice(0, colon).trim();
+    let value = raw.slice(colon + 1).trim();
+    if (!name) continue;
+    const important = /!\s*important$/i.test(value);
+    if (important) value = value.replace(/\s*!\s*important$/i, '');
+    const declText = `${name}: ${value}${important ? ' !important' : ''};`;
+    const propertyText = disabled ? `/* ${declText} */` : declText;
+    if (text) text += ' ';
+    const start = column + text.length;
+    text += propertyText;
+    written.push({
+      name,
+      value,
+      important,
+      disabled,
+      text: propertyText,
+      range: { startLine: line, startColumn: start, endLine: line, endColumn: start + propertyText.length },
+    });
+  }
+  return styleOf(styleSheetId, decl, written, text, {
+    startLine: line,
+    startColumn: column,
+    endLine: line,
+    endColumn: column + text.length,
+  });
 }

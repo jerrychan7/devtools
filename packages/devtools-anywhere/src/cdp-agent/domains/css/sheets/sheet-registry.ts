@@ -7,6 +7,10 @@ import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
+import { type SheetSource, SheetTexts, offsetsOf, selectorSpans, styleSpan } from './sheet-text';
+
+/** Chrome's error for a range that is not that of what an edit changes. */
+export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing source range";
 
 /**
  * Tracks the page's style sheets. Every style rule gets a stable id within its sheet, which
@@ -44,6 +48,8 @@ export class SheetRegistry {
   private fetch: typeof globalThis.fetch;
   private shadowRoots: () => ShadowRoot[];
   private frames: FrameRegistry;
+  /** The texts sheets were written in. */
+  readonly texts = new SheetTexts(sheet => this.rulesOf(sheet));
 
   constructor(fetch: typeof globalThis.fetch, shadowRoots: () => ShadowRoot[], frames: FrameRegistry) {
     this.fetch = fetch;
@@ -192,24 +198,42 @@ export class SheetRegistry {
     }
   }
 
-  /** Fetches copies of the cross-origin sheets not loaded yet; resolves when all are done. */
+  /** Whether the sheet's rules cannot be read: from another origin, without a copy. */
+  isUnreadable(sheet: CSSStyleSheet): boolean {
+    try {
+      void sheet.cssRules;
+      return false;
+    } catch {
+      return !this.copies.get(sheet);
+    }
+  }
+
+  /**
+   * Fetches the texts of the sheets of files not loaded yet (from the HTTP cache, mostly), and
+   * makes copies of the cross-origin ones from theirs; resolves when all are done.
+   */
   loadCopies(onLoaded: (sheet: CSSStyleSheet) => void): Promise<void> {
     for (const sheet of this.all()) {
-      if (!sheet.href || this.copies.has(sheet) || this.loading.has(sheet)) continue;
+      const href = sheet.href;
+      if (!href || this.texts.has(sheet) || this.copies.has(sheet) || this.loading.has(sheet)) continue;
+      let readable = true;
       try {
         void sheet.cssRules;
-        continue;
       } catch {
-        // Cross-origin: load a copy below.
+        readable = false;
       }
-      const load = this.fetch(sheet.href, { credentials: 'omit' })
+      const load = this.fetch(href, readable ? { cache: 'force-cache' } : { credentials: 'omit' })
         .then(res => (res.ok ? res.text() : Promise.reject(new Error(res.statusText))))
         .then(text => {
-          const copy = new CSSStyleSheet();
-          copy.replaceSync(text);
-          this.copies.set(sheet, copy);
+          if (!readable) {
+            const copy = new CSSStyleSheet();
+            copy.replaceSync(text);
+            this.copies.set(sheet, copy);
+          }
+          this.texts.set(sheet, text);
           onLoaded(sheet);
         })
+        // Not tried again: a readable sheet keeps its serialized text.
         .catch(() => void this.copies.set(sheet, null))
         .finally(() => this.loading.delete(sheet));
       this.loading.set(sheet, load);
@@ -276,14 +300,40 @@ export class SheetRegistry {
     return result;
   }
 
-  findRule(sheet: CSSStyleSheet, line: number): StyleRule {
-    const entry = this.entries(sheet).find(e => this.ruleIds.get(e.rule) === line);
-    if (!entry) throw new CdpError('No rule at given range');
-    return entry.rule;
+  /**
+   * The rule whose style (`style`) or selectors (`selector`) are at `range`: in the text the
+   * sheet was written in, or in the serialized one, where a rule's line is its id.
+   */
+  findRule(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, at: 'style' | 'selector'): StyleRule {
+    const source = this.sourceOf(sheet);
+    if (!source) {
+      const entry = this.entries(sheet).find(e => this.ruleIds.get(e.rule) === range.startLine);
+      if (!entry) throw new CdpError('No rule at given range');
+      return entry.rule;
+    }
+    const offsets = offsetsOf(source, range);
+    for (const [rule, node] of source.nodes) {
+      if (!offsets || !(isCssom(rule, 'CSSStyleRule') || isCssom(rule, 'CSSNestedDeclarations'))) continue;
+      const spans = selectorSpans(source.text, node);
+      const [start, end] =
+        at === 'style' ? styleSpan(source.text, node) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
+      if (start === offsets[0] && end === offsets[1] && (at === 'style' || node.kind === 'qualified')) return rule;
+    }
+    throw new CdpError(RANGE_MISMATCH);
+  }
+
+  /** The text the sheet was written in, with its rules in it; null when unknown. */
+  sourceOf(sheet: CSSStyleSheet): SheetSource | null {
+    return this.texts.source(sheet);
+  }
+
+  /** The text of a sheet: the one it was written in, or one serialized from its rules. */
+  text(sheet: CSSStyleSheet): string {
+    return this.sourceOf(sheet)?.text ?? this.serialized(sheet);
   }
 
   /** The text of a sheet with every style rule on the line of its id. */
-  text(sheet: CSSStyleSheet): string {
+  serialized(sheet: CSSStyleSheet): string {
     const lines: string[] = [];
     for (const { rule } of this.entries(sheet)) {
       const id = this.ruleId(sheet, rule);
@@ -305,6 +355,8 @@ export class SheetRegistry {
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
     const text = this.text(sheet);
     const lines = text.split('\n');
+    // Like Chrome, a <style> starts at the start of its text, not where it is in the document's
+    // source (which would need the document fetched again).
     const isInspector = this.isInspector(sheet);
     const constructed = isConstructed(sheet);
     // Like Chrome, sheets in shadow trees, constructed ones and those of a <style> a script

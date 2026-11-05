@@ -7,7 +7,7 @@ import type { ForcedPseudoClasses, TreeScope } from './forced-pseudo';
 import type { RuleView } from './rule-view';
 import { type Entry, type StyleRule, ancestorsOf, resolveSelector, sheetApplies } from './rules';
 import type { SheetRegistry } from '../sheets/sheet-registry';
-import { hostMatcher } from '../sheets/source';
+import { hostMatcher } from './host';
 import type { UserAgentStyles } from '../user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
 

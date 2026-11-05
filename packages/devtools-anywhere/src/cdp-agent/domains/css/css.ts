@@ -14,7 +14,10 @@ import { Cascade } from './matching/cascade';
 import { ComputedStyleUpdates } from './computed/computed-updates';
 import { UserAgentStyles, userAgentSheetUrl } from './user-agent/user-agent';
 import { RuleView } from './matching/rule-view';
-import { SheetRegistry, isConstructed } from './sheets/sheet-registry';
+import { RANGE_MISMATCH, SheetRegistry, isConstructed } from './sheets/sheet-registry';
+import { offsetsOf } from './sheets/sheet-text';
+import { outline } from './sheets/css-outline';
+import { ownEdit, watchCssom, watchRealms } from './sheets/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
@@ -48,6 +51,7 @@ mergedFrames.registerRoutes('CSS', {
     'CSS.setStyleSheetText': SHEET_ID,
     'CSS.collectClassNames': SHEET_ID,
     'CSS.setRuleSelector': SHEET_ID,
+    'CSS.setMediaText': SHEET_ID,
     'CSS.addRule': SHEET_ID,
     'CSS.setStyleTexts': ['edits.0.styleSheetId'],
     'CSS.createStyleSheet': ['frameId'],
@@ -134,6 +138,7 @@ export function registerCss(ctx: Context) {
   let known = new Set<CSSStyleSheet>();
   let observer: MutationObserver | null = null;
   let stopAdopted: (() => void) | null = null;
+  let stopCssom: (() => void) | null = null;
 
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
@@ -191,6 +196,7 @@ export function registerCss(ctx: Context) {
     }
     // Adopted style sheets change without a DOM mutation, in the iframes' realms too.
     watchTrees(documents());
+    watchRealms(documents());
   }
 
   /**
@@ -254,10 +260,12 @@ export function registerCss(ctx: Context) {
     }
     const sheet = sheets.get(edit.styleSheetId);
     assertEditable(sheet);
-    const rule = sheets.findRule(sheet, edit.range.startLine);
+    const rule = sheets.findRule(sheet, edit.range, 'style');
     const old = rule.style.cssText;
     const oldSource = sources.get(rule.style);
-    perform(
+    editSheet(
+      sheet,
+      splice(sheet, edit.range, edit.text),
       () => setStyleText(rule.style, edit.text, () => (rule.style.cssText = edit.text)),
       () => {
         rule.style.cssText = old;
@@ -266,6 +274,42 @@ export function registerCss(ctx: Context) {
       }
     );
     return rules.ruleStyle(sheet, rule);
+  }
+
+  /** The text of the sheet with `range` replaced by `insert`, as written; null without one. */
+  const splice =
+    (sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, insert: string) =>
+    (text: string | null): string | null => {
+      const source = sheets.sourceOf(sheet);
+      const offsets = source && offsetsOf(source, range);
+      return text !== null && offsets ? text.slice(0, offsets[0]) + insert + text.slice(offsets[1]) : null;
+    };
+
+  /**
+   * Edits a sheet through the CSSOM with `apply` (`revert` undoes it), and its text the same way:
+   * `next` gives the new one from the old, null when the text is not known. The edit is the
+   * CSS domain's own: no CSS.styleSheetChanged for it.
+   */
+  function editSheet(
+    sheet: CSSStyleSheet,
+    next: (text: string | null) => string | null,
+    apply: () => void,
+    revert: () => void
+  ) {
+    const before = sheets.sourceOf(sheet)?.text ?? null;
+    const after = next(before);
+    const record = (text: string | null) =>
+      text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
+    perform(
+      () => {
+        ownEdit(apply);
+        record(after);
+      },
+      () => {
+        ownEdit(revert);
+        record(before);
+      }
+    );
   }
 
   async function matchedStyles(
@@ -344,6 +388,16 @@ export function registerCss(ctx: Context) {
         () => void syncSheets(),
         () => [...documents(), ...shadowRoots()]
       );
+      // Like Chrome, a change the page makes through the CSSOM keeps the sheet's id: its text is
+      // the one given replace() or replaceSync(), or else serialized from the CSSOM.
+      stopCssom = watchCssom(
+        (sheet, text) => {
+          if (text === undefined) sheets.texts.invalidate(sheet);
+          else sheets.texts.set(sheet, text);
+          if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
+        },
+        () => documents().map(realmOf)
+      );
       stopFrames = ctx.frames.onChange(framesChanged);
       watchDocuments();
       syncSheets();
@@ -362,6 +416,8 @@ export function registerCss(ctx: Context) {
       stopFrames = null;
       stopAdopted?.();
       stopAdopted = null;
+      stopCssom?.();
+      stopCssom = null;
       updates.stop();
     },
 
@@ -402,38 +458,39 @@ export function registerCss(ctx: Context) {
       };
     },
 
-    getStyleSheetText: (params: Protocol.CSS.GetStyleSheetTextRequest): Protocol.CSS.GetStyleSheetTextResponse => ({
-      text: sheets.text(sheets.get(params.styleSheetId)),
-    }),
+    async getStyleSheetText(
+      params: Protocol.CSS.GetStyleSheetTextRequest
+    ): Promise<Protocol.CSS.GetStyleSheetTextResponse> {
+      const sheet = sheets.get(params.styleSheetId);
+      // The text of a file is fetched again: wait for it.
+      await loadCopies();
+      // Chrome has the text of a cross-origin sheet even without CORS; a page script cannot read it.
+      if (sheets.isUnreadable(sheet))
+        throw new CdpError('The text of a style sheet from another origin is only available with CORS');
+      return { text: sheets.text(sheet) };
+    },
 
     setStyleSheetText(params: Protocol.CSS.SetStyleSheetTextRequest): Protocol.CSS.SetStyleSheetTextResponse {
-      const id = params.styleSheetId;
-      const sheet = sheets.get(id);
-      const owner = sheet.ownerNode;
+      const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
-      if (isConstructed(sheet)) {
-        const old = sheets.text(sheet);
-        perform(
-          () => sheet.replaceSync(params.text),
-          () => sheet.replaceSync(old)
-        );
-        stylesChanged();
-        return {};
-      }
-      if (!isHtml(owner, 'style')) throw new CdpError('Style sheet is not editable');
-      const setText = (text: string) => {
-        const current = sheets.get(id);
-        owner.textContent = text;
-        // The <style> now has a new sheet: it takes the place of the old one.
-        if (owner.sheet && owner.sheet !== current) {
-          sheets.rebind(current, owner.sheet);
-          if (known.delete(current)) known.add(owner.sheet);
-        }
+      // Like Chrome, the text is the sheet's as given, invalid rules and all; that of a <style> is
+      // left as it is (setting it would make another sheet). Its rules are replaced through the CSSOM.
+      const replace = (text: string) => {
+        if (isConstructed(sheet)) return sheet.replaceSync(text);
+        while (sheet.cssRules.length) sheet.deleteRule(sheet.cssRules.length - 1);
+        for (const node of outline(text))
+          try {
+            sheet.insertRule(text.slice(node.start, node.end), sheet.cssRules.length);
+          } catch {
+            // Dropped, as the parser drops it.
+          }
       };
-      const old = owner.textContent;
-      perform(
-        () => setText(params.text),
-        () => setText(old)
+      const old = sheets.text(sheet);
+      editSheet(
+        sheet,
+        () => params.text,
+        () => replace(params.text),
+        () => replace(old)
       );
       stylesChanged();
       return {};
@@ -448,15 +505,40 @@ export function registerCss(ctx: Context) {
     setRuleSelector(params: Protocol.CSS.SetRuleSelectorRequest): Protocol.CSS.SetRuleSelectorResponse {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
-      const rule = sheets.findRule(sheet, params.range.startLine);
+      const rule = sheets.findRule(sheet, params.range, 'selector');
       if (!isCssom(rule, 'CSSStyleRule')) throw new CdpError('No rule at given range');
       const old = rule.selectorText;
-      perform(
+      editSheet(
+        sheet,
+        splice(sheet, params.range, params.selector),
         () => (rule.selectorText = params.selector),
         () => (rule.selectorText = old)
       );
       stylesChanged();
       return { selectorList: rules.selectorList(sheet, rule) };
+    },
+
+    setMediaText(params: Protocol.CSS.SetMediaTextRequest): Protocol.CSS.SetMediaTextResponse {
+      const sheet = sheets.get(params.styleSheetId);
+      assertEditable(sheet);
+      // The @media whose condition is at the range, which only the text the sheet was written in has.
+      const source = sheets.sourceOf(sheet);
+      const offsets = source && offsetsOf(source, params.range);
+      let rule: CSSMediaRule | undefined;
+      for (const [r, node] of source?.nodes ?? [])
+        if (isCssom(r, 'CSSMediaRule') && node.preludeStart === offsets?.[0] && node.preludeEnd === offsets[1])
+          rule = r;
+      if (!rule) throw new CdpError(RANGE_MISMATCH);
+      const media = rule.media;
+      const old = media.mediaText;
+      editSheet(
+        sheet,
+        splice(sheet, params.range, params.text),
+        () => (media.mediaText = params.text),
+        () => (media.mediaText = old)
+      );
+      stylesChanged();
+      return { media: rules.media(sheet, rule) };
     },
 
     createStyleSheet(params: Protocol.CSS.CreateStyleSheetRequest): Protocol.CSS.CreateStyleSheetResponse {
@@ -476,6 +558,7 @@ export function registerCss(ctx: Context) {
         if (!style.sheet) throw new CdpError('Could not create the inspector style sheet');
         sheet = style.sheet;
         sheets.addInspector(sheet, doc, force);
+        sheets.texts.set(sheet, '');
         known.add(sheet);
         session.emit('CSS.styleSheetAdded', { header: header(sheet) });
       }
@@ -485,14 +568,31 @@ export function registerCss(ctx: Context) {
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
-      // Before the rule at `location`, or after it when the location is inside it (rules are one
-      // per line). Like Chrome, a location in an @media (or another group rule) puts the rule in it.
+      // Like Chrome, a location in an @media (or another group rule) puts the rule in it.
       const { startLine, startColumn } = params.location;
       const entries = sheets.entries(sheet).map(e => e.rule);
       const onLine = entries.find(r => sheets.ruleId(sheet, r) === startLine);
       let parent: CSSStyleSheet | CSSGroupingRule = sheet;
       let at = -1;
-      if (onLine) {
+      const source = sheets.sourceOf(sheet);
+      if (source) {
+        // Where the text is inserted, as written: after the rules before it, in the innermost group
+        // rule (not a style rule: addRule does not nest) around it.
+        const offset = offsetsOf(source, params.location)?.[0];
+        if (offset === undefined) throw new CdpError(RANGE_MISMATCH);
+        const around = (r: CSSRule) => {
+          const node = source.nodes.get(r);
+          return !!node && node.blockStart >= 0 && node.blockStart < offset && offset < node.blockEnd;
+        };
+        for (let inner = Array.from(parent.cssRules).find(around); inner;) {
+          if (!isCssom(inner, 'CSSGroupingRule') || isCssom(inner, 'CSSStyleRule')) break;
+          parent = inner;
+          inner = Array.from(parent.cssRules).find(around);
+        }
+        at = Array.from(parent.cssRules).filter(r => (source.nodes.get(r)?.start ?? offset) < offset).length;
+      } else if (onLine) {
+        // Before the rule at `location`, or after it when the location is inside it (in the
+        // serialized text, rules are one per line).
         // The group rule (not a style rule: addRule does not nest) the rule is in.
         let child: CSSRule = onLine;
         for (let p = child.parentRule; p; child = p, p = p.parentRule)
@@ -508,23 +608,32 @@ export function registerCss(ctx: Context) {
         at = next ? Array.from(sheet.cssRules).indexOf(next) : -1;
       }
       const target = parent;
-      const index = target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at);
+      const index = ownEdit(() => target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at));
       const rule = target.cssRules[index];
       if (!isCssom(rule, 'CSSStyleRule')) {
-        target.deleteRule(index);
+        ownEdit(() => target.deleteRule(index));
         throw new CdpError('Failed to parse rule text');
       }
+      // Like Chrome, the text goes in as it is, where asked.
+      const before = source?.text ?? null;
+      const after = splice(sheet, params.location, params.ruleText)(before);
+      const record = (text: string | null) =>
+        text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
+      record(after);
       const text = rule.cssText;
       // Redo inserts a new rule object, which the next undo removes.
       let added: CSSRule = rule;
       history.record({
         undo: () => {
           const at = Array.from(target.cssRules).indexOf(added);
-          if (at >= 0) target.deleteRule(at);
+          if (at >= 0) ownEdit(() => target.deleteRule(at));
+          record(before);
           stylesChanged();
         },
         redo: () => {
-          added = target.cssRules[target.insertRule(text, Math.min(index, target.cssRules.length))] ?? added;
+          const i = ownEdit(() => target.insertRule(text, Math.min(index, target.cssRules.length)));
+          added = target.cssRules[i] ?? added;
+          record(after);
           stylesChanged();
         },
       });
