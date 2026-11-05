@@ -935,6 +935,40 @@ test('the Animations panel lists the CSS and Web Animations the page runs', { sk
   }
 });
 
+test('the Animations panel plays a shadow tree animation it is shown, and pauses it', { skip }, async () => {
+  await showView('animations');
+  const before = await count('.animation-buffer-preview');
+  await page.evaluate(() => {
+    const host = document.body.appendChild(document.createElement('div'));
+    host.id = 'rf-shadow-spin';
+    host.attachShadow({ mode: 'open' }).innerHTML =
+      '<style>@keyframes rf-bounce { 50% { opacity: 0.5 } } p { animation: rf-bounce 0.4s infinite }</style><p>x</p>';
+  });
+  /** Clicks the last match of `selector` in the frontend, shadow DOM included. */
+  const click = (selector: string) =>
+    frontend.evaluate(selector => {
+      const all: Element[] = [];
+      const walk = (root: Document | ShadowRoot) => {
+        all.push(...root.querySelectorAll(selector));
+        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+      };
+      walk(document);
+      const last = all.at(-1);
+      if (last instanceof HTMLElement) last.click();
+      return !!last;
+    }, selector);
+  try {
+    await waitFor(async () => (await count('.animation-buffer-preview')) > before);
+    await click('.animation-buffer-preview');
+    // Selecting a group replays it: the control shows it playing once the page reports the seek.
+    await waitFor(() => count('devtools-button[title="Pause timeline"]'));
+    await click('devtools-button[title="Pause timeline"]');
+    await waitFor(() => count('devtools-button[title="Play timeline"]'));
+  } finally {
+    await page.evaluate(() => document.getElementById('rf-shadow-spin')?.remove());
+  }
+});
+
 test("the Issues panel shows the page's issues", { skip }, async () => {
   await page.evaluate(() => {
     const label = document.createElement('label');

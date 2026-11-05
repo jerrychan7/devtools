@@ -102,6 +102,36 @@ describe('Animation', () => {
     assert.equal((await t.ours.events('Animation.animationCreated')).length, 3);
   });
 
+  test('seeking announces a new start time only for a running animation, as in Chrome', async () => {
+    const results: Record<string, unknown> = {};
+    for (const side of [t.chrome, t.ours]) {
+      await t.page.evaluate(() => document.getAnimations().forEach(a => a.cancel()));
+      await side.clear();
+      const prefix = side === t.chrome ? 's' : 'q';
+      await t.page.evaluate(ADD(prefix));
+      const animation = (await started(side, 3)).get(`${prefix}k`);
+      assert.ok(animation);
+      const ids = [animation.id];
+      const updates = async () => {
+        await sleep(300);
+        const list = (await side.events('Animation.animationUpdated')).map(e => e.animation.playState);
+        await side.clear();
+        return list;
+      };
+      await sleep(300);
+      await side.clear();
+      await side.send('Animation.seekAnimations', { animations: ids, currentTime: 0 });
+      const running = await updates();
+      await side.send('Animation.setPaused', { animations: ids, paused: true });
+      await updates();
+      await side.send('Animation.seekAnimations', { animations: ids, currentTime: 100 });
+      const paused = await updates();
+      results[side === t.chrome ? 'chrome' : 'ours'] = { running, paused };
+    }
+    assert.deepEqual(results.chrome, { running: ['running'], paused: [] });
+    assert.deepEqual(results.ours, results.chrome);
+  });
+
   test('animations in shadow trees are announced, as in Chrome', async () => {
     for (const side of [t.chrome, t.ours]) await side.clear();
     await t.page.evaluate(() => {

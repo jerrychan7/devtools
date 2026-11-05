@@ -16,6 +16,8 @@ interface Tracked {
   rate: number;
   /** The start time last reported. */
   start: number | null;
+  /** Frames to wait before reporting a seek's new start time (see `seekAnimations`). */
+  hold: number;
 }
 
 /** The animation's type and name, as Chrome names them. */
@@ -43,8 +45,9 @@ function targetOf(ctx: Context, effect: KeyframeEffect): Inspectable | null {
 
 /**
  * What `animationUpdated` follows: Chrome sends it when an animation gets a new start time (the page
- * finishing it, or playing it again once finished), not when the page pauses it, nor for what the
- * domain's own commands change. Null while paused or pending, which is no update.
+ * finishing it, or playing it again once finished, or the domain seeking it while it runs), not
+ * when the page pauses it, nor for the domain's other commands. Null while paused or pending,
+ * which is no update.
  */
 function startOf(animation: Animation): number | null {
   const { startTime } = animation;
@@ -163,7 +166,7 @@ export function registerAnimation(ctx: Context) {
         if (released.has(animation)) continue;
         let t = tracked.get(animation);
         if (!t) {
-          t = { id: String(++seq), animation, started: false, rate: animation.playbackRate, start: null };
+          t = { id: String(++seq), animation, started: false, rate: animation.playbackRate, start: null, hold: 0 };
           tracked.set(animation, t);
           byId.set(t.id, t);
           if (rate !== 1) animation.playbackRate = t.rate * rate;
@@ -182,6 +185,10 @@ export function registerAnimation(ctx: Context) {
         continue;
       }
       const start = startOf(animation);
+      if (t.hold > 0) {
+        t.hold--;
+        continue;
+      }
       if (start !== null && start !== t.start) {
         t.start = start;
         session.emit('Animation.animationUpdated', { animation: describe(t) });
@@ -250,7 +257,15 @@ export function registerAnimation(ctx: Context) {
     },
     seekAnimations: ({ animations, currentTime }: Protocol.Animation.SeekAnimationsRequest) => {
       const list = animations.map(find);
-      for (const t of list) quietly(t, () => (t.animation.currentTime = currentTime ?? 0));
+      // Not quietly: a running animation seeked gets a new start time, which Chrome reports with
+      // `animationUpdated`, and the panel's play button waits for it to show it playing. The panel
+      // reads its own scrubber then, which it starts as it seeks: told in the very next frame, it
+      // finds the scrubber not started yet and shows "Replay". Chrome's report comes later, across
+      // processes, so this one waits two frames.
+      for (const t of list) {
+        t.animation.currentTime = currentTime ?? 0;
+        t.hold = 2;
+      }
     },
     setTiming: ({ animationId, duration, delay }: Protocol.Animation.SetTimingRequest) => {
       const t = find(animationId);
