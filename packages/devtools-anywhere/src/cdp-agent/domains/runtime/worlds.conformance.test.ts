@@ -491,8 +491,8 @@ describe('what a world keeps from the page', () => {
         const click = HTMLElement.prototype.click;
         page['seenClick'] = [click.name, click.length, String(click).includes('[native code]')];
         // The page replaces the method while the world's call runs.
-        page['ownClick'] = HTMLElement.prototype.click = function click(this: HTMLElement) {
-          return Reflect.apply(click, this, []);
+        page['ownClick'] = HTMLElement.prototype.click = function ownClick(this: HTMLElement): void {
+          Reflect.apply(click, this, []);
         };
       });
     });
