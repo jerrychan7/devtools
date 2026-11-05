@@ -206,6 +206,32 @@ test('a custom element defined after CSS.enable brings the rules of its shadow t
   }
 });
 
+test('sheets of shadow roots attached out of tree order are announced in tree order', async () => {
+  await t.page.evaluate(() => {
+    for (let i = 0; i < 2; i++) document.body.appendChild(document.createElement('div')).className = 'order-host';
+  });
+  // Ours has listed the shadow roots again by the time the roots are attached.
+  await t.ours.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(t.ours, 'sh-in') });
+  for (const side of [t.ours, t.chrome]) await side.clear();
+  await t.page.evaluate(() => {
+    const [first, second] = Array.from(document.querySelectorAll('.order-host'));
+    if (!first || !second) throw new Error('no hosts');
+    // Told apart by their length.
+    second.attachShadow({ mode: 'open' }).innerHTML = '<style>.order-2 { color: red }</style>';
+    first.attachShadow({ mode: 'open' }).innerHTML = '<style>.order-1 {}</style>';
+  });
+  await t.ours.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(t.ours, 'sh-in') });
+  await new Promise(r => setTimeout(r, 200));
+  // The shorter sheet is .order-1 (on each side: the two count lengths differently).
+  const order = async (side: Side) => {
+    const lengths = (await side.events('CSS.styleSheetAdded')).map(e => e.header.length);
+    return lengths.map(l => (l === Math.min(...lengths) ? 'order-1' : 'order-2'));
+  };
+  // Chrome mostly announces them in tree order too, but not always: under load (other test files
+  // running alongside) it was seen announcing them in attach order, so it is not compared.
+  assert.deepEqual(await order(t.ours), ['order-1', 'order-2']);
+});
+
 test('moving a host takes forced pseudo-classes off the elements of its shadow tree', async () => {
   const result: unknown[] = [];
   for (const side of [t.ours, t.chrome]) {
