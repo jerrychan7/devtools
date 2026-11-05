@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { isOwn, type Inspectable, type PseudoType } from '../../core/nodes';
-import { documentOf, isElement, styleOf } from '../../core/realm';
+import { documentOf, isElement, isNode, realmOf, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 const NOT_FOUND = 'Could not find animation with given id';
@@ -36,17 +36,37 @@ function hasGetter(proto: object | undefined, name: string, value: object): bool
   }
 }
 
-const isCssAnimation = (a: Animation): a is CSSAnimation =>
-  typeof CSSAnimation === 'function' && hasGetter(CSSAnimation.prototype, 'animationName', a);
-const isCssTransition = (a: Animation): a is CSSTransition =>
-  typeof CSSTransition === 'function' && hasGetter(CSSTransition.prototype, 'transitionProperty', a);
-const isKeyframeEffect = (e: AnimationEffect | null): e is KeyframeEffect =>
-  !!e && typeof KeyframeEffect === 'function' && hasGetter(KeyframeEffect.prototype, 'pseudoElement', e);
+type Realm = Window & typeof globalThis;
+
+/**
+ * The window an animation belongs to, from its effect's target: an animation of a same-origin
+ * iframe is a `CSSAnimation` of the iframe's window, not of the top page's. Null without a target
+ * (a Web Animation the page made without one), when `hasGetter` decides instead: it is slower, as
+ * it throws for every animation that is not of the interface.
+ */
+function realmOfAnimation(animation: Animation): Realm | null {
+  const target: unknown = animation.effect ? Reflect.get(animation.effect, 'target') : null;
+  return isNode(target) ? realmOf(target) : null;
+}
+
+const isCssAnimation = (a: Animation, realm: Realm | null): a is CSSAnimation =>
+  realm
+    ? typeof realm.CSSAnimation === 'function' && a instanceof realm.CSSAnimation
+    : typeof CSSAnimation === 'function' && hasGetter(CSSAnimation.prototype, 'animationName', a);
+const isCssTransition = (a: Animation, realm: Realm | null): a is CSSTransition =>
+  realm
+    ? typeof realm.CSSTransition === 'function' && a instanceof realm.CSSTransition
+    : typeof CSSTransition === 'function' && hasGetter(CSSTransition.prototype, 'transitionProperty', a);
+const isKeyframeEffect = (e: AnimationEffect | null, realm: Realm | null): e is KeyframeEffect =>
+  !!e &&
+  (realm
+    ? typeof realm.KeyframeEffect === 'function' && e instanceof realm.KeyframeEffect
+    : typeof KeyframeEffect === 'function' && hasGetter(KeyframeEffect.prototype, 'pseudoElement', e));
 
 /** The animation's type and name, as Chrome names them. */
-function kindOf(animation: Animation): [Protocol.Animation.Animation['type'], string] {
-  if (isCssAnimation(animation)) return ['CSSAnimation', animation.animationName];
-  if (isCssTransition(animation)) return ['CSSTransition', animation.transitionProperty];
+function kindOf(animation: Animation, realm: Realm | null): [Protocol.Animation.Animation['type'], string] {
+  if (isCssAnimation(animation, realm)) return ['CSSAnimation', animation.animationName];
+  if (isCssTransition(animation, realm)) return ['CSSTransition', animation.transitionProperty];
   return ['WebAnimation', animation.id];
 }
 
@@ -177,7 +197,8 @@ export function registerAnimation(ctx: Context) {
 
   const describe = (t: Tracked): Protocol.Animation.Animation => {
     const { animation } = t;
-    const [type, name] = kindOf(animation);
+    const realm = realmOfAnimation(animation);
+    const [type, name] = kindOf(animation, realm);
     const startTime = animation.startTime;
     const result: Protocol.Animation.Animation = {
       id: t.id,
@@ -194,7 +215,7 @@ export function registerAnimation(ctx: Context) {
       type,
     };
     const effect = animation.effect;
-    if (isKeyframeEffect(effect)) {
+    if (isKeyframeEffect(effect, realm)) {
       if (type !== 'WebAnimation') {
         const cssId = cssIdOf(animation, effect, type);
         if (cssId) result.cssId = cssId;
