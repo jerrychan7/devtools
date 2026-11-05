@@ -14,5 +14,5 @@ Thumbs.db
 *.ignore
 
 node_modules/
-dist/
+dist
 dist-test/
