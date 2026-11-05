@@ -326,9 +326,18 @@ export function registerCss(ctx: Context) {
     const offsets = source && span && offsetsOf(source, span);
     const record = (text: string | null) =>
       text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
+    let first = true;
     perform(
       () => {
         ownEdit(apply);
+        if (!first) {
+          // Redone: the text is `after` only if no one changed it since the undo.
+          const text = sheets.texts.current(sheet) === before ? after : null;
+          record(text);
+          editedBy(sheets, sheet, text ?? undefined);
+          return;
+        }
+        first = false;
         if (offsets && before !== null && after !== null)
           sheets.texts.splice(
             sheet,
@@ -341,8 +350,10 @@ export function registerCss(ctx: Context) {
       },
       () => {
         ownEdit(revert);
-        record(before);
-        editedBy(sheets, sheet, before ?? undefined);
+        // Undone: the text is `before` only if no one (a session, the page) changed it since.
+        const text = sheets.texts.current(sheet) === after ? before : null;
+        record(text);
+        editedBy(sheets, sheet, text ?? undefined);
       }
     );
   }
@@ -836,13 +847,14 @@ export function registerCss(ctx: Context) {
         undo: () => {
           const at = Array.from(target.cssRules).indexOf(added);
           if (at >= 0) ownEdit(() => target.deleteRule(at));
-          record(before);
+          // Unknown if someone (a session, the page) changed the text since.
+          record(sheets.texts.current(sheet) === after ? before : null);
           stylesChanged();
         },
         redo: () => {
           const i = ownEdit(() => target.insertRule(text, Math.min(index, target.cssRules.length)));
           added = target.cssRules[i] ?? added;
-          record(after);
+          record(sheets.texts.current(sheet) === before ? after : null);
           stylesChanged();
         },
       });

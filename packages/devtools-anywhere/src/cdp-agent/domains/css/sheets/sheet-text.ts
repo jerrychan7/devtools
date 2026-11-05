@@ -92,6 +92,11 @@ export class SheetTexts {
     this.stale = new WeakSet();
   }
 
+  /** The text recorded for the sheet, paired or not; null when unknown. */
+  current(sheet: CSSStyleSheet): string | null {
+    return this.stale.has(sheet) ? null : (this.recorded.get(sheet)?.text ?? null);
+  }
+
   /** The text of the sheet with its rules (as `rulesOf` gives them) paired, or null. */
   source(sheet: CSSStyleSheet, rulesOf: (sheet: CSSStyleSheet) => CSSRule[]): SheetSource | null {
     if (this.stale.has(sheet)) return null;
