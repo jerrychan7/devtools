@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
 import type { Env, EventName, TestPage } from '../../../../test-support/conformance.ts';
-import { fixtureUrl, launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { fixtureUrl, launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 for (const key of ['id', 'parentId', 'parentFrameId']) VOLATILE.add(key);
 
@@ -140,7 +140,7 @@ test('a sandboxed iframe navigating, then removed', async () => {
   assert.deepEqual(diffSubset(ours, chrome), []);
 });
 
-// The same iframe merged into the page's agent (core/merged-frames.ts): its page loads the probe,
+// The same iframe merged into the page's agent (core/frames/merged-frames.ts): its page loads the probe,
 // whose agent links to the page's. Chrome's frame is the same; the page's agent reports it.
 describe('a sandboxed iframe merged into the page', () => {
   let oopif: Env | undefined;

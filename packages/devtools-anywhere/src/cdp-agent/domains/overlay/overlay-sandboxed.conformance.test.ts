@@ -1,13 +1,13 @@
-// The overlay over a sandboxed iframe merged into the page's agent (core/merged-frames.ts), against
-// Chrome (test-support/merged-sides.ts): a node of the iframe highlighted on the page where Chrome
+// The overlay over a sandboxed iframe merged into the page's agent (core/frames/merged-frames.ts), against
+// Chrome (test-support/oopif/merged-sides.ts): a node of the iframe highlighted on the page where Chrome
 // places it, and inspect mode picking the node under the mouse in the iframe. The iframe's nodes are
 // reached by objects of its execution context (Runtime.evaluate there), not through DOM.getDocument,
 // whose graft of the iframe's document is the DOM domain's.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 

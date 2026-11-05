@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { isCssom, isHtml } from '../../../core/realm';
-import { type PseudoType, hasPseudoElement } from '../../../core/nodes';
-import { compareSpecificity, specificity, splitTopLevel } from '../../../core/selectors';
+import { type PseudoType, hasPseudoElement } from '../../../core/nodes/nodes';
+import { compareSpecificity, specificity, splitTopLevel } from '../../../core/style/selectors';
 import { splitPseudoElement } from '../style';
 
 /**

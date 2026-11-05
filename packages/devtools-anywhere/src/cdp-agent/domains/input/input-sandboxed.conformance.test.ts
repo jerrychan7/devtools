@@ -1,13 +1,13 @@
-// Input over a sandboxed iframe merged into the page's agent (core/merged-frames.ts), end to end
-// against Chrome: the same commands on the same pages (test-support/merged-sides.ts). Chrome keeps
+// Input over a sandboxed iframe merged into the page's agent (core/frames/merged-frames.ts), end to end
+// against Chrome: the same commands on the same pages (test-support/oopif/merged-sides.ts). Chrome keeps
 // the iframe in the page's process and target, and routes the input into it; our page's agent
 // forwards it over the merged link to the iframe's. The iframe's page is read in its own execution
 // context, on the page's session.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 

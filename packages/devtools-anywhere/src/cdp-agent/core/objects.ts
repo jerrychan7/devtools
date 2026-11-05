@@ -193,7 +193,7 @@ export interface WrapOptions {
 
 /**
  * What every object id starts with: '' or, in a page whose agent is merged into its parent's
- * (core/merged-frames.ts), `m{ns}.`, which tells the frames' objects apart.
+ * (core/frames/merged-frames.ts), `m{ns}.`, which tells the frames' objects apart.
  */
 let idPrefix = '';
 

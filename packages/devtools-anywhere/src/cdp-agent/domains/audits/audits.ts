@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import type { Frame } from '../../core/frames';
+import type { Frame } from '../../core/frames/frames';
 import { isElement, isNode } from '../../core/realm';
 
 type Issue = Protocol.Audits.InspectorIssue;

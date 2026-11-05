@@ -1,9 +1,9 @@
-import type { FrameRegistry } from './frames';
-import type { NodeRegistry } from './nodes';
+import type { FrameRegistry } from './frames/frames';
+import type { NodeRegistry } from './nodes/nodes';
 import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
 import type { CdpSession } from './session';
-import type { ShadowRootTracker } from './shadow-roots';
+import type { ShadowRootTracker } from './nodes/shadow-roots';
 
 /** State shared by all domains. */
 export interface Context {
@@ -18,7 +18,7 @@ export interface Context {
   refreshPseudoElements?: (roots?: Node[]) => void;
 }
 
-/** The top frame's id; its execution context is EXECUTION_CONTEXT_ID (core/frames.ts). @internal */
+/** The top frame's id; its execution context is EXECUTION_CONTEXT_ID (core/frames/frames.ts). @internal */
 export const FRAME_ID = 'devtools-anywhere-frame';
 /**
  * Like Chrome, every document gets its own loader id: each page load evaluates this module

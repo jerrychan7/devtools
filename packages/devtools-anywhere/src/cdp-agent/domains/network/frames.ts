@@ -1,6 +1,6 @@
 // Requests of same-origin iframes: the probe hooks each iframe document's network APIs like the
 // top page's, and tags their requests with the frame and document that made them.
-import type { Frame, FrameRegistry } from '../../core/frames';
+import type { Frame, FrameRegistry } from '../../core/frames/frames';
 import type { FrameTag, Probe, RequestRecord } from '../../probe/types';
 
 /**

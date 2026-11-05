@@ -1,7 +1,7 @@
 // Emulation.setDeviceMetricsOverride's params as Chrome takes them, for shell mode, where the
 // shell rather than Chrome sets the page's size (connection.ts): the same checks, with Chrome's
 // messages, and Chrome's notion of the same override. Measured in Chrome
-// (tests/e2e/shell-emulation.test.ts).
+// (tests/e2e/shell/shell-emulation.test.ts).
 import { CdpError } from './cdp-agent';
 
 const MAX_SIZE = 10_000_000;

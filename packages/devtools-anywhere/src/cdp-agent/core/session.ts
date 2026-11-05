@@ -62,7 +62,7 @@ export class CdpSession {
   /**
    * Looks at each of the client's commands (on this session, not a child target's) before its
    * handler: a promise it returns is the command's answer instead, its rejection the error;
-   * undefined lets the handler answer. Set by core/merged-frames.ts, which routes the commands for
+   * undefined lets the handler answer. Set by core/frames/merged-frames.ts, which routes the commands for
    * merged frames to their agents' sessions, and runs others there too.
    */
   intercept: ((method: string, params: object) => Promise<unknown> | undefined) | null = null;

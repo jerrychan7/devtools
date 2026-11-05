@@ -1,14 +1,14 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import type { ChildLink } from '../../core/child-targets';
-import { FAN_OUT_TIMEOUT, mergedFrames, ownerOfId } from '../../core/merged-frames';
-import { mapPoints, ownerContentToTop, pointInOwnerContent } from '../../core/geometry';
+import type { ChildLink } from '../../core/frames/child-targets';
+import { FAN_OUT_TIMEOUT, mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
+import { mapPoints, ownerContentToTop, pointInOwnerContent } from '../../core/frames/geometry';
 import { type FrameOwner, isDocument, isFrameOwner, isShadowRoot } from '../../core/realm';
 import { CdpError } from '../../core/session';
-import { historyOf } from '../../core/history';
+import { historyOf } from '../../core/nodes/history';
 
 /**
- * The DOM of sandboxed iframes merged into the page's agent (core/merged-frames.ts): Chrome keeps
+ * The DOM of sandboxed iframes merged into the page's agent (core/frames/merged-frames.ts): Chrome keeps
  * such a frame in the page's target, its document grafted under the iframe like a same-origin
  * one's. The frame's agent has the nodes (ids in its namespace): commands for them go there by
  * the routes below, and what the page's agent reports (an iframe's `contentDocument`, a search, a

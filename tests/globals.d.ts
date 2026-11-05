@@ -3,10 +3,10 @@
 // no build is needed. Those modules export only what the other code uses, not what the tests would like:
 // types they do not export are derived from those they do.
 import type { DevtoolsAnywhereApi } from '../packages/devtools-anywhere/src/api.ts';
-import type { ChildTargets } from '../packages/devtools-anywhere/src/cdp-agent/core/child-targets.ts';
-import type { MergedFrames } from '../packages/devtools-anywhere/src/cdp-agent/core/merged-frames.ts';
+import type { ChildTargets } from '../packages/devtools-anywhere/src/cdp-agent/core/frames/child-targets.ts';
+import type { MergedFrames } from '../packages/devtools-anywhere/src/cdp-agent/core/frames/merged-frames.ts';
 import type { Probe } from '../packages/devtools-anywhere/src/cdp-agent/probe/types.ts';
-import type { Harness } from '../packages/devtools-anywhere/test-support/child-targets-harness.ts';
+import type { Harness } from '../packages/devtools-anywhere/test-support/oopif/child-targets-harness.ts';
 
 type CdpSession = ReturnType<DevtoolsAnywhereApi['createCdpSession']>;
 

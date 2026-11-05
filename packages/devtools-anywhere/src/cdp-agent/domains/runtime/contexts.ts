@@ -1,11 +1,11 @@
 import type { Protocol } from 'devtools-protocol';
-import { type Frame, type FrameChange, type FrameRegistry, awaitsFirstDocument } from '../../core/frames';
-import { NS_STRIDE, nsPrefix } from '../../core/merged-frames';
+import { type Frame, type FrameChange, type FrameRegistry, awaitsFirstDocument } from '../../core/frames/frames';
+import { NS_STRIDE, nsPrefix } from '../../core/frames/merged-frames';
 import { isNode, realmOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 /**
- * A context's uniqueId: in a merged frame's agent (core/merged-frames.ts), whose context ids are
+ * A context's uniqueId: in a merged frame's agent (core/frames/merged-frames.ts), whose context ids are
  * in its namespace, prefixed with it, so that the page's agent routes uniqueContextId by it too.
  */
 function uniqueIdOf(contextId: number): string {

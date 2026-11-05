@@ -1,20 +1,20 @@
 import type { Protocol } from 'devtools-protocol';
 import { documentOf, isCssom, isElement, isHtml, isHtmlElement, isNode, isSvgElement, realmOf } from '../../core/realm';
 import { type Context } from '../../core/context';
-import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes';
-import { parentOf } from '../../core/container-query';
+import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes/nodes';
+import { parentOf } from '../../core/style/container-query';
 import { CdpError } from '../../core/session';
-import { mergedFrames } from '../../core/merged-frames';
+import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
-import { historyOf } from '../../core/history';
-import { quietly, watchAdopted, watchTrees } from '../../core/adopted';
-import { ForcedPseudoClasses } from './forced-pseudo';
+import { historyOf } from '../../core/nodes/history';
+import { quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
+import { ForcedPseudoClasses } from './matching/forced-pseudo';
 import { backgroundsBehind } from './color';
-import { Cascade } from './cascade';
-import { ComputedStyleUpdates } from './computed-updates';
+import { Cascade } from './matching/cascade';
+import { ComputedStyleUpdates } from './computed/computed-updates';
 import { UserAgentStyles, userAgentSheetUrl } from './user-agent/user-agent';
-import { RuleView } from './rule-view';
-import { SheetRegistry, isConstructed } from './sheet-registry';
+import { RuleView } from './matching/rule-view';
+import { SheetRegistry, isConstructed } from './sheets/sheet-registry';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
@@ -27,7 +27,7 @@ const OBSERVED: MutationObserverInit = {
 
 /**
  * Commands for a merged sandboxed iframe's nodes or style sheets go to its agent
- * (core/merged-frames.ts); its style sheets come in its own CSS.styleSheetAdded, of its frame id.
+ * (core/frames/merged-frames.ts); its style sheets come in its own CSS.styleSheetAdded, of its frame id.
  * The rest fan out: what they answer without an id (media queries) the iframe's agent answers
  * empty, as the page's does, so the page's answer is the merged one. Computed style updates of
  * properties are the page's only: a take waits for a change, which the iframe's would hold up.

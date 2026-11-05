@@ -1,10 +1,10 @@
 import type { Context } from './core/context';
-import { ShadowRootTracker } from './core/shadow-roots';
-import { type Frame, frames } from './core/frames';
-import { mergedFrames, NS_STRIDE, nsPrefix } from './core/merged-frames';
-import { NodeRegistry, setNodeIdBase } from './core/nodes';
+import { ShadowRootTracker } from './core/nodes/shadow-roots';
+import { type Frame, frames } from './core/frames/frames';
+import { mergedFrames, NS_STRIDE, nsPrefix } from './core/frames/merged-frames';
+import { NodeRegistry, setNodeIdBase } from './core/nodes/nodes';
 import { ObjectRegistry, setObjectIdPrefix } from './core/objects';
-import { setSheetIdPrefix } from './domains/css/sheet-registry';
+import { setSheetIdPrefix } from './domains/css/sheets/sheet-registry';
 import { viewProbe } from './core/probe-view';
 import { realmOf } from './core/realm';
 import { CdpSession } from './core/session';
@@ -37,7 +37,7 @@ import type { Probe } from './probe/types';
 
 export { CdpError, CdpSession, END_SESSION_CALLS, type Handler } from './core/session';
 export { installProbe } from './probe';
-export { OWN_ATTRIBUTE, markOwn } from './core/nodes';
+export { OWN_ATTRIBUTE, markOwn } from './core/nodes/nodes';
 export {
   SHELL_KEY,
   SHELL_MODE_KEY,
@@ -52,7 +52,7 @@ export {
 } from './probe/shell';
 export { isTrusted } from './probe/trust';
 export { FRAME_ID, LOADER_ID } from './core/context';
-export { frames } from './core/frames';
+export { frames } from './core/frames/frames';
 export {
   childTargets,
   type ChildLink,
@@ -61,13 +61,13 @@ export {
   type ParentLink,
   readScrollParent,
   SCROLL_PARENT,
-} from './core/child-targets';
-export { scrollFrameAreaIntoView } from './core/geometry';
+} from './core/frames/child-targets';
+export { scrollFrameAreaIntoView } from './core/frames/geometry';
 export { frameOwners, ownerOfWindow, watchOwner } from './frame-owners';
-export { mergedFrames, type MergedFrames, type RouteTable } from './core/merged-frames';
+export { mergedFrames, type MergedFrames, type RouteTable } from './core/frames/merged-frames';
 
 /**
- * Puts the ids this page's agent makes from now on in namespace `ns` (core/merged-frames.ts):
+ * Puts the ids this page's agent makes from now on in namespace `ns` (core/frames/merged-frames.ts):
  * called by the handshake when the page, a sandboxed iframe's, is merged into its parent's agent,
  * before the link carries anything.
  *

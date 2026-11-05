@@ -1,8 +1,14 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import { closestOwn } from '../../core/nodes';
-import { askChild, type ChildLink, childTargets } from '../../core/child-targets';
-import { frameDocumentOf, hitPath, parentFrameDocument, pointInFrame, pointInOwnerContent } from '../../core/geometry';
+import { closestOwn } from '../../core/nodes/nodes';
+import { askChild, type ChildLink, childTargets } from '../../core/frames/child-targets';
+import {
+  frameDocumentOf,
+  hitPath,
+  parentFrameDocument,
+  pointInFrame,
+  pointInOwnerContent,
+} from '../../core/frames/geometry';
 import { documentOf, isElement, isHtml, isHtmlElement, realmOf, styleOf } from '../../core/realm';
 
 /** How long a cross-origin iframe's agent has to carry out forwarded input, in ms. */
@@ -79,7 +85,7 @@ const isEditable = (el: Element | null) =>
  * document, at the point in that document's viewport, as events of that document's window; and
  * keys and text go to the element focused in the focused frame.
  *
- * Input over a linked cross-origin iframe (core/child-targets.ts) goes to the iframe's agent, as
+ * Input over a linked cross-origin iframe (core/frames/child-targets.ts) goes to the iframe's agent, as
  * Chrome routes it to the iframe's process: the same command, at the point in the iframe's
  * viewport, and keys and text while the iframe has the focus. The command goes over the link as
  * this agent's own, which the client does not see, and is answered once the iframe's agent has
@@ -113,7 +119,7 @@ export function registerInput({ session, frames }: Context) {
 
   /**
    * The link of the iframe `target` is, if its document is another agent's: a cross-origin
-   * iframe's (a child target) or a sandboxed one's merged into this page's (core/merged-frames.ts),
+   * iframe's (a child target) or a sandboxed one's merged into this page's (core/frames/merged-frames.ts),
    * whose input Chrome routes into it alike.
    */
   const linkOf = (target: Target | null): ChildLink | undefined =>

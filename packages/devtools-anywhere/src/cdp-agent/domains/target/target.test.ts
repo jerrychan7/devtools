@@ -1,7 +1,7 @@
 // The Target domain of the page's agent: cross-origin iframes' agents attached as child targets
 // and the client's messages routed to them by sessionId, flattened as Chrome does
-// (test-support/oopif-notes.md). The iframe agents are stand-ins in the page, linked by
-// test-support/child-targets-harness.ts; the real links are made by the handshake.
+// (test-support/oopif/oopif-notes.md). The iframe agents are stand-ins in the page, linked by
+// test-support/oopif/child-targets-harness.ts; the real links are made by the handshake.
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -22,7 +22,7 @@ before(async () => {
   const bundled = await build({
     stdin: {
       contents:
-        "import { Harness } from './child-targets-harness.ts'; Object.assign(window, { __harness: new Harness() });",
+        "import { Harness } from './oopif/child-targets-harness.ts'; Object.assign(window, { __harness: new Harness() });",
       resolveDir: support,
       loader: 'ts',
     },

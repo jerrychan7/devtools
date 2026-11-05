@@ -5,13 +5,13 @@ import { CdpError } from '../../core/session';
 import { toTag } from '../../core/objects';
 import { parseStack } from '../../core/stack';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
-import { childTargets } from '../../core/child-targets';
-import { mergedFrames } from '../../core/merged-frames';
+import { childTargets } from '../../core/frames/child-targets';
+import { mergedFrames } from '../../core/frames/merged-frames';
 import { childDocumentOf } from './frames';
 
 /**
  * What every request id the client sees starts with: '' or `m{ns}.` in a page whose agent is
- * merged into its parent's (core/merged-frames.ts); the probe's ids go out with it.
+ * merged into its parent's (core/frames/merged-frames.ts); the probe's ids go out with it.
  */
 let idPrefix = '';
 
@@ -21,7 +21,7 @@ export function setRequestIdPrefix(prefix: string): void {
 }
 
 /**
- * The commands of a sandboxed iframe merged into this page's agent (core/merged-frames.ts): by
+ * The commands of a sandboxed iframe merged into this page's agent (core/frames/merged-frames.ts): by
  * request id to the iframe's agent, which made the request; what sets up the requests reported,
  * to every one. Network.getCookies stays the page's: the iframe's opaque origin has no cookies,
  * and Chrome answers with the page's (network-sandboxed.conformance.test.ts).

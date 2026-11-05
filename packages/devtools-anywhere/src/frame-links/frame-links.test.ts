@@ -4,7 +4,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { fixtureUrl, launchOopif, THIRD_HOST } from '../../test-support/oopif.ts';
+import { fixtureUrl, launchOopif, THIRD_HOST } from '../../test-support/oopif/oopif.ts';
 import type { Env } from '../../../../tests/support/browser.ts';
 
 let env: Env | undefined;

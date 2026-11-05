@@ -1,12 +1,12 @@
 // DOM.scrollIntoViewIfNeeded in a linked cross-origin iframe, end to end against Chrome: the same
-// command on the same pages (test-support/oopif-sides.ts), where each page is scrolled to after it
+// command on the same pages (test-support/oopif/oopif-sides.ts), where each page is scrolled to after it
 // compared. In Chrome the iframe's renderer hands what is left to expose to its parent's; our
 // iframe's agent sends it over the link to the parent's, which scrolls on outward.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../test-support/conformance.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, oursSide, type Side } from '../../../../test-support/oopif-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, oursSide, type Side } from '../../../../test-support/oopif/oopif-sides.ts';
 
 let env: Env | undefined;
 

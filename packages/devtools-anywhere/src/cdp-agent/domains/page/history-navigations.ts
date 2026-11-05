@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import type { Frame, FrameRegistry } from '../../core/frames';
+import type { Frame, FrameRegistry } from '../../core/frames/frames';
 import { realmOf } from '../../core/realm';
 import type { CdpSession } from '../../core/session';
 

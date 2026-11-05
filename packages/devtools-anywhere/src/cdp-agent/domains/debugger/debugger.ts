@@ -3,10 +3,10 @@ import { CdpError } from '../../core/session';
 import type { Context } from '../../core/context';
 import type { RequestRecord } from '../../probe/types';
 import { refetch } from '../network/network';
-import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+import { mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
 
 /**
- * Merged sandboxed iframes (core/merged-frames.ts): the settings go to every frame's agent, so that
+ * Merged sandboxed iframes (core/frames/merged-frames.ts): the settings go to every frame's agent, so that
  * each reports its scripts on enable. Debugger.getScriptSource is the page's handler's (see there).
  * There are no breakpoints to merge: each agent resolves them to nothing, so the page's answers.
  */
@@ -25,7 +25,7 @@ mergedFrames.registerRoutes('Debugger', {
 
 /**
  * What every script id starts with: '' or `m{ns}.` in a page whose agent is merged into its
- * parent's (core/merged-frames.ts).
+ * parent's (core/frames/merged-frames.ts).
  */
 let idPrefix = '';
 

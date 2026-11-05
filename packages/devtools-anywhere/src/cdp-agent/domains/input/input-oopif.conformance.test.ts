@@ -1,12 +1,12 @@
 // Input, the overlay and hit testing over a linked cross-origin iframe, end to end against Chrome:
-// the same commands on the same pages (test-support/oopif-sides.ts), what the parent and the
+// the same commands on the same pages (test-support/oopif/oopif-sides.ts), what the parent and the
 // iframe's page get compared. In Chrome the iframe is out of process and the browser routes input
 // to it; our parent's agent forwards it over the link to the iframe's.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../test-support/conformance.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, oursSide, type Side } from '../../../../test-support/oopif-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, oursSide, type Side } from '../../../../test-support/oopif/oopif-sides.ts';
 
 let env: Env | undefined;
 

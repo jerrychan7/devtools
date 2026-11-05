@@ -1,8 +1,8 @@
-import { adoptedOf, quietly, watchAdopted } from '../../core/adopted';
-import { frames } from '../../core/frames';
-import { closestOwn, isOwn } from '../../core/nodes';
+import { adoptedOf, quietly, watchAdopted } from '../../core/nodes/adopted';
+import { frames } from '../../core/frames/frames';
+import { closestOwn, isOwn } from '../../core/nodes/nodes';
 import { isCssom, isElement, isHtml, isNode } from '../../core/realm';
-import { isCompanion, pageRulesRewritten } from '../css/forced-pseudo';
+import { isCompanion, pageRulesRewritten } from '../css/matching/forced-pseudo';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
 export type Rewrite = (text: string) => string;

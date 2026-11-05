@@ -1,13 +1,19 @@
 // Requests of a sandboxed iframe (no allow-same-origin, on the page's origin) merged into the
-// page's agent (core/merged-frames.ts), against Chrome, which keeps the iframe in the page's
+// page's agent (core/frames/merged-frames.ts), against Chrome, which keeps the iframe in the page's
 // target: its fetch, XHR and WebSocket on the page's session, each once, of the iframe's frame and
 // document loader; its document request once, by the page; bodies asked by request id; cookies the
 // page's. Ids differ between the two sides: they are compared by how they relate.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide, type Received } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import {
+  chromeSide,
+  get,
+  type MergedSide,
+  oursSide,
+  type Received,
+} from '../../../../test-support/oopif/merged-sides.ts';
 
 const ASSET = '/packages/devtools-anywhere/test-support/assets/frame.css';
 

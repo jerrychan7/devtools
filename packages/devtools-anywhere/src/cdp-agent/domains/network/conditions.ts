@@ -5,8 +5,8 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Intercept, Probe, RequestType } from '../../probe/types';
 import { CdpError, type CdpSession } from '../../core/session';
-import { frames } from '../../core/frames';
-import { mergedFrames } from '../../core/merged-frames';
+import { frames } from '../../core/frames/frames';
+import { mergedFrames } from '../../core/frames/merged-frames';
 
 // The user agent applies to the merged sandboxed iframes as well, as Chrome's to every frame of
 // the target; Network's commands go to them already (network.ts).

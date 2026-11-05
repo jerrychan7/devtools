@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { splitTopLevel } from '../../core/selectors';
+import { splitTopLevel } from '../../core/style/selectors';
 
 export type CSSStyle = Protocol.CSS.CSSStyle;
 export type CSSProperty = Protocol.CSS.CSSProperty;

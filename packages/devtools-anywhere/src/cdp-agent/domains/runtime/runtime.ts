@@ -1,10 +1,10 @@
 import type { Protocol } from 'devtools-protocol';
 import { registerViolations } from './violations';
 import type { Context } from '../../core/context';
-import type { Frame } from '../../core/frames';
+import type { Frame } from '../../core/frames/frames';
 import { returnOutsideFunction } from '../../core/lexer';
 import { isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
-import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+import { mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
 import { CdpError } from '../../core/session';
 import { parseStack } from '../../core/stack';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
@@ -235,7 +235,7 @@ interface Scope {
   utilityUsers: number;
 }
 
-// A merged sandboxed iframe's contexts and objects are its agent's (core/merged-frames.ts): commands
+// A merged sandboxed iframe's contexts and objects are its agent's (core/frames/merged-frames.ts): commands
 // naming them go there, the others reach every agent. Its events (executionContextCreated,
 // consoleAPICalled, exceptionThrown) carry ids of its namespace and are the client's as they are.
 mergedFrames.registerRoutes('Runtime', {
@@ -532,7 +532,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         throw new CdpError('ObjectId, executionContextId and uniqueContextId must mutually exclude each other', -32602);
       if (targets === 0)
         throw new CdpError('Either objectId or executionContextId or uniqueContextId must be specified', -32602);
-      // An object of the other side of a merge (core/merged-frames.ts) is in another JavaScript
+      // An object of the other side of a merge (core/frames/merged-frames.ts) is in another JavaScript
       // world: V8's world check, which Chrome applies to the sandboxed iframe's objects too.
       const world = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
       if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== world))

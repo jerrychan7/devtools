@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import { OWN_ATTRIBUTE, markOwn } from '../../core/nodes';
-import { ownerOfId } from '../../core/merged-frames';
+import { OWN_ATTRIBUTE, markOwn } from '../../core/nodes/nodes';
+import { ownerOfId } from '../../core/frames/merged-frames';
 import { isElement, isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 import { boxModel, resolveNode } from '../dom/dom';

@@ -5,8 +5,8 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 const sides: { name: string; side: MergedSide }[] = [];

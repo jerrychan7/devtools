@@ -1,4 +1,4 @@
-import { isOwn } from '../../core/nodes';
+import { isOwn } from '../../core/nodes/nodes';
 
 /** A rectangle in page (document) coordinates, CSS pixels. */
 export interface PageRect {

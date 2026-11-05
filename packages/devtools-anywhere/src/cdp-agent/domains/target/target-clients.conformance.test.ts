@@ -1,11 +1,11 @@
 // Two clients of one page attaching the same cross-origin iframe target, ours against Chrome on the
 // same pages (oopif-sides.ts, linkedUrl): as when a human uses the in-page DevTools while an agent
 // is connected remotely. In Chrome each client gets a session of its own with the target; what it
-// enables there is its own. See test-support/oopif-notes.md (Clients).
+// enables there is its own. See test-support/oopif/oopif-notes.md (Clients).
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { get, linkedUrl } from '../../../../test-support/oopif-sides.ts';
-import { launchOopif, RawCdp } from '../../../../test-support/oopif.ts';
+import { get, linkedUrl } from '../../../../test-support/oopif/oopif-sides.ts';
+import { launchOopif, RawCdp } from '../../../../test-support/oopif/oopif.ts';
 import type { Env } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;

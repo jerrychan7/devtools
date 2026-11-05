@@ -1,12 +1,12 @@
 import type { Protocol } from 'devtools-protocol';
-import type { ChildLink } from '../../core/child-targets';
-import type { FrameRegistry, OpaqueFrameChange } from '../../core/frames';
-import { mergedFrames } from '../../core/merged-frames';
+import type { ChildLink } from '../../core/frames/child-targets';
+import type { FrameRegistry, OpaqueFrameChange } from '../../core/frames/frames';
+import { mergedFrames } from '../../core/frames/merged-frames';
 import type { CdpSession } from '../../core/session';
 
 /**
- * The Page domain with sandboxed iframes merged into the page's agent (core/merged-frames.ts).
- * Their frames stay the page's opaque ones (core/frames.ts, OpaqueFrame): attached, navigated and
+ * The Page domain with sandboxed iframes merged into the page's agent (core/frames/merged-frames.ts).
+ * Their frames stay the page's opaque ones (core/frames/frames.ts, OpaqueFrame): attached, navigated and
  * detached by the page's agent, which knows the iframe; the iframe's agent reports only what
  * happens within its document, Page.navigatedWithinDocument, as Chrome reports it for the frame
  * on the page's target. Chrome sends no lifecycleEvent, domContentEventFired or loadEventFired of

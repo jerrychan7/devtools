@@ -100,7 +100,7 @@ experiments/      验证记录
 | CDP 域 | `packages/devtools-anywhere/src/cdp-agent/domains/` | playground，并加一致性测试 |
 | 组件、连接、外壳模式、Service Worker | `packages/devtools-anywhere/src/` | playground、端到端测试 |
 | Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts`（示例应用在 `tests/e2e/vite-app/`） |
-| 远程调试 | `packages/remote-server/src/`（中继、服务端）、`packages/devtools-anywhere/src/remote.ts`（页面端） | `tests/e2e/remote.test.ts`；`node packages/remote-server/dist/cli.js` |
+| 远程调试 | `packages/remote-server/src/`（中继、服务端）、`packages/devtools-anywhere/src/remote.ts`（页面端） | `tests/e2e/remote/remote.test.ts`；`node packages/remote-server/dist/cli.js` |
 | DevTools 前端 | `packages/devtools-frontend/` | 见下文 |
 
 ### 约束与注意事项
@@ -108,7 +108,7 @@ experiments/      验证记录
 - 所有 `postMessage` 都必须校验 `event.origin` 和 `event.source`，否则任意页面都能向 CDP 运行时发送命令。
 - 判断"是否处于外壳内"要通过 postMessage 握手完成，不要直接读取 `window.parent` 上的属性，否则跨域时会抛出 SecurityError。
 - 握手的两端都要有缓冲：devtools 尚未加载完成时，消息不能丢弃。
-- agent 也服务同源 iframe：iframe 里的节点不是顶层页面 `Element` 等类的实例，它的文档也不是全局 `document`。判断节点用 `cdp-agent/core/realm.ts`（按 `nodeType`，或 `realmOf(node)`），查 frame 用 `core/frames.ts`。`pnpm lint` 会按文件把剩下的顶层 realm 用法和 `scripts/check-realms.json` 对比（`scripts/check-realms.ts`），每个文件只许减少、不许增加。确实要用顶层页面的地方（探针、叠加层），运行 `node scripts/check-realms.ts --update`。
+- agent 也服务同源 iframe：iframe 里的节点不是顶层页面 `Element` 等类的实例，它的文档也不是全局 `document`。判断节点用 `cdp-agent/core/realm.ts`（按 `nodeType`，或 `realmOf(node)`），查 frame 用 `core/frames/frames.ts`。`pnpm lint` 会按文件把剩下的顶层 realm 用法和 `scripts/check-realms.json` 对比（`scripts/check-realms.ts`），每个文件只许减少、不许增加。确实要用顶层页面的地方（探针、叠加层），运行 `node scripts/check-realms.ts --update`。
 - 前端资源应当支持自托管，不依赖 unpkg、jsdelivr 等第三方 CDN。
 - 使用 Service Worker 注入时：
   - 只处理 `destination === 'iframe'` 的导航请求，其他请求一律放行。

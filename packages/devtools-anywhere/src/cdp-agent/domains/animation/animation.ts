@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import { type Inspectable, type PseudoType } from '../../core/nodes';
+import { type Inspectable, type PseudoType } from '../../core/nodes/nodes';
 import { isElement, isNode, realmOf, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
@@ -125,7 +125,7 @@ function hash(text: string): string {
  * So does a hover round trip (`.tr` → `.tr.hov` → `.tr`, where `.tr.hov` sets only the width):
  * Chrome gives the transition into the hover state another id than the ones out of it, ours all
  * share one. Telling these apart needs the rules that match the element, which only the CSS
- * domain's cascade (domains/css/cascade.ts) works out, from its sheet registry and forced
+ * domain's cascade (domains/css/matching/cascade.ts) works out, from its sheet registry and forced
  * pseudo-classes: too much to build for the Animation domain, which must work without the CSS one.
  */
 const cssIds = new WeakMap<Animation, string>();

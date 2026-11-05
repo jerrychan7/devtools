@@ -1,4 +1,4 @@
-import { type Frame, frames, walkFrameOwners } from './core/frames';
+import { type Frame, frames, walkFrameOwners } from './core/frames/frames';
 import { type FrameOwner, contentWindowOf, isShadowRoot } from './core/realm';
 
 /** A frame owner, the frame whose document holds it, and the window it holds now, if any. */

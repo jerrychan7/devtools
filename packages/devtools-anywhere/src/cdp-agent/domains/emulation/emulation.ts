@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import { frames } from '../../core/frames';
-import { markOwn } from '../../core/nodes';
+import { frames } from '../../core/frames/frames';
+import { markOwn } from '../../core/nodes/nodes';
 import { CdpError } from '../../core/session';
 import { mediaRewrite } from './media';
 import { rewriteMedia, rewriteValues } from './rewrite';

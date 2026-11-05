@@ -1,11 +1,11 @@
-// A sandboxed iframe merged into the page's agent (core/merged-frames.ts) reloading, against
+// A sandboxed iframe merged into the page's agent (core/frames/merged-frames.ts) reloading, against
 // Chrome, which keeps it in the page's target: its document's context is destroyed, then the next
 // one's created, with an id never seen before. Pages of its own: the reload changes them.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 let ours: MergedSide | undefined;

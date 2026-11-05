@@ -1,8 +1,8 @@
 import type { Protocol } from 'devtools-protocol';
 import { readBody } from '../../core/body';
 import type { Context } from '../../core/context';
-import type { Frame, OpaqueFrame } from '../../core/frames';
-import { childTargets } from '../../core/child-targets';
+import type { Frame, OpaqueFrame } from '../../core/frames/frames';
+import { childTargets } from '../../core/frames/child-targets';
 import { CdpError } from '../../core/session';
 import { isChildDocument } from '../network/frames';
 import { isOwnRequest, refetch } from '../network/network';

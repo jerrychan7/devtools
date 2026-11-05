@@ -8,7 +8,7 @@ import {
   isOwn,
   truncateNodeValue,
   visibleAttributes,
-} from '../../core/nodes';
+} from '../../core/nodes/nodes';
 import {
   editAttributes,
   editNodeValue,
@@ -16,7 +16,7 @@ import {
   editReplace,
   historyOf,
   patchOuterHTML,
-} from '../../core/history';
+} from '../../core/nodes/history';
 import {
   type FrameOwner,
   isDocument,
@@ -36,8 +36,8 @@ import {
   sourceAttribute,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
-import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames';
-import { childTargets, SCROLL_PARENT } from '../../core/child-targets';
+import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames/frames';
+import { childTargets, SCROLL_PARENT } from '../../core/frames/child-targets';
 import { attachShadowHook } from './attach-shadow';
 import { mergedDom, type SearchPart } from './merged';
 import {
@@ -56,7 +56,7 @@ import {
   svgRootLayout,
   unmapRects,
   untransformedBoxes,
-} from '../../core/geometry';
+} from '../../core/frames/geometry';
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string };
 

@@ -100,7 +100,7 @@ experiments/      validation records
 | A CDP domain | `packages/devtools-anywhere/src/cdp-agent/domains/` | Playground, plus a conformance test |
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
 | Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |
-| Remote debugging | `packages/remote-server/src/` (relay, server), `packages/devtools-anywhere/src/remote.ts` (page side) | `tests/e2e/remote.test.ts`; `node packages/remote-server/dist/cli.js` |
+| Remote debugging | `packages/remote-server/src/` (relay, server), `packages/devtools-anywhere/src/remote.ts` (page side) | `tests/e2e/remote/remote.test.ts`; `node packages/remote-server/dist/cli.js` |
 | DevTools frontend | `packages/devtools-frontend/` | See below |
 
 ### Constraints and caveats
@@ -108,7 +108,7 @@ experiments/      validation records
 - Every `postMessage` must check `event.origin` and `event.source`; otherwise any page could send CDP commands to the runtime.
 - Detect whether the page is inside the shell through a postMessage handshake rather than reading properties on `window.parent`, which throws a SecurityError across origins.
 - Both ends of the handshake need buffering: messages must not be dropped while DevTools is still loading.
-- The agent serves same-origin iframes too, whose nodes are not instances of the top page's `Element`, … and whose document is not the global `document`. Check nodes with `cdp-agent/core/realm.ts` (by `nodeType`, `realmOf(node)`) and look frames up in `core/frames.ts`. `pnpm lint` counts the remaining uses of the top page's realm per file against `scripts/check-realms.json` (`scripts/check-realms.ts`): a file may have fewer, not more. Where the top page is meant (the probe, the overlay), run `node scripts/check-realms.ts --update`.
+- The agent serves same-origin iframes too, whose nodes are not instances of the top page's `Element`, … and whose document is not the global `document`. Check nodes with `cdp-agent/core/realm.ts` (by `nodeType`, `realmOf(node)`) and look frames up in `core/frames/frames.ts`. `pnpm lint` counts the remaining uses of the top page's realm per file against `scripts/check-realms.json` (`scripts/check-realms.ts`): a file may have fewer, not more. Where the top page is meant (the probe, the overlay), run `node scripts/check-realms.ts --update`.
 - Frontend assets should be self-hostable, with no dependency on third-party CDNs such as unpkg or jsDelivr.
 - When injecting with a Service Worker:
   - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.

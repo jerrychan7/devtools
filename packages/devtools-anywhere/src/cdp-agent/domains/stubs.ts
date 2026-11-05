@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping';
-import { mergedFrames } from '../core/merged-frames';
+import { mergedFrames } from '../core/frames/merged-frames';
 import { CdpError, type CdpSession } from '../core/session';
 
 type Command = keyof ProtocolMapping.Commands;

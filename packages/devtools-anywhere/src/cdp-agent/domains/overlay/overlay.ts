@@ -1,14 +1,14 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../../core/nodes';
-import type { Frame } from '../../core/frames';
-import { mapPoints, ownerContentToTop, parentFrameDocument } from '../../core/geometry';
-import { childTargets } from '../../core/child-targets';
-import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+import { OWN_ATTRIBUTE, closestOwn, markOwn } from '../../core/nodes/nodes';
+import type { Frame } from '../../core/frames/frames';
+import { mapPoints, ownerContentToTop, parentFrameDocument } from '../../core/frames/geometry';
+import { childTargets } from '../../core/frames/child-targets';
+import { mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
 import { documentOf, isElement, isFrameOwner, isNode, realmOf } from '../../core/realm';
 import { boxModel, resolveNode } from '../dom/dom';
 import { CdpError } from '../../core/session';
-import { walkFrameOwners } from '../../core/frames';
+import { walkFrameOwners } from '../../core/frames/frames';
 import { registerOverlayTools } from './tools';
 
 /**
