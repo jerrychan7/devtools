@@ -371,7 +371,8 @@ export class SheetRegistry {
       isInline: !sheet.href && !isInspector && !local,
       isMutable: isInspector || constructed,
       isConstructed: constructed,
-      ...(constructed && { loadingFailed: false }),
+      // Like Chrome, for constructed sheets and those of files.
+      ...((constructed || !!sheet.href) && { loadingFailed: false }),
       startLine: 0,
       startColumn: 0,
       length: text.length,

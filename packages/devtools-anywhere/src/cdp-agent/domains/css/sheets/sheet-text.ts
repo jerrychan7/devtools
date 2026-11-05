@@ -45,7 +45,7 @@ export class SheetTexts {
   /** Takes `text` for the sheet's, its CSSOM rules being what it gives now. */
   set(sheet: CSSStyleSheet, text: string): void {
     this.stale.delete(sheet);
-    this.recorded.set(sheet, { text: text.replace(/^﻿/, ''), snapshot: snapshot(this.rulesOf(sheet)) });
+    this.recorded.set(sheet, { text, snapshot: snapshot(this.rulesOf(sheet)) });
   }
 
   has(sheet: CSSStyleSheet): boolean {
