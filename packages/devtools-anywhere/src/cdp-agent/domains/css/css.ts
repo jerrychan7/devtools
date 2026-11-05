@@ -7,7 +7,7 @@ import { CdpError } from '../../core/session';
 import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
 import { historyOf } from '../../core/nodes/history';
-import { quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
+import { adoptedOf, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { ForcedPseudoClasses } from './matching/forced-pseudo';
 import { backgroundsBehind } from './color';
 import { Cascade } from './matching/cascade';
@@ -136,6 +136,9 @@ export function registerCss(ctx: Context) {
   }
   let enabled = false;
   let known = new Set<CSSStyleSheet>();
+  /** Sheets changed while adopted but not reported yet. */
+  const changedUnseen = new Set<CSSStyleSheet>();
+  const adopted = (sheet: CSSStyleSheet) => [...documents(), ...shadowRoots()].some(t => adoptedOf(t).includes(sheet));
   let observer: MutationObserver | null = null;
   let stopAdopted: (() => void) | null = null;
   let stopCssom: (() => void) | null = null;
@@ -164,6 +167,9 @@ export function registerCss(ctx: Context) {
         sheets.forget(sheet);
       }
     known = current;
+    for (const sheet of changedUnseen)
+      if (current.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
+    changedUnseen.clear();
     // Every session's observer reports the same change: the shared companions are rebuilt once.
     if (forced.isActive) forced.schedule();
     else forced.reattach();
@@ -274,7 +280,8 @@ export function registerCss(ctx: Context) {
         rule.style.cssText = old;
         if (oldSource) sources.set(rule.style, oldSource);
         else sources.delete(rule.style);
-      }
+      },
+      edit.range
     );
     return rules.ruleStyle(sheet, rule);
   }
@@ -297,16 +304,27 @@ export function registerCss(ctx: Context) {
     sheet: CSSStyleSheet,
     next: (text: string | null) => string | null,
     apply: () => void,
-    revert: () => void
+    revert: () => void,
+    span?: Protocol.CSS.SourceRange
   ) {
-    const before = sheets.sourceOf(sheet)?.text ?? null;
+    const source = sheets.sourceOf(sheet);
+    const before = source?.text ?? null;
     const after = next(before);
+    // A change of a part of the text: only the rule around it is outlined again.
+    const offsets = source && span && offsetsOf(source, span);
     const record = (text: string | null) =>
       text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
     perform(
       () => {
         ownEdit(apply);
-        record(after);
+        if (offsets && before !== null && after !== null)
+          sheets.texts.splice(
+            sheet,
+            offsets[0],
+            offsets[1],
+            after.slice(offsets[0], after.length - (before.length - offsets[1]))
+          );
+        else record(after);
       },
       () => {
         ownEdit(revert);
@@ -355,6 +373,8 @@ export function registerCss(ctx: Context) {
     enable() {
       if (enabled) return;
       enabled = true;
+      // Changes the page made while disabled went unseen.
+      sheets.texts.reset();
       known = new Set();
       // Before this domain's observer and frame listener, so the tracker drops a stale list first.
       if (!stopShadowRoots) {
@@ -398,6 +418,8 @@ export function registerCss(ctx: Context) {
           if (text === undefined) sheets.texts.invalidate(sheet);
           else sheets.texts.set(sheet, text);
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
+          // Adopted in the same task, not reported yet: like Chrome, added then changed.
+          else if (adopted(sheet)) changedUnseen.add(sheet);
         },
         () => documents().map(realmOf)
       );
@@ -515,7 +537,8 @@ export function registerCss(ctx: Context) {
         sheet,
         splice(sheet, params.range, params.selector),
         () => (rule.selectorText = params.selector),
-        () => (rule.selectorText = old)
+        () => (rule.selectorText = old),
+        params.range
       );
       stylesChanged();
       return { selectorList: rules.selectorList(sheet, rule) };
@@ -538,7 +561,8 @@ export function registerCss(ctx: Context) {
         sheet,
         splice(sheet, params.range, params.text),
         () => (media.mediaText = params.text),
-        () => (media.mediaText = old)
+        () => (media.mediaText = old),
+        params.range
       );
       stylesChanged();
       return { media: rules.media(sheet, rule) };

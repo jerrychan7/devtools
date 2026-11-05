@@ -18,21 +18,32 @@ export interface SheetSource {
   lines: number[];
   /** The outline node each CSSOM rule was written as. */
   nodes: Map<CSSRule, CssRule>;
+  /** The top-level rules, each with its node. */
+  top: [CSSRule, CssRule][];
 }
 
 interface Recorded {
   text: string;
-  /** The CSSOM's rules as serialized when the text was recorded. */
-  snapshot: string;
+  /** Whether the CSSOM is still to be checked against the text (one not given by the CSSOM). */
+  unchecked: boolean;
   /** Paired lazily; null when pairing failed. */
   source?: SheetSource | null;
 }
 
-/** The CSSOM's rules as serialized, to tell when the page changed them. */
+/** The rules as serialized, but @import (which replaceSync() leaves out). */
 function snapshot(rules: CSSRule[]): string {
-  return rules.map(r => r.cssText).join('\n');
+  return rules
+    .filter(r => !isCssom(r, 'CSSImportRule'))
+    .map(r => r.cssText)
+    .join('\n');
 }
 
+/**
+ * Changes the page makes through the CSSOM are seen by cssom-watch.ts, while the CSS domain is
+ * enabled; the texts recorded are dropped when it is enabled again. A text not from the CSSOM's
+ * own replace() (that of a <style>, a file) is checked once against the sheet: parsed alone, it
+ * must give the rules the sheet has, or the page changed them before.
+ */
 export class SheetTexts {
   private recorded = new WeakMap<CSSStyleSheet, Recorded>();
   /** Sheets the page changed through the CSSOM since their text was recorded. */
@@ -43,10 +54,25 @@ export class SheetTexts {
     this.rulesOf = rulesOf;
   }
 
-  /** Takes `text` for the sheet's, its CSSOM rules being what it gives now. */
-  set(sheet: CSSStyleSheet, text: string): void {
+  /**
+   * Takes `text` for the sheet's, its CSSOM rules being what it gives now, or with `check`, those
+   * it gave when parsed, if the page has not changed them since.
+   */
+  set(sheet: CSSStyleSheet, text: string, check = false): void {
     this.stale.delete(sheet);
-    this.recorded.set(sheet, { text, snapshot: snapshot(this.rulesOf(sheet)) });
+    this.recorded.set(sheet, { text, unchecked: check });
+  }
+
+  /**
+   * Replaces `[start, end)` of the sheet's text by `insert`, its CSSOM changed the same way; the
+   * rules are paired again around the change only, when they can be.
+   */
+  splice(sheet: CSSStyleSheet, start: number, end: number, insert: string): void {
+    const rec = this.recorded.get(sheet);
+    if (!rec || this.stale.has(sheet)) return;
+    const next = rec.source && respliced(rec.source, start, end, insert);
+    if (next) this.recorded.set(sheet, { text: next.text, unchecked: false, source: next });
+    else this.set(sheet, rec.text.slice(0, start) + insert + rec.text.slice(end));
   }
 
   has(sheet: CSSStyleSheet): boolean {
@@ -58,21 +84,33 @@ export class SheetTexts {
     this.stale.add(sheet);
   }
 
+  /** Forgets every text: changes made meanwhile were not seen. */
+  reset(): void {
+    this.recorded = new WeakMap();
+    this.stale = new WeakSet();
+  }
+
   /** The text of the sheet with its rules paired, or null. */
   source(sheet: CSSStyleSheet): SheetSource | null {
     if (this.stale.has(sheet)) return null;
     let rec = this.recorded.get(sheet);
     const owner = sheet.ownerNode;
     if (!rec && isHtml(owner, 'style') && owner.sheet === sheet) {
-      this.set(sheet, owner.textContent);
+      this.set(sheet, owner.textContent, true);
       rec = this.recorded.get(sheet);
     }
     if (!rec) return null;
+    if (rec.source !== undefined) return rec.source;
     const rules = this.rulesOf(sheet);
-    // A change the page made unseen (a property set through the CSSOM).
-    if (snapshot(rules) !== rec.snapshot) {
-      this.stale.add(sheet);
-      return null;
+    if (rec.unchecked) {
+      rec.unchecked = false;
+      const alone = new CSSStyleSheet();
+      const text = rec.text;
+      ownEdit(() => alone.replaceSync(text));
+      if (snapshot(Array.from(alone.cssRules)) !== snapshot(rules)) {
+        this.stale.add(sheet);
+        return null;
+      }
     }
     if (rec.source === undefined) rec.source = pair(rec.text, rules);
     return rec.source;
@@ -126,31 +164,79 @@ const loose = (s: string) =>
  * left without one fails the pairing.
  */
 function pair(text: string, rules: CSSRule[]): SheetSource | null {
-  const nodes = new Map<CSSRule, CssRule>();
-  /** `wrap` puts a prelude where it was, for the browser to parse it alone. */
-  const list = (outlined: CssRule[], cssom: CSSRule[], wrap: (p: string) => string): boolean => {
-    let j = 0;
-    for (const rule of cssom) {
-      for (;;) {
-        const node = outlined[j++];
-        if (!node) return false;
-        if (!matches(text, node, rule, wrap)) continue;
-        nodes.set(rule, node);
-        const tag = tagOf(rule);
-        const inner =
-          tag === 'CSSStyleRule'
-            ? (p: string) => `:root{${p}{}}`
-            : tag === 'CSSKeyframesRule'
-              ? (p: string) => `@keyframes x{${p}{}}`
-              : wrap;
-        if (!list(node.rules, childRules(rule), inner)) return false;
-        break;
-      }
+  const top = outline(text);
+  const source: SheetSource = { text, lines: lineStarts(text), nodes: new Map(), top: [] };
+  return pairList(source, top, rules, TOP, true) ? source : null;
+}
+
+/** `wrap` puts a prelude where it was, for the browser to parse it alone. */
+type Wrap = (prelude: string) => string;
+const TOP: Wrap = p => `${p}{}`;
+
+/** Pairs `cssom` with `outlined` into `source.nodes` (and with `top`, its top-level pairs). */
+function pairList(source: SheetSource, outlined: CssRule[], cssom: CSSRule[], wrap: Wrap, top = false): boolean {
+  let j = 0;
+  for (const rule of cssom) {
+    for (;;) {
+      const node = outlined[j++];
+      if (!node) return false;
+      if (!matches(source.text, node, rule, wrap)) continue;
+      source.nodes.set(rule, node);
+      if (top) source.top.push([rule, node]);
+      const tag = tagOf(rule);
+      const inner: Wrap =
+        tag === 'CSSStyleRule' ? p => `:root{${p}{}}` : tag === 'CSSKeyframesRule' ? p => `@keyframes x{${p}{}}` : wrap;
+      if (!pairList(source, node.rules, childRules(rule), inner)) return false;
+      break;
     }
-    return true;
-  };
-  if (!list(outline(text), rules, p => `${p}{}`)) return null;
-  return { text, lines: lineStarts(text), nodes };
+  }
+  return true;
+}
+
+/** Moves a node and those in it by `delta`. */
+function shift(node: CssRule, delta: number) {
+  node.start += delta;
+  node.end += delta;
+  node.preludeStart += delta;
+  node.preludeEnd += delta;
+  if (node.blockStart >= 0) {
+    node.blockStart += delta;
+    node.blockEnd += delta;
+  }
+  for (const d of node.decls) {
+    d.start += delta;
+    d.end += delta;
+    d.nameEnd += delta;
+    d.valueStart += delta;
+    d.valueEnd += delta;
+  }
+  for (const r of node.rules) shift(r, delta);
+}
+
+/**
+ * The source after `[start, end)` of its text was replaced by `insert`, the CSSOM changed the
+ * same way: only the top-level rule around the change is outlined and paired again, the others
+ * moved. null when the change is not inside one rule or does not leave it one rule.
+ */
+function respliced(source: SheetSource, start: number, end: number, insert: string): SheetSource | null {
+  const k = source.top.findIndex(([, n]) => n.start <= start && end <= n.end);
+  const old = source.top[k];
+  if (!old) return null;
+  const [rule, node] = old;
+  const delta = insert.length - (end - start);
+  const text = source.text.slice(0, start) + insert + source.text.slice(end);
+  const slice = text.slice(node.start, node.end + delta);
+  const [fresh, ...more] = outline(slice);
+  if (!fresh || more.length || fresh.start !== 0 || fresh.end !== slice.length) return null;
+  shift(fresh, node.start);
+  const next: SheetSource = { text, lines: lineStarts(text), nodes: source.nodes, top: source.top };
+  if (!pairList(next, [fresh], [rule], TOP)) return null;
+  for (let i = k + 1; i < source.top.length; i++) {
+    const after = source.top[i];
+    if (after) shift(after[1], delta);
+  }
+  source.top[k] = [rule, fresh];
+  return next;
 }
 
 function matches(text: string, node: CssRule, rule: CSSRule, wrap: (p: string) => string): boolean {

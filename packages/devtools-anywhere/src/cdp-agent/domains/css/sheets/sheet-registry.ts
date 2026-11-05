@@ -223,7 +223,7 @@ export class SheetRegistry {
             copy.replaceSync(text);
             this.copies.set(sheet, copy);
           }
-          this.texts.set(sheet, text);
+          this.texts.set(sheet, text, true);
           onLoaded(sheet);
         })
         // Not tried again: a readable sheet keeps its serialized text.
@@ -307,7 +307,9 @@ export class SheetRegistry {
     const offsets = offsetsOf(source, range);
     for (const [rule, node] of source.nodes) {
       if (!offsets || !(isCssom(rule, 'CSSStyleRule') || isCssom(rule, 'CSSNestedDeclarations'))) continue;
-      const spans = selectorSpans(source.text, node);
+      // Selectors are only tokenized for a rule whose prelude starts there.
+      if (at === 'selector' && node.preludeStart !== offsets[0]) continue;
+      const spans = at === 'selector' ? selectorSpans(source.text, node) : [];
       const [start, end] =
         at === 'style' ? styleSpan(source.text, node) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
       if (start === offsets[0] && end === offsets[1] && (at === 'style' || node.kind === 'qualified')) return rule;
