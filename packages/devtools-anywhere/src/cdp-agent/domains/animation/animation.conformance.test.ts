@@ -1,11 +1,12 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VOLATILE, diffSubset, launch, openPage } from '../../../../test-support/conformance.ts';
+import { VOLATILE, diffSubset, launch, missingFields, openPage } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 import type { Protocol } from 'devtools-protocol';
 
 // Ids are given in the order each side sees the animations; times depend on the frame each saw
-// them in. `cssId` is a hash of Chrome's style data the page cannot compute.
+// them in, and are checked on their own (see `timesMatchThePage`). `cssId` is a hash of Chrome's
+// style data the page cannot compute.
 for (const key of ['id', 'backendNodeId', 'startTime', 'currentTime', 'cssId']) VOLATILE.add(key);
 
 const EVENTS = [
@@ -30,6 +31,82 @@ async function until<T>(read: () => Promise<T | undefined>, what: string): Promi
   }
   throw new Error(`timed out waiting for ${what}`);
 }
+
+/**
+ * Cancels every animation of the page, in its shadow trees and same-origin iframes too, so a test
+ * does not see the ones a test before it left running, then lets the cancels be reported.
+ */
+async function reset(t: TestPage) {
+  await t.page.evaluate(async () => {
+    const walk = (root: Document | ShadowRoot) => {
+      for (const animation of root.getAnimations()) animation.cancel();
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) walk(el.shadowRoot);
+        if (el instanceof HTMLIFrameElement && el.contentDocument) walk(el.contentDocument);
+      }
+    };
+    walk(document);
+    for (let i = 0; i < 3; i++) await new Promise(r => requestAnimationFrame(r));
+  });
+  for (const side of [t.chrome, t.ours]) await side.clear();
+}
+
+let fences = 0;
+/**
+ * Has the page start an animation and waits until each of `sides` announces it: what the page did before
+ * has been reported by then, so a test can tell that something was not, without a sleep that a
+ * slow machine outruns. The animation is cancelled again; its own events carry its name.
+ */
+async function fence(t: TestPage, ...sides: Side[]): Promise<void> {
+  const name = `fence${++fences}`;
+  await t.page.evaluate(n => {
+    const div = document.body.appendChild(document.createElement('div'));
+    div.animate({ opacity: [0, 1] }, 100000).id = n;
+  }, name);
+  for (const side of sides)
+    await until(
+      async () => (await side.events('Animation.animationStarted')).find(e => e.animation.name === name),
+      name
+    );
+  // Chrome reports an update a frame or so after a start in the same frame: frames go by too.
+  for (const side of sides) await settle(t, side);
+  await t.page.evaluate(
+    n =>
+      document
+        .getAnimations()
+        .find(a => a.id === n)
+        ?.cancel(),
+    name
+  );
+}
+
+/**
+ * Lets the page run a few frames, then makes a round trip to `side`: its events from those frames
+ * have arrived by then (for the domain disabled, where no animation of the page can be a fence).
+ */
+async function settle(t: TestPage, side: Side) {
+  await t.page.evaluate(async () => {
+    for (let i = 0; i < 3; i++) await new Promise(r => requestAnimationFrame(r));
+  });
+  await side.send('Animation.getPlaybackRate');
+}
+
+/**
+ * Fields Chrome announces that we leave out, known and accepted; any other is reported. diffSubset
+ * only checks the fields we send; `noneMissing` checks the other way.
+ */
+const KNOWN_MISSING = new Set<string>([
+  // Scroll-driven animations' timeline: not announced yet (worked on separately); no test here
+  // runs one, listed so that one that does is not failed by this check alone.
+  '$.viewOrScrollTimeline',
+]);
+/** Fails if Chrome announced a field of `chrome` that `ours` lacks and KNOWN_MISSING does not list. */
+const noneMissing = (ours: unknown, chrome: unknown, what: string) =>
+  assert.deepEqual(
+    missingFields(ours, chrome).filter(path => !KNOWN_MISSING.has(path)),
+    [],
+    `${what}: fields Chrome has and we do not`
+  );
 
 /** The animations a side announced, by name. */
 async function started(side: Side, count: number) {
@@ -64,8 +141,18 @@ function stateOf(t: TestPage, name: string) {
     n =>
       document
         .getAnimations()
-        .filter(a => a.id === n || ('animationName' in a && a.animationName === n))
-        .map(a => ({ playState: a.playState, currentTime: Number(a.currentTime), timing: a.effect?.getTiming() })),
+        .filter(
+          a =>
+            a.id === n ||
+            ('animationName' in a && a.animationName === n) ||
+            ('transitionProperty' in a && a.transitionProperty === n)
+        )
+        .map(a => ({
+          playState: a.playState,
+          startTime: Number(a.startTime),
+          currentTime: Number(a.currentTime),
+          timing: a.effect?.getTiming(),
+        })),
     name
   );
 }
@@ -77,7 +164,14 @@ describe('Animation', () => {
     t = await openPage(env, [...EVENTS]);
   });
 
+  /** The play states of the `Animation.animationUpdated` events `side` sent for the animation `id`. */
+  const updatesOf = async (side: Side, id: string) =>
+    (await side.events('Animation.animationUpdated'))
+      .filter(e => e.animation.id === id)
+      .map(e => e.animation.playState);
+
   test('animations running before enable are announced on enable', async () => {
+    await reset(t);
     await t.page.evaluate(() => {
       const div = document.body.appendChild(document.createElement('div'));
       div.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 10000, iterations: 2 }).id = 'early';
@@ -85,58 +179,90 @@ describe('Animation', () => {
     for (const side of [t.chrome, t.ours]) await side.send('Animation.enable');
     const [chrome, ours] = [await started(t.chrome, 1), await started(t.ours, 1)];
     assert.deepEqual(diffSubset(ours.get('early'), chrome.get('early')), []);
-    assert.equal((await t.ours.events('Animation.animationCreated')).length, 1);
+    noneMissing(ours.get('early'), chrome.get('early'), 'early');
+    await fence(t, t.chrome, t.ours);
+    const created = async (side: Side) => (await side.events('Animation.animationCreated')).length;
+    assert.equal(await created(t.ours), await created(t.chrome));
   });
 
   test('CSS animations, transitions and Web Animations match Chrome', async () => {
-    for (const side of [t.chrome, t.ours]) await side.clear();
+    await reset(t);
     await t.page.evaluate(ADD('a'));
     const [chrome, ours] = [await started(t.chrome, 3), await started(t.ours, 3)];
     for (const name of ['ak', 'width', 'aweb']) {
       const own = ours.get(name);
       assert.ok(own, `missing ${name}`);
       assert.deepEqual(diffSubset(own, chrome.get(name)), [], name);
+      noneMissing(own, chrome.get(name), name);
       assert.equal('keyframesRule' in (own.source ?? {}), 'keyframesRule' in (chrome.get(name)?.source ?? {}), name);
+      // The times left out above: Chrome's start time is the page's, and an animation is announced
+      // at its start (Chrome: at 0; we see it a frame later).
+      const [page] = await stateOf(t, name);
+      assert.ok(page, name);
+      for (const [side, animation] of [
+        ['Chrome', chrome.get(name)],
+        ['ours', own],
+      ] as const) {
+        assert.equal(typeof animation?.startTime, 'number', `${side} ${name}`);
+        assert.equal(typeof animation?.currentTime, 'number', `${side} ${name}`);
+        assert.ok(
+          Math.abs(Number(animation?.startTime) - page.startTime) < 1,
+          `${side} ${name} starts at the page's time`
+        );
+        assert.ok(Number(animation?.currentTime) >= 0 && Number(animation?.currentTime) < 50, `${side} ${name}`);
+      }
     }
     assert.equal(ours.get('ak')?.source?.iterations, undefined, 'infinite iterations are left out');
-    assert.equal((await t.ours.events('Animation.animationCreated')).length, 3);
+    await fence(t, t.chrome, t.ours);
+    // Less the fence.
+    const created = async (side: Side) => (await side.events('Animation.animationCreated')).length - 1;
+    assert.equal(await created(t.ours), await created(t.chrome));
+    assert.equal(await created(t.ours), 3);
   });
 
   test('seeking announces a new start time only for a running animation, as in Chrome', async () => {
     const results: Record<string, unknown> = {};
     for (const side of [t.chrome, t.ours]) {
-      await t.page.evaluate(() => document.getAnimations().forEach(a => a.cancel()));
-      await side.clear();
+      await reset(t);
       const prefix = side === t.chrome ? 's' : 'q';
       await t.page.evaluate(ADD(prefix));
       const animation = (await started(side, 3)).get(`${prefix}k`);
       assert.ok(animation);
       const ids = [animation.id];
-      const updates = async () => {
-        await sleep(300);
-        const list = (await side.events('Animation.animationUpdated')).map(e => e.animation.playState);
+      /** The animation's play states in its updates, once `count` have come and then a fence. */
+      const updates = async (count: number) => {
+        await until(async () => {
+          const list = await updatesOf(side, animation.id);
+          return list.length >= count ? list : undefined;
+        }, `${count} updates`);
+        await fence(t, side);
+        const list = await updatesOf(side, animation.id);
         await side.clear();
         return list;
       };
-      await sleep(300);
+      await fence(t, side);
       await side.clear();
       await side.send('Animation.seekAnimations', { animations: ids, currentTime: 0 });
-      const running = await updates();
+      const running = await updates(1);
       await side.send('Animation.setPaused', { animations: ids, paused: true });
-      await updates();
+      await fence(t, side);
+      await side.clear();
       await side.send('Animation.seekAnimations', { animations: ids, currentTime: 100 });
-      const paused = await updates();
+      // The page then plays it, which Chrome reports: an update for the seek would come before.
+      await t.page.evaluate(n => {
+        for (const a of document.getAnimations()) if ('animationName' in a && a.animationName === n) a.play();
+      }, `${prefix}k`);
+      const paused = await updates(1);
       results[side === t.chrome ? 'chrome' : 'ours'] = { running, paused };
     }
-    assert.deepEqual(results['chrome'], { running: ['running'], paused: [] });
+    assert.deepEqual(results['chrome'], { running: ['running'], paused: ['running'] });
     assert.deepEqual(results['ours'], results['chrome']);
   });
 
   test('seeking each animation to its own time, and the errors, match Chrome', async () => {
     const results: unknown[] = [];
     for (const side of [t.chrome, t.ours]) {
-      await t.page.evaluate(() => document.getAnimations().forEach(a => a.cancel()));
-      await side.clear();
+      await reset(t);
       const prefix = side === t.chrome ? 'm' : 'n';
       await t.page.evaluate(ADD(prefix));
       const all = await started(side, 3);
@@ -166,8 +292,25 @@ describe('Animation', () => {
     assert.deepEqual({ ...Object(chrome), times: Object(ours).times }, ours);
   });
 
+  test('a transition is paused and seeked as in Chrome', async () => {
+    const results: unknown[] = [];
+    for (const side of [t.chrome, t.ours]) {
+      await reset(t);
+      const prefix = side === t.chrome ? 'x' : 'y';
+      await t.page.evaluate(ADD(prefix));
+      const id = (await started(side, 3)).get('width')?.id;
+      assert.ok(id);
+      await side.send('Animation.setPaused', { animations: [id], paused: true });
+      await side.send('Animation.seekAnimations', { animations: [id], currentTime: 500 });
+      const [state] = await stateOf(t, 'width');
+      results.push([state?.playState, Math.round(Number(state?.currentTime))]);
+    }
+    assert.deepEqual(results[0], ['paused', 500]);
+    assert.deepEqual(results[1], results[0]);
+  });
+
   test('animations in shadow trees are announced, as in Chrome', async () => {
-    for (const side of [t.chrome, t.ours]) await side.clear();
+    await reset(t);
     await t.page.evaluate(() => {
       const host = document.body.appendChild(document.createElement('div'));
       const root = host.attachShadow({ mode: 'open' });
@@ -177,6 +320,7 @@ describe('Animation', () => {
     const [chrome, ours] = [await started(t.chrome, 1), await started(t.ours, 1)];
     assert.ok(chrome.get('sk'), 'Chrome announces it');
     assert.deepEqual(diffSubset(ours.get('sk'), chrome.get('sk')), []);
+    noneMissing(ours.get('sk'), chrome.get('sk'), 'sk');
   });
 
   /** A shadow tree's style sheet that animates its <p>s with `name`. */
@@ -185,12 +329,13 @@ describe('Animation', () => {
 
   /** Has the page run `script`, then checks both sides announce the animation `name`. */
   async function announced(script: string, name: string) {
-    for (const side of [t.chrome, t.ours]) await side.clear();
+    await reset(t);
     await t.page.evaluate(script);
     const [chrome, ours] = [await started(t.chrome, 1), await started(t.ours, 1)];
     assert.ok(chrome.get(name), 'Chrome announces it');
     assert.ok(ours.get(name), `we announce ${[...ours.keys()].join()} instead`);
     assert.deepEqual(diffSubset(ours.get(name), chrome.get(name)), []);
+    noneMissing(ours.get(name), chrome.get(name), name);
   }
 
   test('a shadow root attached before its host is inserted is looked into, as in Chrome', async () => {
@@ -231,21 +376,38 @@ describe('Animation', () => {
     );
   });
 
+  test('an element removed from the document cancels its CSS animation, as in Chrome', async () => {
+    await reset(t);
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent = '@keyframes rk { to { opacity: 0.5 } } #rk { animation: rk 5s infinite }';
+      document.head.append(style);
+      document.body.appendChild(document.createElement('div')).id = 'rk';
+    });
+    const ids = [(await started(t.chrome, 1)).get('rk')?.id, (await started(t.ours, 1)).get('rk')?.id];
+    await t.page.evaluate(() => document.getElementById('rk')?.remove());
+    for (const [i, side] of [t.chrome, t.ours].entries())
+      await until(
+        async () => (await side.events('Animation.animationCanceled')).find(e => e.id === ids[i]),
+        `the cancel (${i ? 'ours' : 'Chrome'})`
+      );
+  });
+
   test('pausing, seeking, timing and releasing do what they do in Chrome', async () => {
     const results: unknown[] = [];
     for (const side of [t.chrome, t.ours]) {
-      await side.clear();
-      await t.page.evaluate(() => document.getAnimations().forEach(a => a.cancel()));
-      await side.clear();
+      await reset(t);
       const prefix = side === t.chrome ? 'c' : 'o';
       await t.page.evaluate(ADD(prefix));
-      const animation = (await started(side, 3)).get(`${prefix}web`);
+      const all = await started(side, 3);
+      const animation = all.get(`${prefix}web`);
       assert.ok(animation);
       const ids = [animation.id];
       const name = `${prefix}web`;
       await side.send('Animation.setPaused', { animations: ids, paused: true });
       const paused = await stateOf(t, name);
       await side.send('Animation.seekAnimations', { animations: ids, currentTime: 1000 });
+      const seekedPage = (await stateOf(t, name)).map(s => Math.round(s.currentTime));
       const { currentTime } = await side.send('Animation.getCurrentTime', { id: animation.id });
       await side.send('Animation.setTiming', { animationId: animation.id, duration: 5000, delay: 10 });
       const timed = await stateOf(t, name);
@@ -256,47 +418,100 @@ describe('Animation', () => {
         () => 'none',
         () => 'error'
       );
+      // Released, the animation plays on in the page.
+      const released = await t.page.evaluate(async n => {
+        const animation = document.getAnimations().find(a => a.id === n);
+        const before = Number(animation?.currentTime);
+        for (let i = 0; i < 5; i++) await new Promise(r => requestAnimationFrame(r));
+        return [animation?.playState, Number(animation?.currentTime) > before];
+      }, name);
       const { remoteObject } = await side.send('Animation.resolveAnimation', {
-        animationId: (await started(side, 3)).get(`${prefix}k`)?.id ?? '',
+        animationId: all.get(`${prefix}k`)?.id ?? '',
       });
-      await sleep(100);
+      await fence(t, side);
       results.push({
         paused: paused.map(s => s.playState),
-        // Chrome reads one frame later than it seeked to.
-        seeked: Math.abs(currentTime - 1000) < 40,
-        timing: timed.map(s => [s.playState, s.timing?.duration, s.timing?.delay]),
+        seekedPage,
+        seeked: Math.round(currentTime),
+        timing: timed.map(s => [
+          s.playState,
+          s.timing?.duration,
+          s.timing?.delay,
+          s.timing?.endDelay,
+          s.timing?.iterations,
+          s.timing?.easing,
+        ]),
         resumed: resumed.map(s => s.playState),
         releasedError,
+        released,
         className: remoteObject.className,
         // The domain's own changes are no updates.
-        updated: (await side.events('Animation.animationUpdated')).length,
+        updated: (await updatesOf(side, animation.id)).length,
       });
     }
+    assert.deepEqual(results[0], {
+      paused: ['paused'],
+      seekedPage: [1000],
+      seeked: 1000,
+      timing: [['paused', 5000, 10, 50, 3, 'linear']],
+      resumed: ['running'],
+      releasedError: 'error',
+      released: ['running', true],
+      className: 'CSSAnimation',
+      updated: 0,
+    });
     assert.deepEqual(results[1], results[0]);
   });
 
-  test('the playback rate slows the animations down until disable', async () => {
-    const elapsed: number[][] = [];
+  test('the playback rate slows the animations down until disable, new ones too', async () => {
+    const results: unknown[] = [];
     for (const side of [t.chrome, t.ours]) {
+      await reset(t);
       await side.send('Animation.enable');
-      const before = await t.page.evaluate(() => document.getAnimations().map(a => Number(a.currentTime)));
+      await t.page.evaluate(() => {
+        const add = () => document.body.appendChild(document.createElement('div'));
+        add().animate({ opacity: [0, 1] }, { duration: 100000 }).id = 'r1';
+        add().animate({ opacity: [0, 1] }, { duration: 100000, delay: 100 }).id = 'r2';
+      });
+      await started(side, 2);
       await side.send('Animation.setPlaybackRate', { playbackRate: 0.1 });
       assert.deepEqual(await side.send('Animation.getPlaybackRate'), { playbackRate: 0.1 });
-      await sleep(500);
-      const after = await t.page.evaluate(() => document.getAnimations().map(a => Number(a.currentTime)));
+      // Started at the slowed rate.
+      await t.page.evaluate(() => {
+        document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 100000).id = 'r3';
+      });
+      const r3 = await until(
+        async () => (await side.events('Animation.animationStarted')).find(e => e.animation.name === 'r3'),
+        'r3'
+      );
+      /** Each animation's current time, by id, and the time on the page's clock. */
+      const read = () =>
+        t.page.evaluate(() => ({
+          now: performance.now(),
+          times: Object.fromEntries(document.getAnimations().map(a => [a.id, Number(a.currentTime)])),
+        }));
+      const before = await read();
+      await sleep(600);
+      const after = await read();
       await side.send('Animation.disable');
       assert.deepEqual(await side.send('Animation.getPlaybackRate'), { playbackRate: 1 });
-      elapsed.push(after.map((t, i) => t - (before[i] ?? 0)));
+      const wall = after.now - before.now;
+      const rates = Object.fromEntries(
+        ['r1', 'r2', 'r3'].map(id => [id, ((after.times[id] ?? NaN) - (before.times[id] ?? NaN)) / wall])
+      );
+      for (const [id, rate] of Object.entries(rates))
+        assert.ok(rate > 0.05 && rate < 0.15, `${id} ran at ${rate} of the clock at 10%: ${JSON.stringify(rates)}`);
+      results.push(r3.animation.playbackRate);
     }
-    for (const list of elapsed)
-      for (const ms of list) assert.ok(ms < 150, `advanced ${ms}ms in 500ms at 10%: ${JSON.stringify(elapsed)}`);
+    // The rate is the timeline's in Chrome: an animation started meanwhile reports its own.
+    assert.deepEqual(results, [1, 1]);
   });
 
   test('the page finishing or cancelling an animation is reported, pausing it is not', async () => {
     const results: unknown[] = [];
     for (const side of [t.chrome, t.ours]) {
+      await reset(t);
       await side.send('Animation.enable');
-      await side.clear();
       await t.page.evaluate(() => {
         const div = document.body.appendChild(document.createElement('div'));
         const animation = div.animate({ opacity: [0, 1] }, 10000);
@@ -309,8 +524,8 @@ describe('Animation', () => {
       );
       await side.clear();
       await t.page.evaluate(() => (Reflect.get(window, '__short') as Animation).pause());
-      await sleep(200);
-      const afterPause = (await side.events('Animation.animationUpdated')).length;
+      await fence(t, side);
+      const afterPause = (await updatesOf(side, created.animation.id)).length;
       await t.page.evaluate(() => (Reflect.get(window, '__short') as Animation).finish());
       const updated = await until(
         async () =>
@@ -328,6 +543,29 @@ describe('Animation', () => {
       await side.send('Animation.disable');
     }
     assert.deepEqual(results[1], results[0]);
+  });
+
+  test('once disabled, nothing is reported, as in Chrome', async () => {
+    const results: unknown[] = [];
+    for (const side of [t.chrome, t.ours]) {
+      await reset(t);
+      await side.send('Animation.enable');
+      await side.send('Animation.disable');
+      await side.clear();
+      await t.page.evaluate(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 10000);
+        animation.id = 'off';
+        animation.pause();
+        animation.play();
+        animation.cancel();
+      });
+      await settle(t, side);
+      const all = [];
+      for (const method of EVENTS) all.push(...(await side.events(method)));
+      results.push(all.length);
+    }
+    assert.deepEqual(results, [0, 0]);
   });
 
   test('unknown ids fail as in Chrome', async () => {
@@ -443,6 +681,7 @@ describe('Animation, which animations are told apart', () => {
       assert.ok(chrome, `Chrome announces ${name}`);
       assert.ok(ours, `we announce ${name}`);
       assert.deepEqual(diffSubset(ours, chrome), [], name);
+      noneMissing(ours, chrome, name);
       assert.equal('cssId' in ours, 'cssId' in chrome, name);
       assert.equal('keyframesRule' in (ours.source ?? {}), 'keyframesRule' in (chrome.source ?? {}), name);
       assert.equal('backendNodeId' in (ours.source ?? {}), 'backendNodeId' in (chrome.source ?? {}), name);
@@ -492,9 +731,11 @@ describe('Animation, which animations are told apart', () => {
       for (const cls of ['pl', 'ps'])
         document.body.appendChild(Object.assign(document.createElement('p'), { className: cls, textContent: 'x' }));
     });
-    await sleep(300);
-    assert.equal((await t.chrome.events('Animation.animationStarted')).length, 0);
-    assert.equal((await t.ours.events('Animation.animationStarted')).length, 0);
+    await fence(t, t.chrome, t.ours);
+    const others = async (side: Side) =>
+      (await side.events('Animation.animationStarted')).filter(e => !e.animation.name.startsWith('fence'));
+    assert.deepEqual(await others(t.chrome), []);
+    assert.deepEqual(await others(t.ours), []);
   });
 });
 
@@ -660,7 +901,10 @@ describe('Animation, beyond getAnimations()', () => {
       await side.send('Animation.seekAnimations', { animations: ['1'], currentTimes: [1e6] });
       const ended = await state('ended');
       await side.send('Animation.seekAnimations', { animations: ['2'], currentTimes: [1e6] });
-      const long = await state('long');
+      // Seeked while it still runs, Chrome at times reads it a frame past its end (1167 for 1150,
+      // about 1 run in 20 under load): a frame's slack.
+      const [playState, time] = await state('long');
+      const long = [playState, Math.abs(Number(time) - 1150) <= 17 ? 1150 : time];
       await t.page.evaluate(() => (Reflect.get(window, '__long') as Animation).pause());
       // Paused for good: one still pending pause takes the time of the frame it is paused in.
       await sleep(100);
