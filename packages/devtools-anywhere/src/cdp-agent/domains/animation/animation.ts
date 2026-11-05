@@ -420,8 +420,12 @@ export function registerAnimation(ctx: Context) {
     return t;
   };
   /**
-   * Runs `change` and takes what it did as known, so it is not reported as the page's. */
+   * Runs `change` and takes what it did as known, so it is not reported as the page's. What the page
+   * changed before, in the same frame, is reported first. The start time of an animation `change`
+   * left pending is not known yet: Chrome reports it once it is, and so does the next frame here.
+   */
   const quietly = (t: Tracked, change: () => void) => {
+    check(t);
     change();
     t.start = startOf(t.animation) ?? t.start;
     t.seen = t.animation.playbackRate;
@@ -494,6 +498,7 @@ export function registerAnimation(ctx: Context) {
       // the time stops at the end of the effect; a negative one is kept.
       for (const [i, t] of list.entries()) {
         const { animation } = t;
+        check(t);
         if (animation.playState !== 'paused') animation.play();
         const time = currentTimes?.[i] ?? currentTime ?? 0;
         const end = animation.effect?.getComputedTiming().endTime;

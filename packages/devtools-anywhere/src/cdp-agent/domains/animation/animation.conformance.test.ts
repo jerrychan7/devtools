@@ -691,4 +691,25 @@ describe('Animation, beyond getAnimations()', () => {
     assert.deepEqual(chrome, { reported: -2, after: -2 });
     assert.deepEqual(ours, chrome);
   });
+
+  test("the page's change to a start time is reported though the panel changes the animation in that frame, as in Chrome", async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        Reflect.set(window, '__moved', div.animate({ opacity: [0, 1] }, 10000));
+      });
+      const id = (await until(async () => (await side.events('Animation.animationStarted'))[0], 'the start')).animation
+        .id;
+      await side.clear();
+      await t.page.evaluate(() => {
+        const animation = Reflect.get(window, '__moved') as Animation;
+        animation.startTime = Number(animation.startTime) - 1000;
+      });
+      await side.send('Animation.setTiming', { animationId: id, duration: 20000, delay: 0 });
+      await sleep(300);
+      return (await side.events('Animation.animationUpdated')).length;
+    });
+    assert.equal(chrome, 1);
+    assert.equal(ours, chrome);
+  });
 });
