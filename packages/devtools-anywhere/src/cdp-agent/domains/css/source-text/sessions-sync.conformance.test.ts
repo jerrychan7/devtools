@@ -29,6 +29,9 @@ interface Client {
   text(sheet: string): Promise<string>;
 }
 
+/** Every client made, for a test that disables them all. */
+const clients: Client[] = [];
+
 async function client(css = true): Promise<Client> {
   const name = `c${++seq}`;
   await t.page.evaluate(
@@ -90,6 +93,7 @@ async function client(css = true): Promise<Client> {
     },
     text: async sheet => (await call('CSS.getStyleSheetText', { styleSheetId: sheet }))['text'] as string,
   };
+  clients.push(self);
   return self;
 }
 
@@ -228,4 +232,82 @@ test('a session enabling CSS after an edit gets the edited text, and edits it in
     edits: [{ styleSheetId: mine.sheet, range: mine.style, text: ' color: navy; ' }],
   });
   assert.equal(await a.text(r.sheet), edited.replace('green', 'navy'));
+});
+
+test('undo after the page changed the sheet: the text is serialized from the CSSOM, in every session', async () => {
+  const cls = await sheetWith(c => `.${c} {\n  color: red;\n}\n`);
+  const [a, b] = [await client(), await client()];
+  const r = await a.rule(cls);
+  await a.call('DOM.markUndoableState');
+  await a.call('CSS.setStyleTexts', { edits: [{ styleSheetId: r.sheet, range: r.style, text: ' color: blue; ' }] });
+  await a.call('DOM.markUndoableState');
+  await t.page.evaluate(cls => {
+    const sheet = [...document.styleSheets].find(s => s.cssRules[0]?.cssText.includes(cls));
+    sheet?.insertRule(`.${cls}-p { top: 1px }`, 1);
+  }, cls);
+  await a.call('DOM.undo');
+  const text = await a.text(r.sheet);
+  assert.equal(text, await b.text((await b.rule(cls)).sheet));
+  // Not the text the edit started from: the page's rule is in it, the color undone.
+  assert.match(text, new RegExp(`\\.${cls}-p \\{ top: 1px; \\}`));
+  assert.match(text, /color: red/);
+});
+
+test('after every session disabled CSS and enabled it again, the edited text stays, as in Chrome', async () => {
+  const css = (c: string) => `@media (min-width: 1px) {\n  .${c}-m { top: 1px }\n}\n.${c} {\n  color: red;\n}\n`;
+  const edited = (c: string) => css(c).replace('{\n  color: red;\n}', '{ color: green; }');
+  // Chrome, one session.
+  const theirs = await sheetWith(css);
+  await t.chrome.send('DOM.enable');
+  await t.chrome.send('CSS.enable');
+  const { root } = await t.chrome.send('DOM.getDocument', {});
+  const { nodeId } = await t.chrome.send('DOM.querySelector', { nodeId: root.nodeId, selector: `#${theirs}` });
+  const found = await t.chrome.send('CSS.getMatchedStylesForNode', { nodeId });
+  const rule = found.matchedCSSRules?.map(m => m.rule).find(r => r.selectorList.text === `.${theirs}`);
+  assert.ok(rule?.styleSheetId && rule.style.range);
+  await t.chrome.send('CSS.setStyleTexts', {
+    edits: [{ styleSheetId: rule.styleSheetId, range: rule.style.range, text: ' color: green; ' }],
+  });
+  await t.chrome.send('CSS.disable');
+  await t.chrome.send('CSS.enable');
+  const chrome = (await t.chrome.send('CSS.getStyleSheetText', { styleSheetId: rule.styleSheetId })).text;
+  await t.chrome.send('CSS.disable');
+  assert.equal(chrome, edited(theirs));
+  // Ours, every session disabled meanwhile.
+  const cls = await sheetWith(css);
+  const [a, b] = [await client(), await client()];
+  const r = await a.rule(cls);
+  await a.call('CSS.setStyleTexts', { edits: [{ styleSheetId: r.sheet, range: r.style, text: ' color: green; ' }] });
+  for (const c of clients) await c.call('CSS.disable');
+  await a.call('CSS.enable');
+  await b.call('CSS.enable');
+  const mine = await b.rule(cls);
+  assert.equal(await b.text(mine.sheet), edited(cls));
+  await b.call('CSS.setStyleTexts', {
+    edits: [{ styleSheetId: mine.sheet, range: mine.style, text: ' color: navy; ' }],
+  });
+  assert.equal(await a.text((await a.rule(cls)).sheet), edited(cls).replace('green', 'navy'));
+});
+
+// A regression guard, not a test telling the old code apart: enabling CSS checks the texts against
+// their sheets again, which already catches the page's change; undo must not put back a text from
+// before it either.
+test('undo after a time no session watched, the page changing a value meanwhile: no old text put back', async () => {
+  const cls = await sheetWith(c => `.${c} {\n  color: red;\n}\n.${c}-b { top: 1px }\n`);
+  const a = await client();
+  const r = await a.rule(cls);
+  await a.call('DOM.markUndoableState');
+  await a.call('CSS.setStyleTexts', { edits: [{ styleSheetId: r.sheet, range: r.style, text: ' color: blue; ' }] });
+  await a.call('DOM.markUndoableState');
+  for (const c of clients) await c.call('CSS.disable');
+  await t.page.evaluate(cls => {
+    const sheet = [...document.styleSheets].find(s => s.cssRules[0]?.cssText.includes(cls));
+    const rule = sheet?.cssRules[1];
+    if (rule instanceof CSSStyleRule) rule.style.top = '5px';
+  }, cls);
+  await a.call('CSS.enable');
+  await a.call('DOM.undo');
+  const text = await a.text((await a.rule(cls)).sheet);
+  assert.match(text, /top: 5px/);
+  assert.match(text, /color: red/);
 });

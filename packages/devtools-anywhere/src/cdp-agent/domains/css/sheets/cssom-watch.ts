@@ -19,8 +19,21 @@ const listeners = new Set<Listener>();
 const natives = new Map<object, Map<string, { descriptor: PropertyDescriptor; hook: unknown }>>();
 let own = 0;
 
+/** Records a change of the page in the texts the sessions share, before they are told. */
+let record: (sheet: CSSStyleSheet, text?: string) => void = () => {};
+
+/** Sets what records each change the page makes, once for every session. */
+export function recordPageChanges(fn: (sheet: CSSStyleSheet, text?: string) => void): void {
+  record = fn;
+}
+
 function notify(sheet: CSSStyleSheet | null | undefined, text?: string) {
-  if (!sheet || own) return;
+  if (!sheet || own || !listeners.size) return;
+  try {
+    record(sheet, text);
+  } catch {
+    // Ours, not the page's: its call goes on.
+  }
   for (const listener of listeners)
     try {
       listener(sheet, text);
@@ -149,7 +162,8 @@ export function watchRealms(docs: Document[]): void {
 
 /**
  * Tells every session of an edit session `by` made to a sheet, its text now `text` (undefined:
- * not known), recorded already in the shared store. Unlike Chrome, the others send styleSheetChanged.
+ * not known), recorded already in the texts they share. Unlike Chrome, the others send
+ * styleSheetChanged.
  */
 export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefined): void {
   for (const listener of listeners)

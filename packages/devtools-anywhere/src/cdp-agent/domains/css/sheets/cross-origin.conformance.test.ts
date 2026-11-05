@@ -160,3 +160,80 @@ test('a second session sees the rules and text of the copy too, and cannot edit 
   assert.equal((await eventually(first)).text, mine.text);
   assert.equal((await eventually(second)).text, mine.text);
 });
+
+/**
+ * The agent's fetches of the cross-origin file with `query` (the page's own load of it goes on),
+ * each answered by `answer`.
+ */
+async function intercept(query: string, answer: (n: number) => Promise<'ok' | 'fail'>): Promise<() => number> {
+  let count = 0;
+  answers.set(query, () => answer(++count));
+  if (!intercepting) {
+    intercepting = true;
+    await t.page.setRequestInterception(true);
+    t.page.on('request', req => {
+      const q = req.url().split('cross.css?')[1];
+      const answered = q !== undefined && req.resourceType() !== 'stylesheet' ? answers.get(q) : undefined;
+      if (!answered) return void req.continue();
+      void answered().then(a => (a === 'ok' ? req.continue() : req.respond({ status: 500, body: '' })));
+    });
+  }
+  return () => count;
+}
+const answers = new Map<string, () => Promise<'ok' | 'fail'>>();
+let intercepting = false;
+
+/** Adds a <link> to the cross-origin file with `query`, once loaded. */
+const link = (query: string) =>
+  t.page.evaluate(
+    href =>
+      new Promise<void>(resolve => {
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = href;
+        l.onload = () => resolve();
+        document.head.appendChild(l);
+      }),
+    `${env?.baseUrl.replace('localhost', '127.0.0.1')}/packages/devtools-anywhere/test-support/assets/cross.css?${query}`
+  );
+
+/** Every session of ours in the page disables CSS, then the first one enables it again. */
+async function unwatched() {
+  await first('CSS.disable');
+  await t.page.evaluate(async () => {
+    const s = Reflect.get(window, '__crossSecond') as
+      | ReturnType<typeof window.DevtoolsAnywhere.createCdpSession>
+      | undefined;
+    await s?.call('CSS.disable', {});
+  });
+  await first('CSS.enable');
+}
+
+test('a session that disabled CSS before its copy came is not told of it', async () => {
+  let release = () => {};
+  const held = new Promise<void>(r => (release = r));
+  const fetches = await intercept('held', async () => (await held, 'ok'));
+  await t.ours.clear();
+  await link('held');
+  for (let i = 0; i < 30 && fetches() < 1; i++) await new Promise(r => setTimeout(r, 100));
+  assert.equal(fetches(), 1, 'the copy is being fetched');
+  await first('CSS.disable');
+  release();
+  await new Promise(r => setTimeout(r, 300));
+  assert.deepEqual(await t.ours.events('CSS.styleSheetChanged'), []);
+  await first('CSS.enable');
+});
+
+test('a copy that could not be fetched is fetched again after every session disabled CSS', async () => {
+  const fetches = await intercept('fails-once', async n => (n === 1 ? 'fail' : 'ok'));
+  await link('fails-once');
+  for (let i = 0; i < 30 && fetches() < 1; i++) await new Promise(r => setTimeout(r, 100));
+  assert.equal(fetches(), 1);
+  // Not tried again while some session watches.
+  await first('CSS.getStyleSheetText', { styleSheetId: 'none' }).catch(() => {});
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(fetches(), 1);
+  await unwatched();
+  for (let i = 0; i < 30 && fetches() < 2; i++) await new Promise(r => setTimeout(r, 100));
+  assert.equal(fetches(), 2);
+});

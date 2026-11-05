@@ -1,6 +1,6 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer';
-import { ownEdit } from './cssom-watch';
+import { ownEdit, recordPageChanges } from './cssom-watch';
 import { type CssDecl, type CssRule, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
@@ -33,6 +33,8 @@ interface Recorded {
   unchecked: boolean;
   /** Paired lazily; null when pairing failed. */
   source?: SheetSource | null;
+  /** The `unseen` count when recorded: changes the page made since may have gone unseen. */
+  seen: number;
 }
 
 /** The rules as serialized, but @import (which replaceSync() leaves out). */
@@ -46,15 +48,39 @@ function snapshot(rules: CSSRule[]): string {
 /**
  * One store for the page, shared by every session (`sheetTexts`): all serve the same text, and a
  * session enabling CSS late gets the current one. Changes the page makes through the CSSOM are
- * seen by cssom-watch.ts while some session watches; the texts recorded are dropped when one
- * starts watching with none watching before. A text not from the CSSOM's
- * own replace() (that of a <style>, a file) is checked once against the sheet: parsed alone, it
- * must give the rules the sheet has, or the page changed them before.
+ * seen by cssom-watch.ts while some session watches, and recorded here once. A text not from the
+ * CSSOM's own replace() (that of a <style>, a file), and every text kept while no session
+ * watched, is checked once against the sheet: parsed alone, it must give the rules the sheet
+ * has, or the page changed them before. Each change of a sheet's text counts a generation.
  */
 export class SheetTexts {
   private recorded = new WeakMap<CSSStyleSheet, Recorded>();
   /** Sheets the page changed through the CSSOM since their text was recorded. */
   private stale = new WeakSet<CSSStyleSheet>();
+  /** The tick of each sheet's last change; ticks count every change of any sheet. */
+  private generations = new WeakMap<CSSStyleSheet, number>();
+  private tick = 0;
+  /** The tick of the last time watching started with none watching before. */
+  private unseenAt = 0;
+  private unseenTimes = 0;
+
+  /** How many times watching started with none watching before. */
+  get unseenCount(): number {
+    return this.unseenTimes;
+  }
+
+  private changed(sheet: CSSStyleSheet): void {
+    this.generations.set(sheet, ++this.tick);
+  }
+
+  /**
+   * The generation of the sheet's text: it changes with each change of the text (recorded, or
+   * made unknown), and for every sheet when watching starts after none watched, as the page may
+   * have changed it meanwhile.
+   */
+  generation(sheet: CSSStyleSheet): number {
+    return Math.max(this.generations.get(sheet) ?? 0, this.unseenAt);
+  }
 
   /**
    * Takes `text` for the sheet's, its CSSOM rules being what it gives now, or with `check`, those
@@ -62,7 +88,8 @@ export class SheetTexts {
    */
   set(sheet: CSSStyleSheet, text: string, check = false): void {
     this.stale.delete(sheet);
-    this.recorded.set(sheet, { text, unchecked: check });
+    this.recorded.set(sheet, { text, unchecked: check, seen: this.unseenTimes });
+    this.changed(sheet);
   }
 
   /**
@@ -73,8 +100,10 @@ export class SheetTexts {
     const rec = this.recorded.get(sheet);
     if (!rec || this.stale.has(sheet)) return;
     const next = rec.source && respliced(rec.source, start, end, insert);
-    if (next) this.recorded.set(sheet, { text: next.text, unchecked: false, source: next });
-    else this.set(sheet, rec.text.slice(0, start) + insert + rec.text.slice(end));
+    if (next) {
+      this.recorded.set(sheet, { text: next.text, unchecked: false, source: next, seen: this.unseenTimes });
+      this.changed(sheet);
+    } else this.set(sheet, rec.text.slice(0, start) + insert + rec.text.slice(end));
   }
 
   has(sheet: CSSStyleSheet): boolean {
@@ -84,17 +113,16 @@ export class SheetTexts {
   /** The page changed the sheet through the CSSOM: its text is no longer known. */
   invalidate(sheet: CSSStyleSheet): void {
     this.stale.add(sheet);
+    this.changed(sheet);
   }
 
-  /** Forgets every text: changes made meanwhile were not seen. */
-  reset(): void {
-    this.recorded = new WeakMap();
-    this.stale = new WeakSet();
-  }
-
-  /** The text recorded for the sheet, paired or not; null when unknown. */
-  current(sheet: CSSStyleSheet): string | null {
-    return this.stale.has(sheet) ? null : (this.recorded.get(sheet)?.text ?? null);
+  /**
+   * Watching starts again after none watched: changes the page made meanwhile were not seen, so
+   * each text is checked against its sheet again before it is used.
+   */
+  unseen(): void {
+    this.unseenTimes++;
+    this.unseenAt = ++this.tick;
   }
 
   /** The text of the sheet with its rules (as `rulesOf` gives them) paired, or null. */
@@ -107,6 +135,11 @@ export class SheetTexts {
       rec = this.recorded.get(sheet);
     }
     if (!rec) return null;
+    if (rec.seen !== this.unseenTimes) {
+      rec.seen = this.unseenTimes;
+      rec.unchecked = true;
+      delete rec.source;
+    }
     if (rec.source !== undefined) return rec.source;
     const rules = rulesOf(sheet);
     if (rec.unchecked) {
@@ -115,7 +148,7 @@ export class SheetTexts {
       const text = rec.text;
       ownEdit(() => alone.replaceSync(text));
       if (snapshot(Array.from(alone.cssRules)) !== snapshot(rules)) {
-        this.stale.add(sheet);
+        this.invalidate(sheet);
         return null;
       }
     }
@@ -126,6 +159,8 @@ export class SheetTexts {
 
 /** The texts of the page's sheets, for every session. */
 export const sheetTexts = new SheetTexts();
+// Each change the page makes is recorded once, whatever the number of sessions.
+recordPageChanges((sheet, text) => (text === undefined ? sheetTexts.invalidate(sheet) : sheetTexts.set(sheet, text)));
 
 /** The at-rule name each kind of CSSOM rule is written with; a kind not listed pairs with none. */
 const AT_NAMES: Record<string, string> = {

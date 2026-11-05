@@ -331,18 +331,20 @@ export function registerCss(ctx: Context) {
     const offsets = source && span && offsetsOf(source, span);
     const record = (text: string | null) =>
       text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
-    let first = true;
+    // The generation of the text this edit left (-1: not made yet): undo and redo put back theirs
+    // only if no one (a session, the page) changed it since; the text is unknown otherwise, and
+    // stays so for later ones (-2).
+    let left = -1;
+    const restore = (text: string | null) => {
+      const known = sheets.texts.generation(sheet) === left ? text : null;
+      record(known);
+      left = known === null ? -2 : sheets.texts.generation(sheet);
+      editedBy(sheets, sheet, known ?? undefined);
+    };
     perform(
       () => {
         ownEdit(apply);
-        if (!first) {
-          // Redone: the text is `after` only if no one changed it since the undo.
-          const text = sheets.texts.current(sheet) === before ? after : null;
-          record(text);
-          editedBy(sheets, sheet, text ?? undefined);
-          return;
-        }
-        first = false;
+        if (left !== -1) return restore(after);
         if (offsets && before !== null && after !== null)
           sheets.texts.splice(
             sheet,
@@ -351,14 +353,12 @@ export function registerCss(ctx: Context) {
             after.slice(offsets[0], after.length - (before.length - offsets[1]))
           );
         else record(after);
+        left = sheets.texts.generation(sheet);
         editedBy(sheets, sheet, after ?? undefined);
       },
       () => {
         ownEdit(revert);
-        // Undone: the text is `before` only if no one (a session, the page) changed it since.
-        const text = sheets.texts.current(sheet) === after ? before : null;
-        record(text);
-        editedBy(sheets, sheet, text ?? undefined);
+        restore(before);
       }
     );
   }
@@ -472,9 +472,9 @@ export function registerCss(ctx: Context) {
     enable() {
       if (enabled) return;
       enabled = true;
-      // Changes the page made while no session watched went unseen; those seen since one did are
-      // in the texts the sessions share.
-      if (!watching()) sheets.texts.reset();
+      // Changes the page made while no session watched went unseen: the texts the sessions share
+      // are checked against their sheets again.
+      if (!watching()) sheets.texts.unseen();
       known = new Set();
       // Before this domain's observer and frame listener, so the tracker drops a stale list first.
       if (!stopShadowRoots) {
@@ -514,15 +514,11 @@ export function registerCss(ctx: Context) {
       // Like Chrome, a change the page makes through the CSSOM keeps the sheet's id: its text is
       // the one given replace() or replaceSync(), or else serialized from the CSSOM.
       stopCssom = watchCssom(
-        (sheet, text, by) => {
+        (sheet, _text, by) => {
+          // The text is recorded already, once for every session (sheet-text.ts). Another
+          // session's edit: unlike Chrome (where the other sessions keep the text they had and
+          // hear nothing), this one is sent styleSheetChanged to fetch it again.
           if (by === sheets) return;
-          // Another session's edit, its text recorded already (the sessions share them): unlike
-          // Chrome (where the other sessions keep the text they had and hear nothing), this one
-          // is sent styleSheetChanged to fetch it again.
-          if (!by) {
-            if (text === undefined) sheets.texts.invalidate(sheet);
-            else sheets.texts.set(sheet, text);
-          }
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
           // Adopted in the same task, not reported yet: like Chrome, added then changed. Looking
           // through every tree's adopted sheets costs about 1.3 µs a write: a sheet with an owner
@@ -839,10 +835,16 @@ export function registerCss(ctx: Context) {
         ownEdit(() => target.deleteRule(index));
         throw new CdpError('Failed to parse rule text');
       }
+      // The generation of the text left (-1: not made yet): undo and redo put back theirs only if
+      // no one (a session, the page) changed it since; the text is unknown otherwise, and stays so
+      // for later ones (-2).
+      let left = -1;
       const record = (text: string | null) => {
-        if (text === null) sheets.texts.invalidate(sheet);
-        else sheets.texts.set(sheet, text);
-        editedBy(sheets, sheet, text ?? undefined);
+        const known = left === -1 || sheets.texts.generation(sheet) === left ? text : null;
+        if (known === null) sheets.texts.invalidate(sheet);
+        else sheets.texts.set(sheet, known);
+        left = known === null ? -2 : sheets.texts.generation(sheet);
+        editedBy(sheets, sheet, known ?? undefined);
       };
       record(after);
       const text = rule.cssText;
@@ -852,14 +854,13 @@ export function registerCss(ctx: Context) {
         undo: () => {
           const at = Array.from(target.cssRules).indexOf(added);
           if (at >= 0) ownEdit(() => target.deleteRule(at));
-          // Unknown if someone (a session, the page) changed the text since.
-          record(sheets.texts.current(sheet) === after ? before : null);
+          record(before);
           stylesChanged();
         },
         redo: () => {
           const i = ownEdit(() => target.insertRule(text, Math.min(index, target.cssRules.length)));
           added = target.cssRules[i] ?? added;
-          record(sheets.texts.current(sheet) === before ? after : null);
+          record(after);
           stylesChanged();
         },
       });

@@ -48,10 +48,16 @@ export function setSheetIdPrefix(prefix: string): void {
 const ruleIds = new WeakMap<StyleRule, number>();
 /**
  * Copies of cross-origin sheets, whose rules page scripts cannot read: the CSS text is fetched
- * again (which needs CORS headers) and parsed. null: the fetch failed. Shared by every session,
- * like the texts, which are paired with the copies' rules.
+ * again (which needs CORS headers) and parsed. Shared by every session, like the texts, which are
+ * paired with the copies' rules.
  */
-const copies = new WeakMap<CSSStyleSheet, CSSStyleSheet | null>();
+const copies = new WeakMap<CSSStyleSheet, CSSStyleSheet>();
+/**
+ * The sheets whose file (for a copy, or its text) could not be fetched, with the `unseenCount`
+ * when the fetch started: fetched again only after a time when no session watched (a fetch
+ * failing for good is not tried at each look-up).
+ */
+const failed = new WeakMap<CSSStyleSheet, number>();
 /** Fetches in progress, whichever session started them. */
 const loading = new Map<CSSStyleSheet, Promise<void>>();
 const nextRuleId = new WeakMap<CSSStyleSheet, number>();
@@ -226,7 +232,8 @@ export class SheetRegistry {
   loadCopies(onLoaded: (sheet: CSSStyleSheet) => void): Promise<void> {
     for (const sheet of this.all()) {
       const href = sheet.href;
-      if (!href || this.texts.has(sheet) || copies.has(sheet)) continue;
+      const unseen = this.texts.unseenCount;
+      if (!href || this.texts.has(sheet) || copies.get(sheet) || failed.get(sheet) === unseen) continue;
       // Another session's fetch: this one is told of the copy too.
       const pending = loading.get(sheet);
       if (pending) {
@@ -251,8 +258,8 @@ export class SheetRegistry {
           // A readable sheet's rules were there already: only a copy brings new ones.
           if (!readable) onLoaded(sheet);
         })
-        // Not tried again: a readable sheet keeps its serialized text.
-        .catch(() => void copies.set(sheet, null))
+        // Tried again only after a time unwatched: a readable sheet keeps its serialized text.
+        .catch(() => void failed.set(sheet, unseen))
         .finally(() => loading.delete(sheet));
       loading.set(sheet, load);
     }
