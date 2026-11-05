@@ -36,7 +36,11 @@ export async function launch(args: string[] = [], options: { defaultViewport?: n
     baseUrl: server.url,
     browser,
     async close() {
+      const child = browser.process();
       await browser.close();
+      // Chrome's crashpad handler and the GoogleUpdater it wakes inherit its stdout and stderr and
+      // outlive it by minutes; until they exit, the ends Puppeteer reads keep this process alive.
+      for (const stream of child?.stdio ?? []) stream?.destroy();
       server.close();
     },
   };
