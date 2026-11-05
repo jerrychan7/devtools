@@ -63,35 +63,19 @@ export function registerCss(ctx: Context) {
   const documents = () => Array.from(ctx.frames, f => f.document);
 
   /**
-   * Shadow roots in the frames' documents (closed ones too, when the probe recorded them), in tree order.
-   * While the CSS domain is enabled they are kept until the observer sees an element come or go,
-   * or a shadow root is attached.
+   * Shadow roots in the frames' documents (closed ones too, when the probe recorded them), in tree
+   * order, from the shared tracker, which keeps the list while the CSS domain is enabled.
    */
-  let shadowRootCache: ShadowRoot[] | null = null;
-
-  // An element already in the document can get a shadow root (e.g. a custom element upgraded
-  // later): attaching one makes the cached list stale.
   let stopShadowRoots: (() => void) | null = null;
   function shadowRoots(): ShadowRoot[] {
-    if (shadowRootCache) return shadowRootCache;
-    const roots: ShadowRoot[] = [];
-    const visit = (root: Document | ShadowRoot) => {
-      const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!isElement(node) || isOwn(node)) continue;
-        const shadowRoot = nodes.shadowRootOf(node);
-        if (!shadowRoot) continue;
-        roots.push(shadowRoot);
-        // The document observer does not see into shadow trees.
-        if (observer && !observed.has(shadowRoot)) {
-          observed.add(shadowRoot);
-          observer.observe(shadowRoot, OBSERVED);
+    const roots = ctx.shadowRoots.roots();
+    // The document observer does not see into shadow trees.
+    if (observer)
+      for (const root of roots)
+        if (!observed.has(root)) {
+          observed.add(root);
+          observer.observe(root, OBSERVED);
         }
-        visit(shadowRoot);
-      }
-    };
-    documents().forEach(visit);
-    if (observer) shadowRootCache = roots;
     return roots;
   }
 
@@ -214,7 +198,6 @@ export function registerCss(ctx: Context) {
    * document, and removed with the document it leaves.
    */
   function framesChanged() {
-    shadowRootCache = null;
     watchDocuments();
     void syncSheets();
   }
@@ -326,6 +309,8 @@ export function registerCss(ctx: Context) {
       if (enabled) return;
       enabled = true;
       known = new Set();
+      // Before this domain's observer and frame listener, so the tracker drops a stale list first.
+      stopShadowRoots ??= ctx.shadowRoots.acquire();
       const ownsSheet = (n: Node | null) => (isHtml(n, 'style') || isHtml(n, 'link')) && !isOwn(n);
       observer = new MutationObserver(records => {
         // Adding or removing a <style> or <link>, changing the text of a <style> or the href
@@ -339,15 +324,10 @@ export function registerCss(ctx: Context) {
               n => ownsSheet(n) || (isElement(n) && !isOwn(n) && !!nodes.shadowRootOf(n))
             )
         );
-        // Shadow hosts may come or go with any element: look for shadow roots again when needed.
-        if (records.some(r => [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(n => isElement(n))))
-          shadowRootCache = null;
         quietly(() => forced.removed(records.flatMap(r => Array.from(r.removedNodes))));
         if (touchesSheets) syncSheets();
       });
       observed = new WeakSet();
-      shadowRootCache = null;
-      stopShadowRoots ??= ctx.probe.onShadowRoot(() => (shadowRootCache = null));
       watched = new Set();
       // Adopted style sheets change without a DOM mutation.
       stopAdopted = watchAdopted(
@@ -364,7 +344,6 @@ export function registerCss(ctx: Context) {
       quietly(() => forced.clear());
       observer?.disconnect();
       observer = null;
-      shadowRootCache = null;
       stopShadowRoots?.();
       stopShadowRoots = null;
       for (const doc of watched) doc.removeEventListener('load', onLoad, true);

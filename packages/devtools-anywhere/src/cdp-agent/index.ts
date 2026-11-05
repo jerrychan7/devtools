@@ -1,4 +1,5 @@
 import type { Context } from './core/context';
+import { ShadowRootTracker } from './core/shadow-roots';
 import { type Frame, frames } from './core/frames';
 import { mergedFrames, NS_STRIDE, nsPrefix } from './core/merged-frames';
 import { NodeRegistry, setNodeIdBase } from './core/nodes';
@@ -148,12 +149,14 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   });
   keep(probe.logs, MAX_CONSOLE_MESSAGES);
   hookFrames(probe);
+  const view = viewProbe(probe);
   const ctx: Context = {
     session: new CdpSession(),
     objects: new ObjectRegistry(),
     nodes: new NodeRegistry(frames.shadowRootOf, frames),
-    probe: viewProbe(probe),
+    probe: view,
     frames,
+    shadowRoots: new ShadowRootTracker(frames, frames.shadowRootOf, view.onShadowRoot),
   };
   // Commands for the sandboxed iframes merged into this page's agent go to theirs.
   mergedFrames.attach(ctx.session);

@@ -3,6 +3,7 @@ import type { NodeRegistry } from './nodes';
 import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
 import type { CdpSession } from './session';
+import type { ShadowRootTracker } from './shadow-roots';
 
 /** State shared by all domains. */
 export interface Context {
@@ -11,6 +12,8 @@ export interface Context {
   nodes: NodeRegistry;
   probe: ProbeView;
   frames: FrameRegistry;
+  /** The shadow roots in the frames, shared by the domains that look into shadow trees. */
+  shadowRoots: ShadowRootTracker;
   /** Re-checks which pseudo-elements exist, e.g. after a style edit. Set by the DOM domain. */
   refreshPseudoElements?: (roots?: Node[]) => void;
 }

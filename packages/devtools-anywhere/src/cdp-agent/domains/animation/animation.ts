@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import { isOwn, type Inspectable, type PseudoType } from '../../core/nodes';
-import { documentOf, isElement, isNode, realmOf, styleOf } from '../../core/realm';
+import { type Inspectable, type PseudoType } from '../../core/nodes';
+import { isNode, realmOf, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 const NOT_FOUND = 'Could not find animation with given id';
@@ -254,31 +254,14 @@ export function registerAnimation(ctx: Context) {
   const documents = () => Array.from(ctx.frames, f => f.document);
 
   /**
-   * The shadow roots in the documents: a document's `getAnimations()` leaves out the animations in
-   * its shadow trees, which Chrome's panel shows. Walked again only after a shadow root is attached.
+   * A document's `getAnimations()` leaves out the animations in its shadow trees, which Chrome's
+   * panel shows; the shared tracker lists those while the domain is enabled.
    */
-  let shadowRootCache: ShadowRoot[] | null = null;
   let stopShadowRoots: (() => void) | null = null;
-  const shadowRoots = (): ShadowRoot[] => {
-    if (shadowRootCache) return shadowRootCache;
-    const roots: ShadowRoot[] = [];
-    const visit = (root: Document | ShadowRoot) => {
-      const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!isElement(node) || isOwn(node)) continue;
-        const shadowRoot = ctx.nodes.shadowRootOf(node);
-        if (!shadowRoot) continue;
-        roots.push(shadowRoot);
-        visit(shadowRoot);
-      }
-    };
-    documents().forEach(visit);
-    return (shadowRootCache = roots);
-  };
 
   /** Announces new animations, and changes the page made to the ones announced. */
   const scan = () => {
-    for (const tree of [...documents(), ...shadowRoots()]) {
+    for (const tree of [...documents(), ...ctx.shadowRoots.roots()]) {
       let animations: Animation[];
       try {
         animations = tree.getAnimations();
@@ -353,7 +336,6 @@ export function registerAnimation(ctx: Context) {
     frame = 0;
     stopShadowRoots?.();
     stopShadowRoots = null;
-    shadowRootCache = null;
     if (rate !== 1) setRate(1);
     byId.clear();
     tracked = new WeakMap();
@@ -363,7 +345,7 @@ export function registerAnimation(ctx: Context) {
 
   session.register('Animation', {
     enable: () => {
-      stopShadowRoots ??= ctx.probe.onShadowRoot(() => (shadowRootCache = null));
+      stopShadowRoots ??= ctx.shadowRoots.acquire();
       if (!frame) loop();
     },
     disable: stop,
