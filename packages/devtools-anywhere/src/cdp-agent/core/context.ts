@@ -1,9 +1,20 @@
 import type { FrameRegistry } from './frames/frames';
-import type { NodeRegistry } from './nodes/nodes';
+import type { NodeRegistry, PseudoType } from './nodes/nodes';
 import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
 import type { CdpSession } from './session';
 import type { ShadowRootTracker } from './nodes/shadow-roots';
+
+/** A style matching an element, as the Animation domain asks for it (see {@link Context.matchingStyles}). */
+export interface MatchingStyle {
+  /**
+   * Its style rule, as its style sheet's id and its selector; null for the inline style and
+   * nested declarations, which are not style rules.
+   */
+  rule: string | null;
+  /** Whether it declares the property: null when not, else as `!important` or not. */
+  declares(property: string): 'important' | 'normal' | null;
+}
 
 /** State shared by all domains. */
 export interface Context {
@@ -16,6 +27,12 @@ export interface Context {
   shadowRoots: ShadowRootTracker;
   /** Re-checks which pseudo-elements exist, e.g. after a style edit. Set by the DOM domain. */
   refreshPseudoElements?: (roots?: Node[]) => void;
+  /**
+   * The styles matching an element or its pseudo-element, highest priority first: its inline
+   * style (not a pseudo-element's), then its rules, those of user agent and constructed sheets left
+   * out, like Chrome's `InspectorCSSAgent::MatchingStyles`. Set by the CSS domain, enabled or not.
+   */
+  matchingStyles?: (el: Element, pseudo: PseudoType | null) => MatchingStyle[];
 }
 
 /** The top frame's id; its execution context is EXECUTION_CONTEXT_ID (core/frames/frames.ts). @internal */

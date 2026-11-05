@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { documentOf, isCssom, isElement, isHtml, isHtmlElement, isNode, isSvgElement, realmOf } from '../../core/realm';
-import { type Context } from '../../core/context';
+import { type Context, type MatchingStyle } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes/nodes';
 import { parentOf } from '../../core/style/container-query';
 import { CdpError } from '../../core/session';
@@ -116,6 +116,26 @@ export function registerCss(ctx: Context) {
       })
     : null;
   const cascade = new Cascade(sheets, forced, nodes, rules, userAgent);
+  ctx.matchingStyles = (el, pseudo) => {
+    type Declared = { name: string; value: string; important?: boolean; disabled?: boolean };
+    const declares = (properties: Declared[]) => (name: string) => {
+      const found = properties.filter(p => p.name === name && !p.disabled && p.value !== '');
+      return found.length ? (found.some(p => p.important) ? 'important' : 'normal') : null;
+    };
+    const styles: MatchingStyle[] = [];
+    if (!pseudo && el.hasAttribute('style')) {
+      const inline = cascade.inlineStyle(el);
+      if (inline) styles.push({ rule: null, declares: declares(inline.cssProperties) });
+    }
+    for (const { rule } of cascade.matchedRules(el, pseudo).reverse()) {
+      if (rule.origin === 'user-agent' || !rule.styleSheetId) continue;
+      if (!sheets.get(rule.styleSheetId).ownerNode) continue;
+      // Nested declarations, which have no selectors of their own, are not style rules.
+      const own = rule.selectorList.selectors.length ? `${rule.styleSheetId}\n${rule.selectorList.text}` : null;
+      styles.push({ rule: own, declares: declares(rule.style.cssProperties) });
+    }
+    return styles;
+  };
   const updates = new ComputedStyleUpdates(
     nodes,
     () => [...documents(), ...shadowRoots()],
