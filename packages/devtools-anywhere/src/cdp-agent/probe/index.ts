@@ -26,11 +26,16 @@ export { keep } from './network';
 const LIMIT = 10_000;
 const MAX_TOOL_OUTCOMES = 50;
 
+/** The page's `console.error` as the probe found it, unhooked: for devtools-anywhere's own errors. */
+let ownError: (...args: unknown[]) => void = () => {};
+
 /** @internal */
 export function installProbe(): Probe {
   const w = window;
   const existing: Probe | undefined = Reflect.get(w, PROBE_KEY);
   if (existing) return existing;
+  // Before the console is hooked: our own errors go to the browser's console only.
+  ownError = console.error.bind(console);
 
   const logs: ProbeLog[] = [];
   const requests: ProbeRequest[] = [];
@@ -266,8 +271,16 @@ function hookAnimations(listeners: Set<(animation: Animation) => void>, w: Windo
   const proto = w.Element.prototype;
   const animate = proto.animate;
   if (!ctor || !animate) return;
+  // A listener's error is ours, not the page's: it must neither fail the page's call (nor stop the
+  // other listeners), nor pass for one the page's call threw, nor reach the page's error handlers
+  // or the Console panel. Written to the browser's own console, with the console unhooked.
   const tell = (animation: Animation) => {
-    for (const listener of listeners) listener(animation);
+    for (const listener of listeners)
+      try {
+        listener(animation);
+      } catch (error) {
+        ownError('devtools-anywhere: internal error in an animation listener', error);
+      }
     return animation;
   };
   // Proxies of the page's functions, not functions of our own: their name and length stay the

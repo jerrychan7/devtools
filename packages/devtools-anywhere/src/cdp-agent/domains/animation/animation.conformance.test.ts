@@ -1419,4 +1419,47 @@ describe('Animation, play state changes', () => {
     assert.ok(chrome.finished >= 6, `finished at ${chrome.finished}`);
     assert.deepEqual(ours, chrome);
   });
+  test("an error of the domain's own listener fails none of the page's calls (ours)", async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      await t.ours.send('Animation.enable');
+      const consoled: string[] = [];
+      t.page.on('console', m => consoled.push(m.text()));
+      const result = await t.page.evaluate(async () => {
+        const errors: unknown[] = [];
+        window.addEventListener('error', e => errors.push(e.error instanceof Error ? e.error.message : e.error));
+        const probe: unknown = Reflect.get(window, '__devtoolsAnywhereProbe__');
+        const onAnimation: unknown = probe && Reflect.get(probe, 'onAnimation');
+        if (typeof onAnimation !== 'function' || typeof probe !== 'object' || !probe) return 'no probe';
+        const logs = (): number => {
+          const list: unknown = Reflect.get(probe, 'logs');
+          return Array.isArray(list) ? list.length : -1;
+        };
+        const before = logs();
+        Reflect.apply(onAnimation, probe, [
+          () => {
+            throw new TypeError('listener');
+          },
+        ]);
+        const a = document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000);
+        a.play();
+        a.cancel();
+        new Animation();
+        await new Promise(r => setTimeout(r, 50));
+        return { errors, logged: logs() - before };
+      });
+      // Not the page's: no error event, nothing in the Console panel's log, only the browser's console.
+      assert.deepEqual(result, { errors: [], logged: 0 });
+      assert.equal(consoled.filter(text => text.startsWith('devtools-anywhere: internal error')).length, 4);
+      // The domain's own listener still ran: both were announced.
+      await sleep(200);
+      assert.equal((await t.ours.events('Animation.animationCreated')).length, 2);
+      // A seek plays the animation through the hook: the listener's error does not fail it.
+      await t.ours.send('Animation.seekAnimations', { animations: ['1'], currentTime: 100 });
+      assert.equal(await t.page.evaluate(() => document.getAnimations()[0]?.playState), 'running');
+    } finally {
+      await t.page.close();
+    }
+  });
 });
