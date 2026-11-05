@@ -401,6 +401,74 @@ describe('what a world keeps from the page', () => {
     }
     assert.deepEqual(result[0], result[1]);
   });
+
+  test('typeof does not let a later assignment through to the page', async () => {
+    const result = [];
+    // One side after the other, each with names of its own: both would write the same window.
+    for (const side of [t.ours, t.chrome]) {
+      const n = side === t.ours ? 'Ours' : 'Chrome';
+      const id = await world(side, 'conformance-typeof');
+      await t.page.evaluate(n => ((window as unknown as Record<string, unknown>)[`pageHas${n}`] = 1), n);
+      result.push([
+        await valueIn(side, `if (typeof thenAssign${n} === 'undefined') thenAssign${n} = 1; thenAssign${n}`, id),
+        await valueIn(side, `typeof laterAssign${n}`, id),
+        await valueIn(side, `laterAssign${n} = 5; laterAssign${n}`, id),
+        // The page's global is the world's to read here (not in Chrome), but not to write.
+        await valueIn(side, `pageHas${n} = 9; globalThis.pageHas${n}`, id),
+        await t.page.evaluate(n => {
+          const page = window as unknown as Record<string, unknown>;
+          return [typeof page[`thenAssign${n}`], typeof page[`laterAssign${n}`], page[`pageHas${n}`]];
+        }, n),
+      ]);
+    }
+    assert.deepEqual(result[0], result[1]);
+    assert.deepEqual(result[0]?.[4], ['undefined', 'undefined', 1]);
+  });
+
+  test("properties a world writes on a node in any way stay the world's, and a page listener's the page's", async () => {
+    await t.page.evaluate(() => {
+      const node = document.body.appendChild(document.createElement('div'));
+      node.id = 'written';
+      node.addEventListener('click', function (this: HTMLElement & Record<string, unknown>) {
+        this['__sameName'] = 'page';
+        this['__pageOnly'] = 'page';
+      });
+    });
+    const result = [];
+    for (const side of [t.ours, t.chrome]) {
+      const id = await world(side, 'conformance-written');
+      const { root } = await side.send('DOM.getDocument');
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#written' });
+      const { object } = await side.send('DOM.resolveNode', { nodeId, executionContextId: id });
+      const call = async (functionDeclaration: string) =>
+        (
+          await side.send('Runtime.callFunctionOn', {
+            objectId: object.objectId ?? '',
+            functionDeclaration,
+            returnByValue: true,
+          })
+        ).result.value;
+      await call(`function () {
+        Object.assign(this, { __assigned: 1 });
+        const k = '__computed';
+        this[k] = 2;
+        Object.defineProperty(this, '__defined', { value: 3, configurable: true });
+        this.__sameName = 'world';
+        this.click();
+      }`);
+      result.push([
+        await call('function () { return [this.__assigned, this.__computed, this.__defined, this.__sameName]; }'),
+        await t.page.evaluate(() => {
+          const node = document.getElementById('written') as HTMLElement & Record<string, unknown>;
+          const seen = Object.fromEntries(Object.entries(node));
+          for (const key of Object.keys(node)) delete node[key];
+          return seen;
+        }),
+      ]);
+    }
+    assert.deepEqual(result[0], result[1]);
+    assert.deepEqual(result[0]?.[1], { __sameName: 'page', __pageOnly: 'page' });
+  });
 });
 
 describe('sessions', () => {
