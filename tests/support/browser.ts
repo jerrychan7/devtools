@@ -1,4 +1,5 @@
 // Launches headless Chrome with the repository's static server, for the tests that drive pages.
+import { after, before } from 'node:test';
 import puppeteer, { type Browser, type Frame, type Page } from 'puppeteer-core';
 import { startServer } from '../../playground/server.ts';
 
@@ -44,6 +45,26 @@ export async function launch(args: string[] = [], options: { defaultViewport?: n
       server.close();
     },
   };
+}
+
+/**
+ * Registers `setUp` as a `before` hook and `tearDown` as an `after` hook of the current suite (the
+ * file, or the enclosing `describe`), with `tearDown` waiting for `setUp` to finish first.
+ *
+ * node:test (v24) runs `after` without waiting for an async `before` when --test-name-pattern
+ * matches none of the suite's tests. With the plain pair `before(async () => { env = await
+ * launch(); })` and `after(() => env?.close())`, `after` sees no `env` yet, and the Chrome (or
+ * server) `before` goes on to start is never closed: the process hangs until it times out. Here
+ * `after` awaits the promise `before` returned, ignoring its error (the hook already reports it),
+ * then tears down whatever was started.
+ */
+export function setUpAndTearDown(setUp: () => Promise<unknown>, tearDown: () => unknown): void {
+  let started: Promise<unknown> | undefined;
+  before(() => (started = setUp()));
+  after(async () => {
+    await started?.catch(() => {});
+    await tearDown();
+  });
 }
 
 /**

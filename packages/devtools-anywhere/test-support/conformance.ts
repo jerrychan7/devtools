@@ -4,13 +4,13 @@ import type { Page } from 'puppeteer-core';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launch, type Env } from '../../../tests/support/browser.ts';
+import { launch, setUpAndTearDown, type Env } from '../../../tests/support/browser.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 export const CDP_BUNDLE = path.join(root, 'packages/devtools-anywhere/dist/devtools-anywhere.iife.js');
 export const PROBE_BUNDLE = path.join(root, 'packages/devtools-anywhere/dist/probe.iife.js');
 
-export { launch, type Env };
+export { launch, setUpAndTearDown, type Env };
 
 /** Keys whose values legitimately differ between implementations. */
 export const VOLATILE = new Set([

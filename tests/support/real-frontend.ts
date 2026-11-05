@@ -3,7 +3,9 @@
 // tests/e2e/animations-frontend.test.ts.
 import { existsSync } from 'node:fs';
 import type { Frame, Page } from 'puppeteer-core';
-import { launch } from './browser.ts';
+import { launch, setUpAndTearDown } from './browser.ts';
+
+export { setUpAndTearDown };
 import type { Env } from './browser.ts';
 
 export const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
@@ -96,20 +98,26 @@ export function frontendHelpers(get: () => Frame) {
  */
 export async function openRealFrontend(errors: string[]): Promise<{ env: Env; page: Page; frontend: Frame }> {
   const env = await launch();
-  const page = await env.browser.newPage();
-  page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
-  // Tall enough for the Network panel to render its rows below the overview.
-  await page.setViewport({ width: 1000, height: 1600 });
-  await page.goto(env.baseUrl + '/tests/e2e/pages/real-frontend.html');
-  const frontend = await waitFor(() =>
-    page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html'))
-  );
-  // The frontend registers its locale data while it starts: until then showing a view throws "No
-  // locale data registered for 'en-US'". Waiting here lets any test run alone (--test-name-pattern).
-  const { showView } = frontendHelpers(() => frontend);
-  await waitFor(async () => {
-    await showView('elements');
-    return true;
-  });
-  return { env, page, frontend };
+  // The caller only gets `env` back on success: if the frontend never comes up, close it here.
+  try {
+    const page = await env.browser.newPage();
+    page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
+    // Tall enough for the Network panel to render its rows below the overview.
+    await page.setViewport({ width: 1000, height: 1600 });
+    await page.goto(env.baseUrl + '/tests/e2e/pages/real-frontend.html');
+    const frontend = await waitFor(() =>
+      page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html'))
+    );
+    // The frontend registers its locale data while it starts: until then showing a view throws "No
+    // locale data registered for 'en-US'". Waiting here lets any test run alone (--test-name-pattern).
+    const { showView } = frontendHelpers(() => frontend);
+    await waitFor(async () => {
+      await showView('elements');
+      return true;
+    });
+    return { env, page, frontend };
+  } catch (e) {
+    await env.close();
+    throw e;
+  }
 }
