@@ -1,6 +1,6 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
@@ -9,12 +9,14 @@ const OTHER = '/packages/devtools-anywhere/test-support/frame-other.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.chrome.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.chrome.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 test('getAppManifest without a manifest', async () => {
   const [ours, chrome] = await Promise.all([t.ours.send('Page.getAppManifest'), t.chrome.send('Page.getAppManifest')]);

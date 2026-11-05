@@ -2,7 +2,8 @@
 // same pages (oopif-sides.ts, linkedUrl): as when a human uses the in-page DevTools while an agent
 // is connected remotely. In Chrome each client gets a session of its own with the target; what it
 // enables there is its own. See test-support/oopif/oopif-notes.md (Clients).
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import { get, linkedUrl } from '../../../../test-support/oopif/oopif-sides.ts';
 import { launchOopif, RawCdp } from '../../../../test-support/oopif/oopif.ts';
@@ -10,10 +11,12 @@ import type { Env } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 /** A client of the page: its commands (on its root session unless `sessionId` is given) and its events. */
 interface Client {

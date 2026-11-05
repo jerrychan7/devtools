@@ -3,7 +3,8 @@
 // places it, and inspect mode picking the node under the mouse in the iframe. The iframe's nodes are
 // reached by objects of its execution context (Runtime.evaluate there), not through DOM.getDocument,
 // whose graft of the iframe's document is the DOM domain's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
 import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
@@ -11,10 +12,12 @@ import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-sup
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 const DRAWN = 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))';
 

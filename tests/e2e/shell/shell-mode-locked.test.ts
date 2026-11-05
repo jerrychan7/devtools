@@ -2,10 +2,10 @@
 // the page locks it: no toggle for keeping DevTools open, and no action on the info bar that says
 // it is on. Skipped when the frontend has not been built.
 import { existsSync } from 'node:fs';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { launch } from '../../support/browser.ts';
+import { launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 const built = existsSync(new URL('../../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
@@ -13,10 +13,12 @@ const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-fro
 
 let env: Env | undefined;
 
-before(async () => {
-  if (built) env = await launch();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    if (built) env = await launch();
+  },
+  () => env?.close()
+);
 
 async function waitFor(check: () => Promise<boolean>, what: string, timeout = 15000): Promise<void> {
   const start = Date.now();

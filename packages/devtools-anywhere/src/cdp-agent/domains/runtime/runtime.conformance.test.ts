@@ -1,4 +1,4 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { parseStack } from '../../core/stack.ts';
@@ -9,19 +9,22 @@ import {
   launch,
   openPage,
   waitForBoth,
+  setUpAndTearDown,
 } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['Runtime.consoleAPICalled', 'Runtime.exceptionThrown']);
-  await t.chrome.send('Runtime.enable');
-  await t.ours.send('Runtime.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['Runtime.consoleAPICalled', 'Runtime.exceptionThrown']);
+    await t.chrome.send('Runtime.enable');
+    await t.ours.send('Runtime.enable');
+  },
+  () => env?.close()
+);
 
 async function logged(expression: string) {
   await t.chrome.clear();

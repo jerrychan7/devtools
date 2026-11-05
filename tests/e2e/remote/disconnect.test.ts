@@ -1,32 +1,36 @@
 // Removing <devtools-anywhere> undoes what its frontend did to the page, and attaching it again
 // connects a new frontend as before.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { launch } from '../../support/browser.ts';
+import { launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
-  await page.waitForFunction(() => {
-    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
-    return !!panel && getComputedStyle(panel).display !== 'none';
-  });
-  await page.evaluate(() => {
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<style>#target:hover { color: rgb(255, 0, 0); }</style><button id="target">target</button>'
-    );
-    window.__clicks = 0;
-    document.getElementById('target')?.addEventListener('click', () => (window.__clicks = (window.__clicks ?? 0) + 1));
-  });
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      return !!panel && getComputedStyle(panel).display !== 'none';
+    });
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<style>#target:hover { color: rgb(255, 0, 0); }</style><button id="target">target</button>'
+      );
+      window.__clicks = 0;
+      document
+        .getElementById('target')
+        ?.addEventListener('click', () => (window.__clicks = (window.__clicks ?? 0) + 1));
+    });
+  },
+  () => env?.close()
+);
 
 /** The fake frontend in the panel's iframe, once it is loaded. */
 const frontend = () =>

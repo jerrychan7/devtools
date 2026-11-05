@@ -1,31 +1,32 @@
 // Style sheets of shadow trees and constructed (adopted) style sheets in the CSS domain:
 // their headers, the rules they give elements inside and around the shadow tree (`:host`,
 // `::slotted()`), forced pseudo-classes in shadow trees, and sheets added later.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.styleSheetAdded']);
-  await t.page.evaluate(() => {
-    const doc = new CSSStyleSheet();
-    // Less specific than `:host(.sh-h)` and `::slotted(#sh-light)`, yet win over them (outer tree).
-    doc.replaceSync('.sh-adopted { color: rgb(9, 9, 9); } div.sh-h { margin: 1px; }');
-    document.adoptedStyleSheets = [doc];
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="sh-host" class="sh-h"><span id="sh-light" class="sh-adopted">light</span></div>'
-    );
-    const host = document.getElementById('sh-host');
-    if (!host) throw new Error('no host');
-    const root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = `<style>
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.styleSheetAdded']);
+    await t.page.evaluate(() => {
+      const doc = new CSSStyleSheet();
+      // Less specific than `:host(.sh-h)` and `::slotted(#sh-light)`, yet win over them (outer tree).
+      doc.replaceSync('.sh-adopted { color: rgb(9, 9, 9); } div.sh-h { margin: 1px; }');
+      document.adoptedStyleSheets = [doc];
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div id="sh-host" class="sh-h"><span id="sh-light" class="sh-adopted">light</span></div>'
+      );
+      const host = document.getElementById('sh-host');
+      if (!host) throw new Error('no host');
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>
       :host { color: rgb(1, 1, 1); }
       :host(.sh-h) { padding: 1px; }
       :host(.sh-x) { padding: 2px; }
@@ -34,16 +35,17 @@ before(async () => {
       .sh-in { color: rgb(3, 3, 3); }
       .sh-in:hover { color: rgb(4, 4, 4); }
     </style><p class="sh-in" id="sh-in">in</p><slot></slot>`;
-    const adopted = new CSSStyleSheet();
-    adopted.replaceSync('.sh-in { margin: 3px; }');
-    root.adoptedStyleSheets = [adopted];
-  });
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+      const adopted = new CSSStyleSheet();
+      adopted.replaceSync('.sh-in { margin: 3px; }');
+      root.adoptedStyleSheets = [adopted];
+    });
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 type DomNode = Protocol.DOM.Node;
 function find(node: DomNode, id: string): DomNode | null {

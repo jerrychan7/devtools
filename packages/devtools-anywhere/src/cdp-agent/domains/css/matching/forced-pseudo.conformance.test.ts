@@ -1,9 +1,9 @@
 // CSS.forcePseudoState. Chrome and we both act on the same page, so each side forces,
 // measures and un-forces in turn.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -22,24 +22,26 @@ const STYLE = `
   #fv:visited { color: rgb(40, 0, 0); font-weight: 700; display: none }
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(style => {
-    const s = document.createElement('style');
-    s.textContent = style;
-    document.head.appendChild(s);
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="fo" class="f-order x">fo</div><div id="fm" class="f-media">fm</div><a id="fv" href="#fv-never">fv</a>'
-    );
-  }, STYLE);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(style => {
+      const s = document.createElement('style');
+      s.textContent = style;
+      document.head.appendChild(s);
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div id="fo" class="f-order x">fo</div><div id="fm" class="f-media">fm</div><a id="fv" href="#fv-never">fv</a>'
+      );
+    }, STYLE);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

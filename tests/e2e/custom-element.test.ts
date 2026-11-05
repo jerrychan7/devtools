@@ -1,19 +1,21 @@
 // A <devtools-anywhere> the page places itself: a box in its flow, DevTools loaded at once,
 // shown and hidden by the page's CSS, never in shell mode, and only told about its togglers.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+  },
+  () => env?.close()
+);
 
 const url = () => `${env?.baseUrl}/tests/e2e/pages/custom-element.html`;
 

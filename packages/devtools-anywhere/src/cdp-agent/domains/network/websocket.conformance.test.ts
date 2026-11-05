@@ -1,25 +1,27 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'Network.webSocketCreated',
-    'Network.webSocketWillSendHandshakeRequest',
-    'Network.webSocketHandshakeResponseReceived',
-    'Network.webSocketFrameSent',
-    'Network.webSocketFrameReceived',
-    'Network.webSocketClosed',
-  ]);
-  await t.chrome.send('Network.enable');
-  await t.ours.send('Network.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'Network.webSocketCreated',
+      'Network.webSocketWillSendHandshakeRequest',
+      'Network.webSocketHandshakeResponseReceived',
+      'Network.webSocketFrameSent',
+      'Network.webSocketFrameReceived',
+      'Network.webSocketClosed',
+    ]);
+    await t.chrome.send('Network.enable');
+    await t.ours.send('Network.enable');
+  },
+  () => env?.close()
+);
 
 interface FrameEvent {
   requestId: string;

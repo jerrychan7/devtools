@@ -1,14 +1,16 @@
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffSubset, launch, openPage } from '../../../../test-support/conformance.ts';
+import { diffSubset, launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 import type { Protocol } from 'devtools-protocol';
 
 let env: Env | undefined;
-before(async () => {
-  env = await launch();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+  },
+  () => env?.close()
+);
 
 async function until<T>(read: () => Promise<T | undefined>, what: string): Promise<T> {
   for (const start = Date.now(); Date.now() - start < 5000; await new Promise(r => setTimeout(r, 20))) {

@@ -1,7 +1,8 @@
 // Cross-origin iframes linked to their parent's agent: the handshake, whom it trusts, and the
 // link's life. The pages are on two sites of the one server, out of process (launchOopif):
 // the parent on localhost, the child on 127.0.0.1 (or oopif.test).
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
 import { fixtureUrl, launchOopif, THIRD_HOST } from '../../test-support/oopif/oopif.ts';
@@ -9,10 +10,12 @@ import type { Env } from '../../../../tests/support/browser.ts';
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 /** The origin of a host of the test server. */
 const originOf = (host: string) => {

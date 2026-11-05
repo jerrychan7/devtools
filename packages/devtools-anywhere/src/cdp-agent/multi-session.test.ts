@@ -1,23 +1,25 @@
 // Several CDP sessions on one page, as several clients of Chrome: each keeps its own bodies,
 // forces its own pseudo-classes, and leaves nothing installed behind per session.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { CDP_BUNDLE, launch, type Env } from '../../test-support/conformance.ts';
+import { CDP_BUNDLE, launch, type Env, setUpAndTearDown } from '../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
-  await page.addScriptTag({ path: CDP_BUNDLE });
-  await page.evaluate(() => {
-    window.__sessions = [window.DevtoolsAnywhere.createCdpSession(), window.DevtoolsAnywhere.createCdpSession()];
-  });
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
+    await page.addScriptTag({ path: CDP_BUNDLE });
+    await page.evaluate(() => {
+      window.__sessions = [window.DevtoolsAnywhere.createCdpSession(), window.DevtoolsAnywhere.createCdpSession()];
+    });
+  },
+  () => env?.close()
+);
 
 /** Calls `method` in session `index`; an error comes back as its message. */
 const call = (index: number, method: string, params: object = {}) =>

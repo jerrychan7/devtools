@@ -1,9 +1,9 @@
 // A style sheet from another origin: page scripts cannot read its rules, so the CSS
 // domain fetches a copy (the server sends CORS headers for .css files).
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -11,36 +11,38 @@ type DomNode = Protocol.DOM.Node;
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  const crossUrl =
-    env.baseUrl.replace('localhost', '127.0.0.1') + '/packages/devtools-anywhere/test-support/assets/cross.css';
-  await t.page.evaluate(
-    href =>
-      new Promise<void>(resolve => {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = href;
-        link.onload = () => resolve();
-        document.head.appendChild(link);
-      }),
-    crossUrl
-  );
-  const readable = await t.page.evaluate(() => {
-    try {
-      return !!document.styleSheets[document.styleSheets.length - 1]?.cssRules;
-    } catch {
-      return false;
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    const crossUrl =
+      env.baseUrl.replace('localhost', '127.0.0.1') + '/packages/devtools-anywhere/test-support/assets/cross.css';
+    await t.page.evaluate(
+      href =>
+        new Promise<void>(resolve => {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = href;
+          link.onload = () => resolve();
+          document.head.appendChild(link);
+        }),
+      crossUrl
+    );
+    const readable = await t.page.evaluate(() => {
+      try {
+        return !!document.styleSheets[document.styleSheets.length - 1]?.cssRules;
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(readable, false, 'the sheet must not be readable from the page');
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
     }
-  });
-  assert.equal(readable, false, 'the sheet must not be readable from the page');
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

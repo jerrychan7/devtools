@@ -1,7 +1,7 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -9,24 +9,26 @@ type DomNode = Protocol.DOM.Node;
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.styleSheetAdded']);
-  // The page sets devtools-anywhere's attribute on its own elements: that must not hide them.
-  await t.page.evaluate(() => {
-    const div = document.createElement('div');
-    div.id = 'forged';
-    div.setAttribute('data-devtools-anywhere', '');
-    div.style.cssText = 'position:fixed;left:0;top:0;width:50px;height:50px;z-index:2147483646';
-    const style = document.createElement('style');
-    style.id = 'forged-style';
-    style.setAttribute('data-devtools-anywhere', '');
-    style.textContent = '#forged { color: red }';
-    document.head.append(style);
-    document.body.append(div);
-  });
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.styleSheetAdded']);
+    // The page sets devtools-anywhere's attribute on its own elements: that must not hide them.
+    await t.page.evaluate(() => {
+      const div = document.createElement('div');
+      div.id = 'forged';
+      div.setAttribute('data-devtools-anywhere', '');
+      div.style.cssText = 'position:fixed;left:0;top:0;width:50px;height:50px;z-index:2147483646';
+      const style = document.createElement('style');
+      style.id = 'forged-style';
+      style.setAttribute('data-devtools-anywhere', '');
+      style.textContent = '#forged { color: red }';
+      document.head.append(style);
+      document.body.append(div);
+    });
+  },
+  () => env?.close()
+);
 
 const find = (node: DomNode, pred: (n: DomNode) => boolean): DomNode | null => {
   if (pred(node)) return node;

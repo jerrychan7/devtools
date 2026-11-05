@@ -3,10 +3,10 @@
 // page. Skipped when the frontend has not been built. The tests run in order, each from where the
 // previous one left the page.
 import { existsSync } from 'node:fs';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { launch } from '../../support/browser.ts';
+import { launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 const built = existsSync(new URL('../../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
@@ -17,15 +17,17 @@ let page: Page;
 /** Uncaught errors in the shell, the frontend and the toolbox. */
 const errors: string[] = [];
 
-before(async () => {
-  if (!built) return;
-  env = await launch();
-  page = await env.browser.newPage();
-  page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
-  await page.setViewport({ width: 1000, height: 800 });
-  await page.goto(env.baseUrl + '/tests/e2e/pages/device-mode.html');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    if (!built) return;
+    env = await launch();
+    page = await env.browser.newPage();
+    page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
+    await page.setViewport({ width: 1000, height: 800 });
+    await page.goto(env.baseUrl + '/tests/e2e/pages/device-mode.html');
+  },
+  () => env?.close()
+);
 
 async function waitFor<T>(get: () => T | Promise<T>, what = 'condition', timeout = 15000): Promise<NonNullable<T>> {
   const start = Date.now();

@@ -1,18 +1,20 @@
 // The F12 button in shell mode: shown in the page iframe, where the page's `::part(toggler)` styles
 // reach it, and toggling the shell's element; the shell shows its own only while the page has none.
-import { after, before, beforeEach, test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { launch } from '../../support/browser.ts';
+import { launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+  },
+  () => env?.close()
+);
 beforeEach(async () => {
   await page?.close();
   assert.ok(env);

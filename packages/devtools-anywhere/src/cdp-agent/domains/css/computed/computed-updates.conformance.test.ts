@@ -1,21 +1,23 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.computedStyleUpdated']);
-  await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="a">a<b id="b">b</b></div>'));
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.computedStyleUpdated']);
+    await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="a">a<b id="b">b</b></div>'));
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const run = (f: () => void) => t.page.evaluate(f);

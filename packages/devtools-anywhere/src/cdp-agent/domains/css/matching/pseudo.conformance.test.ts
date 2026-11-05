@@ -1,7 +1,14 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -21,26 +28,28 @@ const STYLE = `
   .late::after { content: "late" }
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['DOM.pseudoElementAdded', 'DOM.pseudoElementRemoved']);
-  await t.page.evaluate(style => {
-    const s = document.createElement('style');
-    s.textContent = style;
-    document.head.appendChild(s);
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<p class="pe" id="pe">x</p><ul><li id="li">item</li></ul><i id="late">i</i>'
-    );
-  }, STYLE);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-  ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
-  chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['DOM.pseudoElementAdded', 'DOM.pseudoElementRemoved']);
+    await t.page.evaluate(style => {
+      const s = document.createElement('style');
+      s.textContent = style;
+      document.head.appendChild(s);
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<p class="pe" id="pe">x</p><ul><li id="li">item</li></ul><i id="late">i</i>'
+      );
+    }, STYLE);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+    ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
+    chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

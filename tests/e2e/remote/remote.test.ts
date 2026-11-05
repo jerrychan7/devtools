@@ -2,11 +2,11 @@
 // client here, and the real frontend when it is built) inspects it through the server.
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
 import { startRemoteServer, type RemoteServer } from '@devtools-anywhere/remote-server';
-import { launch, type Env } from '../../support/browser.ts';
+import { launch, type Env, setUpAndTearDown } from '../../support/browser.ts';
 import { DETACH_METHOD, HELLO_METHOD, PAGEHIDE_METHOD } from '../../../packages/relay-core/src/protocol.ts';
 
 const built = existsSync(new URL('../../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
@@ -27,16 +27,18 @@ interface Listed {
   webSocketDebuggerUrl: string;
 }
 
-before(async () => {
-  env = await launch();
-  remote = await startRemoteServer({ port: 0, host: '127.0.0.1', token: TOKEN });
-  page = await env.browser.newPage();
-  await page.goto(`${env.baseUrl}/tests/e2e/pages/remote-page.html?remote=${encodeURIComponent(origin() + '/')}`);
-});
-after(async () => {
-  await env.close();
-  await remote.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    remote = await startRemoteServer({ port: 0, host: '127.0.0.1', token: TOKEN });
+    page = await env.browser.newPage();
+    await page.goto(`${env.baseUrl}/tests/e2e/pages/remote-page.html?remote=${encodeURIComponent(origin() + '/')}`);
+  },
+  async () => {
+    await env?.close();
+    await remote?.close();
+  }
+);
 
 const origin = () => new URL(remote.url).origin;
 

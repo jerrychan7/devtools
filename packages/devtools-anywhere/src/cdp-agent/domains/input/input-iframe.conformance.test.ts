@@ -1,8 +1,8 @@
 // Input over a same-origin iframe against Chrome's: mouse, wheel and touch input on it goes to
 // the iframe's document at the point in its viewport, keys and text to the element focused in it.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 const FIXTURE = '/packages/devtools-anywhere/test-support/frame-geometry.html';
@@ -34,56 +34,58 @@ const RECORDED = [
   'blur',
 ];
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.setViewport({ width: 800, height: 600 });
-  await t.page.evaluate(
-    (src, RECORDED) =>
-      new Promise<void>(resolve => {
-        document.body.insertAdjacentHTML(
-          'afterbegin',
-          `<div id="ii-test" style="position: fixed; inset: 0; background: #fff; z-index: 1">
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.setViewport({ width: 800, height: 600 });
+    await t.page.evaluate(
+      (src, RECORDED) =>
+        new Promise<void>(resolve => {
+          document.body.insertAdjacentHTML(
+            'afterbegin',
+            `<div id="ii-test" style="position: fixed; inset: 0; background: #fff; z-index: 1">
             <button id="top-btn" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 40px">top</button>
             <iframe id="ii-frame" style="position: absolute; left: 200px; top: 50px; width: 400px; height: 300px; border: 4px solid; padding: 6px"></iframe>
           </div>`
-        );
-        const frame = document.getElementById('ii-frame') as HTMLIFrameElement;
-        frame.onload = () => {
-          const events: string[] = [];
-          const record = (win: Window & typeof globalThis, name: string) => {
-            for (const type of RECORDED)
-              win.addEventListener(
-                type,
-                e => {
-                  const target = e.target;
-                  const id = target && 'id' in target ? String(target.id) : target === win ? 'window' : '';
-                  // The point, view and realm of the event as the page sees it.
-                  const where =
-                    e instanceof win.MouseEvent
-                      ? `@${Math.round(e.clientX)},${Math.round(e.clientY)}${e.view === win ? '' : '!view'}`
-                      : e instanceof win.Event
-                        ? ''
-                        : '!realm';
-                  events.push(`${name}:${type}:${id}${where}`);
-                },
-                true
-              );
+          );
+          const frame = document.getElementById('ii-frame') as HTMLIFrameElement;
+          frame.onload = () => {
+            const events: string[] = [];
+            const record = (win: Window & typeof globalThis, name: string) => {
+              for (const type of RECORDED)
+                win.addEventListener(
+                  type,
+                  e => {
+                    const target = e.target;
+                    const id = target && 'id' in target ? String(target.id) : target === win ? 'window' : '';
+                    // The point, view and realm of the event as the page sees it.
+                    const where =
+                      e instanceof win.MouseEvent
+                        ? `@${Math.round(e.clientX)},${Math.round(e.clientY)}${e.view === win ? '' : '!view'}`
+                        : e instanceof win.Event
+                          ? ''
+                          : '!realm';
+                    events.push(`${name}:${type}:${id}${where}`);
+                  },
+                  true
+                );
+            };
+            record(window, 'top');
+            const inner = frame.contentWindow as (Window & typeof globalThis) | null;
+            if (inner) record(inner, 'in');
+            window.__inputEvents = events;
+            resolve();
           };
-          record(window, 'top');
-          const inner = frame.contentWindow as (Window & typeof globalThis) | null;
-          if (inner) record(inner, 'in');
-          window.__inputEvents = events;
-          resolve();
-        };
-        frame.src = src;
-      }),
-    FIXTURE,
-    RECORDED
-  );
-  await locate();
-});
-after(() => env?.close());
+          frame.src = src;
+        }),
+      FIXTURE,
+      RECORDED
+    );
+    await locate();
+  },
+  () => env?.close()
+);
 
 /** The iframe's document. */
 declare global {

@@ -1,11 +1,11 @@
 // The DevTools frontend built from the official sources (packages/devtools-frontend),
 // against the in-page CDP agent. Skipped when the frontend has not been built. The Animations
 // panel's tests are in animations-frontend.test.ts.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ElementHandle, Frame, JSHandle, Page } from 'puppeteer-core';
 import type { Env } from '../support/browser.ts';
-import { built, frontendHelpers, openRealFrontend, skip, waitFor } from '../support/real-frontend.ts';
+import { built, frontendHelpers, openRealFrontend, skip, waitFor, setUpAndTearDown } from '../support/real-frontend.ts';
 
 let env: Env | undefined;
 let page: Page;
@@ -14,11 +14,13 @@ let frontend: Frame;
 const errors: string[] = [];
 const { text, showView, shownText } = frontendHelpers(() => frontend);
 
-before(async () => {
-  if (!built) return;
-  ({ env, page, frontend } = await openRealFrontend(errors));
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    if (!built) return;
+    ({ env, page, frontend } = await openRealFrontend(errors));
+  },
+  () => env?.close()
+);
 
 /** Clicks a panel's tab in the main tabbed pane (inside shadow DOM). */
 async function showPanel(id: string) {

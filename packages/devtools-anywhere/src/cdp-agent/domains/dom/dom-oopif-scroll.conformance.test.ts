@@ -2,7 +2,8 @@
 // command on the same pages (test-support/oopif/oopif-sides.ts), where each page is scrolled to after it
 // compared. In Chrome the iframe's renderer hands what is left to expose to its parent's; our
 // iframe's agent sends it over the link to the parent's, which scrolls on outward.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../test-support/conformance.ts';
 import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
@@ -10,10 +11,12 @@ import { chromeSide, get, oursSide, type Side } from '../../../../test-support/o
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 /**
  * Waits a while in both pages, for scrolls to land and the parent to hear its iframe: by timers,

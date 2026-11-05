@@ -1,9 +1,16 @@
 // Sandboxed iframes without allow-same-origin, whose same-origin document is opaque: in the Page
 // domain, against Chrome's. Chrome keeps them in the page's frame tree, with no child target.
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, EventName, TestPage } from '../../../../test-support/conformance.ts';
 import { fixtureUrl, launchOopif } from '../../../../test-support/oopif/oopif.ts';
 import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
@@ -22,17 +29,19 @@ const EVENTS: EventName[] = [
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [...EVENTS, 'Target.attachedToTarget', 'Network.requestWillBeSent']);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('Page.enable');
-    await side.send('Network.enable');
-  }
-  for (const side of [t.ours, t.chrome])
-    await side.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [...EVENTS, 'Target.attachedToTarget', 'Network.requestWillBeSent']);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('Page.enable');
+      await side.send('Network.enable');
+    }
+    for (const side of [t.ours, t.chrome])
+      await side.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  },
+  () => env?.close()
+);
 
 async function recorded() {
   const read = async (side: TestPage['ours']) => {
@@ -145,16 +154,18 @@ test('a sandboxed iframe navigating, then removed', async () => {
 describe('a sandboxed iframe merged into the page', () => {
   let oopif: Env | undefined;
   const sides: { ours?: MergedSide; chrome?: MergedSide } = {};
-  before(async () => {
-    oopif = await launchOopif();
-    sides.chrome = await chromeSide(oopif);
-    sides.ours = await oursSide(oopif);
-  });
-  after(async () => {
-    await sides.ours?.close();
-    await sides.chrome?.close();
-    await oopif?.close();
-  });
+  setUpAndTearDown(
+    async () => {
+      oopif = await launchOopif();
+      sides.chrome = await chromeSide(oopif);
+      sides.ours = await oursSide(oopif);
+    },
+    async () => {
+      await sides.ours?.close();
+      await sides.chrome?.close();
+      await oopif?.close();
+    }
+  );
 
   const both = () => {
     const { ours, chrome } = sides;

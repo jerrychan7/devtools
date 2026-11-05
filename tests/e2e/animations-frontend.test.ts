@@ -1,10 +1,10 @@
 // The Animations panel of the DevTools frontend built from the official sources, against the
 // in-page CDP agent. Skipped when the frontend has not been built.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, JSHandle, Page } from 'puppeteer-core';
 import type { Env } from '../support/browser.ts';
-import { built, frontendHelpers, openRealFrontend, skip, waitFor } from '../support/real-frontend.ts';
+import { built, frontendHelpers, openRealFrontend, skip, waitFor, setUpAndTearDown } from '../support/real-frontend.ts';
 
 let env: Env | undefined;
 let page: Page;
@@ -13,11 +13,13 @@ let frontend: Frame;
 const errors: string[] = [];
 const { showView, count, shownText, clickNth } = frontendHelpers(() => frontend);
 
-before(async () => {
-  if (!built) return;
-  ({ env, page, frontend } = await openRealFrontend(errors));
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    if (!built) return;
+    ({ env, page, frontend } = await openRealFrontend(errors));
+  },
+  () => env?.close()
+);
 
 test('the Animations panel lists the CSS and Web Animations the page runs', { skip }, async () => {
   await showView('animations');

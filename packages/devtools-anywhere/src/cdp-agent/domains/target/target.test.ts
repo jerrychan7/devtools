@@ -2,14 +2,14 @@
 // and the client's messages routed to them by sessionId, flattened as Chrome does
 // (test-support/oopif/oopif-notes.md). The iframe agents are stand-ins in the page, linked by
 // test-support/oopif/child-targets-harness.ts; the real links are made by the handshake.
-import { after, before, beforeEach, test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import type { Page } from 'puppeteer-core';
 import { startRemoteServer, type RemoteServer } from '@devtools-anywhere/remote-server';
-import { launch, type Env } from '../../../../test-support/conformance.ts';
+import { launch, type Env, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 
 const support = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../test-support');
 
@@ -17,24 +17,26 @@ let env: Env | undefined;
 let page: Page;
 let harness = '';
 
-before(async () => {
-  env = await launch();
-  const bundled = await build({
-    stdin: {
-      contents:
-        "import { Harness } from './oopif/child-targets-harness.ts'; Object.assign(window, { __harness: new Harness() });",
-      resolveDir: support,
-      loader: 'ts',
-    },
-    bundle: true,
-    format: 'iife',
-    target: 'es2020',
-    write: false,
-    external: ['@zumer/snapdom'],
-  });
-  harness = bundled.outputFiles[0]?.text ?? '';
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    const bundled = await build({
+      stdin: {
+        contents:
+          "import { Harness } from './oopif/child-targets-harness.ts'; Object.assign(window, { __harness: new Harness() });",
+        resolveDir: support,
+        loader: 'ts',
+      },
+      bundle: true,
+      format: 'iife',
+      target: 'es2020',
+      write: false,
+      external: ['@zumer/snapdom'],
+    });
+    harness = bundled.outputFiles[0]?.text ?? '';
+  },
+  () => env?.close()
+);
 
 beforeEach(async () => {
   assert.ok(env);

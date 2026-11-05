@@ -4,23 +4,25 @@
 // session's clear, or its detach, clears it when that session's own override is on, whoever set it
 // last (A clears: the page's own size, not B's); a session without one clearing or detaching
 // changes nothing. The first test checks this in Chrome; the next ones, the shell mirroring it.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import { frontendRequest, launch } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
-import { CDP_BUNDLE } from '../../../packages/devtools-anywhere/test-support/conformance.ts';
+import { CDP_BUNDLE, setUpAndTearDown } from '../../../packages/devtools-anywhere/test-support/conformance.ts';
 
 let env: Env | undefined;
 let page: Page;
 /** The page iframe's size without an override, in shell mode. */
 let natural = '';
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+  },
+  () => env?.close()
+);
 
 const metrics = (width: number, height: number) => ({ width, height, deviceScaleFactor: 1, mobile: false });
 

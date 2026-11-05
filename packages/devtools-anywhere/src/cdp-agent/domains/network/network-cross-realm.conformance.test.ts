@@ -1,20 +1,22 @@
 // A fetch in a same-origin iframe given a Request or body made by another frame, against Chrome's:
 // such objects are not instanceof the iframe window's classes, yet are sent as they are.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['Network.requestWillBeSent', 'Network.loadingFinished']);
-  await t.chrome.send('Network.enable');
-  await t.ours.send('Network.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['Network.requestWillBeSent', 'Network.loadingFinished']);
+    await t.chrome.send('Network.enable');
+    await t.ours.send('Network.enable');
+  },
+  () => env?.close()
+);
 
 const MARKERS = ['n=cross-req', 'n=cross-params', 'n=cross-blob'];
 

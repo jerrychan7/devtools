@@ -1,10 +1,10 @@
 // Same-origin iframes in the CSS domain: the styles of their nodes, from the rules of their own
 // document in their own viewport, and the style sheets of their documents, announced with their
 // frame and removed with it, against Chrome's.
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, waitForBoth } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -14,41 +14,43 @@ const STYLED = '/packages/devtools-anywhere/test-support/frame-styled.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.styleSheetAdded', 'CSS.styleSheetRemoved']);
-  // A narrow iframe with a <link> and a <style>, and a srcdoc one with a <style>, loaded.
-  await t.page.evaluate(
-    src =>
-      Promise.all(
-        [
-          (f: HTMLIFrameElement) => {
-            f.id = 'styled';
-            f.src = src;
-            f.style.width = '300px';
-          },
-          (f: HTMLIFrameElement) => {
-            f.id = 'sd';
-            f.srcdoc = '<style>.sd { color: rgb(9, 9, 9) }</style><p class="sd" id="sd-p">srcdoc</p>';
-          },
-        ].map(
-          init =>
-            new Promise(resolve => {
-              const frame = document.createElement('iframe');
-              init(frame);
-              frame.onload = resolve;
-              document.body.append(frame);
-            })
-        )
-      ),
-    STYLED
-  );
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.styleSheetAdded', 'CSS.styleSheetRemoved']);
+    // A narrow iframe with a <link> and a <style>, and a srcdoc one with a <style>, loaded.
+    await t.page.evaluate(
+      src =>
+        Promise.all(
+          [
+            (f: HTMLIFrameElement) => {
+              f.id = 'styled';
+              f.src = src;
+              f.style.width = '300px';
+            },
+            (f: HTMLIFrameElement) => {
+              f.id = 'sd';
+              f.srcdoc = '<style>.sd { color: rgb(9, 9, 9) }</style><p class="sd" id="sd-p">srcdoc</p>';
+            },
+          ].map(
+            init =>
+              new Promise(resolve => {
+                const frame = document.createElement('iframe');
+                init(frame);
+                frame.onload = resolve;
+                document.body.append(frame);
+              })
+          )
+        ),
+      STYLED
+    );
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

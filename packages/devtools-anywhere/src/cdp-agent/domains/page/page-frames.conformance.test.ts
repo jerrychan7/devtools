@@ -1,9 +1,16 @@
 // Same-origin iframes in the Page domain: the frame tree and the events of frames attached,
 // navigated and detached, against Chrome's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, EventName, TestPage } from '../../../../test-support/conformance.ts';
 
 for (const key of ['id', 'parentId', 'parentFrameId']) VOLATILE.add(key);
@@ -21,23 +28,25 @@ const EVENTS: EventName[] = [
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, EVENTS);
-  // A srcdoc iframe holding another one, there before DevTools connects.
-  await t.page.evaluate(
-    () =>
-      new Promise(resolve => {
-        const frame = document.createElement('iframe');
-        frame.id = 'pre';
-        frame.srcdoc = '<iframe name="inner" srcdoc="<b>in</b>"></iframe>';
-        frame.onload = resolve;
-        document.body.append(frame);
-      })
-  );
-  for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, EVENTS);
+    // A srcdoc iframe holding another one, there before DevTools connects.
+    await t.page.evaluate(
+      () =>
+        new Promise(resolve => {
+          const frame = document.createElement('iframe');
+          frame.id = 'pre';
+          frame.srcdoc = '<iframe name="inner" srcdoc="<b>in</b>"></iframe>';
+          frame.onload = resolve;
+          document.body.append(frame);
+        })
+    );
+    for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 /** The Page events of both sides in the order they came, without the stack of frameAttached. */
 async function recorded() {

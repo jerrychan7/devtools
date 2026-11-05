@@ -1,18 +1,20 @@
 // CSS.disable restores the native `adoptedStyleSheets` only while the hook is still ours: a
 // wrapper the page installed meanwhile is kept, and enabling again does not wrap twice.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+  },
+  () => env?.close()
+);
 
 const getterIsNative = () =>
   t.page.evaluate(() =>

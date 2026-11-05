@@ -3,9 +3,9 @@
 // iframe is checked here, and the whole of it end to end: a parent page and a cross-origin child,
 // both with the probe and trusting each other, linked by the handshake, driven as the frontend
 // drives Chrome, and compared with Chrome on the same pages.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CDP_BUNDLE, type Env } from '../../../../test-support/conformance.ts';
+import { CDP_BUNDLE, type Env, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import { chromeSide, get, oursSide, type Side } from '../../../../test-support/oopif/oopif-sides.ts';
 import {
   chromeSequence,
@@ -19,10 +19,12 @@ import {
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 const methods = (steps: Step[]) => steps.map(s => `${s.session} ${s.method}`);
 const attached = (steps: Step[]) => steps.filter(s => s.method === 'Target.attachedToTarget');

@@ -1,20 +1,22 @@
 // Shell mode in real Chrome, with a fake frontend that records what it receives.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { devtoolsShown, frontendRequest, launch } from '../../support/browser.ts';
+import { devtoolsShown, frontendRequest, launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/e2e/pages/shell-page.html?first');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/tests/e2e/pages/shell-page.html?first');
+  },
+  () => env?.close()
+);
 
 const shellState = () =>
   page.evaluate(() => {

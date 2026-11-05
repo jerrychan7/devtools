@@ -1,9 +1,9 @@
 // Navigations a Navigation API `navigate` listener intercepts, in the top page and a same-origin
 // iframe: Chrome reports each once, as `other`, when it commits, whatever started it. Against
 // Chrome's Page.navigatedWithinDocument.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
@@ -11,32 +11,34 @@ const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['Page.navigatedWithinDocument']);
-  await t.page.evaluate(
-    src =>
-      new Promise(resolve => {
-        document.body.append(Object.assign(document.createElement('iframe'), { id: 'f', src, onload: resolve }));
-      }),
-    CHILD
-  );
-  // In each window, `intercepting` decides whether its listener intercepts; the handler of an
-  // intercepted navigation settles a little later, so that the reports are seen to come first.
-  await t.page.evaluate(() => {
-    for (const win of [window, document.querySelector('iframe')?.contentWindow]) {
-      if (!win) continue;
-      Object.assign(win, { intercepting: true });
-      win.navigation.addEventListener('navigate', event => {
-        if (Reflect.get(win, 'intercepting') && event.canIntercept) {
-          event.intercept({ handler: () => new Promise(resolve => setTimeout(resolve, 200)) });
-        }
-      });
-    }
-  });
-  for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['Page.navigatedWithinDocument']);
+    await t.page.evaluate(
+      src =>
+        new Promise(resolve => {
+          document.body.append(Object.assign(document.createElement('iframe'), { id: 'f', src, onload: resolve }));
+        }),
+      CHILD
+    );
+    // In each window, `intercepting` decides whether its listener intercepts; the handler of an
+    // intercepted navigation settles a little later, so that the reports are seen to come first.
+    await t.page.evaluate(() => {
+      for (const win of [window, document.querySelector('iframe')?.contentWindow]) {
+        if (!win) continue;
+        Object.assign(win, { intercepting: true });
+        win.navigation.addEventListener('navigate', event => {
+          if (Reflect.get(win, 'intercepting') && event.canIntercept) {
+            event.intercept({ handler: () => new Promise(resolve => setTimeout(resolve, 200)) });
+          }
+        });
+      }
+    });
+    for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 const both = async <T>(fn: (side: Side) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 

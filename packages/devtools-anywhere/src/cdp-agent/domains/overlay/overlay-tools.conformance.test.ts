@@ -1,32 +1,34 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(() => {
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      `<div id=g style="display:grid;grid-template-columns:50px 1fr;grid-template-rows:20px 30px;gap:10px 6px;width:300px"><i>a</i><i>b</i><i>c</i></div>
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<div id=g style="display:grid;grid-template-columns:50px 1fr;grid-template-rows:20px 30px;gap:10px 6px;width:300px"><i>a</i><i>b</i><i>c</i></div>
       <div id=f style="display:flex;gap:5px"><b style="margin:2px">x</b><b>y</b></div>
       <div id=c style="container-type:inline-size;width:100px;height:10px"></div>
       <div id=s style="overflow:scroll;scroll-snap-type:x mandatory;scroll-padding:4px;height:50px;width:100px">
         <div style="width:300px;height:10px;scroll-snap-align:start;scroll-margin:3px"></div></div>
       <div id=iso style="width:40px;height:40px"></div>
       <iframe id=fr srcdoc="hi" style="width:120px;height:60px;border:2px solid;padding:3px"></iframe>`
-    );
-  });
-  await t.chrome.send('DOM.enable');
-  await t.chrome.send('Overlay.enable');
-  await t.ours.send('Overlay.enable');
-});
-after(() => env?.close());
+      );
+    });
+    await t.chrome.send('DOM.enable');
+    await t.chrome.send('Overlay.enable');
+    await t.ours.send('Overlay.enable');
+  },
+  () => env?.close()
+);
 
 const nodeId = async (side: Side, selector: string) => {
   const { root } = await side.send('DOM.getDocument', { depth: -1 });

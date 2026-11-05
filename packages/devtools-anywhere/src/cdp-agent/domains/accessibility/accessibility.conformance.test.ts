@@ -1,7 +1,7 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -70,26 +70,28 @@ const FIXTURE = `
 <table id=t2><caption id=cap>Cap</caption><thead><tr><th id=c1>A</th></tr></thead><tbody><tr><th id=rh1 scope=row>R</th><td id=c2>v</td></tr></tbody></table>
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(
-    (html, base) => {
-      document.title = 'AX';
-      document.body.innerHTML = html;
-      // The fixture's own focus would differ between the sides' runs.
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      window.__session = window.DevtoolsAnywhere.createCdpSession({
-        loadAccessibility: () => import(base + '/packages/devtools-anywhere/dist/accessibility.js'),
-      });
-    },
-    FIXTURE,
-    env.baseUrl
-  );
-  // Chrome's whole-tree commands need the domain enabled.
-  await Promise.all([t.ours.send('Accessibility.enable'), t.chrome.send('Accessibility.enable')]);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(
+      (html, base) => {
+        document.title = 'AX';
+        document.body.innerHTML = html;
+        // The fixture's own focus would differ between the sides' runs.
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        window.__session = window.DevtoolsAnywhere.createCdpSession({
+          loadAccessibility: () => import(base + '/packages/devtools-anywhere/dist/accessibility.js'),
+        });
+      },
+      FIXTURE,
+      env.baseUrl
+    );
+    // Chrome's whole-tree commands need the domain enabled.
+    await Promise.all([t.ours.send('Accessibility.enable'), t.chrome.send('Accessibility.enable')]);
+  },
+  () => env?.close()
+);
 
 /** The DOM node id of `#id` on one side. */
 async function nodeIdOf(side: Side, id: string) {

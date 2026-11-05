@@ -1,8 +1,15 @@
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, EventName, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -15,20 +22,22 @@ for (const key of ['nodeId', 'backendNodeId', 'parentId', 'parentNodeId', 'previ
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'DOM.setChildNodes',
-    'DOM.childNodeInserted',
-    'DOM.childNodeRemoved',
-    'DOM.attributeModified',
-    'DOM.attributeRemoved',
-    'DOM.characterDataModified',
-    'DOM.childNodeCountUpdated',
-    'DOM.shadowRootPushed',
-  ]);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'DOM.setChildNodes',
+      'DOM.childNodeInserted',
+      'DOM.childNodeRemoved',
+      'DOM.attributeModified',
+      'DOM.attributeRemoved',
+      'DOM.characterDataModified',
+      'DOM.childNodeCountUpdated',
+      'DOM.shadowRootPushed',
+    ]);
+  },
+  () => env?.close()
+);
 
 const both = <M extends keyof Commands>(method: M, ...params: Commands[M]['paramsType']) =>
   Promise.all([t.ours.send(method, ...params), t.chrome.send(method, ...params)]);

@@ -1,9 +1,16 @@
 // Shadow roots that scripts of same-origin iframes attach, against Chrome's: pushed to the client
 // like the top page's, closed ones included, and the iframes in them given a frame.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 for (const key of ['nodeId', 'backendNodeId', 'parentId', 'hostId', 'id']) VOLATILE.add(key);
@@ -13,23 +20,25 @@ const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['DOM.shadowRootPushed', 'Page.frameAttached']);
-  await t.page.evaluate(
-    src =>
-      new Promise(resolve => {
-        const frame = Object.assign(document.createElement('iframe'), { id: 'host-frame', src, onload: resolve });
-        document.body.append(frame);
-      }),
-    CHILD
-  );
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('Page.enable');
-    await side.send('DOM.getDocument', { depth: -1, pierce: true });
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['DOM.shadowRootPushed', 'Page.frameAttached']);
+    await t.page.evaluate(
+      src =>
+        new Promise(resolve => {
+          const frame = Object.assign(document.createElement('iframe'), { id: 'host-frame', src, onload: resolve });
+          document.body.append(frame);
+        }),
+      CHILD
+    );
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('Page.enable');
+      await side.send('DOM.getDocument', { depth: -1, pierce: true });
+    }
+  },
+  () => env?.close()
+);
 
 const both = async <T>(fn: (side: Side) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 

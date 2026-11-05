@@ -4,10 +4,10 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ElementHandle, Frame, JSHandle, Page } from 'puppeteer-core';
-import { launch } from '../../support/browser.ts';
+import { launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 import { UI_ENTRIES } from './ui-entries.ts';
 
@@ -24,21 +24,23 @@ const errors: string[] = [];
 /** Console messages of the page and the frontend. */
 const messages: string[] = [];
 
-before(async () => {
-  env = await launch();
-  if (!built) return;
-  page = await env.browser.newPage();
-  page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
-  page.on('console', message => messages.push(message.text()));
-  await page.setViewport({ width: 1000, height: 1600 });
-  await page.goto(env.baseUrl + '/tests/e2e/smoke/ui-entries.html');
-  frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
-  // Loaded: the Elements panel, shown first, shows the page.
-  await waitFor(async () =>
-    shows(await frontend.evaluateHandle((): Element | null => document.body), undefined, 'ui-entries-marker')
-  );
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    if (!built) return;
+    page = await env.browser.newPage();
+    page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
+    page.on('console', message => messages.push(message.text()));
+    await page.setViewport({ width: 1000, height: 1600 });
+    await page.goto(env.baseUrl + '/tests/e2e/smoke/ui-entries.html');
+    frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
+    // Loaded: the Elements panel, shown first, shows the page.
+    await waitFor(async () =>
+      shows(await frontend.evaluateHandle((): Element | null => document.body), undefined, 'ui-entries-marker')
+    );
+  },
+  () => env?.close()
+);
 
 async function waitFor<T>(get: () => T | Promise<T>, timeout = 15000): Promise<NonNullable<T>> {
   const start = Date.now();

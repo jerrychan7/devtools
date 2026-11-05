@@ -1,25 +1,27 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 let scope: string;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['ServiceWorker.workerRegistrationUpdated', 'ServiceWorker.workerVersionUpdated']);
-  scope = env.baseUrl + '/packages/devtools-anywhere/test-support/assets/';
-  await t.page.evaluate(async scope => {
-    await navigator.serviceWorker.register(scope + 'sw.js', { scope });
-    const reg = await navigator.serviceWorker.getRegistration(scope);
-    // Waits for it to activate, which the worker does at once.
-    while (!reg?.active) await new Promise(resolve => setTimeout(resolve, 50));
-  }, scope);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['ServiceWorker.workerRegistrationUpdated', 'ServiceWorker.workerVersionUpdated']);
+    scope = env.baseUrl + '/packages/devtools-anywhere/test-support/assets/';
+    await t.page.evaluate(async scope => {
+      await navigator.serviceWorker.register(scope + 'sw.js', { scope });
+      const reg = await navigator.serviceWorker.getRegistration(scope);
+      // Waits for it to activate, which the worker does at once.
+      while (!reg?.active) await new Promise(resolve => setTimeout(resolve, 50));
+    }, scope);
+  },
+  () => env?.close()
+);
 
 const both = <T>(fn: (side: TestPage['ours']) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 const last = <T>(list: T[]) => list[list.length - 1];

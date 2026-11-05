@@ -1,7 +1,7 @@
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -11,15 +11,17 @@ let t: TestPage;
 let ours: DomNode;
 let chrome: DomNode;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.styleSheetAdded']);
-  await Promise.all([t.ours.send('DOM.enable'), t.chrome.send('DOM.enable')]);
-  await Promise.all([t.ours.send('CSS.enable'), t.chrome.send('CSS.enable')]);
-  ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
-  chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.styleSheetAdded']);
+    await Promise.all([t.ours.send('DOM.enable'), t.chrome.send('DOM.enable')]);
+    await Promise.all([t.ours.send('CSS.enable'), t.chrome.send('CSS.enable')]);
+    ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
+    chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

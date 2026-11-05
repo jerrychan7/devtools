@@ -1,4 +1,5 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../tests/support/browser.ts';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { startServer } from './server.ts';
@@ -6,10 +7,12 @@ import type { PlaygroundServer } from './server.ts';
 
 let server: PlaygroundServer | undefined;
 
-before(async () => {
-  server = await startServer(0);
-});
-after(() => server?.close());
+setUpAndTearDown(
+  async () => {
+    server = await startServer(0);
+  },
+  () => server?.close()
+);
 
 function get(pathname: string): Promise<number> {
   if (!server) throw new Error('server not started');

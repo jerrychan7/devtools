@@ -1,20 +1,22 @@
 // Shell mode by default: the zero-config probe enters it on the first load, falls back to the
 // page on its own when the page cannot be framed, and keeps the address bar on the page shown.
-import { after, before, beforeEach, test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { clickF12, launch } from '../../support/browser.ts';
+import { clickF12, launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 let url = '';
 
-before(async () => {
-  env = await launch();
-  url = env.baseUrl + '/tests/e2e/pages/default-shell.html';
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    url = env.baseUrl + '/tests/e2e/pages/default-shell.html';
+  },
+  () => env?.close()
+);
 beforeEach(async () => {
   await page?.close();
   assert.ok(env);

@@ -1,10 +1,17 @@
 // Same-origin iframes in shadow trees: like Chrome, each gets a frame, so it appears in the Page
 // frame tree and events, as a DOM contentDocument, with an execution context and with its
 // requests, against Chrome's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 for (const key of ['id', 'parentId']) VOLATILE.add(key);
@@ -15,41 +22,43 @@ const NETWORK = '/packages/devtools-anywhere/test-support/frame-network.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'Page.frameAttached',
-    'Page.frameNavigated',
-    'Page.frameDetached',
-    'Runtime.executionContextCreated',
-    'Network.requestWillBeSent',
-  ]);
-  // An iframe in a shadow tree, holding one in a shadow tree of its own document; there before
-  // DevTools connects.
-  await t.page.evaluate(
-    src =>
-      new Promise(resolve => {
-        const host = Object.assign(document.createElement('div'), { id: 'open-host' });
-        const frame = Object.assign(document.createElement('iframe'), { id: 'outer', src });
-        frame.onload = () => {
-          const doc = frame.contentDocument;
-          if (!doc) throw new Error('no document');
-          const inner = Object.assign(doc.createElement('iframe'), { id: 'inner', srcdoc: '<b>in</b>' });
-          inner.onload = resolve;
-          doc.body.attachShadow({ mode: 'open' }).append(inner);
-        };
-        host.attachShadow({ mode: 'open' }).append(frame);
-        document.body.append(host);
-      }),
-    CHILD
-  );
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('Page.enable');
-    await side.send('Runtime.enable');
-    await side.send('Network.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'Page.frameAttached',
+      'Page.frameNavigated',
+      'Page.frameDetached',
+      'Runtime.executionContextCreated',
+      'Network.requestWillBeSent',
+    ]);
+    // An iframe in a shadow tree, holding one in a shadow tree of its own document; there before
+    // DevTools connects.
+    await t.page.evaluate(
+      src =>
+        new Promise(resolve => {
+          const host = Object.assign(document.createElement('div'), { id: 'open-host' });
+          const frame = Object.assign(document.createElement('iframe'), { id: 'outer', src });
+          frame.onload = () => {
+            const doc = frame.contentDocument;
+            if (!doc) throw new Error('no document');
+            const inner = Object.assign(doc.createElement('iframe'), { id: 'inner', srcdoc: '<b>in</b>' });
+            inner.onload = resolve;
+            doc.body.attachShadow({ mode: 'open' }).append(inner);
+          };
+          host.attachShadow({ mode: 'open' }).append(frame);
+          document.body.append(host);
+        }),
+      CHILD
+    );
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('Page.enable');
+      await side.send('Runtime.enable');
+      await side.send('Network.enable');
+    }
+  },
+  () => env?.close()
+);
 
 const both = async <T>(fn: (side: Side) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 

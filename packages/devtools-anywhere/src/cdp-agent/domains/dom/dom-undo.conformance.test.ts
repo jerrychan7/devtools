@@ -1,8 +1,8 @@
 // DOM.undo / DOM.redo / DOM.markUndoableState. Both sides edit the same page, so each scenario
 // runs on Chrome and then on ours, from the same markup, and the snapshots are compared.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -11,18 +11,20 @@ let t: TestPage;
 const MARKUP =
   '<div id="a" class="x" title="t"><span id="s">one</span><b id="b">two</b></div><p id="p">text</p><section id="dst"></section>';
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'DOM.childNodeRemoved',
-    'DOM.childNodeInserted',
-    'DOM.attributeModified',
-    'DOM.attributeRemoved',
-    'DOM.characterDataModified',
-  ]);
-  for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'DOM.childNodeRemoved',
+      'DOM.childNodeInserted',
+      'DOM.attributeModified',
+      'DOM.attributeRemoved',
+      'DOM.characterDataModified',
+    ]);
+    for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
+  },
+  () => env?.close()
+);
 
 type Scenario = (side: Side, id: (selector: string) => Promise<number>, snap: () => Promise<void>) => Promise<void>;
 

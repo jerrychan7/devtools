@@ -1,20 +1,22 @@
 // The single-script setup, and the Service Worker that injects the probe in shell mode.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { chooseDockSide, devtoolsShown, frontendRequest, launch } from '../support/browser.ts';
+import { chooseDockSide, devtoolsShown, frontendRequest, launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
+  },
+  () => env?.close()
+);
 
 /** Messages the fake frontend received, in or outside shell mode. */
 const received = () =>

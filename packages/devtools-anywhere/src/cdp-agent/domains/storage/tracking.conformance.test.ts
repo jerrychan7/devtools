@@ -1,6 +1,6 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, EventName, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 const EVENTS = [
@@ -15,19 +15,21 @@ let env: Env | undefined;
 let t: TestPage;
 let storageKey: string;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [...EVENTS]);
-  storageKey = new URL(env.baseUrl).origin + '/';
-  // A bucket exists already: tracking reports it at once.
-  await t.page.evaluate(() => caches.open('existing').then(() => undefined));
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('Storage.trackIndexedDBForStorageKey', { storageKey });
-    await side.send('Storage.trackCacheStorageForStorageKey', { storageKey });
-    await side.send('Storage.setStorageBucketTracking', { storageKey, enable: true });
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [...EVENTS]);
+    storageKey = new URL(env.baseUrl).origin + '/';
+    // A bucket exists already: tracking reports it at once.
+    await t.page.evaluate(() => caches.open('existing').then(() => undefined));
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('Storage.trackIndexedDBForStorageKey', { storageKey });
+      await side.send('Storage.trackCacheStorageForStorageKey', { storageKey });
+      await side.send('Storage.setStorageBucketTracking', { storageKey, enable: true });
+    }
+  },
+  () => env?.close()
+);
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 300));
 const clear = () => Promise.all([t.ours.clear(), t.chrome.clear()]);

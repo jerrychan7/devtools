@@ -2,7 +2,8 @@
 // the same commands on the same pages (test-support/oopif/oopif-sides.ts), what the parent and the
 // iframe's page get compared. In Chrome the iframe is out of process and the browser routes input
 // to it; our parent's agent forwards it over the link to the iframe's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../test-support/conformance.ts';
 import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
@@ -10,10 +11,12 @@ import { chromeSide, get, oursSide, type Side } from '../../../../test-support/o
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 /**
  * Records the page's input events, named by their targets, on the document: Chrome's inspect

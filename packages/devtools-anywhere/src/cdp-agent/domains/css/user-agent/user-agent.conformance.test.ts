@@ -1,8 +1,8 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { CDPSession, Page } from 'puppeteer-core';
-import { launch } from '../../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env } from '../../../../../test-support/conformance.ts';
 
 // The user agent sheet is found next to the bundle's script: here the bundle is loaded from its
@@ -15,31 +15,33 @@ type Send = (method: string, params?: object) => Promise<unknown>;
 let sendOurs: Send;
 let sendChrome: Send;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
-  await page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<ul><li id="li"><p id="p">x<b id="b">b</b><input id="i"><a id="a" href="#">a</a></p></li></ul>' +
-        '<h1 id="h">h</h1><svg><a id="svg-a"><text>t</text></a></svg>'
-    )
-  );
-  chrome = await page.createCDPSession();
-  await page.addScriptTag({ url: env.baseUrl + '/packages/devtools-anywhere/dist/devtools-anywhere.iife.js' });
-  await page.evaluate(() => {
-    window.__session = window.DevtoolsAnywhere.createCdpSession();
-    window.__session.onMessage(() => {});
-  });
-  sendOurs = (method, params = {}) => page.evaluate((m, p) => window.__session.call(m, p), method, params);
-  sendChrome = (method, params = {}) => chrome.send(method as never, params as never);
-  for (const send of [sendOurs, sendChrome]) {
-    await send('DOM.enable');
-    await send('CSS.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
+    await page.evaluate(() =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<ul><li id="li"><p id="p">x<b id="b">b</b><input id="i"><a id="a" href="#">a</a></p></li></ul>' +
+          '<h1 id="h">h</h1><svg><a id="svg-a"><text>t</text></a></svg>'
+      )
+    );
+    chrome = await page.createCDPSession();
+    await page.addScriptTag({ url: env.baseUrl + '/packages/devtools-anywhere/dist/devtools-anywhere.iife.js' });
+    await page.evaluate(() => {
+      window.__session = window.DevtoolsAnywhere.createCdpSession();
+      window.__session.onMessage(() => {});
+    });
+    sendOurs = (method, params = {}) => page.evaluate((m, p) => window.__session.call(m, p), method, params);
+    sendChrome = (method, params = {}) => chrome.send(method as never, params as never);
+    for (const send of [sendOurs, sendChrome]) {
+      await send('DOM.enable');
+      await send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 /** The node of `selector`, on one side. */
 async function nodeId(send: Send, selector: string) {

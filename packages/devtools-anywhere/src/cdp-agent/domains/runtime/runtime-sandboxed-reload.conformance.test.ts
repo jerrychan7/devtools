@@ -1,7 +1,8 @@
 // A sandboxed iframe merged into the page's agent (core/frames/merged-frames.ts) reloading, against
 // Chrome, which keeps it in the page's target: its document's context is destroyed, then the next
 // one's created, with an id never seen before. Pages of its own: the reload changes them.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
 import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
@@ -11,16 +12,18 @@ let env: Env | undefined;
 let ours: MergedSide | undefined;
 let chrome: MergedSide | undefined;
 
-before(async () => {
-  env = await launchOopif();
-  chrome = await chromeSide(env);
-  ours = await oursSide(env);
-});
-after(async () => {
-  await ours?.close();
-  await chrome?.close();
-  await env?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    chrome = await chromeSide(env);
+    ours = await oursSide(env);
+  },
+  async () => {
+    await ours?.close();
+    await chrome?.close();
+    await env?.close();
+  }
+);
 
 /** The sandboxed frame's id, from the page's frame tree. */
 async function sandboxedFrameId(side: MergedSide): Promise<string> {

@@ -1,13 +1,15 @@
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
-before(async () => {
-  env = await launch();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+  },
+  () => env?.close()
+);
 
 /** What the frontend asks for (SDK's LogModel). */
 const CONFIG = [

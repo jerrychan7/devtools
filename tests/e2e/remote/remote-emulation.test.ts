@@ -8,28 +8,30 @@
 // nothing (A sets 400x600, B 700x300, A 400x600 again: 700x300), but does once the page has none
 // (another's clear lifted it). A set Chrome rejects (a negative width) is not kept, and a session's own override stays. The first test checks this
 // in Chrome; the next ones, the relay re-sending each client's override to the new page instance.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import { startRemoteServer, type RemoteServer } from '@devtools-anywhere/remote-server';
-import { frontendRequest, launch } from '../../support/browser.ts';
+import { frontendRequest, launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
 let remote: RemoteServer | undefined;
 
-before(async () => {
-  env = await launch();
-  remote = await startRemoteServer({
-    port: 0,
-    host: '127.0.0.1',
-    token: false,
-  });
-});
-after(async () => {
-  await env?.close();
-  await remote?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    remote = await startRemoteServer({
+      port: 0,
+      host: '127.0.0.1',
+      token: false,
+    });
+  },
+  async () => {
+    await env?.close();
+    await remote?.close();
+  }
+);
 
 const metrics = (width: number, height: number) => ({
   width,

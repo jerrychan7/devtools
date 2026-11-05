@@ -1,9 +1,9 @@
 // Safe areas (a page with viewport-fit=cover on a screen with cutouts): the panel keeps clear of
 // them on the screen's edges, never on its inner edge.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { chooseDockSide, launch } from '../../support/browser.ts';
+import { chooseDockSide, launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
@@ -32,11 +32,13 @@ async function openWithSafeAreas(path: string): Promise<Page> {
   return opened;
 }
 
-before(async () => {
-  env = await launch();
-  page = await openWithSafeAreas('/tests/e2e/pages/zero-config.html');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await openWithSafeAreas('/tests/e2e/pages/zero-config.html');
+  },
+  () => env?.close()
+);
 
 /** The panel's padding (top, right, bottom, left) in `target`, once docked to `dock` and equal to `expected` if given. */
 const padding = (dock: string, target: Page = page, expected?: string[]) =>

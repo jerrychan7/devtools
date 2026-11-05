@@ -2,7 +2,8 @@
 // (core/frames/merged-frames.ts), against Chrome, which keeps the iframe in the page's target: its
 // scripts are reported on the page's session, in the iframe's execution context, and its script
 // and object ids are answered there.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
 import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
@@ -12,17 +13,19 @@ let env: Env | undefined;
 let ours: MergedSide | undefined;
 let chrome: MergedSide | undefined;
 
-before(async () => {
-  env = await launchOopif();
-  chrome = await chromeSide(env);
-  ours = await oursSide(env);
-  for (const side of [chrome, ours]) await side.send('Debugger.enable');
-});
-after(async () => {
-  await ours?.close();
-  await chrome?.close();
-  await env?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    chrome = await chromeSide(env);
+    ours = await oursSide(env);
+    for (const side of [chrome, ours]) await side.send('Debugger.enable');
+  },
+  async () => {
+    await ours?.close();
+    await chrome?.close();
+    await env?.close();
+  }
+);
 
 const sides = () => {
   assert.ok(chrome && ours);

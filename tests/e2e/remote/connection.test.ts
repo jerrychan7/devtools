@@ -1,11 +1,11 @@
 // connectFrontend() with a minimal fake frontend (a same-origin iframe) instead of Chii.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { launch } from '../../support/browser.ts';
+import { launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -21,22 +21,24 @@ const FRONTEND = `<script>
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
-  await page.addScriptTag({ path: BUNDLE });
-  await page.evaluate(() => console.log('logged before connecting'));
-  await page.evaluate(html => {
-    window.__session = window.DevtoolsAnywhere.createCdpSession();
-    const frame = document.createElement('iframe');
-    frame.srcdoc = html;
-    document.body.appendChild(frame);
-    window.__frame = frame;
-    window.DevtoolsAnywhere.connectFrontend(window.__session, frame, location.origin);
-  }, FRONTEND);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
+    await page.addScriptTag({ path: BUNDLE });
+    await page.evaluate(() => console.log('logged before connecting'));
+    await page.evaluate(html => {
+      window.__session = window.DevtoolsAnywhere.createCdpSession();
+      const frame = document.createElement('iframe');
+      frame.srcdoc = html;
+      document.body.appendChild(frame);
+      window.__frame = frame;
+      window.DevtoolsAnywhere.connectFrontend(window.__session, frame, location.origin);
+    }, FRONTEND);
+  },
+  () => env?.close()
+);
 
 const received = () =>
   page.evaluate(() => {

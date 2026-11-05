@@ -1,23 +1,25 @@
 // data-devtools-anywhere-toggle: any element of the page opens and closes the global
 // <devtools-anywhere>, in the page itself and from the page inside the shell.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Frame, Page } from 'puppeteer-core';
-import { frontendRequest, launch } from '../../support/browser.ts';
+import { frontendRequest, launch, setUpAndTearDown } from '../../support/browser.ts';
 import type { Env } from '../../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 const warnings: string[] = [];
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  page.on('console', m => {
-    if (m.type() === 'warn') warnings.push(m.text());
-  });
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    page.on('console', m => {
+      if (m.type() === 'warn') warnings.push(m.text());
+    });
+  },
+  () => env?.close()
+);
 
 /** Whether DevTools is open, and each toggler's aria-expanded. */
 const state = (frame: Page | Frame = page) =>

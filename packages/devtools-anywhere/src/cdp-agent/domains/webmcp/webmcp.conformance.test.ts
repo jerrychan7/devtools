@@ -1,6 +1,6 @@
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VOLATILE, diffSubset, launch, openPage } from '../../../../test-support/conformance.ts';
+import { VOLATILE, diffSubset, launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 import type { Protocol } from 'devtools-protocol';
 
@@ -10,11 +10,13 @@ const EVENTS = ['WebMCP.toolsAdded', 'WebMCP.toolsRemoved', 'WebMCP.toolInvoked'
 
 let env: Env | undefined;
 
-before(async () => {
-  // WebMCP is still behind flags in Chrome.
-  env = await launch(['--enable-features=WebMCP', '--enable-blink-features=WebMCP']);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    // WebMCP is still behind flags in Chrome.
+    env = await launch(['--enable-features=WebMCP', '--enable-blink-features=WebMCP']);
+  },
+  () => env?.close()
+);
 
 /** Every tool one side announced and has not removed, by name. */
 async function toolsOf(side: Side) {

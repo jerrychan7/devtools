@@ -1,9 +1,9 @@
 // Emulation of media, safe area insets and vision deficiencies. Chrome and we both act on the same
 // page, so each side emulates, measures and clears in turn.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -27,17 +27,19 @@ const STYLE = `
   #vd { position: fixed; top: 0; left: 0; width: 20px; height: 20px; background: rgb(200, 40, 40) }
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(style => {
-    const s = document.createElement('style');
-    s.textContent = style;
-    document.head.appendChild(s);
-    document.body.insertAdjacentHTML('beforeend', '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div>');
-  }, STYLE);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(style => {
+      const s = document.createElement('style');
+      s.textContent = style;
+      document.head.appendChild(s);
+      document.body.insertAdjacentHTML('beforeend', '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div>');
+    }, STYLE);
+  },
+  () => env?.close()
+);
 
 const measure = () =>
   t.page.evaluate(() => {

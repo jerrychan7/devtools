@@ -1,6 +1,6 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -19,14 +19,16 @@ const addScript = (query: string) =>
     query
   );
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['Debugger.scriptParsed', 'Runtime.executionContextCreated']);
-  await addScript('before');
-  await t.chrome.send('Debugger.enable');
-  await t.ours.send('Debugger.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['Debugger.scriptParsed', 'Runtime.executionContextCreated']);
+    await addScript('before');
+    await t.chrome.send('Debugger.enable');
+    await t.ours.send('Debugger.enable');
+  },
+  () => env?.close()
+);
 
 const parsed = async (side: Side, query: string) =>
   (await side.events('Debugger.scriptParsed')).find(e => e.url.endsWith(`resource.js?${query}`));

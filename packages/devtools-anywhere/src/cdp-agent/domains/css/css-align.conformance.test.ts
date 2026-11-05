@@ -2,10 +2,10 @@
 // CSS.addRule in an @media, headers of style sheets a script inserts, :host-context() and
 // ::slotted() through nested slots, adoptedStyleSheets changes, nested selectors as written,
 // gradient stops in other color spaces and em / rem in media queries.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -23,37 +23,39 @@ const STYLE = `
   #al-g4 { background: linear-gradient(rgba(0, 0, 0, 0.5), blue), linear-gradient(red, blue); }
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.styleSheetAdded', 'CSS.styleSheetRemoved']);
-  await t.page.evaluate(style => {
-    const s = document.createElement('style');
-    s.textContent = style;
-    document.head.appendChild(s);
-    document.documentElement.style.fontSize = '20px';
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      `<div id="al-p" style="color: blue; margin: 3px; top: x; left: var(--v) !important">x</div>
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.styleSheetAdded', 'CSS.styleSheetRemoved']);
+    await t.page.evaluate(style => {
+      const s = document.createElement('style');
+      s.textContent = style;
+      document.head.appendChild(s);
+      document.documentElement.style.fontSize = '20px';
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<div id="al-p" style="color: blue; margin: 3px; top: x; left: var(--v) !important">x</div>
       <div data-al="p{1}"><i class="al-q" id="al-q"></i><i data-al="c;}" id="al-q2"></i></div><div class="al-par"><div class="al-x" id="al-x">x</div><div class="al-y al-z" id="al-y">y</div></div>
       <div id="al-g1">g</div><div id="al-g2">g</div><div id="al-g3">g</div><div id="al-g4">g</div>
       <div class="al-dark"><div id="al-host"></div></div>`
-    );
-    const host = document.getElementById('al-host');
-    if (!host) return;
-    const outer = host.attachShadow({ mode: 'open' });
-    outer.innerHTML =
-      '<style>:host-context(.al-dark) { color: red } :host-context(.al-light) { top: 1px } ::slotted(span) { color: blue }</style><div id="al-inner"><slot></slot></div>';
-    const inner = outer.getElementById('al-inner')?.attachShadow({ mode: 'open' });
-    if (inner)
-      inner.innerHTML = '<style>::slotted(span) { margin: 3px } ::slotted(slot) { margin: 4px }</style><slot></slot>';
-    host.innerHTML = '<span id="al-slotted">s</span>';
-  }, STYLE);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+      );
+      const host = document.getElementById('al-host');
+      if (!host) return;
+      const outer = host.attachShadow({ mode: 'open' });
+      outer.innerHTML =
+        '<style>:host-context(.al-dark) { color: red } :host-context(.al-light) { top: 1px } ::slotted(span) { color: blue }</style><div id="al-inner"><slot></slot></div>';
+      const inner = outer.getElementById('al-inner')?.attachShadow({ mode: 'open' });
+      if (inner)
+        inner.innerHTML = '<style>::slotted(span) { margin: 3px } ::slotted(slot) { margin: 4px }</style><slot></slot>';
+      host.innerHTML = '<span id="al-slotted">s</span>';
+    }, STYLE);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 function find(node: Protocol.DOM.Node, id: string): Protocol.DOM.Node | undefined {
   const attrs = node.attributes ?? [];

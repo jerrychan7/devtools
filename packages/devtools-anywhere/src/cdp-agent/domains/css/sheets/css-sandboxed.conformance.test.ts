@@ -3,7 +3,8 @@
 // target: its style sheets announced on the page's session with its frame id, the styles of its
 // nodes, and the editing of its rules. The sandboxed node is reached through Runtime (its
 // context) and DOM.requestNode.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../../tests/support/browser.ts';
 import { launchOopif } from '../../../../../test-support/oopif/oopif.ts';
@@ -15,16 +16,18 @@ let chrome: MergedSide | undefined;
 
 const RULE = '#target { color: rgb(1, 2, 3); }';
 
-before(async () => {
-  env = await launchOopif();
-  chrome = await chromeSide(env);
-  ours = await oursSide(env);
-});
-after(async () => {
-  await ours?.close();
-  await chrome?.close();
-  await env?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    chrome = await chromeSide(env);
+    ours = await oursSide(env);
+  },
+  async () => {
+    await ours?.close();
+    await chrome?.close();
+    await env?.close();
+  }
+);
 
 /** The sandboxed frame's id, from the page's frame tree. */
 async function sandboxedFrameId(side: MergedSide): Promise<string> {

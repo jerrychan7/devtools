@@ -3,7 +3,8 @@
 // the iframe in the page's process and target, and routes the input into it; our page's agent
 // forwards it over the merged link to the iframe's. The iframe's page is read in its own execution
 // context, on the page's session.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
 import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
@@ -11,10 +12,12 @@ import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-sup
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 /** Records the input events of a document, named by their targets. */
 const RECORD = `(() => {
