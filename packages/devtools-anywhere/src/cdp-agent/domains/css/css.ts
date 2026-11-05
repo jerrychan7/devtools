@@ -752,6 +752,8 @@ export function registerCss(ctx: Context) {
     addRule(params: Protocol.CSS.AddRuleRequest): Protocol.CSS.AddRuleResponse {
       const sheet = sheets.get(params.styleSheetId);
       assertEditable(sheet);
+      // Like Chrome, a location is a range: one that starts past its end is refused first.
+      assertOrdered(params.location);
       // Like Chrome, a location in an @media (or another group rule) puts the rule in it.
       const { startLine, startColumn } = params.location;
       const entries = sheets.entries(sheet).map(e => e.rule);

@@ -202,7 +202,7 @@ test("errors: a key the parser does not take, a range past the text, a range tha
   assert.deepEqual(ours, chrome);
 });
 
-test('errors: a range that starts past its end, to every edit; a selector range not a selector’s', async () => {
+test('errors: a range that starts past its end, to every edit and addRule’s location; a selector range not a selector’s', async () => {
   const [ours, chrome] = await each(async side => {
     const res = await raw(side);
     const sheet = res.cssKeyframesRules?.[0]?.keyframes[0]?.styleSheetId;
@@ -223,6 +223,7 @@ test('errors: a range that starts past its end, to every edit; a selector range 
       await error(side.send('CSS.setContainerQueryConditionText', { ...at, text: '(min-width: 0px)' })),
       await error(side.send('CSS.setScopeText', { ...at, text: '(.c0)' })),
       await error(side.send('CSS.setKeyframeKey', { ...at, keyText: 'from' })),
+      await error(side.send('CSS.addRule', { styleSheetId: sheet, ruleText: '.r {}', location: reversed })),
       // Inside `.c1 {`: not where a selector starts and ends.
       await error(
         side.send('CSS.setRuleSelector', {
