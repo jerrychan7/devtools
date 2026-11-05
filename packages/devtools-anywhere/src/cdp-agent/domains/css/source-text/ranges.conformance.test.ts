@@ -104,6 +104,22 @@ test('relative selector lists in nested rules', () =>
     'a'
   ));
 
+test('comments in and after selectors: out of their text, the last one in the range', () =>
+  same(
+    `p.q1 /*{*/ { top: 1px }
+p.q1 /*a*/, /*b*/ div.q1 /*c*/ /*d*/ { left: 1px }
+/*x*/p.q1/*y*/{right:1px}
+p/*z*/.q1, p /*z*/ .q1,p
+/*q*/
+.q1
+/*w*/ { order: 1 }
+p.q1/**/ ,div{bottom:1px}
+[title="/*"].q1 /**/ { z-index: 1 }
+.q2 { p.q1 /* n */ { color: red } }`,
+    '<div class="q2"><p class="q1" title="/*">x</p></div>',
+    '.q1'
+  ));
+
 test("Chrome's user agent style sheet, whole: the text as written and the rules in it", async () => {
   const css = readFileSync(new URL('../user-agent/html.css', import.meta.url), 'utf8');
   const at = await addStyle(

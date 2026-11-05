@@ -381,7 +381,7 @@ export function offsetsOf(source: SheetSource, range: Protocol.CSS.SourceRange):
 
 /**
  * The selectors of a prelude as Chrome gives their ranges: each from its first character to the
- * comma after it (white space before it included), the last one to the end of the prelude.
+ * comma after it (white space and comments before it included), the last one to the `{`.
  */
 export function selectorSpans(text: string, node: CssRule): [number, number][] {
   const from = node.preludeStart;
@@ -399,11 +399,21 @@ export function selectorSpans(text: string, node: CssRule): [number, number][] {
       start = -1;
     } else if (start < 0 && k !== Tok.Ws && k !== Tok.Comment) start = at;
   });
-  // Like Chrome, without the white space ending it, even that of an escape (`.k\31 `).
-  let end = node.preludeEnd;
+  // Like Chrome, with the comments ending it (to the `{`), without the white space, even that of
+  // an escape (`.k\31 `).
+  let end = node.blockStart >= 0 ? node.blockStart : node.preludeEnd;
   while (end > from && /[ \t\n\r\f]/.test(text[end - 1] ?? '')) end--;
   spans.push([from + Math.max(start, 0), end]);
   return spans.map(([s, e]) => [Math.min(s, e), e]);
+}
+
+/**
+ * The text of a selector as Chrome gives it: what is in its range without comments, trimmed of
+ * CSS white space (U+2028 and others JavaScript trims are characters of a selector). Like Chrome,
+ * a comment is anything from `/*` to `*\/`, in a string too.
+ */
+export function selectorText(range: string): string {
+  return range.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '');
 }
 
 /**

@@ -7,7 +7,7 @@ import type { TreeScope } from './forced-pseudo';
 import { shownMedia } from '../../emulation/rewrite';
 import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scopeText, selectorLabel } from './rules';
 import type { SheetRegistry, Styled } from '../sheets/sheet-registry';
-import { rangeOf, selectorSpans, sourceStyle } from '../sheets/sheet-text';
+import { rangeOf, selectorSpans, selectorText, sourceStyle } from '../sheets/sheet-text';
 import { type CSSStyle, buildStyle } from '../style';
 
 /** Rules of the page's sheets in the shape the CSS domain reports them in. */
@@ -41,8 +41,7 @@ export class RuleView {
     if (source && spans.length === parts.length)
       return {
         selectors: spans.map(([start, end], i) => ({
-          // CSS white space only: U+2028 and others JavaScript trims are characters of a selector.
-          text: source.text.slice(start, end).replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ''),
+          text: selectorText(source.text.slice(start, end)),
           specificity: specificity(resolveSelector(parts[i] ?? '', rule, true)),
           range: rangeOf(source, start, end),
         })),
