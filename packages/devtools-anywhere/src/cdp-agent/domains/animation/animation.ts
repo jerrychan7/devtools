@@ -20,8 +20,13 @@ interface Tracked {
   start: number | null;
   /** Frames to wait before reporting a seek's new start time (see `seekAnimations`). */
   hold: number;
-  /** Whether it is idle and was reported so (or never ran): cancelled once, reported once. */
-  canceled: boolean;
+  /**
+   * The state, paused or idle, last reported with `animationCanceled` (or the one it was first seen
+   * in): Chrome reports one on every change of the play state to paused or idle (measured: the page
+   * or the panel pausing it, the page cancelling it, pausing a finished or an idle one, cancelling a
+   * paused one), none while it stays so. Null while it runs or is finished.
+   */
+  canceled: 'paused' | 'idle' | null;
   /** Released by the client: not reported again, nor found by id; still slowed by the domain's rate. */
   released: boolean;
 }
@@ -240,6 +245,12 @@ function startOf(animation: Animation): number | null {
  * own rate from here, not the slowed `playbackRate`; one enabled after the page changed the rate
  * meanwhile compares with `seen` and reports the change, as Chrome does with an update.
  */
+/** Whether it is paused (pending a pause too) or idle, the states Chrome reports with a cancel. */
+function pausedOrIdle(animation: Animation): 'paused' | 'idle' | null {
+  const state = animation.playState;
+  return state === 'paused' || state === 'idle' ? state : null;
+}
+
 const owed = new WeakMap<Animation, { own: number; seen: number }>();
 
 /**
@@ -385,8 +396,9 @@ export function registerAnimation(ctx: Context) {
       seen: 0,
       start: null,
       hold: 0,
-      // Chrome reports a cancel on the change to idle: one made idle (`new Animation()`) never had it.
-      canceled: animation.playState === 'idle',
+      // Chrome reports a cancel on the change to idle or paused: one made idle (`new Animation()`)
+      // never had it, nor one already paused when first seen.
+      canceled: pausedOrIdle(animation),
       released: false,
     };
     tracked.set(animation, t);
@@ -435,7 +447,8 @@ export function registerAnimation(ctx: Context) {
     const rated = syncRate(t);
     if (t.released) return false;
     if (!t.started) {
-      if (animation.pending || animation.playState === 'idle') return false;
+      // Chrome announces no start of one paused before it started (measured).
+      if (animation.pending || pausedOrIdle(animation)) return false;
       t.started = true;
       t.start = startOf(animation);
       session.emit('Animation.animationStarted', { animation: describe(t) });
@@ -448,6 +461,9 @@ export function registerAnimation(ctx: Context) {
       t.hold--;
       return false;
     }
+    // A paused one's start time is the pause's doing (or the page's in the task that paused it),
+    // which Chrome reports with the cancel alone (measured).
+    if (animation.playState === 'paused') return false;
     const start = startOf(animation);
     if ((start !== null && start !== t.start) || rated) {
       t.start = start ?? t.start;
@@ -457,19 +473,19 @@ export function registerAnimation(ctx: Context) {
     return false;
   };
 
-  /** Reports a cancel (Chrome reports one even before the start), and lets ended ones sleep. */
+  /**
+   * Reports a change to paused or idle as Chrome does, with a cancel (even before the start), and
+   * lets ended ones sleep. The panel keeps showing a paused one: its model only drops the id from
+   * the ones waiting to be grouped.
+   */
   const settle = (t: Tracked) => {
-    const state = t.animation.playState;
-    if (state !== 'idle' && state !== 'finished') {
-      t.canceled = false;
-      return;
+    const state = pausedOrIdle(t.animation);
+    if (state !== t.canceled) {
+      t.canceled = state;
+      if (state === 'idle') t.start = null;
+      if (state && !t.released) session.emit('Animation.animationCanceled', { id: t.id });
     }
-    if (state === 'idle' && !t.canceled) {
-      t.canceled = true;
-      t.start = null;
-      if (!t.released) session.emit('Animation.animationCanceled', { id: t.id });
-    }
-    sleep(t);
+    if (t.animation.playState === 'idle' || t.animation.playState === 'finished') sleep(t);
   };
 
   /** Announces new animations, and changes the page made to the ones announced. */

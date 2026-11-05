@@ -274,10 +274,10 @@ function hookAnimations(listeners: Set<(animation: Animation) => void>, w: Windo
   // page's, and calls without `new`, or on another `this`, throw as before. `toString()` keeps the
   // native form but loses the name: "function () { [native code] }" for "function animate() {...}".
   proto.animate = new Proxy(animate, { apply: (f, self, args) => tell(Reflect.apply(f, self, args)) });
-  // And on play() and cancel(): ended ones are not looked at every frame, and getAnimations() may
-  // miss them.
+  // And on play(), pause() and cancel(): ended ones are not looked at every frame, and
+  // getAnimations() may miss them; pausing one is reported too.
   const animProto = ctor.prototype;
-  for (const name of ['play', 'cancel'] as const)
+  for (const name of ['play', 'pause', 'cancel'] as const)
     animProto[name] = new Proxy(animProto[name], {
       apply: (f, self, args) => {
         Reflect.apply(f, self, args);

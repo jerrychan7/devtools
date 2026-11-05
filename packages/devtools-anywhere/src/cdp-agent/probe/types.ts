@@ -231,7 +231,7 @@ export interface Probe {
   shadowRoots: WeakMap<Element, ShadowRoot>;
   /** Subscribes to shadow roots being attached. */
   onShadowRoot(listener: (root: ShadowRoot) => void): () => void;
-  /** Subscribes to animations being made with `animate()` or `new Animation()`, played or cancelled. */
+  /** Subscribes to animations being made with `animate()` or `new Animation()`, played, paused or cancelled. */
   onAnimation(listener: (animation: Animation) => void): () => void;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;

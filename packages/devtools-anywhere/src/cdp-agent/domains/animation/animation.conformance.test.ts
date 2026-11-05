@@ -1323,3 +1323,69 @@ describe('Animation, scroll-driven', () => {
     assert.deepEqual(chrome.retimed, [2], 'one update, at the rate the page set');
   });
 });
+
+describe('Animation, play state changes', () => {
+  /** Runs each step in the page, and takes what each side reported after it. */
+  const steps = (list: [name: string, code: string][]) =>
+    onEachSide(async (t, side) => {
+      const out: Record<string, string[]> = {};
+      for (const [name, code] of list) {
+        await t.page.evaluate(code);
+        await sleep(250);
+        out[name] = (await reports(side)).map(r => r.split(' ').slice(0, 2).join(' '));
+      }
+      return out;
+    });
+
+  test('pausing or cancelling is reported with a cancel, playing again with an update, as in Chrome', async () => {
+    const [chrome, ours] = await steps([
+      [
+        'make',
+        `window.a = document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000)`,
+      ],
+      ['pause', 'a.pause()'],
+      ['seek while paused', 'a.currentTime = 3000'],
+      ['play', 'a.play()'],
+      ['pause and play in one task', 'a.pause(); a.play()'],
+      ['seek and pause in one task', 'a.currentTime = 1000; a.pause()'],
+      ['cancel while paused', 'a.cancel()'],
+      ['pause while idle', 'a.pause()'],
+      ['reverse while paused', 'a.reverse()'],
+      ['finish', 'a.finish()'],
+      ['pause while finished', 'a.pause()'],
+      ['play again', 'a.play()'],
+      ['cancel', 'a.cancel()'],
+      [
+        'made paused',
+        `document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 1000).pause()`,
+      ],
+    ]);
+    assert.deepEqual(chrome['pause'], ['Canceled 1']);
+    assert.deepEqual(ours, chrome);
+  });
+
+  test("the panel's pause is reported with a cancel, its play with an update, as in Chrome", async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000);
+      });
+      await sleep(300);
+      await reports(side);
+      const out: Record<string, string[]> = {};
+      const step = async (name: string, send: () => Promise<unknown>) => {
+        await send();
+        await sleep(250);
+        out[name] = (await reports(side)).map(r => r.split(' ').slice(0, 2).join(' '));
+      };
+      const animations = ['1'];
+      await step('pause', () => side.send('Animation.setPaused', { animations, paused: true }));
+      await step('seek paused', () => side.send('Animation.seekAnimations', { animations, currentTime: 500 }));
+      await step('play', () => side.send('Animation.setPaused', { animations, paused: false }));
+      await step('seek running', () => side.send('Animation.seekAnimations', { animations, currentTime: 500 }));
+      await step('pause again', () => side.send('Animation.setPaused', { animations, paused: true }));
+      return out;
+    });
+    assert.deepEqual(chrome['pause'], ['Canceled 1']);
+    assert.deepEqual(ours, chrome);
+  });
+});
