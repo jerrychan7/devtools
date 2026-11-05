@@ -175,6 +175,14 @@ function startOf(animation: Animation): number | null {
 }
 
 /**
+ * What a disable left of an animation pending then (see `stop`), across sessions: the page's own
+ * rate, and the `playbackRate` last seen. A session enabled again before it is restored takes the
+ * own rate from here, not the slowed `playbackRate`; one enabled after the page changed the rate
+ * meanwhile compares with `seen` and reports the change, as Chrome does with an update.
+ */
+const owed = new WeakMap<Animation, { own: number; seen: number }>();
+
+/**
  * Animation: the Animations panel, from `getAnimations()` of each document in the page, which has
  * the CSS animations and transitions and those of the Web Animations API. The page has no event for
  * an animation starting, so the documents are looked at on every frame while the domain is enabled.
@@ -311,7 +319,7 @@ export function registerAnimation(ctx: Context) {
       id: String(++seq),
       animation,
       started: false,
-      rate: animation.playbackRate,
+      rate: owed.get(animation)?.own ?? animation.playbackRate,
       seen: 0,
       start: null,
       hold: 0,
@@ -322,7 +330,9 @@ export function registerAnimation(ctx: Context) {
     tracked.set(animation, t);
     collected.register(t, t.id);
     awake.set(t.id, t);
-    t.seen = t.rate;
+    // The slowed rate a disable left is no change of the page's; one the page set since is.
+    t.seen = owed.get(animation)?.seen ?? animation.playbackRate;
+    owed.delete(animation);
     syncRate(t);
     session.emit('Animation.animationCreated', { id: t.id });
   };
@@ -364,6 +374,9 @@ export function registerAnimation(ctx: Context) {
       t.started = true;
       t.start = startOf(animation);
       session.emit('Animation.animationStarted', { animation: describe(t) });
+      // A rate the page set while it was pending, taken over from a disable (see `owed`): Chrome
+      // reports it with an update after the start.
+      if (rated) session.emit('Animation.animationUpdated', { animation: describe(t) });
       return;
     }
     if (t.hold > 0) {
@@ -448,13 +461,32 @@ export function registerAnimation(ctx: Context) {
     stopAnimations = null;
     // Every animation slowed down gets its own rate back: cancelled and released ones too, and
     // pending ones once they are ready (or cancelled), not to drop a rate the page set meanwhile.
+    // The rate to restore is fixed now: by the time a pending one is ready the domain may be enabled
+    // again with another rate, and tracking it anew. The page's change meanwhile is kept (its
+    // reverse() negated). One pending for good (its timeline inactive) keeps the panel's rate.
     rate = 1;
     for (const t of all()) {
-      if (!t.animation.pending) syncRate(t);
-      else {
-        const restore = () => void syncRate(t);
-        t.animation.ready.then(restore, restore);
+      const { animation } = t;
+      if (!animation.pending) {
+        syncRate(t);
+        continue;
       }
+      const { rate: own, seen } = t;
+      owed.set(animation, { own, seen });
+      const restore = () => {
+        // Pending again (the page played or changed its rate meanwhile): writing now would drop it.
+        if (animation.pending) {
+          animation.ready.then(restore, restore);
+          return;
+        }
+        // Taken by a session enabled since, which writes the rate itself: no longer `seen`. A rate
+        // the page set meanwhile is kept, and stays owed for the next session to report.
+        const now = animation.playbackRate;
+        if (now !== seen && now !== -seen) return;
+        owed.delete(animation);
+        animation.playbackRate = now === seen ? own : -own;
+      };
+      animation.ready.then(restore, restore);
     }
     awake.clear();
     asleep.clear();

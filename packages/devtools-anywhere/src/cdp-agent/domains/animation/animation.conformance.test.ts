@@ -709,7 +709,134 @@ describe('Animation, beyond getAnimations()', () => {
       await sleep(300);
       return (await side.events('Animation.animationUpdated')).length;
     });
+    // Only that the result matches Chrome's: the two changes may fall in different frames here, so
+    // this passes without the fix too. The test below puts them in one frame, on our side only.
     assert.equal(chrome, 1);
     assert.equal(ours, chrome);
+  });
+
+  test("the page's change to a start time in the panel's frame is reported (ours, one frame)", async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      await t.ours.send('Animation.enable');
+      const updates = await t.page.evaluate(async () => {
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 10000);
+        await frame();
+        await frame();
+        await frame();
+        const started = window.__ours.find(e => e.method === 'Animation.animationStarted');
+        const id = String(Object(Object(started?.params).animation).id);
+        window.__ours.length = 0;
+        animation.startTime = Number(animation.startTime) - 1000;
+        await window.__session.call('Animation.setTiming', { animationId: id, duration: 20000, delay: 0 });
+        await frame();
+        await frame();
+        return window.__ours.filter(e => e.method === 'Animation.animationUpdated').length;
+      });
+      assert.equal(updates, 1);
+    } finally {
+      await t.page.close();
+    }
+  });
+
+  test('a pending animation gets its own rate back though the domain is enabled again (ours)', async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      const rate = await t.page.evaluate(async () => {
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        const call = (method: string, params = {}) => window.__session.call(method, params);
+        await call('Animation.enable');
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 10000);
+        await frame();
+        await frame();
+        await call('Animation.setPlaybackRate', { playbackRate: 0.5 });
+        // Pending until ready: disable meets it pending, and the domain is enabled again meanwhile.
+        animation.updatePlaybackRate(-2);
+        await call('Animation.disable');
+        await call('Animation.enable');
+        await call('Animation.setPlaybackRate', { playbackRate: 0.25 });
+        await animation.ready;
+        await frame();
+        await frame();
+        await call('Animation.disable');
+        await frame();
+        return animation.playbackRate;
+      });
+      assert.equal(rate, -2);
+    } finally {
+      await t.page.close();
+    }
+  });
+
+  test('an animation a disable left pending is not taken at the slowed rate by the next session (ours)', async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      const rate = await t.page.evaluate(async () => {
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        const call = (method: string, params = {}) => window.__session.call(method, params);
+        await call('Animation.enable');
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 10000);
+        await frame();
+        await frame();
+        await call('Animation.setPlaybackRate', { playbackRate: 0.5 });
+        // Pending (a play after a pause) with the page's rate untouched; the next session tracks it
+        // at once, on enable, before it is ready. finish() ends the pending play at once, but the
+        // disable's callback on `ready` runs only after this task: the new session sets its rate first.
+        animation.pause();
+        animation.play();
+        void call('Animation.disable');
+        void call('Animation.enable');
+        animation.finish();
+        void call('Animation.setPlaybackRate', { playbackRate: 0.25 });
+        await animation.ready;
+        await frame();
+        await frame();
+        await call('Animation.disable');
+        await frame();
+        return animation.playbackRate;
+      });
+      assert.equal(rate, 1);
+    } finally {
+      await t.page.close();
+    }
+  });
+
+  test('a rate the page set pending at a disable survives it and is reported by the next session (ours)', async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      const result = await t.page.evaluate(async () => {
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        const call = (method: string, params = {}) => window.__session.call(method, params);
+        await call('Animation.enable');
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 100000);
+        await frame();
+        await frame();
+        await call('Animation.setPlaybackRate', { playbackRate: 0.25 });
+        await frame();
+        // Disabled and enabled again while the page's new rate is pending.
+        animation.updatePlaybackRate(2);
+        void call('Animation.disable');
+        void call('Animation.enable');
+        window.__ours.length = 0;
+        for (let i = 0; i < 5; i++) await frame();
+        const updated = window.__ours
+          .filter(e => e.method === 'Animation.animationUpdated')
+          .map(e => Number(Object(Object(e.params).animation).playbackRate));
+        await call('Animation.disable');
+        return { rate: animation.playbackRate, updated };
+      });
+      assert.deepEqual(result, { rate: 2, updated: [2] });
+    } finally {
+      await t.page.close();
+    }
   });
 });
