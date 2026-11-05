@@ -21,6 +21,24 @@ setUpAndTearDown(
   () => env?.close()
 );
 
+/**
+ * Empties the panel. It keeps only as many groups as its width holds and drops the oldest for a new
+ * one, so the groups a test leaves would keep the next one's from adding to the count.
+ */
+async function clearPanel() {
+  await frontend.evaluate(() => {
+    const walk = (root: Document | ShadowRoot): Element | undefined =>
+      root.querySelector('[title="Clear all"], [aria-label="Clear all"]') ??
+      [...root.querySelectorAll('*')].reduce<Element | undefined>(
+        (found, el) => found ?? (el.shadowRoot ? walk(el.shadowRoot) : undefined),
+        undefined
+      );
+    const button = walk(document);
+    if (button instanceof HTMLElement) button.click();
+  });
+  await waitFor(async () => (await count('.animation-buffer-preview')) === 0);
+}
+
 test('the Animations panel lists the CSS and Web Animations the page runs', { skip }, async () => {
   await showView('animations');
   const before = await count('.animation-buffer-preview');
@@ -31,8 +49,10 @@ test('the Animations panel lists the CSS and Web Animations the page runs', { sk
     document.head.append(style);
     const css = document.createElement('div');
     css.className = 'rf-spin';
+    css.id = 'rf-spin-el';
     document.body.append(css);
     const web = document.createElement('div');
+    web.id = 'rf-web-el';
     document.body.append(web);
     web.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity }).id = 'rf-web';
   });
@@ -50,10 +70,14 @@ test('the Animations panel lists the CSS and Web Animations the page runs', { sk
       return names.size === 2;
     });
   } finally {
+    // Removed, not only cancelled: selecting a group replays it, and a replay of the clicks above
+    // still on its way would start the cancelled animations again, in the next test's panel.
     await page.evaluate(() => {
       for (const animation of document.getAnimations()) animation.cancel();
-      document.querySelector('.rf-spin')?.classList.remove('rf-spin');
+      document.getElementById('rf-spin-el')?.remove();
+      document.getElementById('rf-web-el')?.remove();
     });
+    await clearPanel();
   }
 });
 
@@ -79,19 +103,7 @@ test('the Animations panel keeps a group for each of two CSS animations started 
       for (const animation of document.getAnimations()) animation.cancel();
       for (const el of document.querySelectorAll('.rf-one, .rf-two')) el.remove();
     });
-    // The panel keeps only as many groups as its width holds and drops the oldest for a new one, so
-    // the groups left here would keep the next test's from adding to the count: clear them.
-    await frontend.evaluate(() => {
-      const walk = (root: Document | ShadowRoot): Element | undefined =>
-        root.querySelector('[title="Clear all"], [aria-label="Clear all"]') ??
-        [...root.querySelectorAll('*')].reduce<Element | undefined>(
-          (found, el) => found ?? (el.shadowRoot ? walk(el.shadowRoot) : undefined),
-          undefined
-        );
-      const button = walk(document);
-      if (button instanceof HTMLElement) button.click();
-    });
-    await waitFor(async () => (await count('.animation-buffer-preview')) === 0);
+    await clearPanel();
   }
 });
 
