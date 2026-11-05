@@ -224,7 +224,8 @@ export class SheetRegistry {
             this.copies.set(sheet, copy);
           }
           this.texts.set(sheet, text, true);
-          onLoaded(sheet);
+          // A readable sheet's rules were there already: only a copy brings new ones.
+          if (!readable) onLoaded(sheet);
         })
         // Not tried again: a readable sheet keeps its serialized text.
         .catch(() => void this.copies.set(sheet, null))
