@@ -179,6 +179,60 @@ describe('Animation', () => {
     assert.deepEqual(diffSubset(ours.get('sk'), chrome.get('sk')), []);
   });
 
+  /** A shadow tree's style sheet that animates its <p>s with `name`. */
+  const SHADOW = (name: string) =>
+    `<style>@keyframes ${name} { 50% { opacity: 0.5 } } p { animation: ${name} 0.4s infinite }</style><p>x</p>`;
+
+  /** Has the page run `script`, then checks both sides announce the animation `name`. */
+  async function announced(script: string, name: string) {
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    await t.page.evaluate(script);
+    const [chrome, ours] = [await started(t.chrome, 1), await started(t.ours, 1)];
+    assert.ok(chrome.get(name), 'Chrome announces it');
+    assert.ok(ours.get(name), `we announce ${[...ours.keys()].join()} instead`);
+    assert.deepEqual(diffSubset(ours.get(name), chrome.get(name)), []);
+  }
+
+  test('a shadow root attached before its host is inserted is looked into, as in Chrome', async () => {
+    await announced(
+      `(async () => {
+        const frame = () => new Promise(r => requestAnimationFrame(r));
+        const host = document.createElement('div');
+        host.attachShadow({ mode: 'open' }).innerHTML = ${JSON.stringify(SHADOW('dk'))};
+        // Frames go by, each walking the shadow trees, before the host is in the document.
+        for (let i = 0; i < 3; i++) await frame();
+        document.body.append(host);
+      })()`,
+      'dk'
+    );
+  });
+
+  test('declarative shadow roots are looked into, as in Chrome', async () => {
+    await announced(
+      `(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        div.setHTMLUnsafe('<div><template shadowrootmode="open">' + ${JSON.stringify(SHADOW('hk'))} + '</template></div>');
+      })()`,
+      'hk'
+    );
+  });
+
+  test("shadow roots already in a new iframe's document are looked into, as in Chrome", async () => {
+    // A Web Animation named by its id: an iframe's CSS animations are not told apart from Web
+    // Animations yet (`instanceof` against the top window's classes), whichever tree they are in.
+    await announced(
+      `(() => {
+        const iframe = document.createElement('iframe');
+        iframe.srcdoc = '<div><template shadowrootmode="open"><p>x</p></template></div><script>'
+          + 'document.querySelector("div").shadowRoot.querySelector("p")'
+          + '.animate([{ opacity: 1 }, { opacity: 0.5 }], { duration: 400, iterations: Infinity }).id = "fk"'
+          + '</' + 'script>';
+        document.body.append(iframe);
+      })()`,
+      'fk'
+    );
+  });
+
   test('pausing, seeking, timing and releasing do what they do in Chrome', async () => {
     const results: unknown[] = [];
     for (const side of [t.chrome, t.ours]) {
