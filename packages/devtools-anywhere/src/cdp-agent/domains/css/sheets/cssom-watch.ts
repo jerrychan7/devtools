@@ -48,7 +48,7 @@ function hook(proto: object, name: string, after: After, setter = false) {
   const proxy = new Proxy(native, {
     apply(f, self, args) {
       const result: unknown = Reflect.apply(f, self, args);
-      if (listeners.size) after(self, args, result);
+      if (listeners.size && !own) after(self, args, result);
       return result;
     },
   });
@@ -66,11 +66,23 @@ function install(realm: Window & typeof globalThis) {
     for (const name of ['insertRule', 'deleteRule', 'addRule', 'removeRule']) hook(proto, name, changed);
   if (realm.CSSKeyframesRule)
     for (const name of ['appendRule', 'deleteRule']) hook(realm.CSSKeyframesRule.prototype, name, changed);
-  for (const name of ['setProperty', 'removeProperty']) hook(realm.CSSStyleDeclaration.prototype, name, changed);
-  // A style's setters (in Chrome 156 `cssText` and `cssFloat`: `color` and the like are no
-  // accessors), a rule's selector, a keyframe's key. Inline styles share the prototype: while
-  // watching, each of their `cssText` writes goes through the proxy too, which only looks for a
-  // parent rule.
+  // An element's own style shares the prototype, and belongs to no sheet: its parent rule, read
+  // through the realm's native getter, ends its writes' hooks at once.
+  const parentRule = Object.getOwnPropertyDescriptor(realm.CSSStyleDeclaration.prototype, 'parentRule')?.get;
+  const styleChanged: After = self => {
+    let rule: unknown;
+    try {
+      rule = parentRule ? Reflect.apply(parentRule, self, []) : null;
+    } catch {
+      return; // Not a style.
+    }
+    if (rule) notify(sheetOf(rule));
+  };
+  for (const name of ['setProperty', 'removeProperty']) hook(realm.CSSStyleDeclaration.prototype, name, styleChanged);
+  // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are no
+  // accessors, so `el.style.left = …` is not hooked and costs nothing), a rule's selector, a
+  // keyframe's key. While watching, an element's `style.cssText = …` costs about 40% more
+  // (Chrome 157, 1000 writes: 0.33 ms against 0.24 ms), the proxy's.
   // A style's properties may be on an interface of its own (CSSStyleProperties) above it.
   const styles: object[] = [];
   for (let p: unknown = Object.getPrototypeOf(realm.document.createElement('div').style); ;) {
@@ -78,8 +90,10 @@ function install(realm: Window & typeof globalThis) {
     styles.push(p);
     p = Object.getPrototypeOf(p);
   }
+  for (const proto of styles)
+    for (const name of Object.getOwnPropertyNames(proto))
+      if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, styleChanged, true);
   for (const proto of [
-    ...styles,
     realm.CSSStyleRule.prototype,
     realm.CSSKeyframeRule?.prototype,
     realm.CSSKeyframesRule?.prototype,
