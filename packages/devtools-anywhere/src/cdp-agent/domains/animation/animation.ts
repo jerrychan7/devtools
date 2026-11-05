@@ -124,7 +124,12 @@ const percent = (offset: number) => `${Number((offset * 100).toPrecision(6))}%`;
 const PSEUDO_TYPES: readonly string[] = ['marker', 'before', 'after'] satisfies PseudoType[];
 const isPseudoType = (type: string): type is PseudoType => PSEUDO_TYPES.includes(type);
 
-/** Who an effect animates: its element, or the pseudo-element of it the effect names. */
+/**
+ * Who an effect animates: its element, or the pseudo-element of it the effect names. Of the other
+ * pseudo-elements, Blink animates none of ::first-letter, ::first-line and ::selection (Chrome
+ * announces no animation of theirs either); ::backdrop and the like, which Chrome names as nodes of
+ * their own, our DOM has no node for, so their element stands in.
+ */
 function targetOf(ctx: Context, effect: KeyframeEffect): Inspectable | null {
   const { target, pseudoElement } = effect;
   if (!target || !pseudoElement) return target;
@@ -181,6 +186,10 @@ export function registerAnimation(ctx: Context) {
       playState: animation.playState,
       playbackRate: t.rate,
       startTime: typeof startTime === 'number' ? startTime : 0,
+      // Chrome's `animationStarted` has the current time when the start time is set: about 0 (0 for
+      // a CSS animation of the top document, -0.09 for a delayed Web Animation, a frame, 16.7, in
+      // an iframe), not always 0. The page is looked at a frame later, so ours is a frame on. Left
+      // so: it is the animation's real time, and faking 0 would be wrong for one running before enable.
       currentTime: current(t),
       type,
     };

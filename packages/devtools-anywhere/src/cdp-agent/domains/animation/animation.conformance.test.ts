@@ -396,4 +396,52 @@ describe('Animation, which animations are told apart', () => {
       assert.equal('backendNodeId' in (ours.source ?? {}), 'backendNodeId' in (chrome.source ?? {}), name);
     }
   });
+
+  test('animations of pseudo-elements name the node Chrome names', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes pk { to { left: 10px } } .pb::before { content: "x"; animation: pk 5s }' +
+        ' .pm::marker { animation: pk 5s } .pl::first-letter { animation: pk 5s } .pl::first-line { animation: pk 5s }' +
+        ' .ps::selection { animation: pk 5s } .pd::backdrop { animation: pk 5s }';
+      document.head.append(style);
+    });
+    const results: { chrome: unknown[]; ours: unknown[] } = { chrome: [], ours: [] };
+    /** The node of the document with `backendNodeId`, looked up in the tree (we describe no pseudo-element). */
+    const find = (node: Protocol.DOM.Node, id: number): Protocol.DOM.Node | undefined => {
+      if (node.backendNodeId === id) return node;
+      for (const child of [...(node.children ?? []), ...(node.pseudoElements ?? [])]) {
+        const found = find(child, id);
+        if (found) return found;
+      }
+      return undefined;
+    };
+    for (const [label, code] of [
+      ['before', `add('pb')`],
+      ['marker', `add('pm', 'li')`],
+      ['backdrop', `add('pd', 'dialog').showModal()`],
+    ] as const) {
+      const got = await run(code, 1);
+      for (const side of ['chrome', 'ours'] as const) {
+        const id = got[side][0]?.source?.backendNodeId;
+        const { root } = await t[side].send('DOM.getDocument', { depth: -1 });
+        const node = id ? find(root, id) : undefined;
+        results[side].push([label, node?.nodeName, node?.pseudoType]);
+      }
+    }
+    // Chrome names the ::backdrop pseudo-element node, which our DOM does not have (it has ::before,
+    // ::after and ::marker): we name the dialog, the nearest node the panel can show.
+    assert.deepEqual(results.chrome.at(-1), ['backdrop', '::backdrop', 'backdrop']);
+    assert.deepEqual(results.ours.at(-1), ['backdrop', 'DIALOG', undefined]);
+    assert.deepEqual(results.ours.slice(0, -1), results.chrome.slice(0, -1));
+    // Blink runs no animations on ::first-letter, ::first-line or ::selection: none is announced.
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    await t.page.evaluate(() => {
+      for (const cls of ['pl', 'ps'])
+        document.body.appendChild(Object.assign(document.createElement('p'), { className: cls, textContent: 'x' }));
+    });
+    await sleep(300);
+    assert.equal((await t.chrome.events('Animation.animationStarted')).length, 0);
+    assert.equal((await t.ours.events('Animation.animationStarted')).length, 0);
+  });
 });
