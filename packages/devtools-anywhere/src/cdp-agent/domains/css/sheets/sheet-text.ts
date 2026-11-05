@@ -1,5 +1,6 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer';
+import { ownEdit } from './cssom-watch';
 import { type CssDecl, type CssRule, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
@@ -78,7 +79,7 @@ export class SheetTexts {
   }
 }
 
-/** The at-rule name each kind of CSSOM rule is written with; others take any at-rule. */
+/** The at-rule name each kind of CSSOM rule is written with; a kind not listed pairs with none. */
 const AT_NAMES: Record<string, string> = {
   CSSMediaRule: 'media',
   CSSSupportsRule: 'supports',
@@ -96,15 +97,28 @@ const AT_NAMES: Record<string, string> = {
   CSSCounterStyleRule: 'counter-style',
   CSSFontFeatureValuesRule: 'font-feature-values',
   CSSFontPaletteValuesRule: 'font-palette-values',
+  CSSViewTransitionRule: 'view-transition',
+  CSSPositionTryRule: 'position-try',
+  CSSFunctionRule: 'function',
 };
+
+const MARGINS = /^(top|bottom)-(left-corner|left|center|right|right-corner)$|^(left|right)-(top|middle|bottom)$/;
 
 const tagOf = (rule: CSSRule) => Object.prototype.toString.call(rule).slice(8, -1);
 const childRules = (rule: CSSRule): CSSRule[] =>
   'cssRules' in rule && rule.cssRules && typeof rule.cssRules === 'object'
     ? Array.from(rule.cssRules as CSSRuleList)
     : [];
-/** Without whitespace and comments, and a leading `&` (the CSSOM adds one to relative selectors). */
-const loose = (s: string) => s.replace(/\/\*[\s\S]*?(\*\/|$)|\s+/g, '').replace(/^&/, '');
+/**
+ * Without whitespace and comments, and the `&` each selector of a list may start with: the CSSOM
+ * adds one to every relative selector (`a, img` in a style rule is `& a, & img`).
+ */
+const loose = (s: string) =>
+  s
+    .replace(/\/\*[\s\S]*?(\*\/|$)|\s+/g, '')
+    .split(',')
+    .map(p => p.replace(/^&/, ''))
+    .join(',');
 
 /**
  * Pairs the CSSOM's rules with those of the text's outline, in order: outline rules the CSSOM
@@ -159,18 +173,24 @@ function matches(text: string, node: CssRule, rule: CSSRule, wrap: (p: string) =
     // Serialized otherwise (escapes, `from` for 0%): as the browser serializes the text alone.
     const sheet = new CSSStyleSheet();
     try {
-      sheet.replaceSync(wrap(prelude));
+      // Our own sheet: not reported as the page's change.
+      ownEdit(() => sheet.replaceSync(wrap(prelude)));
     } catch {
       return false;
     }
+    // The innermost rule: the wrapping ones are around it.
     let first: CSSRule | undefined = sheet.cssRules[0];
-    while (first && tagOf(first) !== tag) first = childRules(first)[0];
+    for (let inner = first && childRules(first)[0]; inner; inner = childRules(inner)[0]) first = inner;
+    if (!first || tagOf(first) !== tag) return false;
     const parsed = first && (isCssom(first, 'CSSStyleRule') ? first.selectorText : Reflect.get(first, 'keyText'));
     return typeof parsed === 'string' && loose(parsed) === loose(written);
   }
   if (node.kind !== 'at') return false;
   const name = AT_NAMES[tag];
-  return !name || node.name.toLowerCase().replace(/^-webkit-/, '') === name;
+  const written = node.name.toLowerCase().replace(/^-webkit-/, '');
+  // The margin rules of @page are named after their box.
+  if (tag === 'CSSMarginRule') return MARGINS.test(written);
+  return written === name;
 }
 
 /** A range of the text, in lines and columns. */
@@ -207,7 +227,10 @@ export function selectorSpans(text: string, node: CssRule): [number, number][] {
       start = -1;
     } else if (start < 0 && k !== Tok.Ws && k !== Tok.Comment) start = at;
   });
-  spans.push([from + Math.max(start, 0), node.preludeEnd]);
+  // Like Chrome, without the white space ending it, even that of an escape (`.k\31 `).
+  let end = node.preludeEnd;
+  while (end > from && /[ \t\n\r\f]/.test(text[end - 1] ?? '')) end--;
+  spans.push([from + Math.max(start, 0), end]);
   return spans.map(([s, e]) => [Math.min(s, e), e]);
 }
 
@@ -252,18 +275,25 @@ export function sourceStyle(
   const { text } = source;
   const [from, to] = styleSpan(text, node);
   const last = node.decls.length - 1;
-  const written = node.decls.map((d, i): Written => {
+  // The top page's: any realm knows the same properties.
+  const known = document.createElement('div').style;
+  // Like Chrome, a comment is a disabled declaration only of a property it knows.
+  const shown = node.decls.filter(
+    d => d.kind === 'decl' || text.startsWith('--', d.start) || text.slice(d.start, d.nameEnd).toLowerCase() in known
+  );
+  const written = shown.map((d): Written => {
     const [start, span] = declSpan(text, d);
     // The last declaration without `;` runs to the `}`.
-    const end = d.kind === 'decl' && !d.semicolon && i === last ? Math.max(span, to) : span;
+    const end = d.kind === 'decl' && !d.semicolon && d === node.decls[last] ? Math.max(span, to) : span;
     // Like Chrome, the value with `!important` as written.
-    let shown = d.semicolon ? d.end - 1 : d.end;
-    while (shown > d.valueEnd && /\s/.test(text[shown - 1] ?? '')) shown--;
+    let until = d.semicolon ? d.end - 1 : d.end;
+    while (until > d.valueEnd && /\s/.test(text[until - 1] ?? '')) until--;
     return {
       name: text.slice(d.start, d.nameEnd),
       value: text.slice(d.valueStart, d.valueEnd),
-      shown: text.slice(d.valueStart, d.important ? shown : d.valueEnd),
-      important: d.important,
+      shown: text.slice(d.valueStart, d.important ? until : d.valueEnd),
+      // Like Chrome, a commented-out declaration is not important.
+      important: d.important && d.kind === 'decl',
       disabled: d.kind === 'comment',
       text: text.slice(start, end),
       range: rangeOf(source, start, end),

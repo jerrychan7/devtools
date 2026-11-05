@@ -17,7 +17,7 @@ export interface CssDecl {
   start: number;
   end: number;
   nameEnd: number;
-  /** Leading and trailing whitespace and comments trimmed, `!important` excluded. */
+  /** Leading whitespace and comments and trailing whitespace trimmed, `!important` excluded. */
   valueStart: number;
   valueEnd: number;
   important: boolean;
@@ -109,9 +109,12 @@ function parse(text: string, inBlock: boolean): CssRule {
       }
     }
   };
-  /** The end of the last token before `j`, from `from`, that is not whitespace or a comment. */
-  const trimEnd = (from: number, j: number) => {
-    while (j > from && trivia(kind(j - 1))) j--;
+  /**
+   * The end of the last token before `j`, from `from`, that is not whitespace or (unless `ws`) a
+   * comment.
+   */
+  const trimEnd = (from: number, j: number, ws = false) => {
+    while (j > from && (ws ? kind(j - 1) === Tok.Ws : trivia(kind(j - 1)))) j--;
     return pos(j);
   };
   const rule = (kind: CssRule['kind'], start: number, name = ''): CssRule => ({
@@ -220,7 +223,8 @@ function parse(text: string, inBlock: boolean): CssRule {
       text[pos(prev)] === '!' &&
       kind(last) === Tok.Ident &&
       text.slice(pos(last), pos(last + 1)).toLowerCase() === 'important';
-    const valueEnd = trimEnd(from, important ? prev : i);
+    // Like Chrome, comments at its end are part of the value.
+    const valueEnd = trimEnd(from, important ? prev : i, true);
     const semicolon = kind(i) === Tok.Semi;
     const end = semicolon ? pos(++i) : trimEnd(from, i);
     return {
