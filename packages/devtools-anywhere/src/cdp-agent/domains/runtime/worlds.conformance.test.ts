@@ -304,6 +304,116 @@ describe('a scroll listener in a world, as the Animations panel adds it', () => 
   });
 });
 
+describe('what a world keeps from the page', () => {
+  test("a world's undeclared globals and top-level `this` properties are not the page's", async () => {
+    const [ours, chrome] = await both(async side => {
+      const id = await world(side, 'conformance-leak');
+      await valueIn(side, 'conformanceLeak = 1; this.conformanceThis = 3', id);
+      return [
+        await valueIn(side, '[typeof conformanceLeak, typeof conformanceThis]', id),
+        await t.page.evaluate(() => {
+          const page = window as unknown as Record<string, unknown>;
+          return [typeof page['conformanceLeak'], typeof page['conformanceThis']];
+        }),
+      ];
+    });
+    assert.deepEqual(ours, chrome);
+    // Both sides share the page: what either left there would show on both.
+    assert.deepEqual(ours, [
+      ['number', 'number'],
+      ['undefined', 'undefined'],
+    ]);
+  });
+
+  test("a world's global is a Window, and the node a function is called on is the page's node", async () => {
+    const [ours, chrome] = await both(async side => {
+      const id = await world(side, 'conformance-identity');
+      const { root } = await side.send('DOM.getDocument');
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#scroller' });
+      const { object } = await side.send('DOM.resolveNode', { nodeId, executionContextId: id });
+      const { result } = await side.send('Runtime.callFunctionOn', {
+        objectId: object.objectId ?? '',
+        functionDeclaration: `function () {
+          return [
+            window instanceof Window,
+            document.body.contains(this),
+            getComputedStyle(this).overflowY,
+            this === document.getElementById('scroller'),
+          ];
+        }`,
+        returnByValue: true,
+      });
+      return result.value;
+    });
+    assert.deepEqual(ours, chrome);
+  });
+});
+
+describe('sessions', () => {
+  /** A second session on each side, and the bindingCalled events it got. */
+  async function secondSessions() {
+    const cdp = await t.page.createCDPSession();
+    const chromeSeen: string[] = [];
+    cdp.on('Runtime.bindingCalled', e => chromeSeen.push(e.payload));
+    await t.page.evaluate(() => {
+      const session = window.DevtoolsAnywhere.createCdpSession();
+      const seen: string[] = [];
+      session.onMessage(m => {
+        const msg = JSON.parse(m) as { method?: string; params?: { payload: string } };
+        if (msg.method === 'Runtime.bindingCalled' && msg.params) seen.push(msg.params.payload);
+      });
+      window.__sessions = [session];
+      (window as unknown as Record<string, unknown>)['__secondSeen'] = seen;
+    });
+    return {
+      chrome: {
+        send: (method: string, params: object) => cdp.send(method as never, params as never),
+        seen: () => chromeSeen,
+      },
+      ours: {
+        send: (method: string, params: object) =>
+          t.page.evaluate((m, p) => window.__sessions?.[0]?.call(m, p), method, params),
+        seen: () => t.page.evaluate(() => (window as unknown as Record<string, string[]>)['__secondSeen'] ?? []),
+      },
+    };
+  }
+
+  test('a binding of the page added by two sessions reports each call to both', async () => {
+    const second = await secondSessions();
+    const result = [];
+    for (const [side, other, name] of [
+      [t.ours, second.ours, 'conformanceSharedOurs'],
+      [t.chrome, second.chrome, 'conformanceSharedChrome'],
+    ] as const) {
+      await side.clear();
+      await side.send('Runtime.addBinding', { name });
+      await other.send('Runtime.addBinding', { name });
+      await t.page.evaluate(name => (window as unknown as Record<string, (s: string) => void>)[name]?.('both'), name);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      result.push([(await side.events('Runtime.bindingCalled')).map(e => e.payload), await other.seen()]);
+    }
+    assert.deepEqual(result[0], result[1]);
+    assert.deepEqual(result[0], [['both'], ['both']]);
+  });
+
+  test('a world of a name has the same id in every session', async () => {
+    const second = await secondSessions();
+    const same = [];
+    for (const [side, other] of [
+      [t.ours, second.ours],
+      [t.chrome, second.chrome],
+    ] as const) {
+      const frameId = await topFrameId(side);
+      const a = await side.send('Page.createIsolatedWorld', { frameId, worldName: 'conformance-shared' });
+      const b = (await other.send('Page.createIsolatedWorld', { frameId, worldName: 'conformance-shared' })) as {
+        executionContextId: number;
+      };
+      same.push(a.executionContextId === b.executionContextId);
+    }
+    assert.deepEqual(same, [true, true]);
+  });
+});
+
 describe('worlds of iframes', () => {
   test("a frame's world is made again, with a new id, for each document it loads", async () => {
     await t.page.evaluate(
