@@ -17,7 +17,7 @@ import { RuleView } from './matching/rule-view';
 import { RANGE_MISMATCH, SheetRegistry, isConstructed } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
 import { outline } from './sheets/css-outline';
-import { ownEdit, watchCssom, watchRealms } from './sheets/cssom-watch';
+import { editedBy, ownEdit, watchCssom, watchRealms } from './sheets/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
@@ -325,10 +325,12 @@ export function registerCss(ctx: Context) {
             after.slice(offsets[0], after.length - (before.length - offsets[1]))
           );
         else record(after);
+        editedBy(sheets, sheet, after ?? undefined);
       },
       () => {
         ownEdit(revert);
         record(before);
+        editedBy(sheets, sheet, before ?? undefined);
       }
     );
   }
@@ -414,7 +416,11 @@ export function registerCss(ctx: Context) {
       // Like Chrome, a change the page makes through the CSSOM keeps the sheet's id: its text is
       // the one given replace() or replaceSync(), or else serialized from the CSSOM.
       stopCssom = watchCssom(
-        (sheet, text) => {
+        (sheet, text, by) => {
+          if (by === sheets) return;
+          // Another session's edit: like Chrome, this one keeps the text it had and sends no
+          // styleSheetChanged, but reports sheets added or removed (setStyleSheetText's @import).
+          if (by) return void syncSheets();
           if (text === undefined) sheets.texts.invalidate(sheet);
           else sheets.texts.set(sheet, text);
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
@@ -517,6 +523,8 @@ export function registerCss(ctx: Context) {
         () => replace(params.text),
         () => replace(old)
       );
+      // @import rules gone or new bring or take sheets.
+      void syncSheets();
       stylesChanged();
       return {};
     },
@@ -644,8 +652,11 @@ export function registerCss(ctx: Context) {
         ownEdit(() => target.deleteRule(index));
         throw new CdpError('Failed to parse rule text');
       }
-      const record = (text: string | null) =>
-        text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
+      const record = (text: string | null) => {
+        if (text === null) sheets.texts.invalidate(sheet);
+        else sheets.texts.set(sheet, text);
+        editedBy(sheets, sheet, text ?? undefined);
+      };
       record(after);
       const text = rule.cssText;
       // Redo inserts a new rule object, which the next undo removes.

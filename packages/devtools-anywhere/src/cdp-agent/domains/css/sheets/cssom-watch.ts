@@ -10,7 +10,8 @@ import { isCssom, realmOf } from '../../../core/realm';
  * goes unseen: a MediaList does not tell its rule. The CSS domain's own changes are made through
  * `ownEdit`, and not reported.
  */
-type Listener = (sheet: CSSStyleSheet, text?: string) => void;
+/** `by`: the CSS domain session that made the change, for one of its own edits. */
+type Listener = (sheet: CSSStyleSheet, text?: string, by?: object) => void;
 type After = (self: unknown, args: unknown[], result: unknown) => void;
 
 const listeners = new Set<Listener>();
@@ -122,6 +123,19 @@ export function watchCssom(listener: Listener, realms: () => (Window & typeof gl
 /** Hooks the realms of documents seen since watching started. */
 export function watchRealms(docs: Document[]): void {
   if (listeners.size) for (const doc of docs) install(realmOf(doc));
+}
+
+/**
+ * Tells every session of an edit session `by` made to a sheet, its text now `text` (undefined:
+ * not known). Like Chrome, the others keep the text they had and send no styleSheetChanged.
+ */
+export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefined): void {
+  for (const listener of listeners)
+    try {
+      listener(sheet, text, by);
+    } catch {
+      // Ours: the edit goes on.
+    }
 }
 
 /** Runs `fn`, the CSS domain's own change, without reporting it. */
