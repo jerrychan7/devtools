@@ -7,7 +7,15 @@ import type { Env, Side, TestPage } from '../../../../../test-support/conformanc
 import { matched } from '../../../../../test-support/css-source.ts';
 
 let env: Env | undefined;
-let sides: { side: Side; t: TestPage; other: () => Promise<string[]>; otherText: () => Promise<string> }[] = [];
+/** A call the other client makes. */
+type Call = (method: string, params: object) => Promise<unknown>;
+let sides: {
+  side: Side;
+  t: TestPage;
+  other: () => Promise<string[]>;
+  otherText: () => Promise<string>;
+  otherCall: Call;
+}[] = [];
 
 const CSS = `@import url(/packages/devtools-anywhere/test-support/assets/frame.css);
 @namespace svg url(http://www.w3.org/2000/svg);
@@ -54,6 +62,15 @@ setUpAndTearDown(
         side: a.ours,
         t: a,
         other: () => a.page.evaluate(() => (Reflect.get(window, '__second') as string[]).splice(0)),
+        otherCall: (method, params) =>
+          a.page.evaluate(
+            (method, params) =>
+              (
+                Reflect.get(window, '__secondSession') as ReturnType<typeof window.DevtoolsAnywhere.createCdpSession>
+              ).call(method, params),
+            method,
+            params
+          ),
         otherText: () =>
           a.page.evaluate(async () => {
             const s = Reflect.get(window, '__secondSession') as ReturnType<
@@ -72,6 +89,7 @@ setUpAndTearDown(
         side: b.chrome,
         t: b,
         other: async () => seen.splice(0),
+        otherCall: (method, params) => cdp.send(method as 'CSS.enable', params as never),
         otherText: async () => {
           const texts = await Promise.all(
             ids.map(styleSheetId =>
@@ -146,4 +164,33 @@ test('setStyleSheetText keeps the sheet, replaces its rules: those the page held
     return { objects, other: await other() };
   });
   assert.deepEqual(ours, chrome);
+});
+
+/** A field of a reply, as `unknown` goes. */
+const field = (value: unknown, ...path: string[]): unknown =>
+  path.reduce<unknown>((v, k) => (v && typeof v === 'object' ? Reflect.get(v, k) : undefined), value);
+
+test('after another client replaced the rules, an edit with the ranges of the old text goes as in Chrome', async () => {
+  const [ours, chrome] = await each(async ({ side, otherCall }) => {
+    const root = field(await otherCall('DOM.getDocument', {}), 'root', 'nodeId');
+    const nodeId = field(await otherCall('DOM.querySelector', { nodeId: root, selector: '#s1' }), 'nodeId');
+    const found = field(await otherCall('CSS.getMatchedStylesForNode', { nodeId }), 'matchedCSSRules');
+    const rule = Array.isArray(found)
+      ? found.map(m => field(m, 'rule')).find(r => field(r, 'selectorList', 'text') === '.s1')
+      : undefined;
+    const edit = {
+      styleSheetId: field(rule, 'styleSheetId'),
+      range: field(rule, 'style', 'range'),
+      text: ' color: pink ',
+    };
+    // This client replaces the rules: the other's range is of rules gone.
+    const { sheet } = await matched(side, '#s1');
+    await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text: '.s0 { top: 0 }\n.s1 { color: green }' });
+    return otherCall('CSS.setStyleTexts', { edits: [edit] }).then(
+      () => 'ok',
+      // Ours come through page.evaluate, with where they were thrown on the next lines.
+      (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+    );
+  });
+  assert.equal(ours, chrome);
 });

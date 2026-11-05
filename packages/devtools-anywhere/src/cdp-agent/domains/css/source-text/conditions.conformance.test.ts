@@ -133,6 +133,75 @@ for (const [name, method, pick, value] of [
     assert.deepEqual(ours, chrome);
   });
 
+test('setContainerQueryConditionText writes the @container condition as given', async () => {
+  const [ours, chrome] = await each(async side => {
+    const res = await raw(side);
+    const at = res.matchedCSSRules?.map(m => m.rule.containerQueries?.[0]).find(x => x?.range);
+    assert.ok(at?.range && at.styleSheetId);
+    const set = await side.send('CSS.setContainerQueryConditionText', {
+      styleSheetId: at.styleSheetId,
+      range: at.range,
+      text: '(min-width: 2px)',
+    });
+    return { set: [set.containerQuery.text, range(set.containerQuery.range)], after: await after(side) };
+  });
+  assert.deepEqual(ours, chrome);
+});
+
+test("setStyleTexts edits a keyframe's style, and the animation follows", async () => {
+  const [ours, chrome] = await each(async (side, t) => {
+    const kf = (await raw(side)).cssKeyframesRules?.[0]?.keyframes[2];
+    assert.ok(kf?.style.range && kf.styleSheetId);
+    const { styles } = await side.send('CSS.setStyleTexts', {
+      edits: [{ styleSheetId: kf.styleSheetId, range: kf.style.range, text: ' opacity: 0.9 ' }],
+    });
+    const frames = await t.page.evaluate(() => {
+      const effect = document.getElementById('c1')?.getAnimations()[0]?.effect;
+      return effect instanceof KeyframeEffect ? effect.getKeyframes().map(k => [k.offset, k['opacity']]) : [];
+    });
+    return {
+      styles: styles.map(style),
+      frames,
+      after: await after(side),
+      kf: keyframes((await raw(side)).cssKeyframesRules),
+    };
+  });
+  assert.deepEqual(ours, chrome);
+});
+
+test("errors: a key the parser does not take, a range past the text, a range that is no style's", async () => {
+  const [ours, chrome] = await each(async side => {
+    const res = await raw(side);
+    const kf = res.cssKeyframesRules?.[0]?.keyframes[0];
+    assert.ok(kf?.keyText.range && kf.styleSheetId);
+    const sheet = kf.styleSheetId;
+    const error = (p: Promise<unknown>) =>
+      p.then(
+        () => 'ok',
+        // Ours come through page.evaluate, with where they were thrown on the next lines.
+        (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+      );
+    return [
+      await error(side.send('CSS.setKeyframeKey', { styleSheetId: sheet, range: kf.keyText.range, keyText: 'bogus' })),
+      await error(
+        side.send('CSS.setMediaText', {
+          styleSheetId: sheet,
+          range: { startLine: 99, startColumn: 0, endLine: 99, endColumn: 1 },
+          text: 'all',
+        })
+      ),
+      await error(
+        side.send('CSS.setStyleTexts', {
+          edits: [
+            { styleSheetId: sheet, range: { startLine: 0, startColumn: 1, endLine: 0, endColumn: 3 }, text: 'x:y' },
+          ],
+        })
+      ),
+    ];
+  });
+  assert.deepEqual(ours, chrome);
+});
+
 test("a <link>'s sheet: setStyleTexts and setStyleSheetText change its text, no event", async () => {
   const [ours, chrome] = await each(async (side, t) => {
     const res = await raw(side);

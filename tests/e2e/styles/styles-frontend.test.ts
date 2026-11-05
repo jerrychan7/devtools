@@ -21,7 +21,11 @@ let frontend: Frame;
 const errors: string[] = [];
 const { showView } = frontendHelpers(() => frontend);
 
-const CSS = '.e2e {\n  color: red;\n  padding: 1px;\n}\n';
+// After the rule the first tests edit: an @container and the @keyframes of an animation.
+const MORE =
+  'body { container-type: inline-size }\n@container (min-width: 0px) { p.e2e { margin-right: 3px } }\n' +
+  '#e2e { animation: kf 100s paused }\n@keyframes kf { from { opacity: 0.5 } to { opacity: 1 } }\n';
+const CSS = '.e2e {\n  color: red;\n  padding: 1px;\n}\n' + MORE;
 
 setUpAndTearDown(
   async () => {
@@ -85,7 +89,11 @@ async function state(property: string) {
     const el = document.getElementById('e2e');
     return el ? getComputedStyle(el).getPropertyValue(p) : '';
   }, property);
-  const text = await frontend.evaluate(async () => {
+  const at = await page.evaluate(() => {
+    const box = document.getElementById('e2e')?.getBoundingClientRect();
+    return box ? { x: Math.round(box.left + 2), y: Math.round(box.top + 2) } : { x: 0, y: 0 };
+  });
+  const text = await frontend.evaluate(async at => {
     // The built frontend has no type declarations; only this much of it is used.
     type Host = {
       InspectorFrontendHost: {
@@ -101,30 +109,57 @@ async function state(property: string) {
       await import(src)
     ).modules['core/host/host.js']();
     const host = InspectorFrontendHost.InspectorFrontendHostInstance;
-    // The agent's session the frontend uses, asked directly (ids out of the frontend's range):
-    // its sheets are numbered, the one holding .e2e is among the first.
-    const replies = new Map<number, string>();
+    // The session the frontend uses, asked directly, with ids out of the frontend's range.
+    const pending = new Map<number, (result: unknown) => void>();
     host.events.addEventListener(InspectorFrontendHostAPI.Events.DispatchMessage, ({ data }) => {
-      const msg: { id?: number; result?: { text?: string } } = typeof data === 'string' ? JSON.parse(data) : {};
-      if (msg.id && msg.id >= 9e8) replies.set(msg.id, msg.result?.text ?? '');
+      const msg: { id?: number; result?: unknown } = typeof data === 'string' ? JSON.parse(data) : {};
+      if (msg.id) pending.get(msg.id)?.(msg.result);
     });
-    for (let i = 1; i <= 40; i++)
-      host.sendMessageToBackend(
-        JSON.stringify({ id: 9e8 + i, method: 'CSS.getStyleSheetText', params: { styleSheetId: `sheet-${i}` } })
-      );
-    await new Promise(r => setTimeout(r, 300));
-    return [...replies.values()].find(t => t.includes('.e2e')) ?? '';
-  });
+    let id = 9e8 + Math.floor(Math.random() * 1e6);
+    const call = (method: string, params: object) =>
+      new Promise<Record<string, unknown>>(resolve => {
+        pending.set(++id, result => resolve(result && typeof result === 'object' ? { ...result } : {}));
+        host.sendMessageToBackend(JSON.stringify({ id, method, params }));
+      });
+    // The sheet of the rule matching #e2e with `.e2e` in its selector.
+    const { backendNodeId } = await call('DOM.getNodeForLocation', at);
+    const { nodeIds } = await call('DOM.pushNodesByBackendIdsToFrontend', { backendNodeIds: [backendNodeId] });
+    const nodeId = Array.isArray(nodeIds) ? nodeIds[0] : undefined;
+    const { matchedCSSRules } = await call('CSS.getMatchedStylesForNode', { nodeId });
+    const rules = Array.isArray(matchedCSSRules) ? matchedCSSRules : [];
+    const rule: unknown = rules
+      .map(m => (m && typeof m === 'object' ? Reflect.get(m, 'rule') : null))
+      .find(r => r && typeof r === 'object' && JSON.stringify(Reflect.get(r, 'selectorList')).includes('.e2e'));
+    const styleSheetId = rule && typeof rule === 'object' ? Reflect.get(rule, 'styleSheetId') : undefined;
+    const { text } = await call('CSS.getStyleSheetText', { styleSheetId });
+    return typeof text === 'string' ? text : '';
+  }, at);
   return { computed, text };
 }
 
 /** The element matching `selector` in the Styles pane's section of the rule `rule`. */
-async function inRule(rule: string, selector: string): Promise<ElementHandle<Element>> {
-  const name = await find('.selector', rule);
+// The section whose header (`head`) reads `rule` and that has one: the pane may show a rule twice.
+async function inRule(rule: string, selector: string, head = '.selector'): Promise<ElementHandle<Element>> {
   return waitFor(async () => {
-    const handle = await name.evaluateHandle(
-      (el, selector) => el.closest('.styles-section')?.querySelector(selector),
-      selector
+    const handle = await frontend.evaluateHandle(
+      (rule, selector, head) => {
+        const walk = (root: Document | ShadowRoot): Element | null => {
+          for (const el of root.querySelectorAll(head))
+            if (el.textContent?.trim() === rule) {
+              const found = el.closest('.styles-section')?.querySelector(selector);
+              if (found) return found;
+            }
+          for (const el of root.querySelectorAll('*')) {
+            const found = el.shadowRoot && walk(el.shadowRoot);
+            if (found) return found;
+          }
+          return null;
+        };
+        return walk(document);
+      },
+      rule,
+      selector,
+      head
     );
     return handle.asElement() as ElementHandle<Element> | null;
   });
@@ -166,7 +201,7 @@ test('the Styles pane edits a value, as written in the sheet', { skip }, async (
   await page.keyboard.press('Tab');
   await type('blue');
   await waitFor(async () => (await state('color')).computed === 'rgb(0, 0, 255)');
-  assert.equal((await state('color')).text, '.e2e {\n  color: blue;\n  padding: 1px;\n}\n');
+  assert.equal((await state('color')).text, '.e2e {\n  color: blue;\n  padding: 1px;\n}\n' + MORE);
 });
 
 test('unchecking a property comments it out, checking it brings it back', { skip }, async () => {
@@ -182,7 +217,7 @@ test('unchecking a property comments it out, checking it brings it back', { skip
   // Shown on hover only: clicked as a script would.
   await (await box()).evaluate(el => el instanceof HTMLElement && el.click());
   await waitFor(async () => (await state('padding-top')).computed === '1px');
-  assert.equal((await state('padding')).text, '.e2e {\n  color: blue;\n  padding: 1px;\n}\n');
+  assert.equal((await state('padding')).text, '.e2e {\n  color: blue;\n  padding: 1px;\n}\n' + MORE);
 });
 
 test('adding a property and removing it', { skip }, async () => {
@@ -201,7 +236,7 @@ test('adding a property and removing it', { skip }, async () => {
   for (let i = 0; i < 'margin'.length; i++) await page.keyboard.press('Backspace');
   await page.keyboard.press('Enter');
   await waitFor(async () => (await state('margin-top')).computed !== '3px');
-  assert.doesNotMatch((await state('margin')).text, /margin/);
+  assert.doesNotMatch((await state('margin')).text, /margin: 3px/);
 });
 
 test('changing the selector writes it as typed', { skip }, async () => {
@@ -209,6 +244,13 @@ test('changing the selector writes it as typed', { skip }, async () => {
   await type('.e2e,  #e2e');
   await waitFor(async () => (await state('color')).text.startsWith('.e2e,  #e2e {'));
   assert.equal((await state('color')).computed, 'rgb(0, 0, 255)');
+});
+
+test("editing an @container's condition", { skip }, async () => {
+  await edit(() => find('.query-text', '(min-width: 0px)'));
+  await type('(min-width: 99999px)');
+  await waitFor(async () => (await state('margin-right')).computed === '0px');
+  assert.match((await state('margin-right')).text, /@container \(min-width: 99999px\) \{/);
 });
 
 test('a new rule from the toolbar applies to the element', { skip }, async () => {
