@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
-import type { Inspectable, PseudoType } from '../../core/nodes';
+import { isOwn, type Inspectable, type PseudoType } from '../../core/nodes';
+import { documentOf, isElement } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 const NOT_FOUND = 'Could not find animation with given id';
@@ -110,10 +111,13 @@ export function registerAnimation(ctx: Context) {
       // A transition's keyframes are not a rule, and Chrome sends none.
       if (type !== 'CSSTransition') {
         source.keyframesRule = {
-          keyframes: effect.getKeyframes().map(k => ({
-            offset: percent(k.computedOffset),
-            easing: k.easing ?? 'linear',
-          })),
+          // A CSS animation's rule lists only the keyframes written in it; the 0% and 100% the
+          // browser fills in are left out, as in Chrome. They are the ones whose composite is
+          // `replace`: written ones have `auto`, whatever `animation-composition` says.
+          keyframes: effect
+            .getKeyframes()
+            .filter(k => type !== 'CSSAnimation' || k.composite !== 'replace')
+            .map(k => ({ offset: percent(k.computedOffset), easing: k.easing ?? 'linear' })),
         };
       }
       result.source = source;
@@ -123,12 +127,35 @@ export function registerAnimation(ctx: Context) {
 
   const documents = () => Array.from(ctx.frames, f => f.document);
 
+  /**
+   * The shadow roots in the documents: a document's `getAnimations()` leaves out the animations in
+   * its shadow trees, which Chrome's panel shows. Walked again only after a shadow root is attached.
+   */
+  let shadowRootCache: ShadowRoot[] | null = null;
+  let stopShadowRoots: (() => void) | null = null;
+  const shadowRoots = (): ShadowRoot[] => {
+    if (shadowRootCache) return shadowRootCache;
+    const roots: ShadowRoot[] = [];
+    const visit = (root: Document | ShadowRoot) => {
+      const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!isElement(node) || isOwn(node)) continue;
+        const shadowRoot = ctx.nodes.shadowRootOf(node);
+        if (!shadowRoot) continue;
+        roots.push(shadowRoot);
+        visit(shadowRoot);
+      }
+    };
+    documents().forEach(visit);
+    return (shadowRootCache = roots);
+  };
+
   /** Announces new animations, and changes the page made to the ones announced. */
   const scan = () => {
-    for (const doc of documents()) {
+    for (const tree of [...documents(), ...shadowRoots()]) {
       let animations: Animation[];
       try {
-        animations = doc.getAnimations();
+        animations = tree.getAnimations();
       } catch {
         continue;
       }
@@ -194,6 +221,9 @@ export function registerAnimation(ctx: Context) {
   const stop = () => {
     cancelAnimationFrame(frame);
     frame = 0;
+    stopShadowRoots?.();
+    stopShadowRoots = null;
+    shadowRootCache = null;
     if (rate !== 1) setRate(1);
     byId.clear();
     tracked = new WeakMap();
@@ -203,6 +233,7 @@ export function registerAnimation(ctx: Context) {
 
   session.register('Animation', {
     enable: () => {
+      stopShadowRoots ??= ctx.probe.onShadowRoot(() => (shadowRootCache = null));
       if (!frame) loop();
     },
     disable: stop,

@@ -102,6 +102,19 @@ describe('Animation', () => {
     assert.equal((await t.ours.events('Animation.animationCreated')).length, 3);
   });
 
+  test('animations in shadow trees are announced, as in Chrome', async () => {
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    await t.page.evaluate(() => {
+      const host = document.body.appendChild(document.createElement('div'));
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML =
+        '<style>@keyframes sk { 50% { opacity: 0.5 } } p { animation: sk 0.4s infinite }</style><p>x</p>';
+    });
+    const [chrome, ours] = [await started(t.chrome, 1), await started(t.ours, 1)];
+    assert.ok(chrome.get('sk'), 'Chrome announces it');
+    assert.deepEqual(diffSubset(ours.get('sk'), chrome.get('sk')), []);
+  });
+
   test('pausing, seeking, timing and releasing do what they do in Chrome', async () => {
     const results: unknown[] = [];
     for (const side of [t.chrome, t.ours]) {
