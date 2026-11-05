@@ -79,6 +79,43 @@ const cssom = (at: string) =>
     at
   );
 
+test('addRule at the line of @namespace rules: the rule goes in after them, its text where asked', async () => {
+  const cases: [string, number][] = [
+    [`${SVG}\n.n6 { color: red }`, 0],
+    [`${SVG}\n.n6 { color: red }`, SVG.length],
+    [`@import url("data:text/css,.zz{}");\n${SVG}\n.n6 { color: red }`, 0],
+  ];
+  for (const [css, column] of cases) {
+    // A sheet for each side: both are on the same page.
+    const sheets = [await added(css), await added(css)];
+    const result: { outcome: unknown; text: string; rules: string[] }[] = [];
+    for (const [i, side] of [t.ours, t.chrome].entries()) {
+      const { at, ids } = sheets[i] ?? { at: '', ids: [] };
+      const id = ids[i] ?? '';
+      const outcome = await side
+        .send('CSS.addRule', {
+          styleSheetId: id,
+          ruleText: '.n7 { top: 1px }',
+          location: { startLine: 0, startColumn: column, endLine: 0, endColumn: column },
+        })
+        .then(
+          r => r.rule.selectorList.selectors.map(s => s.range),
+          (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+        );
+      result.push({ outcome, text: await text(side, id), rules: await cssom(at) });
+    }
+    const [ours, chrome] = result;
+    assert.ok(ours && chrome);
+    // Before an @import the rule is refused. Chrome's sheet then has lost its @import rule as well
+    // (Chrome 156): not followed, ours keeps its rules as they were.
+    if (css.startsWith('@import')) {
+      assert.equal(ours.rules[0], '@import url("data:text/css,.zz{}");');
+      chrome.rules = ours.rules;
+    }
+    assert.deepEqual(ours, chrome, `${column} in ${css}`);
+  }
+});
+
 /**
  * Inserts `rule` at `index` of the <style> in `at` through the CSSOM: from then on its text is
  * serialized. Ours puts each style rule on the line of its id, the @namespace rules on line 0;
@@ -150,4 +187,94 @@ test('@import before @namespace, served serialized: the @namespace rules on line
   const [first, ...lines] = (await text(t.ours, ids[0])).split('\n');
   assert.equal(first, '@namespace svg url("http://www.w3.org/2000/svg");');
   assert.deepEqual(lines.toSorted(), ['.n10 { color: red; }', '.n10 { top: 1px; }']);
+});
+
+const outcome = (p: Promise<unknown>) =>
+  p.then(
+    r => r,
+    (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+  );
+/** Without sheet ids, and the specificity of selectors, which ours gives only in part. */
+const plain = (v: unknown) =>
+  JSON.parse(JSON.stringify(v, (k, x: unknown) => (k === 'specificity' || k === 'styleSheetId' ? undefined : x)));
+
+test('after addRule before @namespace rules, that rule and the one after it are edited as written', async () => {
+  const css = `${SVG}\n.n11 { color: red }\n`;
+  const html = '<p class="n11 n12">x</p>';
+  const sheets = [await added(css, html), await added(css, html)];
+  const result = [];
+  for (const [i, side] of [t.ours, t.chrome].entries()) {
+    const { at, ids } = sheets[i] ?? { at: '', ids: [] };
+    const id = ids[i] ?? '';
+    const steps: unknown[] = [];
+    const add = await side.send('CSS.addRule', {
+      styleSheetId: id,
+      ruleText: '.n12 { top: 1px }',
+      location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    });
+    steps.push(plain(add.rule.selectorList), add.rule.style.range);
+    // The new rule, then the one after the @namespace rule, each by the range it is given now.
+    for (const [selector, style] of [
+      ['.n12, .n13', 'top: 2px'],
+      ['.n11, .n14', 'color: blue'],
+    ] as const) {
+      const { rules } = await side
+        .send('CSS.getMatchedStylesForNode', {
+          nodeId: await nodeId(side, `${at} .n11`),
+        })
+        .then(r => ({ rules: (r.matchedCSSRules ?? []).map(m => m.rule).filter(r => r.styleSheetId === id) }));
+      const rule = rules.find(r => r.selectorList.text.startsWith(selector.slice(0, 4)));
+      steps.push(plain(rules.map(r => [r.selectorList, r.style.range, r.style.cssText])));
+      steps.push(
+        plain(
+          await outcome(
+            side.send('CSS.setStyleTexts', {
+              edits: [{ styleSheetId: id, range: rule?.style.range as never, text: style }],
+            })
+          )
+        )
+      );
+      steps.push(
+        plain(
+          await outcome(
+            side.send('CSS.setRuleSelector', {
+              styleSheetId: id,
+              range: rule?.selectorList.selectors[0]?.range as never,
+              selector,
+            })
+          )
+        )
+      );
+      steps.push(await text(side, id), await cssom(at));
+    }
+    result.push(steps);
+  }
+  assert.deepEqual(result[0], result[1]);
+});
+
+test('addRule with an @import in a group rule, or before an @import, is refused as in Chrome', async () => {
+  const css = `@import url("data:text/css,.zz{}");\n@media all {\n  .n15 { top: 1px }\n}\n`;
+  const sheets = [await added(css), await added(css)];
+  const result = [];
+  for (const [i, side] of [t.ours, t.chrome].entries()) {
+    const ids = sheets[i]?.ids ?? [];
+    const id = ids[i] ?? '';
+    const steps: unknown[] = [];
+    for (const [ruleText, line, column] of [
+      ['@import url("data:text/css,.yy{}");', 2, 2],
+      ['.n16 { top: 1px }', 0, 0],
+    ] as const)
+      steps.push(
+        await outcome(
+          side.send('CSS.addRule', {
+            styleSheetId: id,
+            ruleText,
+            location: { startLine: line, startColumn: column, endLine: line, endColumn: column },
+          })
+        ).then(r => (typeof r === 'string' ? r : 'ok')),
+        await text(side, id)
+      );
+    result.push(steps);
+  }
+  assert.deepEqual(result[0], result[1]);
 });

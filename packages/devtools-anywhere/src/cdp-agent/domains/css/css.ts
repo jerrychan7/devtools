@@ -795,11 +795,27 @@ export function registerCss(ctx: Context) {
         while (next?.parentRule) next = next.parentRule;
         at = next ? Array.from(sheet.cssRules).indexOf(next) : -1;
       }
+      // As measured in Chrome 156, a rule asked for before @namespace rules (which only @import may
+      // precede) goes in after them, its text still where asked; one before an @import is refused.
+      if (parent === sheet) while (at >= 0 && isCssom(sheet.cssRules[at], 'CSSNamespaceRule')) at++;
       const target = parent;
       // Like Chrome, the text goes in as it is, where asked (taken before the CSSOM changes).
       const before = source?.text ?? null;
       const after = splice(sheet, params.location, params.ruleText)(before);
-      const index = ownEdit(() => target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at));
+      let index: number;
+      try {
+        index = ownEdit(() => target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at));
+      } catch (e) {
+        // By name: the sheet may be another frame's, with a DOMException of its own. Chrome 156's
+        // messages: a rule before an @import, and one that cannot be in a group rule (@import).
+        if ((e as { name?: unknown } | null)?.name === 'HierarchyRequestError')
+          throw new CdpError(
+            target === sheet
+              ? `SyntaxError The rule '${params.ruleText}' could not be added in style sheet.`
+              : 'SyntaxError Rule text is not valid.'
+          );
+        throw e;
+      }
       const rule = target.cssRules[index];
       if (!isCssom(rule, 'CSSStyleRule')) {
         ownEdit(() => target.deleteRule(index));

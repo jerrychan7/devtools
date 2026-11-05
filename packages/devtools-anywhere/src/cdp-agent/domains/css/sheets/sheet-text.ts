@@ -195,12 +195,34 @@ const loose = (s: string) =>
  * Pairs the CSSOM's rules with those of the text's outline, in order: outline rules the CSSOM
  * dropped (invalid ones, runs of declarations it found all invalid) are passed over; a CSSOM rule
  * left without one fails the pairing.
+ *
+ * The @import and @namespace rules the CSSOM has first pair with the first such rules of the text
+ * wherever they are: CSS.addRule puts a rule asked for before them after them in the CSSOM, its
+ * text where asked (as Chrome 156 does), so that the text has a style rule before them.
  */
 function pair(text: string, rules: CSSRule[]): SheetSource | null {
-  const top = outline(text);
+  let top = outline(text);
   const namespaces = namespaceText(rules);
   const source: SheetSource = { text, lines: lineStarts(text), nodes: new Map(), top: [], namespaces };
-  return pairList(source, top, rules, TOP, true) ? source : null;
+  let lead = rules.findIndex(r => !isCssom(r, 'CSSImportRule') && !isCssom(r, 'CSSNamespaceRule'));
+  if (lead < 0) lead = rules.length;
+  // Out of order only as a fallback for a text CSS.addRule put a rule in before the @namespace
+  // rules of: any other text with rules before them has none in the CSSOM, and pairs in order.
+  const used = new Set<CssRule>();
+  let j = 0;
+  for (const rule of rules.slice(0, lead)) {
+    while (top[j] && !matches(text, top[j] as CssRule, rule, TOP, '')) j++;
+    const node = top[j++];
+    if (!node) return null;
+    used.add(node);
+    source.nodes.set(rule, node);
+    source.top.push([rule, node]);
+  }
+  top = top.filter(n => !used.has(n));
+  if (!pairList(source, top, rules.slice(lead), TOP, true)) return null;
+  // In the order of the text, which SheetTexts.splice relies on.
+  source.top.sort((a, b) => a[1].start - b[1].start);
+  return source;
 }
 
 /** The @namespace rules among `rules` as the CSSOM serializes them, on one line. */
