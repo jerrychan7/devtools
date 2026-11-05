@@ -158,7 +158,9 @@ export class SheetTexts {
       }
     }
     if (rec.source === undefined) rec.source = pair(rec.text, rules);
-    return rec.source;
+    // Its rules not found in it: the page changed them unseen, in a way the check does not tell
+    // (an @import, which replaceSync() leaves out). Serialized then, like a changed sheet.
+    return rec.source ?? this.serialize(sheet, rules);
   }
 
   /**

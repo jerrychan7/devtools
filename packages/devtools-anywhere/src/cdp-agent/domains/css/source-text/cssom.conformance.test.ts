@@ -115,6 +115,30 @@ test('replaceSync, adopt and replaceSync in one task: added, then changed, as in
   assert.deepEqual(await counts(t.ours), await counts(t.chrome));
 });
 
+test('an @import inserted into a <style> before CSS.enable: in its text, as in Chrome', async () => {
+  for (const side of [t.ours, t.chrome]) await side.send('CSS.disable');
+  await t.page.evaluate(() => {
+    const s = document.createElement('style');
+    s.textContent = '.u2{color:red}';
+    document.head.appendChild(s);
+    s.sheet?.insertRule('@import url("data:text/css,.zz{}");', 0);
+  });
+  const texts = [];
+  for (const side of [t.ours, t.chrome]) {
+    await side.clear();
+    await side.send('CSS.enable');
+    for (const { header } of await side.events('CSS.styleSheetAdded')) {
+      const r = await side.send('CSS.getStyleSheetText', { styleSheetId: header.styleSheetId });
+      if (r.text.includes('.u2')) texts.push(r.text);
+    }
+  }
+  const [ours, chrome] = texts;
+  // Chrome splices the rule's text into the one of the <style> (no line break between them);
+  // ours is serialized from the CSSOM, each rule followed by a line break.
+  assert.equal(chrome, '@import url("data:text/css,.zz{}");.u2{color:red}');
+  assert.equal(ours, '@import url("data:text/css,.zz{}");\n.u2 { color: red; }\n');
+});
+
 test('a constructed sheet changed before CSS.enable: served serialized as in Chrome', async () => {
   for (const side of [t.ours, t.chrome]) await side.send('CSS.disable');
   await t.page.evaluate(() => {
