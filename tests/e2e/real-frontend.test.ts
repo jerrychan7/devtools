@@ -25,6 +25,12 @@ before(async () => {
   await page.setViewport({ width: 1000, height: 1600 });
   await page.goto(env.baseUrl + '/tests/e2e/pages/real-frontend.html');
   frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
+  // The frontend registers its locale data while it starts: until then showing a view throws "No
+  // locale data registered for 'en-US'". Waiting here lets any test run alone (--test-name-pattern).
+  await waitFor(async () => {
+    await showView('elements');
+    return true;
+  });
 });
 after(() => env?.close());
 
@@ -910,6 +916,24 @@ const shownText = () =>
     return lines;
   });
 
+/** Clicks the `index`th match of `selector` in the frontend, shadow DOM included (-1: the last). */
+const clickNth = (selector: string, index: number) =>
+  frontend.evaluate(
+    (selector, index) => {
+      const all: Element[] = [];
+      const walk = (root: Document | ShadowRoot) => {
+        all.push(...root.querySelectorAll(selector));
+        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+      };
+      walk(document);
+      const hit = all.at(index);
+      if (hit instanceof HTMLElement) hit.click();
+      return !!hit;
+    },
+    selector,
+    index
+  );
+
 test('the Animations panel lists the CSS and Web Animations the page runs', { skip }, async () => {
   await showView('animations');
   const before = await count('.animation-buffer-preview');
@@ -923,10 +947,21 @@ test('the Animations panel lists the CSS and Web Animations the page runs', { sk
     document.body.append(css);
     const web = document.createElement('div');
     document.body.append(web);
-    web.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity });
+    web.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity }).id = 'rf-web';
   });
   try {
     await waitFor(async () => (await count('.animation-buffer-preview')) > before);
+    // Each animation's name is shown in its group's timeline: the CSS animation's and the Web
+    // Animation's, whether they share a group or not.
+    const names = new Set<string>();
+    await waitFor(async () => {
+      const previews = await count('.animation-buffer-preview');
+      for (let i = before; i < previews; i++) {
+        await clickNth('.animation-buffer-preview', i);
+        for (const line of await shownText()) if (line === 'rf-spin' || line === 'rf-web') names.add(line);
+      }
+      return names.size === 2;
+    });
   } finally {
     await page.evaluate(() => {
       for (const animation of document.getAnimations()) animation.cancel();
@@ -1015,19 +1050,31 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
     host.attachShadow({ mode: 'open' }).innerHTML =
       '<style>@keyframes rf-bounce { 50% { opacity: 0.5 } } p { animation: rf-bounce 0.4s infinite }</style><p>x</p>';
   });
-  /** Clicks the last match of `selector` in the frontend, shadow DOM included. */
-  const click = (selector: string) =>
-    frontend.evaluate(selector => {
-      const all: Element[] = [];
-      const walk = (root: Document | ShadowRoot) => {
-        all.push(...root.querySelectorAll(selector));
-        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+  const click = (selector: string) => clickNth(selector, -1);
+  /** The play state and current time of the shadow tree's animation, as the page reads them. */
+  const state = () =>
+    page.evaluate(() => {
+      const animation = document.getElementById('rf-shadow-spin')?.shadowRoot?.getAnimations()[0];
+      return {
+        playState: animation?.playState,
+        pending: animation?.pending,
+        currentTime: Number(animation?.currentTime),
       };
-      walk(document);
-      const last = all.at(-1);
-      if (last instanceof HTMLElement) last.click();
-      return !!last;
-    }, selector);
+    });
+  /**
+   * The animation's time once it stands still: read twice 300 ms apart, the same both times and
+   * paused (the frontend's last seeks of a drag may still be on their way). A running animation
+   * never stands still, so this times out.
+   */
+  const stopped = () =>
+    waitFor(async () => {
+      const first = await state();
+      await new Promise(r => setTimeout(r, 300));
+      const second = await state();
+      return first.playState === 'paused' && second.pending === false && first.currentTime === second.currentTime
+        ? { at: second.currentTime }
+        : null;
+    }).then(({ at }) => at);
   try {
     await waitFor(async () => (await count('.animation-buffer-preview')) > before);
     await click('.animation-buffer-preview');
@@ -1035,6 +1082,9 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
     await waitFor(() => count('devtools-button[title="Pause timeline"]'));
     await click('devtools-button[title="Pause timeline"]');
     await waitFor(() => count('devtools-button[title="Play timeline"]'));
+    // The page's animation is paused, not only the button.
+    await waitFor(async () => (await state()).playState === 'paused');
+    const pausedAt = await stopped();
     // Dragging the scrubber seeks the page's animation along: to about half the 1.2 s timeline.
     const header = await frontend.evaluate(() => {
       const find = (root: Document | ShadowRoot): Element | null => {
@@ -1057,13 +1107,13 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
     await page.mouse.down();
     await page.mouse.move(frame.x + header.x + header.width / 2, y, { steps: 5 });
     await page.mouse.up();
-    const time = await waitFor(async () => {
-      const value = await page.evaluate(() =>
-        Number(document.getElementById('rf-shadow-spin')?.shadowRoot?.getAnimations()[0]?.currentTime)
-      );
-      return value > 300 ? value : null;
-    });
-    assert.ok(time < 1200, `seeked to ${time} ms`);
+    // Seeked, and still paused: the time is the scrubber's, not one the animation ran to.
+    await waitFor(async () => (await state()).currentTime !== pausedAt);
+    const time = await stopped();
+    assert.ok(time > 300 && time < 1200, `seeked to ${time} ms`);
+    // Played again, the page's animation runs.
+    await click('devtools-button[title="Play timeline"]');
+    await waitFor(async () => (await state()).playState === 'running');
   } finally {
     await page.evaluate(() => document.getElementById('rf-shadow-spin')?.remove());
   }

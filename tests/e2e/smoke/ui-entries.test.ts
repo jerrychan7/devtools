@@ -212,6 +212,44 @@ for (const [domain, entry] of Object.entries(UI_ENTRIES)) {
         `${entry.view} does not show ${entry.selector ?? JSON.stringify(entry.text)} for ${entry.trigger}; it shows: ${shown}`
       );
     }
+    if (entry.open) {
+      const { click, texts } = entry.open;
+      const seen = new Set<string>();
+      try {
+        await waitFor(async () => {
+          const lines = await element.evaluate((element, click) => {
+            const all: Element[] = [];
+            const walk = (root: Element | ShadowRoot) => {
+              all.push(...root.querySelectorAll(click));
+              for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+            };
+            const textOf = () => {
+              const lines: string[] = [];
+              const collect = (root: Element | ShadowRoot) => {
+                for (const el of root.querySelectorAll('*:not(style):not(script)'))
+                  for (const node of el.childNodes) if (node instanceof Text) lines.push(node.data.trim());
+                for (const el of root.querySelectorAll('*')) if (el.shadowRoot) collect(el.shadowRoot);
+              };
+              if (element) collect(element.shadowRoot ?? element);
+              if (element?.shadowRoot) collect(element);
+              return lines;
+            };
+            if (element) walk(element.shadowRoot ?? element);
+            if (element?.shadowRoot) walk(element);
+            const lines: string[] = [];
+            for (const hit of all) {
+              if (hit instanceof HTMLElement) hit.click();
+              lines.push(...textOf());
+            }
+            return lines;
+          }, click);
+          for (const text of texts) if (lines.includes(text)) seen.add(text);
+          return seen.size === texts.length;
+        }, 8000);
+      } catch {
+        assert.fail(`${entry.view} shows ${[...seen].join(', ') || 'none'} of ${texts.join(', ')}`);
+      }
+    }
     assert.deepEqual(errors.slice(before.errors), [], 'uncaught errors');
     assert.deepEqual(
       messages.slice(before.messages).filter(message => message.includes("wasn't found")),

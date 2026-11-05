@@ -20,6 +20,11 @@ export interface UiEntry {
   select?: string;
   /** Expands the view's collapsed tree items first: their children are made on expanding. */
   expand?: boolean;
+  /**
+   * Once `selector` matches: each match of `click` is clicked in turn, and the view must then have
+   * shown every one of `texts` (in its text nodes) after one of the clicks.
+   */
+  open?: { click: string; texts: string[] };
 }
 
 export const UI_ENTRIES: Record<string, UiEntry | null> = {
@@ -28,10 +33,14 @@ export const UI_ENTRIES: Record<string, UiEntry | null> = {
     view: 'animations',
     trigger: 'the infinite ui-entries-spin animation, started once the panel is open',
     // Like Chrome's, the panel lists the animations that start while it is open.
-    start: "document.getElementById('ui-entries-spinner').className = 'spin'",
+    start:
+      "document.getElementById('ui-entries-spinner').className = 'spin';" +
+      " document.body.appendChild(document.createElement('div'))" +
+      ".animate({ opacity: [0, 1] }, { duration: 1000, iterations: Infinity }).id = 'ui-entries-web'",
     text: 'ui-entries-spin',
-    // An animation group's preview in the timeline.
+    // An animation group's preview in the timeline; selected, its timeline names each animation.
     selector: '.animation-buffer-preview',
+    open: { click: '.animation-buffer-preview', texts: ['ui-entries-spin', 'ui-entries-web'] },
   },
   Audits: { view: 'issues-pane', trigger: 'an input without id or name', text: 'id or name attribute' },
   CacheStorage: { view: 'resources', trigger: 'caches.open', text: 'ui-entries-cache', expand: true },
