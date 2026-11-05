@@ -137,6 +137,11 @@ export function watchCssom(listener: Listener, realms: () => (Window & typeof gl
   };
 }
 
+/** Whether some session watches: the page's changes are seen. */
+export function watching(): boolean {
+  return listeners.size > 0;
+}
+
 /** Hooks the realms of documents seen since watching started. */
 export function watchRealms(docs: Document[]): void {
   if (listeners.size) for (const doc of docs) install(realmOf(doc));
@@ -144,7 +149,7 @@ export function watchRealms(docs: Document[]): void {
 
 /**
  * Tells every session of an edit session `by` made to a sheet, its text now `text` (undefined:
- * not known). Unlike Chrome, the others take that text too and send styleSheetChanged.
+ * not known), recorded already in the shared store. Unlike Chrome, the others send styleSheetChanged.
  */
 export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefined): void {
   for (const listener of listeners)

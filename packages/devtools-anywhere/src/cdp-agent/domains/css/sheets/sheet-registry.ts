@@ -7,7 +7,7 @@ import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
-import { type SheetSource, SheetTexts, namespaceText, offsetsOf, selectorSpans, styleSpan } from './sheet-text';
+import { type SheetSource, namespaceText, offsetsOf, sheetTexts, selectorSpans, styleSpan } from './sheet-text';
 
 /** Chrome's error for a range that is not that of what an edit changes. */
 export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing source range";
@@ -41,12 +41,17 @@ export function setSheetIdPrefix(prefix: string): void {
   idPrefix = prefix;
 }
 
+/**
+ * The id of each style rule, by sheet the next one: shared by every session, so that the texts
+ * serialized from the same rules (a rule on the line of its id) are the same in all.
+ */
+const ruleIds = new WeakMap<StyleRule, number>();
+const nextRuleId = new WeakMap<CSSStyleSheet, number>();
+
 export class SheetRegistry {
   private sheetIds = new WeakMap<CSSStyleSheet, string>();
   /** Weak, so that sheets the page drops can be collected. */
   private sheets = new Map<string, WeakRef<CSSStyleSheet>>();
-  private ruleIds = new WeakMap<StyleRule, number>();
-  private nextRuleId = new WeakMap<CSSStyleSheet, number>();
   private seq = 0;
   /** Inspector style sheets (CSS.createStyleSheet), in any frame. */
   private inspectorSheets = new WeakSet<CSSStyleSheet>();
@@ -60,8 +65,8 @@ export class SheetRegistry {
   private fetch: typeof globalThis.fetch;
   private shadowRoots: () => ShadowRoot[];
   private frames: FrameRegistry;
-  /** The texts sheets were written in. */
-  readonly texts = new SheetTexts(sheet => this.rulesOf(sheet));
+  /** The texts sheets were written in, shared with the other sessions. */
+  readonly texts = sheetTexts;
 
   constructor(fetch: typeof globalThis.fetch, shadowRoots: () => ShadowRoot[], frames: FrameRegistry) {
     this.fetch = fetch;
@@ -248,12 +253,12 @@ export class SheetRegistry {
   }
 
   ruleId(sheet: CSSStyleSheet, rule: StyleRule): number {
-    let id = this.ruleIds.get(rule);
+    let id = ruleIds.get(rule);
     if (id === undefined) {
       // Line 0 of the serialized text holds the @namespace rules, if any (see `serialized`).
-      id = this.nextRuleId.get(sheet) ?? (this.namespacesOf(sheet).length ? 1 : 0);
-      this.nextRuleId.set(sheet, id + 1);
-      this.ruleIds.set(rule, id);
+      id = nextRuleId.get(sheet) ?? (this.namespacesOf(sheet).length ? 1 : 0);
+      nextRuleId.set(sheet, id + 1);
+      ruleIds.set(rule, id);
     }
     return id;
   }
@@ -315,7 +320,7 @@ export class SheetRegistry {
     assertOrdered(range);
     const source = this.sourceOf(sheet);
     if (!source) {
-      const entry = this.entries(sheet).find(e => this.ruleIds.get(e.rule) === range.startLine);
+      const entry = this.entries(sheet).find(e => ruleIds.get(e.rule) === range.startLine);
       if (!entry) throw new CdpError('No rule at given range');
       return entry.rule;
     }
@@ -339,7 +344,7 @@ export class SheetRegistry {
 
   /** The text the sheet was written in, with its rules in it; null when unknown. */
   sourceOf(sheet: CSSStyleSheet): SheetSource | null {
-    return this.texts.source(sheet);
+    return this.texts.source(sheet, s => this.rulesOf(s));
   }
 
   /** The text of a sheet: the one it was written in, or one serialized from its rules. */

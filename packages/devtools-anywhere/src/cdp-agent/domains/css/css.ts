@@ -24,7 +24,7 @@ import {
 } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
 import { outline } from './sheets/css-outline';
-import { editedBy, ownEdit, watchCssom, watchRealms } from './sheets/cssom-watch';
+import { editedBy, ownEdit, watchCssom, watchRealms, watching } from './sheets/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
@@ -456,8 +456,9 @@ export function registerCss(ctx: Context) {
     enable() {
       if (enabled) return;
       enabled = true;
-      // Changes the page made while disabled went unseen.
-      sheets.texts.reset();
+      // Changes the page made while no session watched went unseen; those seen since one did are
+      // in the texts the sessions share.
+      if (!watching()) sheets.texts.reset();
       known = new Set();
       // Before this domain's observer and frame listener, so the tracker drops a stale list first.
       if (!stopShadowRoots) {
@@ -499,11 +500,13 @@ export function registerCss(ctx: Context) {
       stopCssom = watchCssom(
         (sheet, text, by) => {
           if (by === sheets) return;
-          // Another session's edit is taken like the page's, with the text it wrote: unlike
-          // Chrome (where the other sessions keep the text they had and hear nothing), every
-          // session serves the same text, and is sent styleSheetChanged to fetch it again.
-          if (text === undefined) sheets.texts.invalidate(sheet);
-          else sheets.texts.set(sheet, text);
+          // Another session's edit, its text recorded already (the sessions share them): unlike
+          // Chrome (where the other sessions keep the text they had and hear nothing), this one
+          // is sent styleSheetChanged to fetch it again.
+          if (!by) {
+            if (text === undefined) sheets.texts.invalidate(sheet);
+            else sheets.texts.set(sheet, text);
+          }
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
           // Adopted in the same task, not reported yet: like Chrome, added then changed. Looking
           // through every tree's adopted sheets costs about 1.3 µs a write: a sheet with an owner

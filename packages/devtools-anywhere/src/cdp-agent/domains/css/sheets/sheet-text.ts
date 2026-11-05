@@ -44,8 +44,10 @@ function snapshot(rules: CSSRule[]): string {
 }
 
 /**
- * Changes the page makes through the CSSOM are seen by cssom-watch.ts, while the CSS domain is
- * enabled; the texts recorded are dropped when it is enabled again. A text not from the CSSOM's
+ * One store for the page, shared by every session (`sheetTexts`): all serve the same text, and a
+ * session enabling CSS late gets the current one. Changes the page makes through the CSSOM are
+ * seen by cssom-watch.ts while some session watches; the texts recorded are dropped when one
+ * starts watching with none watching before. A text not from the CSSOM's
  * own replace() (that of a <style>, a file) is checked once against the sheet: parsed alone, it
  * must give the rules the sheet has, or the page changed them before.
  */
@@ -53,11 +55,6 @@ export class SheetTexts {
   private recorded = new WeakMap<CSSStyleSheet, Recorded>();
   /** Sheets the page changed through the CSSOM since their text was recorded. */
   private stale = new WeakSet<CSSStyleSheet>();
-  private rulesOf: (sheet: CSSStyleSheet) => CSSRule[];
-
-  constructor(rulesOf: (sheet: CSSStyleSheet) => CSSRule[]) {
-    this.rulesOf = rulesOf;
-  }
 
   /**
    * Takes `text` for the sheet's, its CSSOM rules being what it gives now, or with `check`, those
@@ -95,8 +92,8 @@ export class SheetTexts {
     this.stale = new WeakSet();
   }
 
-  /** The text of the sheet with its rules paired, or null. */
-  source(sheet: CSSStyleSheet): SheetSource | null {
+  /** The text of the sheet with its rules (as `rulesOf` gives them) paired, or null. */
+  source(sheet: CSSStyleSheet, rulesOf: (sheet: CSSStyleSheet) => CSSRule[]): SheetSource | null {
     if (this.stale.has(sheet)) return null;
     let rec = this.recorded.get(sheet);
     const owner = sheet.ownerNode;
@@ -106,7 +103,7 @@ export class SheetTexts {
     }
     if (!rec) return null;
     if (rec.source !== undefined) return rec.source;
-    const rules = this.rulesOf(sheet);
+    const rules = rulesOf(sheet);
     if (rec.unchecked) {
       rec.unchecked = false;
       const alone = new CSSStyleSheet();
@@ -121,6 +118,9 @@ export class SheetTexts {
     return rec.source;
   }
 }
+
+/** The texts of the page's sheets, for every session. */
+export const sheetTexts = new SheetTexts();
 
 /** The at-rule name each kind of CSSOM rule is written with; a kind not listed pairs with none. */
 const AT_NAMES: Record<string, string> = {
