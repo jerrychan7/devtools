@@ -475,7 +475,7 @@ describe('what a world keeps from the page', () => {
       const id = await world(side, 'conformance-typeof-forms');
       return valueIn(
         side,
-        `[typeof(nope), typeof ((nope)), typeof (nope) === 'undefined', (() => { let pi = 1; return [typeof pi++, pi]; })(), typeof ñope, typeof ñope2 === typeof undefined]`,
+        `[typeof(nope), typeof ((nope)), typeof (nope) === 'undefined', (() => { let pi = 1; return [typeof pi++, pi]; })(), typeof ñope, typeof ñope2 === typeof undefined, typeof arguments]`,
         id
       );
     });
