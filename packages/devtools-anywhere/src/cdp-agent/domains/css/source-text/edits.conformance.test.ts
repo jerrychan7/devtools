@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
-import { matched, rule, style } from '../../../../../test-support/css-source.ts';
+import { addStyle, matched, nodeId, rule, style } from '../../../../../test-support/css-source.ts';
 
 let env: Env | undefined;
 /** Our agent on one page, Chrome on another. */
@@ -58,9 +58,18 @@ async function state(side: Side, t: TestPage) {
   const { sheet, rules } = await matched(side, '#e1');
   const changed = (await side.events('CSS.styleSheetChanged')).length;
   await side.clear();
-  return { sheet, rules, text: await text(side, sheet), textContent: await textContent(t), changed };
+  return {
+    sheet,
+    rules,
+    text: await text(side, sheet),
+    textContent: await textContent(t),
+    changed,
+  };
 }
-const strip = (s: Awaited<ReturnType<typeof state>>) => ({ ...s, sheet: undefined });
+const strip = (s: Awaited<ReturnType<typeof state>>) => ({
+  ...s,
+  sheet: undefined,
+});
 
 test('setStyleTexts replaces the range only, keeps textContent, sends no styleSheetChanged', async () => {
   const [ours, chrome] = await each(async (side, t) => {
@@ -69,9 +78,18 @@ test('setStyleTexts replaces the range only, keeps textContent, sends no styleSh
     const raw = rules.find(r => r.style.cssText?.includes('left'));
     assert.ok(raw?.style.range);
     const res = await side.send('CSS.setStyleTexts', {
-      edits: [{ styleSheetId: sheet, range: raw.style.range, text: ' left: 2px; /* top: 3px; */ color: blue ' }],
+      edits: [
+        {
+          styleSheetId: sheet,
+          range: raw.style.range,
+          text: ' left: 2px; /* top: 3px; */ color: blue ',
+        },
+      ],
     });
-    return { styles: res.styles.map(style), after: strip(await state(side, t)) };
+    return {
+      styles: res.styles.map(style),
+      after: strip(await state(side, t)),
+    };
   });
   assert.deepEqual(ours, chrome);
   assert.equal(ours.after.changed, 0);
@@ -81,10 +99,16 @@ test('setStyleTexts replaces the range only, keeps textContent, sends no styleSh
 /** The raw rules of the edited sheet matching #e1. */
 async function rawRules(side: Side): Promise<{ sheet: string; rules: Protocol.CSS.CSSRule[] }> {
   const { root } = await side.send('DOM.getDocument', {});
-  const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#e1' });
+  const { nodeId } = await side.send('DOM.querySelector', {
+    nodeId: root.nodeId,
+    selector: '#e1',
+  });
   const res = await side.send('CSS.getMatchedStylesForNode', { nodeId });
   const { sheet } = await matched(side, '#e1');
-  return { sheet, rules: (res.matchedCSSRules ?? []).map(m => m.rule).filter(r => r.styleSheetId === sheet) };
+  return {
+    sheet,
+    rules: (res.matchedCSSRules ?? []).map(m => m.rule).filter(r => r.styleSheetId === sheet),
+  };
 }
 
 test('setRuleSelector writes the selector as given and returns it normalized', async () => {
@@ -93,8 +117,17 @@ test('setRuleSelector writes the selector as given and returns it normalized', a
     const target = rules.find(r => r.selectorList.selectors.length === 2);
     const [a, b] = [target?.selectorList.selectors[0]?.range, target?.selectorList.selectors[1]?.range];
     assert.ok(a && b);
-    const range = { startLine: a.startLine, startColumn: a.startColumn, endLine: b.endLine, endColumn: b.endColumn };
-    const res = await side.send('CSS.setRuleSelector', { styleSheetId: sheet, range, selector: '.t1,   .t3' });
+    const range = {
+      startLine: a.startLine,
+      startColumn: a.startColumn,
+      endLine: b.endLine,
+      endColumn: b.endColumn,
+    };
+    const res = await side.send('CSS.setRuleSelector', {
+      styleSheetId: sheet,
+      range,
+      selector: '.t1,   .t3',
+    });
     return {
       res: res.selectorList.selectors.map(s => [s.text, s.range]),
       text: res.selectorList.text,
@@ -124,7 +157,12 @@ test('setMediaText writes the condition as given; a range not a condition’s is
         () => 'ok',
         (e: Error) => /NotFoundError Source range didn't match existing source range/.test(e.message)
       );
-    return { text: res.media.text, range: res.media.range, wrong, after: strip(await state(side, t)) };
+    return {
+      text: res.media.text,
+      range: res.media.range,
+      wrong,
+      after: strip(await state(side, t)),
+    };
   });
   assert.deepEqual(ours, chrome);
 });
@@ -133,7 +171,11 @@ test('addRule inserts the text as it is, where asked', async () => {
   const [ours, chrome] = await each(async (side, t) => {
     const { sheet } = await rawRules(side);
     const location = { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 };
-    const res = await side.send('CSS.addRule', { styleSheetId: sheet, location, ruleText: '.t1 { order: 1 }' });
+    const res = await side.send('CSS.addRule', {
+      styleSheetId: sheet,
+      location,
+      ruleText: '.t1 { order: 1 }',
+    });
     return { rule: rule(res.rule), after: strip(await state(side, t)) };
   });
   assert.deepEqual(ours, chrome);
@@ -194,7 +236,56 @@ test('changes through the CSSOM: styleSheetChanged, same id; replaceSync gives t
       () => 'ok',
       (e: Error) => /No style sheet with given id found/.test(e.message)
     );
-    return { changed, replaced, replacedText: await text(side, id), removed, readded, gone };
+    return {
+      changed,
+      replaced,
+      replacedText: await text(side, id),
+      removed,
+      readded,
+      gone,
+    };
   });
   assert.deepEqual(ours, chrome);
+});
+
+test('a sheet whose rules do not pair with its text is edited by the ranges it is served with', async () => {
+  // Parsed alone, `svg|\61` has no namespace: its rule is not paired, the sheet is served
+  // serialized, a rule's range by its line.
+  const css = '@namespace svg url(http://www.w3.org/2000/svg);\nsvg|\\61 { top: 1px }\n.u1 { color: red }';
+  const [ours, chrome] = await each(async (side, t) => {
+    const at = await addStyle(t, css, '<p class="u1">x</p>');
+    const res = await side.send('CSS.getMatchedStylesForNode', {
+      nodeId: await nodeId(side, `${at} .u1`),
+    });
+    const found = res.matchedCSSRules?.map(m => m.rule).find(r => r.selectorList.text === '.u1');
+    assert.ok(found?.styleSheetId && found.style.range && found.selectorList.selectors[0]?.range);
+    const id = found.styleSheetId;
+    const outcome = (p: Promise<unknown>) =>
+      p.then(
+        () => 'ok',
+        (e: Error) => e.message
+      );
+    const styleEdit = await outcome(
+      side.send('CSS.setStyleTexts', {
+        edits: [{ styleSheetId: id, range: found.style.range, text: 'color: blue' }],
+      })
+    );
+    const selectorEdit = await outcome(
+      side.send('CSS.setRuleSelector', {
+        styleSheetId: id,
+        range: found.selectorList.selectors[0].range,
+        selector: '.u1, .u2',
+      })
+    );
+    const rules = await t.page.evaluate(
+      at =>
+        [...((document.getElementById(`${at.slice(1)}-style`) as HTMLStyleElement).sheet?.cssRules ?? [])].map(
+          r => r.cssText
+        ),
+      at
+    );
+    return { styleEdit, selectorEdit, rules };
+  });
+  assert.deepEqual(ours, chrome);
+  assert.equal(chrome.styleEdit, 'ok');
 });
