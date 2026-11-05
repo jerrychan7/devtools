@@ -1,11 +1,11 @@
 // css-outline.ts against Chrome's parser: the rules outline() finds in a sheet are the ones CSSOM
 // keeps, in order, once those CSSOM drops for their selector or prelude are left out. Which ones
 // those are is asked of Chrome too, by parsing each rule's text alone.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { Page } from 'puppeteer-core';
-import { launch } from '../../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Env } from '../../../../../test-support/conformance.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,11 +31,13 @@ const { outline }: { outline: typeof Outline } = await import(
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+  },
+  () => env?.close()
+);
 
 /** Each rule as CSSOM serializes it, nested rules in it as a tree. */
 type Tree = [string, Tree[]];
