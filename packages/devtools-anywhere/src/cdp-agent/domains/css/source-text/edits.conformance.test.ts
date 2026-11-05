@@ -64,22 +64,12 @@ const strip = (s: Awaited<ReturnType<typeof state>>) => ({ ...s, sheet: undefine
 
 test('setStyleTexts replaces the range only, keeps textContent, sends no styleSheetChanged', async () => {
   const [ours, chrome] = await each(async (side, t) => {
-    const before = await state(side, t);
-    const target = before.rules.find(r => r.text === '.t1' && r.style.cssText.includes('left'));
-    const { rules } = await side
-      .send('CSS.getMatchedStylesForNode', {
-        nodeId: (
-          await side.send('DOM.querySelector', {
-            nodeId: (await side.send('DOM.getDocument', {})).root.nodeId,
-            selector: '#e1',
-          })
-        ).nodeId,
-      })
-      .then(r => ({ rules: (r.matchedCSSRules ?? []).map(m => m.rule) }));
-    const raw = rules.find(r => r.styleSheetId === before.sheet && r.style.cssText === target?.style.cssText);
+    await state(side, t);
+    const { sheet, rules } = await rawRules(side);
+    const raw = rules.find(r => r.style.cssText?.includes('left'));
     assert.ok(raw?.style.range);
     const res = await side.send('CSS.setStyleTexts', {
-      edits: [{ styleSheetId: before.sheet, range: raw.style.range, text: ' left: 2px; /* top: 3px; */ color: blue ' }],
+      edits: [{ styleSheetId: sheet, range: raw.style.range, text: ' left: 2px; /* top: 3px; */ color: blue ' }],
     });
     return { styles: res.styles.map(style), after: strip(await state(side, t)) };
   });
