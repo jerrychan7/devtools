@@ -96,9 +96,7 @@ async function settle(t: TestPage, side: Side) {
  * only checks the fields we send; `noneMissing` checks the other way.
  */
 const KNOWN_MISSING = new Set<string>([
-  // Scroll-driven animations' timeline: not announced yet (worked on separately); no test here
-  // runs one, listed so that one that does is not failed by this check alone.
-  '$.viewOrScrollTimeline',
+  // None at present: add a field here, saying why, only when leaving it out is accepted.
 ]);
 /** Fails if Chrome announced a field of `chrome` that `ours` lacks and KNOWN_MISSING does not list. */
 const noneMissing = (ours: unknown, chrome: unknown, what: string) =>
@@ -1294,6 +1292,7 @@ describe('Animation, scroll-driven', () => {
       const own = ours.announced[name];
       assert.ok(own, `missing ${name}`);
       assert.deepEqual(diffSubset(own, animation), [], name);
+      noneMissing(own, animation, name);
       assert.deepEqual(own.viewOrScrollTimeline, animation.viewOrScrollTimeline, name);
     }
     assert.deepEqual({ ...ours, announced: undefined }, { ...chrome, announced: undefined });
