@@ -35,6 +35,9 @@ type Candidate = {
   }[];
 };
 
+type Kind = 'own' | 'host' | 'slotted';
+type Selector = Candidate['selectors'][number];
+
 /** Matches elements against the page's style rules, in cascade order. */
 export class Cascade {
   /**
@@ -42,6 +45,11 @@ export class Cascade {
    * pseudo-elements and its ancestors against the same rules, so they are collected once.
    */
   private request: Map<TreeScope, Candidate[]> | null = null;
+  /** The namespaces of sheets, and what was matched in them (see inNamespaces), for one request. */
+  private namespaceCache: {
+    namespaces: Map<CSSStyleSheet, string>;
+    matched: Map<TreeScope, Map<Element, Map<CSSStyleSheet, Map<string, boolean>>>>;
+  } | null = null;
 
   private readonly sheets: SheetRegistry;
   private readonly forced: ForcedPseudoClasses;
@@ -67,10 +75,12 @@ export class Cascade {
   /** Runs `answer` with the candidates collected once for it. */
   forRequest<T>(answer: () => T): T {
     this.request = this.candidates();
+    this.namespaceCache = null;
     try {
       return answer();
     } finally {
       this.request = null;
+      this.namespaceCache = null;
     }
   }
 
@@ -161,26 +171,65 @@ export class Cascade {
     return null;
   }
   /**
-   * Whether `el` matches each selector (but those in @scope) of the rules in `group` of the sheets
-   * declaring namespaces, by sheet and selector: Element.matches() does not know them.
+   * Whether `el` matches selector `s` of a candidate as the rules of a tree match it (`kind`), in
+   * the namespaces its sheet declares; undefined for a sheet declaring none, which
+   * Element.matches() can match. Found by a probe (namespaces.ts) for all the candidates of the
+   * tree at once, and for an element of the tree, for its ancestors too: they are matched next.
    */
-  private namespaceMatches(el: Element, pseudo: PseudoType | null, group: Candidate[]) {
-    const bySheet = new Map<CSSStyleSheet, { tree: TreeScope; hosts: Set<string> }>();
-    for (const { sheet, tree, scope, selectors } of group) {
-      if (scope) continue;
-      let entry = bySheet.get(sheet);
-      if (!entry) bySheet.set(sheet, (entry = { tree, hosts: new Set() }));
-      for (const s of selectors) if (s.pseudo === pseudo) entry.hosts.add(s.host);
+  private inNamespaces(kind: Kind, group: Candidate[], el: Element, c: Candidate, s: Selector): boolean | undefined {
+    const cache = (this.namespaceCache ??= { namespaces: new Map(), matched: new Map() });
+    const namespacesOf = (sheet: CSSStyleSheet) => {
+      let text = cache.namespaces.get(sheet);
+      if (text === undefined) cache.namespaces.set(sheet, (text = namespaceText(this.sheets.rulesOf(sheet))));
+      return text;
+    };
+    if (!namespacesOf(c.sheet)) return undefined;
+    const probe = (c: Candidate, s: Selector): ((d: string) => string) | null => {
+      if (kind === 'slotted') return s.slotted === null ? null : d => `${s.host}::slotted(${s.slotted}){${d}}`;
+      if (kind === 'host' || !c.scope) return d => `${s.host}{${d}}`;
+      // The implicit root of an @scope is the parent of its own sheet's <style>.
+      const { start, end } = c.scope;
+      if (start === null) return null;
+      return d => `@scope (${start})${end === null ? '' : ` to (${end})`}{${s.host}{${d}}}`;
+    };
+    const key = (c: Candidate, s: Selector) =>
+      `${kind}\u0001${c.scope ? `${c.scope.start}\u0002${c.scope.end}` : ''}\u0001${s.host}\u0001${s.slotted}`;
+    let byTree = cache.matched.get(c.tree);
+    if (!byTree) cache.matched.set(c.tree, (byTree = new Map()));
+    const known = byTree.get(el)?.get(c.sheet)?.get(key(c, s));
+    if (known !== undefined) return known;
+    const els = [el];
+    if (kind === 'own') for (let p = el.parentElement; p && !byTree.has(p); p = p.parentElement) els.push(p);
+    const bySheet = new Map<CSSStyleSheet, { keys: string[]; rules: ((d: string) => string)[] }>();
+    for (const candidate of group) {
+      if (!namespacesOf(candidate.sheet)) continue;
+      let entry = bySheet.get(candidate.sheet);
+      if (!entry) bySheet.set(candidate.sheet, (entry = { keys: [], rules: [] }));
+      for (const selector of candidate.selectors) {
+        const rule = probe(candidate, selector);
+        const k = key(candidate, selector);
+        if (rule && !entry.keys.includes(k)) {
+          entry.keys.push(k);
+          entry.rules.push(rule);
+        }
+      }
     }
-    const result = new Map<CSSStyleSheet, Map<string, boolean>>();
-    for (const [sheet, { tree, hosts }] of bySheet) {
-      const namespaces = namespaceText(this.sheets.rulesOf(sheet));
-      if (!namespaces || !hosts.size) continue;
-      const list = [...hosts];
-      const matched = matchInNamespaces(el, tree, namespaces, list);
-      result.set(sheet, new Map(list.map((h, i) => [h, matched[i] ?? false])));
-    }
-    return result;
+    const sheets = [...bySheet];
+    const found = matchInNamespaces(
+      els,
+      c.tree,
+      sheets.map(([sheet, { rules }]) => ({ namespaces: namespacesOf(sheet), rules }))
+    );
+    els.forEach((e, j) => {
+      let bySheetOf = byTree.get(e);
+      if (!bySheetOf) byTree.set(e, (bySheetOf = new Map()));
+      sheets.forEach(([sheet, { keys }], i) => {
+        let byKey = bySheetOf.get(sheet);
+        if (!byKey) bySheetOf.set(sheet, (byKey = new Map()));
+        keys.forEach((k, n) => byKey.set(k, found[i]?.[j]?.[n] ?? false));
+      });
+    });
+    return byTree.get(el)?.get(c.sheet)?.get(key(c, s));
   }
 
   /**
@@ -188,6 +237,8 @@ export class Cascade {
    * priority first). Selectors ending in a pseudo-element only match that pseudo-element.
    */
   matchedRules(el: Element, pseudo: PseudoType | null = null): Protocol.CSS.RuleMatch[] {
+    // Kept for one request only: out of one, for one call.
+    if (!this.request) this.namespaceCache = null;
     const matches: {
       match: Protocol.CSS.RuleMatch;
       spec: Protocol.CSS.Specificity;
@@ -217,21 +268,40 @@ export class Cascade {
     }
     groups.push([ownShadow ? byTree.get(ownShadow) : undefined, 'host', null, -depth]);
     for (const [group, kind, slot, rank] of groups) {
-      const inNamespaces = kind === 'own' ? this.namespaceMatches(el, pseudo, group ?? []) : null;
       for (const candidate of group ?? []) {
         const { sheet, tree, rule, order, layer, containers, scope, selectors } = candidate;
         let proximity = Infinity;
         const matched = selectors.filter(s => {
           try {
-            if (kind === 'slotted')
-              return !pseudo && s.slotted !== null && !!slot?.matches(s.host) && el.matches(s.slotted);
+            if (kind === 'slotted') {
+              if (pseudo || s.slotted === null) return false;
+              return (
+                this.inNamespaces(kind, group ?? [], el, candidate, s) ??
+                (!!slot?.matches(s.host) && el.matches(s.slotted))
+              );
+            }
             if (s.pseudo !== pseudo) return false;
+            const declared = this.inNamespaces(kind, group ?? [], el, candidate, s);
             if (kind === 'host') {
+              if (declared !== undefined) return declared;
               const host = hostMatcher(s.host);
               return host !== null && host(el);
             }
-            const declared = inNamespaces?.get(sheet)?.get(s.host);
             if (!scope) return declared ?? el.matches(s.host);
+            if (declared === false) return false;
+            if (declared) {
+              // Its proximity where Element.matches() can tell it, else as if the root were the farthest.
+              let distance: number | null = null;
+              try {
+                distance = this.scopeProximity(sheet, scope, el, root =>
+                  root === el ? el.matches(s.host) : Array.from(root.querySelectorAll(s.host)).includes(el)
+                );
+              } catch {
+                // A prefix Element.matches() does not know.
+              }
+              if (distance !== null) proximity = Math.min(proximity, distance);
+              return true;
+            }
             // `:scope` is the root: Element.matches for the root itself, querySelectorAll below it,
             // once the element matches the selector with any root.
             const anyRoot = s.host.replace(/:scope(?![\w-])/g, ':is(*)');
