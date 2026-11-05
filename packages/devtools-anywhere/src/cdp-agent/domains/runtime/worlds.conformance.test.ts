@@ -347,6 +347,60 @@ describe('what a world keeps from the page', () => {
     });
     assert.deepEqual(ours, chrome);
   });
+
+  test('a world finds the names that exist, and throws for the others as Chrome', async () => {
+    const [ours, chrome] = await both(async side => {
+      const id = await world(side, 'conformance-names');
+      return [
+        await valueIn(side, "['nope' in window, 'document' in window, typeof nope]", id),
+        await valueIn(side, 'nope', id),
+        await valueIn(side, 'nopeFn()', id),
+      ];
+    });
+    assert.deepEqual(ours, chrome);
+  });
+
+  test("properties the page's listener writes during a world's call stay the page's", async () => {
+    await t.page.evaluate(() => {
+      const node = document.body.appendChild(document.createElement('div'));
+      node.id = 'clicked';
+      node.addEventListener('click', function (this: HTMLElement & Record<string, unknown>) {
+        this['__pageWrote'] = 'page';
+      });
+    });
+    const result = [];
+    // One side after the other: both write on the same node.
+    for (const side of [t.ours, t.chrome]) {
+      const id = await world(side, 'conformance-window');
+      const { root } = await side.send('DOM.getDocument');
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#clicked' });
+      const { object } = await side.send('DOM.resolveNode', { nodeId, executionContextId: id });
+      const call = async (functionDeclaration: string, awaitPromise = false) =>
+        (
+          await side.send('Runtime.callFunctionOn', {
+            objectId: object.objectId ?? '',
+            functionDeclaration,
+            returnByValue: true,
+            awaitPromise,
+          })
+        ).result.value;
+      const page = () =>
+        t.page.evaluate(() => {
+          const node = document.getElementById('clicked') as HTMLElement & Record<string, unknown>;
+          const seen = [typeof node['__worldWrote'], node['__pageWrote'], typeof node['__afterAwait']];
+          for (const key of Object.keys(node)) delete node[key];
+          return seen;
+        });
+      result.push([
+        await call('function () { this.__worldWrote = 1; this.click(); return 0; }'),
+        await call('function () { return this.__worldWrote; }'),
+        await call('async function () { await 0; this.__afterAwait = 2; }', true),
+        await call('function () { return this.__afterAwait; }'),
+        await page(),
+      ]);
+    }
+    assert.deepEqual(result[0], result[1]);
+  });
 });
 
 describe('sessions', () => {
