@@ -198,11 +198,18 @@ function timelineOf(ctx: Context, animation: Animation): Protocol.Animation.View
   const source: unknown = Reflect.get(timeline, 'source');
   const axis: unknown = Reflect.get(timeline, 'axis');
   if (!isNode(source) || !isElement(source) || typeof axis !== 'string') return undefined;
+  // The root scroller (`scroll(root)`) is `document.scrollingElement`, whose client size is the
+  // viewport's: its range is the document's beyond the viewport (measured: 3000px in a 600px
+  // viewport is 2400, as in Chrome). In quirks mode that element is the body, whose client size is
+  // the viewport's too (measured in the page); what Chrome reports for it is not measured.
   // `block` and `inline` follow the scroller's writing mode.
   const lines = styleOf(source).writingMode.startsWith('horizontal');
   const horizontal = axis === 'x' || (axis !== 'y' && (axis === 'inline') === lines);
   const result: Protocol.Animation.ViewOrScrollTimeline = {
-    sourceNodeId: ctx.nodes.backendIdOf(source),
+    // Chrome names the document for the root scroller (measured), as the panel scrolls it.
+    sourceNodeId: ctx.nodes.backendIdOf(
+      source === source.ownerDocument.scrollingElement ? source.ownerDocument : source
+    ),
     startOffset: 0,
     endOffset: horizontal ? source.scrollWidth - source.clientWidth : source.scrollHeight - source.clientHeight,
     axis: horizontal ? 'horizontal' : 'vertical',
@@ -422,29 +429,32 @@ export function registerAnimation(ctx: Context) {
   };
 
   /** Reports what the page changed: the start (Chrome's `animationStarted`), the start time, the rate. */
-  const check = (t: Tracked) => {
+  /** Whether an update was sent. */
+  const check = (t: Tracked): boolean => {
     const { animation } = t;
     const rated = syncRate(t);
-    if (t.released) return;
+    if (t.released) return false;
     if (!t.started) {
-      if (animation.pending || animation.playState === 'idle') return;
+      if (animation.pending || animation.playState === 'idle') return false;
       t.started = true;
       t.start = startOf(animation);
       session.emit('Animation.animationStarted', { animation: describe(t) });
       // A rate the page set while it was pending, taken over from a disable (see `owed`): Chrome
       // reports it with an update after the start.
       if (rated) session.emit('Animation.animationUpdated', { animation: describe(t) });
-      return;
+      return rated;
     }
     if (t.hold > 0) {
       t.hold--;
-      return;
+      return false;
     }
     const start = startOf(animation);
     if ((start !== null && start !== t.start) || rated) {
       t.start = start ?? t.start;
       session.emit('Animation.animationUpdated', { animation: describe(t) });
+      return true;
     }
+    return false;
   };
 
   /** Reports a cancel (Chrome reports one even before the start), and lets ended ones sleep. */
@@ -495,10 +505,11 @@ export function registerAnimation(ctx: Context) {
    * left pending is not known yet: Chrome reports it once it is, and so does the next frame here.
    */
   const quietly = (t: Tracked, change: () => void) => {
-    check(t);
+    const updated = check(t);
     change();
     t.start = startOf(t.animation) ?? t.start;
     t.seen = t.animation.playbackRate;
+    return updated;
   };
 
   const setRate = (value: number) => {
@@ -592,19 +603,26 @@ export function registerAnimation(ctx: Context) {
       for (const [i, t] of list.entries()) {
         const { animation } = t;
         check(t);
+        const time = currentTimes?.[i] ?? currentTime ?? 0;
+        const end = numberOf(animation.effect?.getComputedTiming().endTime);
+        const timeline = timelineOf(ctx, animation);
+        let value: CSSNumberish | null = null;
+        if (!timeline) value = end === null ? time : Math.min(time, end);
+        else if (animation.playState === 'paused') {
+          const range = (timeline.endOffset ?? 0) - (timeline.startOffset ?? 0);
+          const percent = range > 0 ? (time / MS_PER_PX / range) * 100 : 0;
+          value = CSS.percent(end === null ? percent : Math.min(percent, end));
+        }
+        // Only the page's own calls: they throw a DOMException (or a TypeError) the page decides.
         try {
           if (animation.playState !== 'paused') animation.play();
-          let time = currentTimes?.[i] ?? currentTime ?? 0;
-          const end = numberOf(animation.effect?.getComputedTiming().endTime);
-          const timeline = timelineOf(ctx, animation);
-          if (!timeline) animation.currentTime = end === null ? time : Math.min(time, end);
-          else if (animation.playState === 'paused') {
-            const range = (timeline.endOffset ?? 0) - (timeline.startOffset ?? 0);
-            time = range > 0 ? (time / MS_PER_PX / range) * 100 : 0;
-            animation.currentTime = CSS.percent(end === null ? time : Math.min(time, end));
-          }
-        } catch {
-          // Left as it is, as in Chrome.
+          if (value !== null) animation.currentTime = value;
+        } catch (error) {
+          // Of any realm: an iframe's animation throws its window's errors.
+          const pageError =
+            Object.prototype.toString.call(error) === '[object DOMException]' ||
+            (typeof error === 'object' && error !== null && Reflect.get(error, 'name') === 'TypeError');
+          if (!pageError) throw error;
         }
         t.hold = 2;
         wake(t);
@@ -612,9 +630,11 @@ export function registerAnimation(ctx: Context) {
     },
     setTiming: ({ animationId, duration, delay }: Protocol.Animation.SetTimingRequest) => {
       const t = find(animationId);
-      quietly(t, () => t.animation.effect?.updateTiming({ duration, delay }));
-      // Chrome reports a scroll-driven one with an update, its timing back in percent (measured).
-      if (scrollDriven(t.animation)) session.emit('Animation.animationUpdated', { animation: describe(t) });
+      const updated = quietly(t, () => t.animation.effect?.updateTiming({ duration, delay }));
+      // Chrome reports a scroll-driven one with an update, its timing back in percent (measured),
+      // and one only when the page changed its rate in that frame too (measured): the page's
+      // change, reported first, stands for it.
+      if (!updated && scrollDriven(t.animation)) session.emit('Animation.animationUpdated', { animation: describe(t) });
       wake(t);
     },
     releaseAnimations: ({ animations }: Protocol.Animation.ReleaseAnimationsRequest) => {
