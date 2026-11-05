@@ -973,6 +973,39 @@ test('the Animations panel keeps a group for each of two CSS animations started 
   }
 });
 
+test('the Animations panel removes its last group without an error', { skip }, async () => {
+  await showView('animations');
+  // The previous test leaves the panel empty, so the group added here is its only one.
+  assert.equal(await count('.animation-buffer-preview'), 0);
+  const before = errors.length;
+  await page.evaluate(() => {
+    const el = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'rf-last' }));
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity });
+  });
+  try {
+    await waitFor(async () => (await count('.animation-buffer-preview')) === 1);
+    await frontend.evaluate(() => {
+      const walk = (root: Document | ShadowRoot): Element | undefined =>
+        root.querySelector('.animation-remove-button') ??
+        [...root.querySelectorAll('*')].reduce<Element | undefined>(
+          (found, el) => found ?? (el.shadowRoot ? walk(el.shadowRoot) : undefined),
+          undefined
+        );
+      const button = walk(document);
+      if (button instanceof HTMLElement) button.click();
+    });
+    await waitFor(async () => (await count('.animation-buffer-preview')) === 0);
+    // Upstream focused a toolbar button it never assigned, and threw (patches/animation-remove-last-group.patch).
+    await new Promise(r => setTimeout(r, 200));
+    assert.deepEqual(errors.slice(before), []);
+  } finally {
+    await page.evaluate(() => {
+      for (const animation of document.getAnimations()) animation.cancel();
+      document.getElementById('rf-last')?.remove();
+    });
+  }
+});
+
 test('the Animations panel plays a shadow tree animation it is shown, and pauses it', { skip }, async () => {
   await showView('animations');
   const before = await count('.animation-buffer-preview');
