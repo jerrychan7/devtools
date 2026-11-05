@@ -850,8 +850,12 @@ describe('Animation, beyond getAnimations()', () => {
       await sleep(200);
       await side.clear();
       await t.page.evaluate(() => (Reflect.get(window, '__rate') as Animation).reverse());
-      await sleep(200);
-      const reversed = (await side.events('Animation.animationUpdated')).map(e => e.animation.playbackRate);
+      // Under load Chrome reported the reverse after 200 ms (1 run in 24): waited for, then a fence.
+      await until(async () => (await side.events('Animation.animationUpdated'))[0], 'the reverse');
+      await fence(t, side);
+      const reversed = (await side.events('Animation.animationUpdated'))
+        .filter(e => !e.animation.name.startsWith('fence'))
+        .map(e => e.animation.playbackRate);
       await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
       await t.page.evaluate(() => ((Reflect.get(window, '__rate') as Animation).playbackRate = 2));
       await sleep(200);
