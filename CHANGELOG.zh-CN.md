@@ -5,7 +5,7 @@
 ## Unreleased
 
 - Elements 的 Accessibility 窗格显示无障碍树；`Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors` 的应答与 Chrome 一致，供读取页面结构的工具和 agent 使用。树由 `accessibility.js` 在页面里计算，首次使用时从 bundle 旁边加载；其中打包了 dom-accessibility-api（MIT）。
-- Animations 面板列出页面的 CSS 动画、过渡和 Web Animations，能暂停、拖动进度、改时间和调速。
+- Animations 面板列出页面的 CSS 动画、过渡和 Web Animations，能暂停、拖动进度、改时间和调速。能找到 shadow 树（包括声明式的和宿主后插入的）和同源 iframe 里的动画；伪元素动画指向的节点与 Chrome 一致（`::backdrop` 的指向其 dialog）；分别开始的两个 CSS 动画分成两组。和 Chrome 一样报告 `getAnimations()` 漏掉的动画：无 target、不在文档里、立即结束或在第一帧前就取消的（探针挂钩 `animate()`、`new Animation()`、`play()` 和 `cancel()`）。调速会跟随页面自己设的速率，disable 时还给页面；拖动进度条时每个动画各自 seek 到自己的时间，已结束的先播放、停在结尾，与 Chrome 一致。前端删除最后一个动画分组时不再抛错。
 - Rendering 面板和设备模式里的模拟媒体特性（`prefers-color-scheme`、减少动画、对比度、强制颜色等）和媒体类型、安全区、色觉缺陷模拟生效：通过改写页面的样式表，以及和 Chrome 相同的 SVG 滤镜实现。
 - Styles 显示浏览器的「user agent stylesheet」规则，来自随包附带的 Chromium `html.css` 副本 `chromium-html.css`；Computed 窗格会自动刷新。
 - 网络：屏蔽 URL、附加请求头、禁用缓存、离线和 UA 覆盖对页面的 `fetch()`、XHR 生效；列出页面能看到的 Reporting API 报告。
@@ -19,7 +19,7 @@
 公开 API（以 `packages/*/etc/*.public.api.md` 为准）与 0.3.0 相比没有变化。
 
 - `devtools-anywhere` 的 `dist/` 新增两个首次使用时才加载的文件：`accessibility.js`（导出为 `./accessibility.js`）和 `chromium-html.css`；自托管时和 bundle 放在一起。`chromium-html.css` 采用 LGPL（2.0 或更高版本），是包里唯一不属于 MIT 或 BSD 的文件；许可全文随附为 `chromium-html.LICENSE.txt`，两个文件都删掉只会少掉 user agent stylesheet 规则。新增依赖 `dom-accessibility-api`。
-- 探针 minify 后从 18948 字节增到 19385 字节。
+- 探针 minify 后从 18948 字节增到 19899 字节（其中 514 字节是 Animations 面板用的挂钩，属于探针的内部接口，不是公开 API）。
 - 跨域 iframe 里的探针和父页面之间的消息新增内部事件 `DevtoolsAnywhere.scrollParent`：两边请使用同一版本的探针。
 
 ## 0.3.0
