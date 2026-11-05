@@ -508,8 +508,10 @@ export function registerCss(ctx: Context) {
           if (text === undefined) sheets.texts.invalidate(sheet);
           else sheets.texts.set(sheet, text);
           if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
-          // Adopted in the same task, not reported yet: like Chrome, added then changed.
-          else if (adopted(sheet)) changedUnseen.add(sheet);
+          // Adopted in the same task, not reported yet: like Chrome, added then changed. Looking
+          // through every tree's adopted sheets costs about 1.3 µs a write: a sheet with an owner
+          // node (a <style> added in the same task) is none, one already found is not looked for.
+          else if (!sheet.ownerNode && !changedUnseen.has(sheet) && adopted(sheet)) changedUnseen.add(sheet);
         },
         () => documents().map(realmOf)
       );
