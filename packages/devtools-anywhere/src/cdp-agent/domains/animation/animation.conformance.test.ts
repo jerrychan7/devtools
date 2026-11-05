@@ -109,10 +109,12 @@ const noneMissing = (ours: unknown, chrome: unknown, what: string) =>
   );
 
 /**
- * `time`, or `target` if `time` is up to a frame past it: Chrome's animation, paused and seeked,
+ * For Chrome's side (`chrome`), `time`, or `target` if `time` is up to a frame past it; for ours,
+ * `time` as it is, which must be exact: Chrome's animation, paused and seeked,
  * still moves on by a frame now and then (1017 for 1000, 517 for 500: 3 runs in 15 under load).
  */
-const aFramePast = (time: number, target: number) => (time >= target && time - target <= 17 ? target : time);
+const aFramePast = (time: number, target: number, chrome: boolean) =>
+  chrome && time >= target && time - target <= 17 ? target : time;
 
 /** The animations a side announced, by name. */
 async function started(side: Side, count: number) {
@@ -309,7 +311,7 @@ describe('Animation', () => {
       await side.send('Animation.setPaused', { animations: [id], paused: true });
       await side.send('Animation.seekAnimations', { animations: [id], currentTime: 500 });
       const [state] = await stateOf(t, 'width');
-      results.push([state?.playState, aFramePast(Math.round(Number(state?.currentTime)), 500)]);
+      results.push([state?.playState, aFramePast(Math.round(Number(state?.currentTime)), 500, side === t.chrome)]);
     }
     assert.deepEqual(results[0], ['paused', 500]);
     assert.deepEqual(results[1], results[0]);
@@ -413,7 +415,9 @@ describe('Animation', () => {
       await side.send('Animation.setPaused', { animations: ids, paused: true });
       const paused = await stateOf(t, name);
       await side.send('Animation.seekAnimations', { animations: ids, currentTime: 1000 });
-      const seekedPage = (await stateOf(t, name)).map(s => aFramePast(Math.round(s.currentTime), 1000));
+      const seekedPage = (await stateOf(t, name)).map(s =>
+        aFramePast(Math.round(s.currentTime), 1000, side === t.chrome)
+      );
       const { currentTime } = await side.send('Animation.getCurrentTime', { id: animation.id });
       await side.send('Animation.setTiming', { animationId: animation.id, duration: 5000, delay: 10 });
       const timed = await stateOf(t, name);
@@ -438,7 +442,7 @@ describe('Animation', () => {
       results.push({
         paused: paused.map(s => s.playState),
         seekedPage,
-        seeked: aFramePast(Math.round(currentTime), 1000),
+        seeked: aFramePast(Math.round(currentTime), 1000, side === t.chrome),
         timing: timed.map(s => [
           s.playState,
           s.timing?.duration,
@@ -914,7 +918,7 @@ describe('Animation, beyond getAnimations()', () => {
       // Seeked while it still runs, Chrome at times reads it a frame past its end (1167 for 1150,
       // about 1 run in 20 under load): a frame's slack.
       const [playState, time] = await state('long');
-      const long = [playState, Math.abs(Number(time) - 1150) <= 17 ? 1150 : time];
+      const long = [playState, aFramePast(Number(time), 1150, side === t.chrome)];
       await t.page.evaluate(() => (Reflect.get(window, '__long') as Animation).pause());
       // Paused for good: one still pending pause takes the time of the frame it is paused in.
       await sleep(100);
