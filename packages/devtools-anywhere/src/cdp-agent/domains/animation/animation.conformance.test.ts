@@ -324,6 +324,58 @@ describe('Animation, which animations are told apart', () => {
     return { chrome: await list(t.chrome), ours: await list(t.ours) };
   }
 
+  test('cssId: the same rule shares one, another rule does not, as in Chrome', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes i1 { to { left: 10px } } @keyframes i2 { to { top: 10px } }' +
+        ' .ia { animation: i1 5s } .ia2 { animation: i1 5s 1s } .ion { animation-play-state: running } .ib { animation: i2 5s } .ic { animation: i1 5s, i2 5s }' +
+        ' .it { transition: width 5s, height 5s; width: 1px; height: 1px } .it3 { transition: width 6s; width: 1px }';
+      document.head.append(style);
+    });
+    const labels: string[] = [];
+    const ids: { chrome: (string | undefined)[]; ours: (string | undefined)[] } = { chrome: [], ours: [] };
+    const steps: [string, string, number][] = [
+      ['a', `add('ia')`, 1],
+      ['a again', `add('ia')`, 1],
+      ['a with other classes', `add('ia ix')`, 1],
+      ['a with inline style', `add('ia iy').style.color = 'red'`, 1],
+      ['a replayed', `const e = add('ia'); e.id = 'ir'`, 1],
+      [
+        'a replayed after changes',
+        `const e = document.getElementById('ir'); e.className = ''; e.getBoundingClientRect(); e.className = 'ia iz ion'; e.style.color = 'blue'`,
+        1,
+      ],
+      ['a2', `add('ia2')`, 1],
+      ['b', `add('ib')`, 1],
+      ['c', `add('ic')`, 2],
+      ['t', `const e = add('it'); e.getBoundingClientRect(); e.style.width = e.style.height = '9px'`, 2],
+      ['t again', `const e = add('it'); e.getBoundingClientRect(); e.style.width = e.style.height = '9px'`, 2],
+      ['t to 20px', `const e = add('it'); e.id = 'itt'; e.getBoundingClientRect(); e.style.width = '20px'`, 1],
+      ['t to 30px', `document.getElementById('itt').style.width = '30px'`, 1],
+      ['t3', `const e = add('it3'); e.getBoundingClientRect(); e.style.width = '9px'`, 1],
+      ['waapi', `add('').animate({ opacity: [0, 1] }, 5000).id = 'iw'`, 1],
+    ];
+    for (const [label, code, count] of steps) {
+      const got = await run(code, count);
+      for (const side of ['chrome', 'ours'] as const) {
+        const sorted = got[side].slice(0, count).sort((x, y) => x.name.localeCompare(y.name));
+        if (side === 'chrome') labels.push(...sorted.map(a => `${label} ${a.name}`));
+        ids[side].push(...sorted.map(a => a.cssId));
+      }
+    }
+    // Which animations share an id: the ids differ, the relation is Chrome's. Left out: the same
+    // declarations in two rules, which Chrome tells apart and we cannot (see cssIdOf).
+    const relation = (list: (string | undefined)[]) =>
+      list.map(
+        (id, i) =>
+          `${labels[i]}: ${list.flatMap((other, j) => (id !== undefined && other === id ? [labels[j]] : [])).join(', ')}`
+      );
+    assert.deepEqual(relation(ids.ours), relation(ids.chrome));
+    assert.equal(ids.chrome.at(-1), undefined, 'a Web Animation has none');
+    assert.equal(ids.ours.at(-1), undefined, 'a Web Animation has none');
+  });
+
   test('animations of a same-origin iframe match Chrome', async () => {
     const got = await run(
       `const f = document.body.appendChild(document.createElement('iframe'));

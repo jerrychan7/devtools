@@ -935,6 +935,44 @@ test('the Animations panel lists the CSS and Web Animations the page runs', { sk
   }
 });
 
+test('the Animations panel keeps a group for each of two CSS animations started apart', { skip }, async () => {
+  await showView('animations');
+  const before = await count('.animation-buffer-preview');
+  // Without a cssId the panel took the second group for the first and replaced it.
+  const add = (name: string) =>
+    page.evaluate(n => {
+      const style = document.createElement('style');
+      style.textContent = `@keyframes ${n} { to { opacity: 0.5 } } .${n} { animation: ${n} 1s infinite }`;
+      document.head.append(style);
+      document.body.append(Object.assign(document.createElement('div'), { className: n }));
+    }, name);
+  try {
+    await add('rf-one');
+    await waitFor(async () => (await count('.animation-buffer-preview')) === before + 1);
+    await new Promise(r => setTimeout(r, 300));
+    await add('rf-two');
+    await waitFor(async () => (await count('.animation-buffer-preview')) === before + 2);
+  } finally {
+    await page.evaluate(() => {
+      for (const animation of document.getAnimations()) animation.cancel();
+      for (const el of document.querySelectorAll('.rf-one, .rf-two')) el.remove();
+    });
+    // The panel keeps only as many groups as its width holds and drops the oldest for a new one, so
+    // the groups left here would keep the next test's from adding to the count: clear them.
+    await frontend.evaluate(() => {
+      const walk = (root: Document | ShadowRoot): Element | undefined =>
+        root.querySelector('[title="Clear all"], [aria-label="Clear all"]') ??
+        [...root.querySelectorAll('*')].reduce<Element | undefined>(
+          (found, el) => found ?? (el.shadowRoot ? walk(el.shadowRoot) : undefined),
+          undefined
+        );
+      const button = walk(document);
+      if (button instanceof HTMLElement) button.click();
+    });
+    await waitFor(async () => (await count('.animation-buffer-preview')) === 0);
+  }
+});
+
 test('the Animations panel plays a shadow tree animation it is shown, and pauses it', { skip }, async () => {
   await showView('animations');
   const before = await count('.animation-buffer-preview');

@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { isOwn, type Inspectable, type PseudoType } from '../../core/nodes';
-import { documentOf, isElement } from '../../core/realm';
+import { documentOf, isElement, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 const NOT_FOUND = 'Could not find animation with given id';
@@ -48,6 +48,74 @@ function kindOf(animation: Animation): [Protocol.Animation.Animation['type'], st
   if (isCssAnimation(animation)) return ['CSSAnimation', animation.animationName];
   if (isCssTransition(animation)) return ['CSSTransition', animation.transitionProperty];
   return ['WebAnimation', animation.id];
+}
+
+const ANIMATION_LONGHANDS = [
+  'animation-name',
+  'animation-duration',
+  'animation-timing-function',
+  'animation-delay',
+  'animation-iteration-count',
+  'animation-direction',
+  'animation-fill-mode',
+  'animation-composition',
+  'animation-timeline',
+  'animation-range-start',
+  'animation-range-end',
+];
+const TRANSITION_LONGHANDS = [
+  'transition-property',
+  'transition-duration',
+  'transition-timing-function',
+  'transition-delay',
+  'transition-behavior',
+];
+
+/** FNV-1a, as base64 of its 4 bytes: short, and shaped like Chrome's ids. */
+function hash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return btoa(String.fromCharCode(h >>> 24, (h >>> 16) & 255, (h >>> 8) & 255, h & 255));
+}
+
+/**
+ * The `cssId` of a CSS animation or transition. The panel takes two groups of CSS animations with
+ * the same ids for one, and replaces the first with the second, so without one every group of a
+ * single CSS animation replaced the last. Chrome hashes the rule the animation came from: measured,
+ * one rule gives one id on any element whatever its other classes or inline style, when played
+ * again after the element changed, and for a transition to any value; all the animations of one
+ * `animation` list share it; another rule with the very same declarations, or the same declaration
+ * written inline, gives another. The page cannot tell which rule won, so this hashes only the
+ * pseudo-element and the computed animation (or transition) longhands, leaving out
+ * `animation-play-state`, which another rule may toggle. What remains different from Chrome: the
+ * same declarations in different rules (or inline) share an id here, where Chrome's differ.
+ * So does a hover round trip (`.tr` → `.tr.hov` → `.tr`, where `.tr.hov` sets only the width):
+ * Chrome gives the transition into the hover state another id than the ones out of it, ours all
+ * share one. Telling these apart needs the rules that match the element, which only the CSS
+ * domain's cascade (domains/css/cascade.ts) works out, from its sheet registry and forced
+ * pseudo-classes: too much to build for the Animation domain, which must work without the CSS one.
+ */
+const cssIds = new WeakMap<Animation, string>();
+/** Taken when first described and kept, as in Chrome, where it does not change with the element. */
+function cssIdOf(
+  animation: Animation,
+  effect: KeyframeEffect,
+  type: 'CSSAnimation' | 'CSSTransition'
+): string | undefined {
+  const known = cssIds.get(animation);
+  if (known) return known;
+  const { target, pseudoElement } = effect;
+  if (!target) return undefined;
+  let style: CSSStyleDeclaration;
+  try {
+    style = styleOf(target, pseudoElement ?? undefined);
+  } catch {
+    return undefined;
+  }
+  const longhands = type === 'CSSAnimation' ? ANIMATION_LONGHANDS : TRANSITION_LONGHANDS;
+  const id = hash([type, pseudoElement ?? '', ...longhands.map(name => style.getPropertyValue(name))].join('\n'));
+  cssIds.set(animation, id);
+  return id;
 }
 
 /** `0.3` → `"30%"`: Blink's number formatting, which drops the float noise of `0.3 * 100`. */
@@ -118,6 +186,10 @@ export function registerAnimation(ctx: Context) {
     };
     const effect = animation.effect;
     if (isKeyframeEffect(effect)) {
+      if (type !== 'WebAnimation') {
+        const cssId = cssIdOf(animation, effect, type);
+        if (cssId) result.cssId = cssId;
+      }
       const timing = effect.getComputedTiming();
       const source: Protocol.Animation.AnimationEffect = {
         delay: timing.delay ?? 0,
