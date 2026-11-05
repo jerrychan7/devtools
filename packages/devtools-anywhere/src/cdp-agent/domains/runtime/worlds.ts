@@ -41,6 +41,8 @@ function noteNames(world: World, code: string): void {
 
 /** What `typeof name` of the world's code is rewritten to call (see {@link rewriteTypeof}): no name of the page's. */
 const TYPEOF = `$typeof${Math.random().toString(36).slice(2)}`;
+/** A name: Unicode ID_Start then ID_Continue, as JavaScript identifiers (escapes left out). */
+const IDENTIFIER = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200C\u200D]*$/u;
 /** Words after `typeof` that are not names to look up. */
 const NOT_NAMES = new Set([
   'this',
@@ -70,28 +72,49 @@ const NOT_NAMES = new Set([
 function rewriteTypeof(code: string): string {
   if (!code.includes('typeof')) return code;
   const tokens = tokenize(code);
+  const text = (k: number) => {
+    const token = tokens[k];
+    return token ? code.slice(token.start, token.end) : '';
+  };
   let out = '';
   let at = 0;
-  for (let i = 0; i + 1 < tokens.length; i++) {
+  for (let i = 0; i < tokens.length; i++) {
     const op = tokens[i];
-    const name = tokens[i + 1];
-    if (!op || !name || op.kind !== 'word' || name.kind !== 'word') continue;
-    if (code.slice(op.start, op.end) !== 'typeof') continue;
-    const word = code.slice(name.start, name.end);
-    if (!/^[A-Za-z_$][\w$]*$/.test(word) || NOT_NAMES.has(word)) continue;
-    // A member, a call or an optional chain: `typeof` applies to more than the name.
-    const next = tokens[i + 2];
-    if (next && /^(\.|\[|\(|\?\.(?!\d)|`)/.test(code.slice(next.start, next.start + 3))) continue;
+    if (!op || op.kind !== 'word' || text(i) !== 'typeof') continue;
+    // The name, in as many parentheses as there are: `typeof (name)`.
+    let open = 0;
+    while (text(i + 1 + open) === '(') open++;
+    const name = tokens[i + 1 + open];
+    const word = text(i + 1 + open);
+    if (!name || name.kind !== 'word' || !IDENTIFIER.test(word) || NOT_NAMES.has(word)) continue;
+    let close = 0;
+    while (close < open && text(i + 2 + open + close) === ')') close++;
+    if (close !== open) continue;
+    // A member, a call, an optional chain, a tagged template or a postfix update right after it:
+    // `typeof` applies to more than the name. `++` on the next line starts another statement.
+    const end = i + 2 + open + close;
+    const next = tokens[end];
+    const after = next ? code.slice(next.start, next.start + 3) : '';
+    if (/^(\.|\[|\(|\?\.(?!\d)|`)/.test(after)) continue;
+    if (/^(\+\+|--)/.test(after) && !next?.newline) continue;
+    const last = tokens[end - 1];
+    if (!last) continue;
     out += `${code.slice(at, op.start)}${TYPEOF}(() => ${word})`;
-    at = name.end;
+    at = last.end;
+    i = end - 1;
   }
   return out + code.slice(at);
 }
 
 /** The names the world's code reads as its global (names, not the top realm's window: scripts/check-realms.ts counts it). */
 const GLOBAL_NAMES: PropertyKey[] = ['globalThis', 'self', 'window'];
-/** Names the world's code must find as they are: `eval` for direct eval, `arguments` its function's. */
-const UNSCOPED: PropertyKey[] = ['eval', 'arguments'];
+/** A name the world's code must find as it is: `eval`, for direct eval. */
+const UNSCOPED: PropertyKey[] = ['eval'];
+/**
+ * What the world's runner reads the code to run from, in its `with` scope: not its `arguments`,
+ * which its top-level code would see (Chrome's has none).
+ */
+const CODE = `$code${Math.random().toString(36).slice(2)}`;
 
 /** A session's binding (Runtime.addBinding): the contexts it names, and where its calls go. */
 interface Subscriber {
@@ -112,6 +135,8 @@ class PageWorlds {
   #globals = new WeakMap<World, { global: object; scope: object }>();
   /** What each world's global shows. */
   #targets = new WeakMap<object, object>();
+  /** The code each world runs now (see CODE). */
+  #code = new WeakMap<World, string>();
   /** The properties a world's calls left on page objects, kept apart from the page's. */
   #expandos = new WeakMap<World, WeakMap<object, Map<PropertyKey, PropertyDescriptor>>>();
   /** The sessions' bindings by name. */
@@ -182,7 +207,7 @@ class PageWorlds {
       names: new Set(),
     };
     const win = realmOf(frame.document);
-    let run: ((code: string) => unknown) | undefined;
+    let run: (() => unknown) | undefined;
     // Compiled on first use, not here: a page whose CSP forbids eval still gets its worlds (as in
     // Chrome), whose code then fails like the page's own context's, with an EvalError.
     world.evaluate = code => {
@@ -192,12 +217,14 @@ class PageWorlds {
         // Indirect eval of the frame's window makes the function there, without declaring anything;
         // direct eval within it then looks global names up in the world's global first.
         const make = Reflect.apply(Reflect.get(win, 'eval'), undefined, [
-          '(function (g) { with (g) return function () { return eval(arguments[0]); }; })',
-        ]) as (global: unknown) => (code: string) => unknown;
-        run = make(this.#scope(world));
+          // An arrow: no `arguments` of its own for the code to see, and the `this` it is made with.
+          `(function (g) { with (g) return () => eval(${CODE}); })`,
+        ]) as (global: unknown) => () => unknown;
+        // The top-level `this` is the world's global too.
+        run = Reflect.apply(make, this.global(world), [this.#scope(world)]) as () => unknown;
       }
-      // The top-level `this` is the world's global too.
-      return Reflect.apply(run, this.global(world), [code]);
+      this.#code.set(world, code);
+      return run();
     };
     return world;
   }
@@ -274,6 +301,7 @@ class PageWorlds {
       ...traps,
       get: (_, key) => {
         if (key === TYPEOF) return typeOf;
+        if (key === CODE) return this.#code.get(world);
         if (typeof key === 'symbol' || known(key) || GLOBAL_NAMES.includes(key)) return read(key);
         const error = new target.ReferenceError(`${key} is not defined`);
         unknownNames.add(error);
@@ -402,16 +430,20 @@ class PageWorlds {
       const desc = proto && Reflect.getOwnPropertyDescriptor(proto, key);
       const original: unknown = desc?.value;
       if (!proto || !desc || typeof original !== 'function') return;
-      Reflect.defineProperty(proto, key, {
-        ...desc,
-        value: function (this: unknown, ...args: unknown[]) {
-          return around(() => Reflect.apply(original, this, args));
-        },
+      // A proxy of the method, as the probe hooks animate(): its name and length stay, `toString()`
+      // keeps the native form, and calls on another `this` throw as before.
+      const watched = new Proxy(original, { apply: (f, self, args) => around(() => Reflect.apply(f, self, args)) });
+      Reflect.defineProperty(proto, key, { ...desc, value: watched });
+      // Put back only if still ours: the page may have replaced it meanwhile.
+      undo.push(() => {
+        if (Reflect.getOwnPropertyDescriptor(proto, key)?.value === watched) Reflect.defineProperty(proto, key, desc);
       });
-      undo.push(() => Reflect.defineProperty(proto, key, desc));
     };
     watch(win.EventTarget?.prototype, 'dispatchEvent');
-    for (const key of ['click', 'focus', 'blur']) watch(win.HTMLElement?.prototype, key);
+    for (const key of ['click', 'focus', 'blur']) {
+      watch(win.HTMLElement?.prototype, key);
+      if (key !== 'click') watch(win.SVGElement?.prototype, key);
+    }
     return () => undo.reverse().forEach(fn => fn());
   }
 
