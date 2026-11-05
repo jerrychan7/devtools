@@ -104,7 +104,8 @@ export function specificity(selector: string): Specificity {
       i++;
     } else {
       ident();
-      result.c++;
+      // A namespace prefix (`svg|rect`) is not a type selector of its own.
+      if (s[i] !== '|' || s[i + 1] === '|') result.c++;
     }
   }
   return result;
