@@ -166,6 +166,18 @@ test('setStyleSheetText keeps the sheet, replaces its rules: those the page held
   assert.deepEqual(ours, chrome);
 });
 
+test("after another client's setStyleSheetText, this one's getStyleSheetText gives what Chrome's does", async () => {
+  const [ours, chrome] = await each(async ({ side, otherText }) => {
+    const before = await otherText();
+    const { sheet } = await matched(side, '#s1');
+    const text = '.s1 { color: olive }\n.s3 { top: 3px }';
+    await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text });
+    const after = await otherText();
+    return { after, kept: after === before, isNew: after === text };
+  });
+  assert.deepEqual(ours, chrome);
+});
+
 /** A field of a reply, as `unknown` goes. */
 const field = (value: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>((v, k) => (v && typeof v === 'object' ? Reflect.get(v, k) : undefined), value);

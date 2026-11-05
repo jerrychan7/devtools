@@ -367,9 +367,14 @@ export class SheetRegistry {
     return this.texts.source(sheet);
   }
 
-  /** The text of a sheet: the one it was written in, or one serialized from its rules. */
+  /**
+   * The text of a sheet: the one it was written in, or one serialized from its rules. As in
+   * Chrome 156, after another session replaced the rules this one keeps the text it had.
+   */
   text(sheet: CSSStyleSheet): string {
-    return this.sourceOf(sheet)?.text ?? this.serialized(sheet);
+    const source = this.sourceOf(sheet);
+    if (source) return source.text;
+    return (this.texts.unpaired(sheet) ? this.texts.textOf(sheet) : null) ?? this.serialized(sheet);
   }
 
   /** The text of a sheet with every style rule on the line of its id. */
