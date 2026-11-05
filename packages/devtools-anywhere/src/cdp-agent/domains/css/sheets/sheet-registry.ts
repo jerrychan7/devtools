@@ -7,7 +7,7 @@ import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
-import { type SheetSource, SheetTexts, offsetsOf, selectorSpans, styleSpan } from './sheet-text';
+import { type SheetSource, SheetTexts, namespaceText, offsetsOf, selectorSpans, styleSpan } from './sheet-text';
 import { type CssRule, outline } from './css-outline';
 import { lineStarts } from './text-lines';
 
@@ -252,7 +252,8 @@ export class SheetRegistry {
   ruleId(sheet: CSSStyleSheet, rule: StyleRule): number {
     let id = this.ruleIds.get(rule);
     if (id === undefined) {
-      id = this.nextRuleId.get(sheet) ?? 0;
+      // Line 0 of the serialized text holds the @namespace rules, if any (see `serialized`).
+      id = this.nextRuleId.get(sheet) ?? (this.namespacesOf(sheet).length ? 1 : 0);
       this.nextRuleId.set(sheet, id + 1);
       this.ruleIds.set(rule, id);
     }
@@ -380,9 +381,22 @@ export class SheetRegistry {
     return (this.texts.unpaired(sheet) ? this.texts.textOf(sheet) : null) ?? this.serialized(sheet);
   }
 
-  /** The text of a sheet with every style rule on the line of its id. */
+  /**
+   * The @namespace rules of a sheet. They come before any rule but @import, and once the sheet has
+   * a rule other than @import or @namespace, no @namespace can be inserted: a sheet that has none
+   * when its first rule id is given gets none until its rules are replaced.
+   */
+  private namespacesOf(sheet: CSSStyleSheet): CSSRule[] {
+    return this.rulesOf(sheet).filter(r => isCssom(r, 'CSSNamespaceRule'));
+  }
+
+  /**
+   * The text of a sheet with every style rule on the line of its id, and its @namespace rules
+   * first, on line 0 (style rules are then numbered from 1).
+   */
   serialized(sheet: CSSStyleSheet): string {
-    const lines: string[] = [];
+    const namespaces = this.namespacesOf(sheet);
+    const lines: string[] = namespaces.length ? [namespaceText(namespaces)] : [];
     for (const { rule } of this.entries(sheet)) {
       const id = this.ruleId(sheet, rule);
       while (lines.length < id) lines.push('');
