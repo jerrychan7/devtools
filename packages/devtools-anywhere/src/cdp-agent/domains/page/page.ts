@@ -10,7 +10,7 @@ import { frameEvents, frameTree } from './frame-tree';
 import { sameDocumentNavigations } from './history-navigations';
 import { mergedResources, updateMergedUrls, withMergedUrls } from './merged';
 
-export function registerPage({ session, probe, frames }: Context) {
+export function registerPage({ session, probe, frames, worlds }: Context) {
   let stopFrames: (() => void) | null = null;
   let stopOpaque: (() => void) | null = null;
   let stopSameDocument: (() => void) | null = null;
@@ -172,6 +172,17 @@ export function registerPage({ session, probe, frames }: Context) {
     },
 
     reload: () => location.reload(),
+
+    /**
+     * An isolated world of a frame's document (domains/runtime/worlds.ts): like Chrome, the same
+     * one again for the same name, and one of that name for each document the frame loads.
+     */
+    createIsolatedWorld(params: Protocol.Page.CreateIsolatedWorldRequest): Protocol.Page.CreateIsolatedWorldResponse {
+      frames.sync();
+      const frame = frames.byId(params.frameId);
+      if (!frame) throw new CdpError('No frame for given id found');
+      return { executionContextId: worlds.create(frame, params.worldName ?? '').id };
+    },
 
     /** The frame given, as in Chrome; the loader returned is that of the document it leaves. */
     navigate(params: Protocol.Page.NavigateRequest): Protocol.Page.NavigateResponse {

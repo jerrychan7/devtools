@@ -189,6 +189,8 @@ export interface WrapOptions {
    * own (one level deep), of only the given columns if any.
    */
   table?: { columns?: readonly string[] | undefined } | undefined;
+  /** The isolated world's context id, if the object is wrapped for one: like V8, it gets an id of its own there. */
+  world?: number | undefined;
 }
 
 /**
@@ -213,6 +215,8 @@ export class ObjectRegistry {
    */
   private ids = new Map<string, Map<unknown, string>>();
   private groupById = new Map<string, string>();
+  /** The isolated world each object id was given in, if any. */
+  private worldById = new Map<string, number>();
   private groups = new Map<string, Set<string>>();
   /** Arrays created for `[[Entries]]`; like Chrome, they have no visible prototype. */
   private entryLists = new WeakSet<object>();
@@ -244,7 +248,7 @@ export class ObjectRegistry {
       result.className = subtype === 'error' ? (value as Error).name || className(value) : className(value);
     if (options.table && type === 'object') result.preview = this.tablePreview(value as object, subtype, options.table);
     else if (options.generatePreview && type === 'object') result.preview = this.preview(value as object, subtype);
-    result.objectId = this.idOf(value, options.group);
+    result.objectId = this.idOf(value, options.group, options.world);
     return result;
   }
 
@@ -256,10 +260,17 @@ export class ObjectRegistry {
   release(objectId: string) {
     if (!this.byId.has(objectId)) return;
     const group = this.groupById.get(objectId) ?? '';
-    this.ids.get(group)?.delete(this.byId.get(objectId));
+    const world = this.worldById.get(objectId);
+    this.ids.get(world === undefined ? group : `${group}\0${world}`)?.delete(this.byId.get(objectId));
     this.groups.get(group)?.delete(objectId);
     this.groupById.delete(objectId);
+    this.worldById.delete(objectId);
     this.byId.delete(objectId);
+  }
+
+  /** The context id of the isolated world `objectId` was given in, undefined for the page's own. */
+  worldOf(objectId: string): number | undefined {
+    return this.worldById.get(objectId);
   }
 
   /** The object group `objectId` was wrapped in, if any. */
@@ -273,6 +284,7 @@ export class ObjectRegistry {
     this.byId.clear();
     this.ids.clear();
     this.groupById.clear();
+    this.worldById.clear();
     this.groups.clear();
   }
 
@@ -346,8 +358,9 @@ export class ObjectRegistry {
     return internalProperties.length ? { result, internalProperties } : { result };
   }
 
-  private idOf(value: unknown, group?: string): string {
-    const key = group ?? '';
+  private idOf(value: unknown, group?: string, world?: number): string {
+    // A world's ids are apart from the page's: the group's name followed by the world's.
+    const key = world === undefined ? (group ?? '') : `${group ?? ''}\0${world}`;
     let byValue = this.ids.get(key);
     if (!byValue) this.ids.set(key, (byValue = new Map()));
     let id = byValue.get(value);
@@ -355,6 +368,7 @@ export class ObjectRegistry {
     id = idPrefix + this.prefix + ++this.seq;
     byValue.set(value, id);
     this.byId.set(id, value);
+    if (world !== undefined) this.worldById.set(id, world);
     if (group) {
       this.groupById.set(id, group);
       let ids = this.groups.get(group);

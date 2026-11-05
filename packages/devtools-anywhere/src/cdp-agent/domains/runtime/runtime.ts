@@ -11,6 +11,7 @@ import type { ConsoleEntry, LogEntry } from '../../probe/types';
 import { executionContexts } from './contexts';
 import { globalLexicalNames } from './lexical-names';
 import { replBindings, returnLast } from './repl';
+import type { World } from './worlds';
 
 // Indirect eval runs in the global scope, like code typed into the console.
 // oxlint-disable-next-line no-eval -- evaluating console input is the point.
@@ -233,6 +234,8 @@ interface Scope {
   /** The console utilities put on window and their values, until the task boundary after the last of `utilityUsers` evaluations' synchronous part. */
   utilities: Map<string, unknown>;
   utilityUsers: number;
+  /** The isolated world the code runs in (./worlds.ts), none for the document's own context. */
+  world?: World;
 }
 
 // A merged sandboxed iframe's contexts and objects are its agent's (core/frames/merged-frames.ts): commands
@@ -258,11 +261,12 @@ mergedFrames.registerRoutes('Runtime', {
     'Runtime.releaseObjectGroup',
     'Runtime.discardConsoleEntries',
     'Runtime.addBinding',
+    'Runtime.removeBinding',
   ],
 });
 mergedFrames.registerRoutes('Log', { fanOut: ['Log.clear'] });
 
-export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
+export function registerRuntime({ session, objects, nodes, probe, frames, worlds }: Context) {
   const topFrame = frames.top;
   registerViolations(session, topFrame.window);
   /** Per document: a navigated frame's new document is a new realm, with bindings of its own. */
@@ -288,10 +292,15 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     }
     return scope;
   }
+  /** The scope of `frame`'s document, or of its isolated world `world`: its code sees the world's globals. */
+  function scopeIn(frame: Frame, world: World | undefined): Scope {
+    const scope = scopeOf(frame);
+    return world ? { ...scope, evaluate: world.evaluate, world } : scope;
+  }
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
-  const contexts = executionContexts(frames, (method, params) => session.emit(method, params));
+  const contexts = executionContexts(frames, worlds, (method, params) => session.emit(method, params));
   session.onReset(() => {
     contexts.disable();
     lastResult = undefined;
@@ -363,7 +372,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
   }
 
   function exceptionResult(
-    { frame, win }: Pick<Scope, 'frame' | 'win'>,
+    { frame, win, world }: Pick<Scope, 'frame' | 'win' | 'world'>,
     error: unknown,
     group?: string,
     generatePreview = false,
@@ -374,7 +383,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     hideEvalFrames(error, win);
     const callFrames = isError(error, win) ? parseStack(error.stack) : [];
     // One object for both places, like V8.
-    const exception = objects.wrap(error, { generatePreview, group });
+    const exception = objects.wrap(error, { generatePreview, group, world: world?.id });
     return {
       result: exception,
       exceptionDetails: {
@@ -386,7 +395,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         lineNumber: 0,
         columnNumber: 0,
         exception,
-        executionContextId: frame.executionContextId,
+        executionContextId: world?.id ?? frame.executionContextId,
         ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
     };
@@ -467,7 +476,10 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     async evaluate(params: Protocol.Runtime.EvaluateRequest): Promise<Protocol.Runtime.EvaluateResponse> {
       const group = params.objectGroup;
       // Like Chrome, in the context asked for, else the top page's.
-      const scope = scopeOf(contexts.frameOf(params.contextId, params.uniqueContextId));
+      const scope = scopeIn(
+        contexts.frameOf(params.contextId, params.uniqueContextId),
+        contexts.worldOf(params.contextId, params.uniqueContextId)
+      );
       const { repl } = scope;
       if (params.throwOnSideEffect && mayHaveSideEffects(params.expression, scope)) {
         return exceptionResult(
@@ -510,10 +522,11 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         const value = params.includeCommandLineAPI ? await withCommandLineApi(scope, evaluate) : await evaluate();
         if (!params.silent) lastResult = value;
         return {
-          result: objects.wrap(value, {
+          result: objects.wrap(worlds.unwrap(value), {
             generatePreview: params.generatePreview,
             returnByValue: params.returnByValue,
             group,
+            world: scope.world?.id,
           }),
         };
       } catch (e) {
@@ -534,18 +547,24 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         throw new CdpError('Either objectId or executionContextId or uniqueContextId must be specified', -32602);
       // An object of the other side of a merge (core/frames/merged-frames.ts) is in another JavaScript
       // world: V8's world check, which Chrome applies to the sandboxed iframe's objects too.
-      const world = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
-      if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== world))
+      const owner = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
+      if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== owner))
         throw new CdpError('Argument should belong to the same JavaScript world as target object');
-      const self = params.objectId ? objects.get(params.objectId) : undefined;
-      // Like Chrome, in the context asked for, else in the object's.
-      const scope = scopeOf(
-        params.executionContextId !== undefined || params.uniqueContextId !== undefined
-          ? contexts.frameOf(params.executionContextId, params.uniqueContextId)
-          : contexts.frameOfValue(self)
+      let self = params.objectId ? objects.get(params.objectId) : undefined;
+      // Like Chrome, in the context asked for, else in the object's: an isolated world's object
+      // (DOM.resolveNode in it) is called there.
+      const inContext = params.executionContextId !== undefined || params.uniqueContextId !== undefined;
+      const world = inContext
+        ? contexts.worldOf(params.executionContextId, params.uniqueContextId)
+        : worlds.byId(params.objectId === undefined ? undefined : objects.worldOf(params.objectId));
+      const scope = scopeIn(
+        inContext ? contexts.frameOf(params.executionContextId, params.uniqueContextId) : contexts.frameOfValue(self),
+        world
       );
+      // The world sees the object's own properties as its own, apart from the page's.
+      if (world) self = worlds.view(world, self);
       const args = (params.arguments || []).map(arg => {
-        if (arg.objectId) return objects.get(arg.objectId);
+        if (arg.objectId) return world ? worlds.view(world, objects.get(arg.objectId)) : objects.get(arg.objectId);
         if (arg.unserializableValue !== undefined) return parseUnserializable(arg.unserializableValue);
         return arg.value;
       });
@@ -560,10 +579,11 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
           value = await value;
         }
         return {
-          result: objects.wrap(value, {
+          result: objects.wrap(worlds.unwrap(value), {
             generatePreview: params.generatePreview,
             returnByValue: params.returnByValue,
             group: params.objectGroup,
+            world: world?.id,
           }),
         };
       } catch (e) {
@@ -628,7 +648,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     setAsyncCallStackDepth: () => {},
     setCustomObjectFormatterEnabled: () => {},
     setMaxCallStackSizeToCapture: () => {},
-    addBinding: () => {},
+    addBinding: (params: Protocol.Runtime.AddBindingRequest) => worlds.addBinding(params),
+    removeBinding: (params: Protocol.Runtime.RemoveBindingRequest) => worlds.removeBinding(params.name),
     getExceptionDetails: () => ({}),
   });
 }

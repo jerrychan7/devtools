@@ -646,7 +646,14 @@ export function registerDom(ctx: Context) {
     },
 
     resolveNode(params: Protocol.DOM.ResolveNodeRequest): Protocol.DOM.ResolveNodeResponse {
-      return { object: objects.wrap(resolveNode(ctx, params), { group: params.objectGroup }) };
+      const node = resolveNode(ctx, params);
+      const id = params.executionContextId;
+      // In an isolated world (Page.createIsolatedWorld), an object of its own. Like Chrome, any
+      // frame's context takes any node; an unknown one is refused with Chrome's words.
+      const world = ctx.worlds.byId(id);
+      if (id !== undefined && !world && !ctx.frames.byContext(id))
+        throw new CdpError('Node with given id does not belong to the document');
+      return { object: objects.wrap(node, { group: params.objectGroup, world: world?.id }) };
     },
 
     requestNode(params: Protocol.DOM.RequestNodeRequest): Protocol.DOM.RequestNodeResponse {

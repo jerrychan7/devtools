@@ -268,6 +268,11 @@ export class FrameRegistry {
     return this.#byId.get(id);
   }
 
+  /** A new execution context id, in the same sequence as the frames' (for isolated worlds). */
+  newContextId(): number {
+    return ++this.#contextSeq;
+  }
+
   byContext(id: number): Frame | undefined {
     return this.#byContext.get(id);
   }

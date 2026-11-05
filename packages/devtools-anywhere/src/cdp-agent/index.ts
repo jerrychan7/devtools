@@ -22,6 +22,7 @@ import { registerNetwork, setRequestIdPrefix } from './domains/network/network';
 import { registerReporting } from './domains/network/reporting';
 import { registerOverlay } from './domains/overlay/overlay';
 import { registerPage } from './domains/page/page';
+import { IsolatedWorlds } from './domains/runtime/worlds';
 import { registerRuntime } from './domains/runtime/runtime';
 import { createRender, type SnapdomLoader } from './domains/page/render';
 import { registerAccessibility, type AccessibilityLoader } from './domains/accessibility/accessibility';
@@ -150,13 +151,15 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   keep(probe.logs, MAX_CONSOLE_MESSAGES);
   hookFrames(probe);
   const view = viewProbe(probe);
+  const session = new CdpSession();
   const ctx: Context = {
-    session: new CdpSession(),
+    session,
     objects: new ObjectRegistry(),
     nodes: new NodeRegistry(frames.shadowRootOf, frames),
     probe: view,
     frames,
     shadowRoots: new ShadowRootTracker(frames, frames.shadowRootOf, view.onShadowRoot),
+    worlds: new IsolatedWorlds(frames, session),
   };
   // Commands for the sandboxed iframes merged into this page's agent go to theirs.
   mergedFrames.attach(ctx.session);

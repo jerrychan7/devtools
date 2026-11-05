@@ -4,6 +4,7 @@ import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
 import type { CdpSession } from './session';
 import type { ShadowRootTracker } from './nodes/shadow-roots';
+import type { IsolatedWorlds } from '../domains/runtime/worlds';
 
 /** A style matching an element, as the Animation domain asks for it (see {@link Context.matchingStyles}). */
 export interface MatchingStyle {
@@ -25,6 +26,8 @@ export interface Context {
   frames: FrameRegistry;
   /** The shadow roots in the frames, shared by the domains that look into shadow trees. */
   shadowRoots: ShadowRootTracker;
+  /** The isolated worlds (Page.createIsolatedWorld) and bindings (Runtime.addBinding). */
+  worlds: IsolatedWorlds;
   /** Re-checks which pseudo-elements exist, e.g. after a style edit. Set by the DOM domain. */
   refreshPseudoElements?: (roots?: Node[]) => void;
   /**
