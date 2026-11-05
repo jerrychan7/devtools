@@ -540,8 +540,7 @@ describe('Animation, which animations are told apart', () => {
         ids[side].push(...sorted.map(a => a.cssId));
       }
     }
-    // Which animations share an id: the ids differ, the relation is Chrome's. Left out: the same
-    // declarations in two rules, which Chrome tells apart and we cannot (see cssIdOf).
+    // Which animations share an id: the ids differ, the relation is Chrome's.
     const relation = (list: (string | undefined)[]) =>
       list.map(
         (id, i) =>
@@ -550,6 +549,55 @@ describe('Animation, which animations are told apart', () => {
     assert.deepEqual(relation(ids.ours), relation(ids.chrome));
     assert.equal(ids.chrome.at(-1), undefined, 'a Web Animation has none');
     assert.equal(ids.ours.at(-1), undefined, 'a Web Animation has none');
+  });
+
+  test('cssId follows the rules that won each property, as in Chrome', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes j1 { to { left: 10px } } .ja { animation: j1 5s } .jb { animation: j1 5s }' +
+        ' .jt { transition: width 5s; width: 1px } .jt.jh { width: 20px } .jt.jw { width: 30px !important }' +
+        ' .ju { transition: width 5s } .jv { transition: width 5s; width: 1px }';
+      document.head.append(style);
+      const other = document.createElement('style');
+      other.textContent = '.jc { animation: j1 5s }';
+      document.head.append(other);
+    });
+    const labels: string[] = [];
+    const ids: { chrome: (string | undefined)[]; ours: (string | undefined)[] } = { chrome: [], ours: [] };
+    const hover = `const e = add('jt'); e.id = 'jth'; e.getBoundingClientRect(); e.classList.add('jh')`;
+    const steps: [string, string, number][] = [
+      ['rule a', `add('ja')`, 1],
+      ['rule b, same declarations', `add('jb')`, 1],
+      ['same selector in another sheet', `add('jc')`, 1],
+      ['inline', `add('').style.animation = 'j1 5s'`, 1],
+      ['inline again', `add('').style.animation = 'j1 5s 1s'`, 1],
+      ['hover in', hover, 1],
+      ['hover out', `document.getElementById('jth').classList.remove('jh')`, 1],
+      ['hover in again', `document.getElementById('jth').classList.add('jh')`, 1],
+      ['hover out again', `document.getElementById('jth').classList.remove('jh')`, 1],
+      ['important', `const e = add('jt'); e.getBoundingClientRect(); e.classList.add('jw')`, 1],
+      ['inline width', `const e = add('jt'); e.getBoundingClientRect(); e.style.width = '9px'`, 1],
+      [
+        'no width rule',
+        `const e = add('ju'); e.style.width = '1px'; e.getBoundingClientRect(); e.style.width = '9px'`,
+        1,
+      ],
+      ['width in the same rule', `const e = add('jv'); e.getBoundingClientRect(); e.style.width = '9px'`, 1],
+    ];
+    for (const [label, code, count] of steps) {
+      const got = await run(code, count);
+      for (const side of ['chrome', 'ours'] as const) {
+        if (side === 'chrome') labels.push(label);
+        ids[side].push(got[side][0]?.cssId);
+      }
+    }
+    const relation = (list: (string | undefined)[]) =>
+      list.map(
+        (id, i) =>
+          `${labels[i]}: ${list.flatMap((other, j) => (id !== undefined && other === id ? [labels[j]] : [])).join(', ')}`
+      );
+    assert.deepEqual(relation(ids.ours), relation(ids.chrome));
   });
 
   test('animations of a same-origin iframe match Chrome', async () => {

@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import type { Context } from '../../core/context';
+import type { Context, MatchingStyle } from '../../core/context';
 import { type Inspectable, type PseudoType } from '../../core/nodes/nodes';
 import { isElement, isNode, realmOf, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
@@ -112,26 +112,57 @@ function hash(text: string): string {
 }
 
 /**
+ * The longhands Chrome's `InspectorAnimationAgent::CreateCSSId` looks up the rule of, for a CSS
+ * animation; a transition's are `CSS_ID_TRANSITION` and the property it transitions.
+ */
+const CSS_ID_ANIMATION = [
+  'animation-delay',
+  'animation-direction',
+  'animation-duration',
+  'animation-fill-mode',
+  'animation-iteration-count',
+  'animation-name',
+  'animation-timing-function',
+];
+const CSS_ID_TRANSITION = [
+  'transition-delay',
+  'transition-duration',
+  'transition-property',
+  'transition-timing-function',
+];
+
+/**
+ * The style that wins `property` among `styles` (highest priority first), as Chrome's
+ * `InspectorCSSAgent::FindEffectiveDeclaration` picks it: the first to declare it `!important`,
+ * else the first to declare it, else the first style at all.
+ */
+function effectiveStyle(property: string, styles: MatchingStyle[]): MatchingStyle | undefined {
+  let found: MatchingStyle | undefined;
+  for (const style of styles) {
+    const declared = style.declares(property);
+    if (declared === 'important') return style;
+    if (declared) found ??= style;
+  }
+  return found ?? styles[0];
+}
+
+/**
  * The `cssId` of a CSS animation or transition. The panel takes two groups of CSS animations with
  * the same ids for one, and replaces the first with the second, so without one every group of a
- * single CSS animation replaced the last. Chrome hashes the rule the animation came from: measured,
- * one rule gives one id on any element whatever its other classes or inline style, when played
- * again after the element changed, and for a transition to any value; all the animations of one
- * `animation` list share it; another rule with the very same declarations, or the same declaration
- * written inline, gives another. The page cannot tell which rule won, so this hashes only the
- * pseudo-element and the computed animation (or transition) longhands, leaving out
- * `animation-play-state`, which another rule may toggle. What remains different from Chrome: the
- * same declarations in different rules (or inline) share an id here, where Chrome's differ.
- * So does a hover round trip (`.tr` → `.tr.hov` → `.tr`, where `.tr.hov` sets only the width):
- * Chrome gives the transition into the hover state another id than the ones out of it, ours all
- * share one. Telling these apart needs the rules that match the element, which only the CSS
- * domain's cascade (domains/css/matching/cascade.ts) works out, from its sheet registry and forced
- * pseudo-classes: too much to build for the Animation domain, which must work without the CSS one.
+ * single CSS animation replaced the last. Like Chrome (`InspectorAnimationAgent::CreateCSSId`), it
+ * hashes the type, the animation's `id`, and for each of its longhands (a transition's property
+ * too) the style rule that wins it among those matching the element, from the CSS domain, enabled
+ * or not: a declaration inline (or in a user agent or constructed sheet) counts for nothing, so
+ * one rule gives one id on any element, the same declarations in another rule another, and a
+ * transition into a hover state another than the one out of it, its property's value coming from
+ * another rule. Without the CSS domain, or for a pseudo-element it cannot match, the pseudo-element
+ * and the computed longhands are hashed instead, which tells fewer animations apart.
  */
 const cssIds = new WeakMap<Animation, string>();
 /** Taken when first described and kept, as in Chrome, where it does not change with the element. */
 function cssIdOf(
-  animation: Animation,
+  ctx: Context,
+  animation: CSSAnimation | CSSTransition,
   effect: KeyframeEffect,
   type: 'CSSAnimation' | 'CSSTransition'
 ): string | undefined {
@@ -139,14 +170,35 @@ function cssIdOf(
   if (known) return known;
   const { target, pseudoElement } = effect;
   if (!target) return undefined;
-  let style: CSSStyleDeclaration;
-  try {
-    style = styleOf(target, pseudoElement ?? undefined);
-  } catch {
-    return undefined;
+  const pseudo = pseudoElement ? pseudoElement.replace(/^::?/, '') : null;
+  const properties =
+    type === 'CSSAnimation'
+      ? CSS_ID_ANIMATION
+      : [...CSS_ID_TRANSITION, (animation as CSSTransition).transitionProperty];
+  let parts: string[] | undefined;
+  if (ctx.matchingStyles && (pseudo === null || isPseudoType(pseudo))) {
+    try {
+      const styles = ctx.matchingStyles(target, pseudo);
+      parts = [type, animation.id];
+      for (const property of properties) {
+        const rule = effectiveStyle(property, styles)?.rule;
+        if (rule) parts.push(property, rule);
+      }
+    } catch {
+      parts = undefined;
+    }
   }
-  const longhands = type === 'CSSAnimation' ? ANIMATION_LONGHANDS : TRANSITION_LONGHANDS;
-  const id = hash([type, pseudoElement ?? '', ...longhands.map(name => style.getPropertyValue(name))].join('\n'));
+  if (!parts) {
+    let style: CSSStyleDeclaration;
+    try {
+      style = styleOf(target, pseudoElement ?? undefined);
+    } catch {
+      return undefined;
+    }
+    const longhands = type === 'CSSAnimation' ? ANIMATION_LONGHANDS : TRANSITION_LONGHANDS;
+    parts = [type, pseudoElement ?? '', ...longhands.map(name => style.getPropertyValue(name))];
+  }
+  const id = hash(parts.join('\n'));
   cssIds.set(animation, id);
   return id;
 }
@@ -334,7 +386,7 @@ export function registerAnimation(ctx: Context) {
     const effect = animation.effect;
     if (isKeyframeEffect(effect, realm)) {
       if (type !== 'WebAnimation') {
-        const cssId = cssIdOf(animation, effect, type);
+        const cssId = cssIdOf(ctx, animation as CSSAnimation | CSSTransition, effect, type);
         if (cssId) result.cssId = cssId;
       }
       const timing = effect.getComputedTiming();
