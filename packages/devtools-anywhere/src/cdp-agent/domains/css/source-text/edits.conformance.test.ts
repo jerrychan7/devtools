@@ -248,44 +248,47 @@ test('changes through the CSSOM: styleSheetChanged, same id; replaceSync gives t
   assert.deepEqual(ours, chrome);
 });
 
-test('a sheet whose rules do not pair with its text is edited by the ranges it is served with', async () => {
-  // Parsed alone, `svg|\61` has no namespace: its rule is not paired, the sheet is served
-  // serialized, a rule's range by its line.
-  const css = '@namespace svg url(http://www.w3.org/2000/svg);\nsvg|\\61 { top: 1px }\n.u1 { color: red }';
-  const [ours, chrome] = await each(async (side, t) => {
-    const at = await addStyle(t, css, '<p class="u1">x</p>');
-    const res = await side.send('CSS.getMatchedStylesForNode', {
-      nodeId: await nodeId(side, `${at} .u1`),
-    });
-    const found = res.matchedCSSRules?.map(m => m.rule).find(r => r.selectorList.text === '.u1');
-    assert.ok(found?.styleSheetId && found.style.range && found.selectorList.selectors[0]?.range);
-    const id = found.styleSheetId;
-    const outcome = (p: Promise<unknown>) =>
-      p.then(
-        () => 'ok',
-        (e: Error) => e.message
+for (const css of [
+  '@namespace svg url(http://www.w3.org/2000/svg);\nsvg|\\61 { top: 1px }\n.u1 { color: red }',
+  '@namespace url(http://www.w3.org/1999/xhtml);\n@namespace s "http://www.w3.org/2000/svg";\n|p, s|\\61 , *|p.u1 { top: 1px }\n.u1 { color: red }',
+])
+  test(`a sheet with @namespace is edited as written: ${JSON.stringify(css)}`, async () => {
+    // `svg|\61` is paired as parsed after the sheet's @namespace rules.
+    const [ours, chrome] = await each(async (side, t) => {
+      const at = await addStyle(t, css, '<p class="u1">x</p>');
+      const res = await side.send('CSS.getMatchedStylesForNode', {
+        nodeId: await nodeId(side, `${at} .u1`),
+      });
+      const found = res.matchedCSSRules?.map(m => m.rule).find(r => r.selectorList.text === '.u1');
+      assert.ok(found?.styleSheetId && found.style.range && found.selectorList.selectors[0]?.range);
+      const id = found.styleSheetId;
+      const outcome = (p: Promise<unknown>) =>
+        p.then(
+          () => 'ok',
+          (e: Error) => e.message
+        );
+      const styleEdit = await outcome(
+        side.send('CSS.setStyleTexts', {
+          edits: [{ styleSheetId: id, range: found.style.range, text: 'color: blue' }],
+        })
       );
-    const styleEdit = await outcome(
-      side.send('CSS.setStyleTexts', {
-        edits: [{ styleSheetId: id, range: found.style.range, text: 'color: blue' }],
-      })
-    );
-    const selectorEdit = await outcome(
-      side.send('CSS.setRuleSelector', {
-        styleSheetId: id,
-        range: found.selectorList.selectors[0].range,
-        selector: '.u1, .u2',
-      })
-    );
-    const rules = await t.page.evaluate(
-      at =>
-        [...((document.getElementById(`${at.slice(1)}-style`) as HTMLStyleElement).sheet?.cssRules ?? [])].map(
-          r => r.cssText
-        ),
-      at
-    );
-    return { styleEdit, selectorEdit, rules };
+      const selectorEdit = await outcome(
+        side.send('CSS.setRuleSelector', {
+          styleSheetId: id,
+          range: found.selectorList.selectors[0].range,
+          selector: '.u1, .u2',
+        })
+      );
+      const rules = await t.page.evaluate(
+        at =>
+          [...((document.getElementById(`${at.slice(1)}-style`) as HTMLStyleElement).sheet?.cssRules ?? [])].map(
+            r => r.cssText
+          ),
+        at
+      );
+      return { found: rule(found), styleEdit, selectorEdit, rules, text: await text(side, id) };
+    });
+    assert.deepEqual(ours, chrome);
+    assert.equal(chrome.styleEdit, 'ok');
+    assert.ok(chrome.text.startsWith('@namespace'));
   });
-  assert.deepEqual(ours, chrome);
-  assert.equal(chrome.styleEdit, 'ok');
-});

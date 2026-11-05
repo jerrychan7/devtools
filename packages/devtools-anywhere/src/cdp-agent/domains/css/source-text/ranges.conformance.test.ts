@@ -126,3 +126,17 @@ test('line breaks: CR LF, CR, FF, U+2028 and characters outside the BMP', () =>
     '<p class="l1">x</p>',
     '.l1'
   ));
+
+test('@namespace: selectors with prefixes pair in the namespaces the sheet declares', async () => {
+  await same(
+    '@namespace svg url(http://www.w3.org/2000/svg);\nsvg|\\61 { top: 1px }\n.n1 { color: red }',
+    '<p class="n1">x</p>',
+    '.n1'
+  );
+  await same(
+    '@namespace url(http://www.w3.org/1999/xhtml);\n@namespace s "http://www.w3.org/2000/svg";\n' +
+      '|p, s|\\61 , *|p.n2 { color: red }\n.n2 { top: 1px }',
+    '<p class="n2">x</p>',
+    '.n2'
+  );
+});

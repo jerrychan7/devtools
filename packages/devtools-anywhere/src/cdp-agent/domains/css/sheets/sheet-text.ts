@@ -20,6 +20,11 @@ export interface SheetSource {
   nodes: Map<CSSRule, CssRule>;
   /** The top-level rules, each with its node. */
   top: [CSSRule, CssRule][];
+  /**
+   * The sheet's @namespace rules as the CSSOM serializes them: a selector parsed alone is parsed
+   * after them, so that its namespace prefixes are declared.
+   */
+  namespaces: string;
 }
 
 interface Recorded {
@@ -193,8 +198,17 @@ const loose = (s: string) =>
  */
 function pair(text: string, rules: CSSRule[]): SheetSource | null {
   const top = outline(text);
-  const source: SheetSource = { text, lines: lineStarts(text), nodes: new Map(), top: [] };
+  const namespaces = namespaceText(rules);
+  const source: SheetSource = { text, lines: lineStarts(text), nodes: new Map(), top: [], namespaces };
   return pairList(source, top, rules, TOP, true) ? source : null;
+}
+
+/** The @namespace rules among `rules` as the CSSOM serializes them, on one line. */
+export function namespaceText(rules: CSSRule[]): string {
+  return rules
+    .filter(r => isCssom(r, 'CSSNamespaceRule'))
+    .map(r => r.cssText)
+    .join(' ');
 }
 
 /** `wrap` puts a prelude where it was, for the browser to parse it alone. */
@@ -208,7 +222,7 @@ function pairList(source: SheetSource, outlined: CssRule[], cssom: CSSRule[], wr
     for (;;) {
       const node = outlined[j++];
       if (!node) return false;
-      if (!matches(source.text, node, rule, wrap)) continue;
+      if (!matches(source.text, node, rule, wrap, source.namespaces)) continue;
       source.nodes.set(rule, node);
       if (top) source.top.push([rule, node]);
       const tag = tagOf(rule);
@@ -260,7 +274,13 @@ function respliced(source: SheetSource, start: number, end: number, insert: stri
   const [fresh, ...more] = outline(slice);
   if (!fresh || more.length || fresh.start !== 0 || fresh.end !== slice.length) return null;
   shift(fresh, node.start);
-  const next: SheetSource = { text, lines: lineStarts(text), nodes: source.nodes, top: source.top };
+  const next: SheetSource = {
+    text,
+    lines: lineStarts(text),
+    nodes: source.nodes,
+    top: source.top,
+    namespaces: source.namespaces,
+  };
   if (!pairList(next, [fresh], [rule], TOP)) return null;
   for (let i = k + 1; i < source.top.length; i++) {
     const after = source.top[i];
@@ -270,7 +290,7 @@ function respliced(source: SheetSource, start: number, end: number, insert: stri
   return next;
 }
 
-function matches(text: string, node: CssRule, rule: CSSRule, wrap: (p: string) => string): boolean {
+function matches(text: string, node: CssRule, rule: CSSRule, wrap: Wrap, namespaces: string): boolean {
   const tag = tagOf(rule);
   if (tag === 'CSSNestedDeclarations') {
     // Some declaration of the run is one the CSSOM kept.
@@ -287,16 +307,17 @@ function matches(text: string, node: CssRule, rule: CSSRule, wrap: (p: string) =
     const written = isCssom(rule, 'CSSStyleRule') ? rule.selectorText : Reflect.get(rule, 'keyText');
     if (typeof written !== 'string') return false;
     if (loose(prelude) === loose(written)) return true;
-    // Serialized otherwise (escapes, `from` for 0%): as the browser serializes the text alone.
+    // Serialized otherwise (escapes, `from` for 0%): as the browser serializes the text alone,
+    // after the sheet's @namespace rules (`svg|\61` is `svg|a` only where `svg` is declared).
     const sheet = new CSSStyleSheet();
     try {
       // Our own sheet: not reported as the page's change.
-      ownEdit(() => sheet.replaceSync(wrap(prelude)));
+      ownEdit(() => sheet.replaceSync(namespaces + wrap(prelude)));
     } catch {
       return false;
     }
     // The innermost rule: the wrapping ones are around it.
-    let first: CSSRule | undefined = sheet.cssRules[0];
+    let first: CSSRule | undefined = Array.from(sheet.cssRules).find(r => !isCssom(r, 'CSSNamespaceRule'));
     for (let inner = first && childRules(first)[0]; inner; inner = childRules(inner)[0]) first = inner;
     if (!first || tagOf(first) !== tag) return false;
     const parsed = first && (isCssom(first, 'CSSStyleRule') ? first.selectorText : Reflect.get(first, 'keyText'));

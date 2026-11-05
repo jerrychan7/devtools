@@ -109,6 +109,21 @@ test('at-rules: blockless, with blocks, nested, unknown', () => {
   assert.deepEqual(parse('@import "a"'), [['@import "a";']]);
 });
 
+test('@namespace: default, with a prefix, with a string, before rules with prefixed selectors', () => {
+  const text =
+    '@namespace url(http://www.w3.org/1999/xhtml);\n@NAMESPACE svg url("http://www.w3.org/2000/svg") ;' +
+    '@namespace s "x";\nsvg|\\61 , *|p, |b { c: d }';
+  assert.deepEqual(parse(text), [
+    ['@namespace url(http://www.w3.org/1999/xhtml);'],
+    ['@NAMESPACE svg url("http://www.w3.org/2000/svg");'],
+    ['@namespace s "x";'],
+    ['svg|\\61 , *|p, |b', 'c=d'],
+  ]);
+  const [ns] = outline(text);
+  assert.equal(ns?.name, 'namespace');
+  assert.equal(text.slice(ns?.start, ns?.end), '@namespace url(http://www.w3.org/1999/xhtml);');
+});
+
 test('nesting: & rules, rules without &, nested declarations', () => {
   assert.deepEqual(parse('a { color: red; &:hover { x: y } b: c; .d { } e: f }'), [
     ['a', 'color=red;', ['&:hover', 'x=y'], ['nested', 'b=c;'], ['.d'], ['nested', 'e=f']],

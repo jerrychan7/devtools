@@ -141,6 +141,7 @@ type CssomName =
   | 'CSSStyleRule'
   | 'CSSNestedDeclarations'
   | 'CSSImportRule'
+  | 'CSSNamespaceRule'
   | 'CSSMediaRule'
   | 'CSSSupportsRule'
   | 'CSSContainerRule'

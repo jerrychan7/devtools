@@ -321,7 +321,10 @@ export class SheetRegistry {
     const old = !source && this.texts.unpaired(sheet) ? this.texts.textOf(sheet) : null;
     if (old !== null) {
       const fail = () => new CdpError(at === 'style' ? STYLE_MISMATCH : RANGE_MISMATCH);
-      const offsets = offsetsOf({ text: old, lines: lineStarts(old), nodes: new Map(), top: [] }, range);
+      const offsets = offsetsOf(
+        { text: old, lines: lineStarts(old), nodes: new Map(), top: [], namespaces: '' },
+        range
+      );
       if (!offsets) throw new CdpError(OUT_OF_BOUNDS);
       const written: CssRule[] = [];
       const walk = (list: CssRule[]) =>
