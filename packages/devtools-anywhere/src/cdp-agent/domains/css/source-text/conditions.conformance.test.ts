@@ -202,6 +202,40 @@ test("errors: a key the parser does not take, a range past the text, a range tha
   assert.deepEqual(ours, chrome);
 });
 
+test('errors: a range that starts past its end, to every edit; a selector range not a selector’s', async () => {
+  const [ours, chrome] = await each(async side => {
+    const res = await raw(side);
+    const sheet = res.cssKeyframesRules?.[0]?.keyframes[0]?.styleSheetId;
+    assert.ok(sheet);
+    const reversed = { startLine: 1, startColumn: 5, endLine: 1, endColumn: 1 };
+    const error = (p: Promise<unknown>) =>
+      p.then(
+        () => 'ok',
+        (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+      );
+    const at = { styleSheetId: sheet, range: reversed };
+    return [
+      await error(side.send('CSS.setStyleTexts', { edits: [{ ...at, text: 'x:y' }] })),
+      await error(side.send('CSS.setRuleSelector', { ...at, selector: '.a' })),
+      await error(side.send('CSS.setMediaText', { ...at, text: 'all' })),
+      await error(side.send('CSS.setSupportsText', { ...at, text: '(display: grid)' })),
+      await error(side.send('CSS.setContainerQueryText', { ...at, text: '(min-width: 0px)' })),
+      await error(side.send('CSS.setContainerQueryConditionText', { ...at, text: '(min-width: 0px)' })),
+      await error(side.send('CSS.setScopeText', { ...at, text: '(.c0)' })),
+      await error(side.send('CSS.setKeyframeKey', { ...at, keyText: 'from' })),
+      // Inside `.c1 {`: not where a selector starts and ends.
+      await error(
+        side.send('CSS.setRuleSelector', {
+          styleSheetId: sheet,
+          range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 3 },
+          selector: '.a',
+        })
+      ),
+    ];
+  });
+  assert.deepEqual(ours, chrome);
+});
+
 test("a <link>'s sheet: setStyleTexts and setStyleSheetText change its text, no event", async () => {
   const [ours, chrome] = await each(async (side, t) => {
     const res = await raw(side);

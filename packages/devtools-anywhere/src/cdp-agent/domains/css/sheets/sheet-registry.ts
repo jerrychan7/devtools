@@ -17,6 +17,12 @@ export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing 
 export const STYLE_MISMATCH = "NotFoundError Source range didn't match existing style source range";
 export const OUT_OF_BOUNDS = 'Specified range is out of bounds';
 
+/** Throws Chrome's error for a range that starts past its end, before any other check. */
+export function assertOrdered(range: Protocol.CSS.SourceRange): void {
+  if (range.startLine > range.endLine || (range.startLine === range.endLine && range.startColumn > range.endColumn))
+    throw new CdpError('Range start must not succeed its end');
+}
+
 /** A rule with a style of its own (setStyleTexts edits it). */
 export type Styled = StyleRule | CSSKeyframeRule;
 
@@ -307,6 +313,7 @@ export class SheetRegistry {
    * sheet was written in, or in the serialized one, where a rule's line is its id.
    */
   findRule(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, at: 'style' | 'selector'): Styled {
+    assertOrdered(range);
     const source = this.sourceOf(sheet);
     // A text this session has, whose rules no longer pair with the sheet's (another session
     // replaced them). As measured in Chrome 156, the style rules of the old text stand for those

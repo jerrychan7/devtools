@@ -14,7 +14,14 @@ import { Cascade } from './matching/cascade';
 import { ComputedStyleUpdates } from './computed/computed-updates';
 import { UserAgentStyles, userAgentSheetUrl } from './user-agent/user-agent';
 import { RuleView } from './matching/rule-view';
-import { OUT_OF_BOUNDS, RANGE_MISMATCH, STYLE_MISMATCH, SheetRegistry, isConstructed } from './sheets/sheet-registry';
+import {
+  OUT_OF_BOUNDS,
+  RANGE_MISMATCH,
+  STYLE_MISMATCH,
+  SheetRegistry,
+  assertOrdered,
+  isConstructed,
+} from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
 import { outline } from './sheets/css-outline';
 import { editedBy, ownEdit, watchCssom, watchRealms } from './sheets/cssom-watch';
@@ -345,6 +352,7 @@ export function registerCss(ctx: Context) {
    * written in has ranges for them.
    */
   function atPrelude(sheet: CSSStyleSheet, range: Protocol.CSS.SourceRange, is: (r: CSSRule) => boolean): CSSRule {
+    assertOrdered(range);
     const source = sheets.sourceOf(sheet);
     const offsets = source && offsetsOf(source, range);
     if (source && !offsets) throw new CdpError(OUT_OF_BOUNDS);
