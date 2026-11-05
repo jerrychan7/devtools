@@ -108,6 +108,12 @@ const noneMissing = (ours: unknown, chrome: unknown, what: string) =>
     `${what}: fields Chrome has and we do not`
   );
 
+/**
+ * `time`, or `target` if `time` is up to a frame past it: Chrome's animation, paused and seeked,
+ * still moves on by a frame now and then (1017 for 1000, 517 for 500: 3 runs in 15 under load).
+ */
+const aFramePast = (time: number, target: number) => (time >= target && time - target <= 17 ? target : time);
+
 /** The animations a side announced, by name. */
 async function started(side: Side, count: number) {
   return until(async () => {
@@ -303,7 +309,7 @@ describe('Animation', () => {
       await side.send('Animation.setPaused', { animations: [id], paused: true });
       await side.send('Animation.seekAnimations', { animations: [id], currentTime: 500 });
       const [state] = await stateOf(t, 'width');
-      results.push([state?.playState, Math.round(Number(state?.currentTime))]);
+      results.push([state?.playState, aFramePast(Math.round(Number(state?.currentTime)), 500)]);
     }
     assert.deepEqual(results[0], ['paused', 500]);
     assert.deepEqual(results[1], results[0]);
@@ -407,7 +413,7 @@ describe('Animation', () => {
       await side.send('Animation.setPaused', { animations: ids, paused: true });
       const paused = await stateOf(t, name);
       await side.send('Animation.seekAnimations', { animations: ids, currentTime: 1000 });
-      const seekedPage = (await stateOf(t, name)).map(s => Math.round(s.currentTime));
+      const seekedPage = (await stateOf(t, name)).map(s => aFramePast(Math.round(s.currentTime), 1000));
       const { currentTime } = await side.send('Animation.getCurrentTime', { id: animation.id });
       await side.send('Animation.setTiming', { animationId: animation.id, duration: 5000, delay: 10 });
       const timed = await stateOf(t, name);
@@ -432,7 +438,7 @@ describe('Animation', () => {
       results.push({
         paused: paused.map(s => s.playState),
         seekedPage,
-        seeked: Math.round(currentTime),
+        seeked: aFramePast(Math.round(currentTime), 1000),
         timing: timed.map(s => [
           s.playState,
           s.timing?.duration,
