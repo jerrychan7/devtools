@@ -180,14 +180,15 @@ test('CDO and CDC are skipped at the top level only', () => {
 test('offsets to lines and columns', () => {
   const text = 'a\nb\r\nc\rd\fe';
   const starts = lineStarts(text);
-  assert.deepEqual(starts, [0, 2, 5, 7, 9]);
+  // Like Chrome: only LF ends a line, CR and FF are characters of theirs.
+  assert.deepEqual(starts, [0, 2, 5]);
   assert.deepEqual(positionAt(starts, 0), { line: 0, column: 0 });
   assert.deepEqual(positionAt(starts, 1), { line: 0, column: 1 });
   assert.deepEqual(positionAt(starts, 3), { line: 1, column: 1 });
   assert.deepEqual(positionAt(starts, 4), { line: 1, column: 2 });
-  assert.deepEqual(positionAt(starts, 10), { line: 4, column: 1 });
+  assert.deepEqual(positionAt(starts, 10), { line: 2, column: 5 });
   assert.equal(offsetAt(starts, 2, 1), 6);
-  assert.equal(offsetAt(starts, 9, 0), 9);
+  assert.equal(offsetAt(starts, 9, 0), -1);
   assert.deepEqual(lineStarts(''), [0]);
   // UTF-16 code units: an astral character is two columns.
   assert.deepEqual(positionAt(lineStarts('😀a'), 2), { line: 0, column: 2 });

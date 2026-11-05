@@ -1,16 +1,13 @@
 /**
- * Offsets in a text to lines and columns and back, both counted from 0, columns in UTF-16 code
- * units. A line ends at LF, CR LF, CR or FF, the newlines of CSS Syntax §3.3.
+ * Offsets in a style sheet's text to lines and columns and back, both counted from 0, columns in
+ * UTF-16 code units. Like Chrome's, lines end at LF only: a CR (of CR LF or alone) and FF are
+ * characters at the end of the line, or in it.
  */
 
 /** The offset each line starts at: the first is 0. */
 export function lineStarts(text: string): number[] {
   const starts = [0];
-  for (let p = 0; p < text.length; p++) {
-    const c = text.charCodeAt(p);
-    if (c === 13 && text.charCodeAt(p + 1) === 10) p++;
-    if (c === 10 || c === 13 || c === 12) starts.push(p + 1);
-  }
+  for (let p = text.indexOf('\n'); p >= 0; p = text.indexOf('\n', p + 1)) starts.push(p + 1);
   return starts;
 }
 
@@ -31,7 +28,8 @@ export function positionAt(starts: readonly number[], offset: number): TextPosit
   return { line: lo, column: offset - (starts[lo] ?? 0) };
 }
 
-/** The offset of a line and column, from `lineStarts`; a line past the last one is the last. */
+/** The offset of a line and column, from `lineStarts`; -1 for a line past the last one. */
 export function offsetAt(starts: readonly number[], line: number, column: number): number {
-  return (starts[Math.min(Math.max(line, 0), starts.length - 1)] ?? 0) + column;
+  const start = starts[line];
+  return start === undefined || line < 0 ? -1 : start + column;
 }
