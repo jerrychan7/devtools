@@ -18,6 +18,10 @@ interface Tracked {
   start: number | null;
   /** Frames to wait before reporting a seek's new start time (see `seekAnimations`). */
   hold: number;
+  /** Whether it is idle and was reported so (or never ran): cancelled once, reported once. */
+  canceled: boolean;
+  /** Released by the client: not reported again, nor found by id; still slowed by the domain's rate. */
+  released: boolean;
 }
 
 /**
@@ -179,13 +183,22 @@ function startOf(animation: Animation): number | null {
  */
 export function registerAnimation(ctx: Context) {
   const { session } = ctx;
-  const byId = new Map<string, Tracked>();
-  let tracked = new WeakMap<Animation, Tracked>();
+  /** The animations that change on their own (running, paused, pending): looked at every frame. */
+  const awake = new Map<string, Tracked>();
   /**
-   * Animations the client released: not announced again, and still slowed down by the domain's
-   * rate, which is the documents' in Chrome. Forgotten when they end.
+   * The cancelled and released ones, kept only while the page keeps them: a page that runs for long
+   * makes and drops animations without end. Still found by id, as in Chrome, and woken when the page
+   * plays them again (back in `getAnimations()`). Finished ones stay awake: one the page cancels is
+   * in no `getAnimations()`.
+   * Chrome keeps every one until disable: here one the page dropped, and the garbage collector took,
+   * is no longer found by id (Could not find animation, as for a released one): a trade, so that
+   * the domain does not keep alive every animation and target a long-running page ever made.
    */
-  const released = new Map<Animation, Tracked>();
+  const asleep = new Map<string, WeakRef<Tracked>>();
+  const collected = new FinalizationRegistry<string>(id => {
+    if (!asleep.get(id)?.deref()) asleep.delete(id);
+  });
+  let tracked = new WeakMap<Animation, Tracked>();
   let seq = 0;
   let rate = 1;
   let frame = 0;
@@ -259,6 +272,88 @@ export function registerAnimation(ctx: Context) {
    */
   let stopShadowRoots: (() => void) | null = null;
 
+  const sleep = (t: Tracked) => {
+    awake.delete(t.id);
+    asleep.set(t.id, new WeakRef(t));
+  };
+  const wake = (t: Tracked) => {
+    if (t.released || awake.has(t.id)) return;
+    asleep.delete(t.id);
+    awake.set(t.id, t);
+  };
+  /** Every tracked animation still in the page; a copy, so that they can move while it is gone through. */
+  const all = (): Tracked[] => {
+    const list = [...awake.values()];
+    for (const ref of asleep.values()) {
+      const t = ref.deref();
+      if (t) list.push(t);
+    }
+    return list;
+  };
+
+  /** Starts tracking an animation, or wakes one the page plays again. */
+  const track = (animation: Animation) => {
+    const known = tracked.get(animation);
+    if (known) {
+      // Finished ones with `fill: forwards` stay in getAnimations(): only one that runs again wakes.
+      if (animation.playState !== 'finished' && animation.playState !== 'idle') wake(known);
+      return;
+    }
+    const t: Tracked = {
+      id: String(++seq),
+      animation,
+      started: false,
+      rate: animation.playbackRate,
+      start: null,
+      hold: 0,
+      // Chrome reports a cancel on the change to idle: one made idle (`new Animation()`) never had it.
+      canceled: animation.playState === 'idle',
+      released: false,
+    };
+    tracked.set(animation, t);
+    collected.register(t, t.id);
+    awake.set(t.id, t);
+    if (rate !== 1) animation.playbackRate = t.rate * rate;
+    session.emit('Animation.animationCreated', { id: t.id });
+  };
+
+  /** Reports what the page changed: the start (Chrome's `animationStarted`), the start time. */
+  const check = (t: Tracked) => {
+    const { animation } = t;
+    if (t.released) return;
+    if (!t.started) {
+      if (animation.pending || animation.playState === 'idle') return;
+      t.started = true;
+      t.start = startOf(animation);
+      session.emit('Animation.animationStarted', { animation: describe(t) });
+      return;
+    }
+    if (t.hold > 0) {
+      t.hold--;
+      return;
+    }
+    const start = startOf(animation);
+    if (start !== null && start !== t.start) {
+      t.start = start;
+      session.emit('Animation.animationUpdated', { animation: describe(t) });
+    }
+  };
+
+  /** Reports a cancel (Chrome reports one even before the start), and lets cancelled ones sleep. */
+  const settle = (t: Tracked) => {
+    const state = t.animation.playState;
+    if (state !== 'idle') {
+      t.canceled = false;
+      return;
+    }
+    if (!t.canceled) {
+      t.canceled = true;
+      t.start = null;
+      if (!t.released) session.emit('Animation.animationCanceled', { id: t.id });
+    }
+    sleep(t);
+  };
+
   /** Announces new animations, and changes the page made to the ones announced. */
   const scan = () => {
     for (const tree of [...documents(), ...ctx.shadowRoots.roots()]) {
@@ -268,44 +363,11 @@ export function registerAnimation(ctx: Context) {
       } catch {
         continue;
       }
-      for (const animation of animations) {
-        if (released.has(animation)) continue;
-        let t = tracked.get(animation);
-        if (!t) {
-          t = { id: String(++seq), animation, started: false, rate: animation.playbackRate, start: null, hold: 0 };
-          tracked.set(animation, t);
-          byId.set(t.id, t);
-          if (rate !== 1) animation.playbackRate = t.rate * rate;
-          session.emit('Animation.animationCreated', { id: t.id });
-        }
-      }
+      for (const animation of animations) track(animation);
     }
-    // Finished ones leave getAnimations() too, and are updated when the page plays them again.
-    for (const t of byId.values()) {
-      const { animation } = t;
-      if (!t.started) {
-        if (animation.pending || animation.playState === 'idle') continue;
-        t.started = true;
-        t.start = startOf(animation);
-        session.emit('Animation.animationStarted', { animation: describe(t) });
-        continue;
-      }
-      const start = startOf(animation);
-      if (t.hold > 0) {
-        t.hold--;
-        continue;
-      }
-      if (start !== null && start !== t.start) {
-        t.start = start;
-        session.emit('Animation.animationUpdated', { animation: describe(t) });
-      }
-    }
-    // Canceled ones are idle; finished ones are not.
-    for (const animation of released.keys()) if (animation.playState === 'idle') released.delete(animation);
-    for (const t of byId.values()) {
-      if (!t.started || t.animation.playState !== 'idle') continue;
-      byId.delete(t.id);
-      session.emit('Animation.animationCanceled', { id: t.id });
+    for (const t of awake.values()) {
+      check(t);
+      settle(t);
     }
   };
 
@@ -315,11 +377,12 @@ export function registerAnimation(ctx: Context) {
   };
 
   const find = (id: string) => {
-    const t = byId.get(id);
-    if (!t) throw new CdpError(NOT_FOUND);
+    const t = awake.get(id) ?? asleep.get(id)?.deref();
+    if (!t || t.released) throw new CdpError(NOT_FOUND);
     return t;
   };
-  /** Runs `change` and takes what it did as known, so it is not reported as the page's. */
+  /**
+   * Runs `change` and takes what it did as known, so it is not reported as the page's. */
   const quietly = (t: Tracked, change: () => void) => {
     change();
     t.start = startOf(t.animation) ?? t.start;
@@ -327,8 +390,7 @@ export function registerAnimation(ctx: Context) {
 
   const setRate = (value: number) => {
     rate = value;
-    for (const t of [...byId.values(), ...released.values()])
-      quietly(t, () => (t.animation.playbackRate = t.rate * rate));
+    for (const t of all()) quietly(t, () => (t.animation.playbackRate = t.rate * rate));
   };
 
   const stop = () => {
@@ -336,10 +398,11 @@ export function registerAnimation(ctx: Context) {
     frame = 0;
     stopShadowRoots?.();
     stopShadowRoots = null;
+    // Every animation slowed down gets its own rate back: cancelled and released ones too.
     if (rate !== 1) setRate(1);
-    byId.clear();
+    awake.clear();
+    asleep.clear();
     tracked = new WeakMap();
-    released.clear();
   };
   session.onReset(stop);
 
@@ -354,11 +417,13 @@ export function registerAnimation(ctx: Context) {
     getCurrentTime: ({ id }: Protocol.Animation.GetCurrentTimeRequest) => ({ currentTime: current(find(id)) }),
     setPaused: ({ animations, paused }: Protocol.Animation.SetPausedRequest) => {
       const list = animations.map(find);
-      for (const t of list)
+      for (const t of list) {
         quietly(t, () => {
           if (paused) t.animation.pause();
           else if (t.animation.playState === 'paused') t.animation.play();
         });
+        wake(t);
+      }
     },
     seekAnimations: ({ animations, currentTime, currentTimes }: Protocol.Animation.SeekAnimationsRequest) => {
       // The panel sends one time per animation, `currentTimes`; Chrome's messages.
@@ -375,18 +440,20 @@ export function registerAnimation(ctx: Context) {
       for (const [i, t] of list.entries()) {
         t.animation.currentTime = currentTimes?.[i] ?? currentTime ?? 0;
         t.hold = 2;
+        wake(t);
       }
     },
     setTiming: ({ animationId, duration, delay }: Protocol.Animation.SetTimingRequest) => {
       const t = find(animationId);
       quietly(t, () => t.animation.effect?.updateTiming({ duration, delay }));
+      wake(t);
     },
     releaseAnimations: ({ animations }: Protocol.Animation.ReleaseAnimationsRequest) => {
       for (const id of animations) {
-        const t = byId.get(id);
+        const t = awake.get(id) ?? asleep.get(id)?.deref();
         if (!t) continue;
-        byId.delete(id);
-        released.set(t.animation, t);
+        t.released = true;
+        sleep(t);
       }
     },
     resolveAnimation: ({ animationId }: Protocol.Animation.ResolveAnimationRequest) => ({

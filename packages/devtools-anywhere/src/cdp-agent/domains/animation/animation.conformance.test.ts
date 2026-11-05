@@ -499,3 +499,82 @@ describe('Animation, which animations are told apart', () => {
     assert.equal((await t.ours.events('Animation.animationStarted')).length, 0);
   });
 });
+
+/** What a side reported, by kind (created, started, updated, canceled), without times. */
+async function reports(side: Side) {
+  const out: string[] = [];
+  for (const method of EVENTS)
+    for (const e of await side.events(method)) {
+      const kind = method.slice('Animation.animation'.length);
+      if ('id' in e) out.push(`${kind} ${e.id}`);
+      else
+        out.push(`${kind} ${e.animation.id} ${e.animation.name} ${e.animation.playState} ${e.animation.playbackRate}`);
+    }
+  await side.clear();
+  return out;
+}
+
+/** Runs `steps` against each side, on a page of its own with the domain enabled: [Chrome's, ours]. */
+async function onEachSide<T>(steps: (t: TestPage, side: Side) => Promise<T>): Promise<[T, T]> {
+  const results: T[] = [];
+  for (const which of ['chrome', 'ours'] as const) {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      await t[which].send('Animation.enable');
+      results.push(await steps(t, t[which]));
+    } finally {
+      await t.page.close();
+    }
+  }
+  const [chrome, ours] = results;
+  assert.ok(chrome !== undefined && ours !== undefined);
+  return [chrome, ours];
+}
+
+describe('Animation, beyond getAnimations()', () => {
+  test('an animation played again after a cancel or its end keeps its id, as in Chrome', async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 100);
+        animation.id = 'again';
+        Reflect.set(window, '__again', animation);
+      });
+      await sleep(400);
+      const finished = await reports(side);
+      const found = await side.send('Animation.getCurrentTime', { id: '1' }).then(
+        () => 'found',
+        () => 'missing'
+      );
+      await t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).play());
+      await sleep(300);
+      const replayed = await reports(side);
+      await t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).cancel());
+      await sleep(200);
+      const canceled = await reports(side);
+      await t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).play());
+      await sleep(300);
+      return { finished, found, replayed, canceled, again: await reports(side) };
+    });
+    assert.deepEqual(ours, chrome);
+  });
+
+  test('disable gives a cancelled animation its own rate back, as in Chrome', async () => {
+    // Chrome sets the rate on the timeline, not on the animation: the page reads its own throughout.
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(() => {
+        const div = document.body.appendChild(document.createElement('div'));
+        Reflect.set(window, '__cancel', div.animate({ opacity: [0, 1] }, 10000));
+      });
+      await sleep(200);
+      await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
+      await t.page.evaluate(() => (Reflect.get(window, '__cancel') as Animation).cancel());
+      await sleep(200);
+      await side.send('Animation.disable');
+      return t.page.evaluate(() => (Reflect.get(window, '__cancel') as Animation).playbackRate);
+    });
+    assert.equal(chrome, 1);
+    assert.equal(ours, chrome);
+  });
+});
