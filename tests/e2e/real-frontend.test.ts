@@ -1069,6 +1069,65 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
   }
 });
 
+test(
+  'the Animations panel shows a scroll-driven animation by scroll position, and scrolls with its scrubber',
+  { skip },
+  async () => {
+    await showView('animations');
+    const before = await count('.animation-buffer-preview');
+    await page.evaluate(() => {
+      const scroller = document.body.appendChild(document.createElement('div'));
+      scroller.id = 'rf-scroller';
+      scroller.style.cssText = 'height: 100px; overflow: scroll';
+      scroller.innerHTML =
+        '<style>@keyframes rf-fade { to { opacity: 0.5 } } #rf-scrolled { height: 1000px; animation: rf-fade linear; animation-timeline: scroll(nearest) }</style><div id="rf-scrolled"></div>';
+    });
+    /** Finds the last match of `selector` in the frontend, shadow DOM included. */
+    const find = (selector: string) =>
+      frontend.evaluateHandle(selector => {
+        const all: Element[] = [];
+        const walk = (root: Document | ShadowRoot) => {
+          all.push(...root.querySelectorAll(selector));
+          for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+        };
+        walk(document);
+        return all.at(-1) ?? null;
+      }, selector);
+    try {
+      await waitFor(async () => (await count('.animation-buffer-preview')) > before);
+      await (await find('.animation-buffer-preview')).evaluate(el => el instanceof HTMLElement && el.click());
+      // Shown by scroll position, in pixels, where a time-based one shows milliseconds.
+      const current = await waitFor(async () => {
+        const value = await (await find('.animation-timeline-current-time')).evaluate(el => el?.textContent ?? '');
+        return /^\d+px$/.test(value) ? value : null;
+      });
+      assert.equal(current, '0px');
+      // Dragging the scrubber scrolls the scroller, rather than seeking the animation.
+      const header = await (
+        await find('.animation-grid-header')
+      ).evaluate(el => {
+        const rect = el?.getBoundingClientRect();
+        return rect && { x: rect.x, y: rect.y + rect.height / 2, width: rect.width };
+      });
+      assert.ok(header);
+      const frame = await (await frontend.frameElement())?.boundingBox();
+      assert.ok(frame);
+      const y = frame.y + header.y;
+      await page.mouse.move(frame.x + header.x + 20, y);
+      await page.mouse.down();
+      await page.mouse.move(frame.x + header.x + header.width / 2, y, { steps: 5 });
+      await page.mouse.up();
+      const top = await waitFor(async () => {
+        const value = await page.evaluate(() => document.getElementById('rf-scroller')?.scrollTop ?? 0);
+        return value > 100 ? value : null;
+      });
+      assert.ok(top < 900, `scrolled to ${top}px`);
+    } finally {
+      await page.evaluate(() => document.getElementById('rf-scroller')?.remove());
+    }
+  }
+);
+
 test("the Issues panel shows the page's issues", { skip }, async () => {
   await page.evaluate(() => {
     const label = document.createElement('label');
