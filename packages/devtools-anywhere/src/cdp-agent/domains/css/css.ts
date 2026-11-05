@@ -310,7 +310,17 @@ export function registerCss(ctx: Context) {
       enabled = true;
       known = new Set();
       // Before this domain's observer and frame listener, so the tracker drops a stale list first.
-      stopShadowRoots ??= ctx.shadowRoots.acquire();
+      if (!stopShadowRoots) {
+        const release = ctx.shadowRoots.acquire();
+        // A shadow tree found with no DOM change this domain sees (a declarative root the parser
+        // attached earlier, found when parsing ends) brings sheets; syncSheets only reports the
+        // difference from the sheets known, so syncing again after its own observer adds none.
+        const unsubscribe = ctx.shadowRoots.onStale(() => void syncSheets());
+        stopShadowRoots = () => {
+          unsubscribe();
+          release();
+        };
+      }
       const ownsSheet = (n: Node | null) => (isHtml(n, 'style') || isHtml(n, 'link')) && !isOwn(n);
       observer = new MutationObserver(records => {
         // Adding or removing a <style> or <link>, changing the text of a <style> or the href

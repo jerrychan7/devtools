@@ -34,7 +34,7 @@ export class ShadowRootTracker {
   /** Documents still loading, whose `readystatechange` drops the list. */
   #documents = new Set<Document>();
   readonly #ready = (event: Event) => {
-    this.#cache = null;
+    this.#stale();
     const doc = event.currentTarget;
     // Nothing more to wait for: not kept alive until release.
     if (isNode(doc) && isDocument(doc) && doc.readyState === 'complete') {
@@ -49,13 +49,47 @@ export class ShadowRootTracker {
     private readonly onShadowRoot: (listener: (root: ShadowRoot) => void) => () => void
   ) {}
 
+  /** Listeners told, once per microtask at most, that the list went stale. */
+  #staleListeners = new Set<() => void>();
+  #notifying = false;
+
+  /**
+   * Calls `listener` (after the current task's microtasks start) whenever the list may have gone
+   * stale, cached or not (so not only after a roots() call), for those with nothing else telling them, e.g. a declarative root found when parsing ends.
+   * Only while someone holds the tracker; returns a function that stops.
+   */
+  onStale(listener: () => void): () => void {
+    this.#staleListeners.add(listener);
+    return () => void this.#staleListeners.delete(listener);
+  }
+
+  #stale() {
+    this.#cache = null;
+    if (this.#notifying || !this.#staleListeners.size) return;
+    this.#notifying = true;
+    // Not from within roots(), which drops the list on the records it takes.
+    queueMicrotask(() => {
+      this.#notifying = false;
+      this.#staleListeners.forEach(listener => listener());
+    });
+  }
+
   /** Starts keeping the list up to date; returns a function that stops (once per call). */
   acquire(): () => void {
     if (!this.#users++) {
       this.#observer = new MutationObserver(records => this.#changed(records));
       this.#observed = new WeakSet();
       this.#stop = [
-        this.frames.onChange(() => (this.#cache = null)),
+        this.frames.onChange(() => {
+          // Documents of removed iframes, or navigated away from, while loading never complete.
+          const current = new Set(Array.from(this.frames, f => f.document));
+          for (const doc of this.#documents)
+            if (!current.has(doc)) {
+              doc.removeEventListener('readystatechange', this.#ready);
+              this.#documents.delete(doc);
+            }
+          this.#stale();
+        }),
         this.onShadowRoot(root => {
           const cache = this.#cache;
           // A detached host: inserting it drops the list. A document no frame has (yet): its frame
@@ -140,7 +174,7 @@ export class ShadowRootTracker {
     let removed = false;
     for (const r of records) {
       if (!this.#cache) return;
-      for (const n of Array.from(r.addedNodes)) if (this.#hasHost(n)) return void (this.#cache = null);
+      for (const n of Array.from(r.addedNodes)) if (this.#hasHost(n)) return this.#stale();
       for (const n of Array.from(r.removedNodes)) removed ||= this.#hasHost(n);
     }
     // A host moved elsewhere is also in an added list, which dropped the list above.
