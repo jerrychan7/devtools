@@ -297,6 +297,9 @@ describe('Animation, beyond getAnimations()', () => {
     }
   });
 
+  // Not covered: once, under load (another conformance run in parallel), this sequence left the
+  // page at rate 1 instead of 2. It never came back in later runs, loaded or not, and this test,
+  // ordered as it is, passes either way; see the guard in animation.ts's stop().
   test('a rate the page set pending at a disable survives it and is reported by the next session (ours)', async () => {
     assert.ok(env);
     const t = await openPage(env, [...EVENTS]);

@@ -593,6 +593,10 @@ export function registerAnimation(ctx: Context) {
       owed.set(animation, { own, seen });
       const restore = () => {
         // Pending again (the page played or changed its rate meanwhile): writing now would drop it.
+        // Watch here: once, under load, the panel at 25%, the page's updatePlaybackRate(2), then
+        // disable and enable at once, left the page at rate 1 instead of 2. It was never seen again
+        // and no order of the ready callbacks and the next session's frames found here leads to it;
+        // this wait is a guard against it, not a proven fix.
         if (animation.pending) {
           animation.ready.then(restore, restore);
           return;
