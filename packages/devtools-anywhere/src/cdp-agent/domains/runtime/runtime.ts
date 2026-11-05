@@ -550,7 +550,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames, worlds
       const owner = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
       if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== owner))
         throw new CdpError('Argument should belong to the same JavaScript world as target object');
-      let self = params.objectId ? objects.get(params.objectId) : undefined;
+      const self = params.objectId ? objects.get(params.objectId) : undefined;
       // Like Chrome, in the context asked for, else in the object's: an isolated world's object
       // (DOM.resolveNode in it) is called there.
       const inContext = params.executionContextId !== undefined || params.uniqueContextId !== undefined;
@@ -561,10 +561,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames, worlds
         inContext ? contexts.frameOf(params.executionContextId, params.uniqueContextId) : contexts.frameOfValue(self),
         world
       );
-      // The world sees the object's own properties as its own, apart from the page's.
-      if (world) self = worlds.view(world, self);
       const args = (params.arguments || []).map(arg => {
-        if (arg.objectId) return world ? worlds.view(world, objects.get(arg.objectId)) : objects.get(arg.objectId);
+        if (arg.objectId) return objects.get(arg.objectId);
         if (arg.unserializableValue !== undefined) return parseUnserializable(arg.unserializableValue);
         return arg.value;
       });
@@ -573,7 +571,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames, worlds
         const fn = scope.evaluate(`(${params.functionDeclaration}\n)`);
         // Same error as V8 for a declaration that is not a function, a response error.
         if (typeof fn !== 'function') throw new CdpError('Given expression does not evaluate to a function');
-        let value: unknown = Reflect.apply(fn, self, args);
+        // In a world, the properties the call leaves on a node are the world's, apart from the page's.
+        let value: unknown = world ? worlds.callOn(world, self, fn, args) : Reflect.apply(fn, self, args);
         if (params.awaitPromise && isThenable(value)) {
           inPromise = true;
           value = await value;
