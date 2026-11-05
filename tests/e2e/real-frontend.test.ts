@@ -1069,64 +1069,97 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
   }
 });
 
+/**
+ * Selects the scroll-driven group `add` makes, checks the panel shows it in pixels, drags the
+ * scrubber to about half the timeline, and gives the scroll position `top` then reads.
+ */
+async function scrubScrollDriven(add: () => void, top: () => number, remove: () => void) {
+  await showView('animations');
+  const before = await count('.animation-buffer-preview');
+  await page.evaluate(add);
+  /** Finds the last match of `selector` in the frontend, shadow DOM included. */
+  const find = (selector: string): Promise<JSHandle<Element | null>> =>
+    frontend.evaluateHandle(selector => {
+      const all: Element[] = [];
+      const walk = (root: Document | ShadowRoot) => {
+        all.push(...root.querySelectorAll(selector));
+        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+      };
+      walk(document);
+      return all.at(-1) ?? null;
+    }, selector);
+  try {
+    await waitFor(async () => (await count('.animation-buffer-preview')) > before);
+    await (await find('.animation-buffer-preview')).evaluate(el => el instanceof HTMLElement && el.click());
+    // Shown by scroll position, in pixels, where a time-based one shows milliseconds.
+    const current = await waitFor(async () => {
+      const value = await (await find('.animation-timeline-current-time')).evaluate(el => el?.textContent ?? '');
+      return /^\d+px$/.test(value) ? value : null;
+    });
+    assert.equal(current, '0px');
+    // Dragging the scrubber scrolls the scroller, rather than seeking the animation.
+    const header = await (
+      await find('.animation-grid-header')
+    ).evaluate(el => {
+      const rect = el?.getBoundingClientRect();
+      return rect && { x: rect.x, y: rect.y + rect.height / 2, width: rect.width };
+    });
+    assert.ok(header);
+    const frame = await (await frontend.frameElement())?.boundingBox();
+    assert.ok(frame);
+    const y = frame.y + header.y;
+    await page.mouse.move(frame.x + header.x + 20, y);
+    await page.mouse.down();
+    await page.mouse.move(frame.x + header.x + header.width / 2, y, { steps: 5 });
+    await page.mouse.up();
+    return await waitFor(async () => {
+      const value = await page.evaluate(top);
+      return value > 100 ? value : null;
+    });
+  } finally {
+    await page.evaluate(remove);
+  }
+}
+
 test(
   'the Animations panel shows a scroll-driven animation by scroll position, and scrolls with its scrubber',
   { skip },
   async () => {
-    await showView('animations');
-    const before = await count('.animation-buffer-preview');
-    await page.evaluate(() => {
-      const scroller = document.body.appendChild(document.createElement('div'));
-      scroller.id = 'rf-scroller';
-      scroller.style.cssText = 'height: 100px; overflow: scroll';
-      scroller.innerHTML =
-        '<style>@keyframes rf-fade { to { opacity: 0.5 } } #rf-scrolled { height: 1000px; animation: rf-fade linear; animation-timeline: scroll(nearest) }</style><div id="rf-scrolled"></div>';
-    });
-    /** Finds the last match of `selector` in the frontend, shadow DOM included. */
-    const find = (selector: string) =>
-      frontend.evaluateHandle(selector => {
-        const all: Element[] = [];
-        const walk = (root: Document | ShadowRoot) => {
-          all.push(...root.querySelectorAll(selector));
-          for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
-        };
-        walk(document);
-        return all.at(-1) ?? null;
-      }, selector);
-    try {
-      await waitFor(async () => (await count('.animation-buffer-preview')) > before);
-      await (await find('.animation-buffer-preview')).evaluate(el => el instanceof HTMLElement && el.click());
-      // Shown by scroll position, in pixels, where a time-based one shows milliseconds.
-      const current = await waitFor(async () => {
-        const value = await (await find('.animation-timeline-current-time')).evaluate(el => el?.textContent ?? '');
-        return /^\d+px$/.test(value) ? value : null;
-      });
-      assert.equal(current, '0px');
-      // Dragging the scrubber scrolls the scroller, rather than seeking the animation.
-      const header = await (
-        await find('.animation-grid-header')
-      ).evaluate(el => {
-        const rect = el?.getBoundingClientRect();
-        return rect && { x: rect.x, y: rect.y + rect.height / 2, width: rect.width };
-      });
-      assert.ok(header);
-      const frame = await (await frontend.frameElement())?.boundingBox();
-      assert.ok(frame);
-      const y = frame.y + header.y;
-      await page.mouse.move(frame.x + header.x + 20, y);
-      await page.mouse.down();
-      await page.mouse.move(frame.x + header.x + header.width / 2, y, { steps: 5 });
-      await page.mouse.up();
-      const top = await waitFor(async () => {
-        const value = await page.evaluate(() => document.getElementById('rf-scroller')?.scrollTop ?? 0);
-        return value > 100 ? value : null;
-      });
-      assert.ok(top < 900, `scrolled to ${top}px`);
-    } finally {
-      await page.evaluate(() => document.getElementById('rf-scroller')?.remove());
-    }
+    const top = await scrubScrollDriven(
+      () => {
+        const scroller = document.body.appendChild(document.createElement('div'));
+        scroller.id = 'rf-scroller';
+        scroller.style.cssText = 'height: 100px; overflow: scroll';
+        scroller.innerHTML =
+          '<style>@keyframes rf-fade { to { opacity: 0.5 } } #rf-scrolled { height: 1000px; animation: rf-fade linear; animation-timeline: scroll(nearest) }</style><div id="rf-scrolled"></div>';
+      },
+      () => document.getElementById('rf-scroller')?.scrollTop ?? 0,
+      () => document.getElementById('rf-scroller')?.remove()
+    );
+    assert.ok(top < 900, `scrolled to ${top}px`);
   }
 );
+
+test('the Animations panel scrolls the page with the scrubber of a scroll(root) animation', { skip }, async () => {
+  // The panel is told the document is the scroller (as Chrome tells it), and scrolls it through
+  // DOM.resolveNode and Runtime.callFunctionOn on the document node.
+  const top = await scrubScrollDriven(
+    () => {
+      const style = document.head.appendChild(document.createElement('style'));
+      style.id = 'rf-root-style';
+      style.textContent =
+        'html { height: 3000px } @keyframes rf-root { to { opacity: 0.5 } } #rf-root { animation: rf-root linear; animation-timeline: scroll(root) }';
+      document.body.appendChild(document.createElement('div')).id = 'rf-root';
+    },
+    () => document.scrollingElement?.scrollTop ?? 0,
+    () => {
+      document.getElementById('rf-root-style')?.remove();
+      document.getElementById('rf-root')?.remove();
+      document.scrollingElement?.scrollTo(0, 0);
+    }
+  );
+  assert.ok(top < 3000, `scrolled to ${top}px`);
+});
 
 test("the Issues panel shows the page's issues", { skip }, async () => {
   await page.evaluate(() => {
