@@ -159,7 +159,10 @@ export function registerCss(ctx: Context) {
     const current = new Set(scoped.map(s => s.sheet));
     for (const sheet of current) if (!known.has(sheet)) session.emit('CSS.styleSheetAdded', { header: header(sheet) });
     for (const sheet of known)
-      if (!current.has(sheet)) session.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) });
+      if (!current.has(sheet)) {
+        session.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) });
+        sheets.forget(sheet);
+      }
     known = current;
     // Every session's observer reports the same change: the shared companions are rebuilt once.
     if (forced.isActive) forced.schedule();
@@ -608,15 +611,15 @@ export function registerCss(ctx: Context) {
         at = next ? Array.from(sheet.cssRules).indexOf(next) : -1;
       }
       const target = parent;
+      // Like Chrome, the text goes in as it is, where asked (taken before the CSSOM changes).
+      const before = source?.text ?? null;
+      const after = splice(sheet, params.location, params.ruleText)(before);
       const index = ownEdit(() => target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at));
       const rule = target.cssRules[index];
       if (!isCssom(rule, 'CSSStyleRule')) {
         ownEdit(() => target.deleteRule(index));
         throw new CdpError('Failed to parse rule text');
       }
-      // Like Chrome, the text goes in as it is, where asked.
-      const before = source?.text ?? null;
-      const after = splice(sheet, params.location, params.ruleText)(before);
       const record = (text: string | null) =>
         text === null ? sheets.texts.invalidate(sheet) : sheets.texts.set(sheet, text);
       record(after);

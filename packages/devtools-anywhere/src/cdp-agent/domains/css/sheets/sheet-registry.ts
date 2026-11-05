@@ -72,18 +72,11 @@ export class SheetRegistry {
     return id;
   }
 
-  /**
-   * Gives `replacement` the id of `sheet`, e.g. the new sheet of a <style> whose text was
-   * replaced: like in Chrome, the style sheet keeps its id.
-   */
-  rebind(sheet: CSSStyleSheet, replacement: CSSStyleSheet) {
-    const id = this.idOf(sheet);
-    this.sheetIds.set(replacement, id);
-    this.sheets.set(id, new WeakRef(replacement));
-    if (!this.inspectorSheets.has(sheet)) return;
-    this.inspectorSheets.add(replacement);
-    const doc = replacement.ownerNode?.ownerDocument;
-    if (doc && this.inspectorOfDocument.get(doc) === sheet) this.inspectorOfDocument.set(doc, replacement);
+  /** Like Chrome, a sheet removed (or replaced: a new text, href) is gone with its id. */
+  forget(sheet: CSSStyleSheet): void {
+    const id = this.sheetIds.get(sheet);
+    if (id) this.sheets.delete(id);
+    this.sheetIds.delete(sheet);
   }
 
   isInspector(sheet: CSSStyleSheet): boolean {
