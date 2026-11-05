@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { type Inspectable, type PseudoType } from '../../core/nodes';
-import { isNode, realmOf, styleOf } from '../../core/realm';
+import { isElement, isNode, realmOf, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 const NOT_FOUND = 'Could not find animation with given id';
@@ -164,6 +164,59 @@ function targetOf(ctx: Context, effect: KeyframeEffect): Inspectable | null {
 }
 
 /**
+ * A time as a number: a scroll-driven animation's times and durations are `CSSUnitValue`s, in
+ * percent of its timeline, whose value Chrome reports as is (or null, as `currentTime` of one whose
+ * timeline is inactive).
+ */
+function numberOf(value: unknown): number | null {
+  if (typeof value === 'number') return value;
+  const inner: unknown = typeof value === 'object' && value ? Reflect.get(value, 'value') : null;
+  return typeof inner === 'number' ? inner : null;
+}
+
+/**
+ * Blink's time unit of a scroll timeline, `kScrollTimelineMicrosecondsPerPixel`: Chrome reports a
+ * scroll-driven animation's current time, and takes a seek, in milliseconds of 16µs per pixel of
+ * the timeline's range (measured: 500px into a 2400px range is 8). Its start time and the effect's
+ * timing stay in percent.
+ */
+const MS_PER_PX = 0.016;
+
+/** Whether a scroll or view timeline drives it: cheap, for every frame. */
+const scrollDriven = (animation: Animation) =>
+  !!animation.timeline && typeof Reflect.get(animation.timeline, 'axis') === 'string';
+
+/**
+ * The scroll or view timeline driving an animation, as Chrome reports it; undefined for any other
+ * timeline. The offsets are the scroll positions the timeline runs between: the scroll range for a
+ * scroll timeline, its subject's cover range for a view timeline (`animation-range` is left to the
+ * start time and duration, as in Chrome).
+ */
+function timelineOf(ctx: Context, animation: Animation): Protocol.Animation.ViewOrScrollTimeline | undefined {
+  const timeline = animation.timeline;
+  if (!timeline) return undefined;
+  const source: unknown = Reflect.get(timeline, 'source');
+  const axis: unknown = Reflect.get(timeline, 'axis');
+  if (!isNode(source) || !isElement(source) || typeof axis !== 'string') return undefined;
+  // `block` and `inline` follow the scroller's writing mode.
+  const lines = styleOf(source).writingMode.startsWith('horizontal');
+  const horizontal = axis === 'x' || (axis !== 'y' && (axis === 'inline') === lines);
+  const result: Protocol.Animation.ViewOrScrollTimeline = {
+    sourceNodeId: ctx.nodes.backendIdOf(source),
+    startOffset: 0,
+    endOffset: horizontal ? source.scrollWidth - source.clientWidth : source.scrollHeight - source.clientHeight,
+    axis: horizontal ? 'horizontal' : 'vertical',
+  };
+  const subject: unknown = Reflect.get(timeline, 'subject');
+  if (isNode(subject)) {
+    result.startOffset = numberOf(Reflect.get(timeline, 'startOffset')) ?? 0;
+    result.endOffset = numberOf(Reflect.get(timeline, 'endOffset')) ?? 0;
+    result.subjectNodeId = ctx.nodes.backendIdOf(subject);
+  }
+  return result;
+}
+
+/**
  * What `animationUpdated` follows: Chrome sends it when an animation gets a new start time (the page
  * finishing it, or playing it again once finished, or the domain seeking it while it runs), not
  * when the page pauses it, nor for the domain's other commands. Null while paused or pending,
@@ -215,28 +268,29 @@ export function registerAnimation(ctx: Context) {
   let frame = 0;
   let stopAnimations: (() => void) | null = null;
 
-  const current = (t: Tracked) => {
-    const value = t.animation.currentTime;
-    return typeof value === 'number' ? value : 0;
+  /** The current time Chrome reports: in its scroll-timeline milliseconds for a scroll-driven one. */
+  const current = (t: Tracked, timeline = timelineOf(ctx, t.animation)) => {
+    const value = numberOf(t.animation.currentTime) ?? 0;
+    return timeline ? (value / 100) * ((timeline.endOffset ?? 0) - (timeline.startOffset ?? 0)) * MS_PER_PX : value;
   };
 
   const describe = (t: Tracked): Protocol.Animation.Animation => {
     const { animation } = t;
     const realm = realmOfAnimation(animation);
     const [type, name] = kindOf(animation, realm);
-    const startTime = animation.startTime;
+    const timeline = timelineOf(ctx, animation);
     const result: Protocol.Animation.Animation = {
       id: t.id,
       name,
       pausedState: animation.playState === 'paused',
       playState: animation.playState,
       playbackRate: t.rate,
-      startTime: typeof startTime === 'number' ? startTime : 0,
+      startTime: numberOf(animation.startTime) ?? 0,
       // Chrome's `animationStarted` has the current time when the start time is set: about 0 (0 for
       // a CSS animation of the top document, -0.09 for a delayed Web Animation, a frame, 16.7, in
       // an iframe), not always 0. The page is looked at a frame later, so ours is a frame on. Left
       // so: it is the animation's real time, and faking 0 would be wrong for one running before enable.
-      currentTime: current(t),
+      currentTime: current(t, timeline),
       type,
     };
     const effect = animation.effect;
@@ -247,10 +301,10 @@ export function registerAnimation(ctx: Context) {
       }
       const timing = effect.getComputedTiming();
       const source: Protocol.Animation.AnimationEffect = {
-        delay: timing.delay ?? 0,
-        endDelay: timing.endDelay ?? 0,
+        delay: numberOf(timing.delay) ?? 0,
+        endDelay: numberOf(timing.endDelay) ?? 0,
         iterationStart: timing.iterationStart ?? 0,
-        duration: typeof timing.duration === 'number' ? timing.duration : 0,
+        duration: numberOf(timing.duration) ?? 0,
         direction: timing.direction ?? 'normal',
         fill: timing.fill ?? 'none',
         easing: timing.easing ?? 'linear',
@@ -273,6 +327,7 @@ export function registerAnimation(ctx: Context) {
       }
       result.source = source;
     }
+    if (timeline) result.viewOrScrollTimeline = timeline;
     return result;
   };
 
@@ -353,7 +408,9 @@ export function registerAnimation(ctx: Context) {
     const now = animation.playbackRate;
     const changed = now !== t.seen;
     if (changed) t.rate = now === -t.seen ? -t.rate : now;
-    const wanted = t.rate * rate;
+    // The domain's rate is that of the documents' timelines in Chrome: a scroll-driven animation
+    // keeps its own (measured: its playbackRate stays 1 at a panel rate of 0.5).
+    const wanted = scrollDriven(animation) ? t.rate : t.rate * rate;
     if (now !== wanted) {
       // The start time this moves is the domain's doing, not the page's.
       const known = startOf(animation) === t.start;
@@ -528,13 +585,27 @@ export function registerAnimation(ctx: Context) {
       // processes, so this one waits two frames.
       // As in Chrome, one not paused is played first (a finished or cancelled one starts over), and
       // the time stops at the end of the effect; a negative one is kept.
+      // A scroll-driven one follows its scroller while it runs: Chrome leaves it be (its seek throws
+      // inside and is ignored), and moves a paused one, taking the time in its scroll-timeline
+      // milliseconds (see `MS_PER_PX`). What the page throws for one animation (`play()` of one
+      // that cannot be played) is ignored, as Chrome ignores it, so the others are still seeked.
       for (const [i, t] of list.entries()) {
         const { animation } = t;
         check(t);
-        if (animation.playState !== 'paused') animation.play();
-        const time = currentTimes?.[i] ?? currentTime ?? 0;
-        const end = animation.effect?.getComputedTiming().endTime;
-        animation.currentTime = typeof end === 'number' ? Math.min(time, end) : time;
+        try {
+          if (animation.playState !== 'paused') animation.play();
+          let time = currentTimes?.[i] ?? currentTime ?? 0;
+          const end = numberOf(animation.effect?.getComputedTiming().endTime);
+          const timeline = timelineOf(ctx, animation);
+          if (!timeline) animation.currentTime = end === null ? time : Math.min(time, end);
+          else if (animation.playState === 'paused') {
+            const range = (timeline.endOffset ?? 0) - (timeline.startOffset ?? 0);
+            time = range > 0 ? (time / MS_PER_PX / range) * 100 : 0;
+            animation.currentTime = CSS.percent(end === null ? time : Math.min(time, end));
+          }
+        } catch {
+          // Left as it is, as in Chrome.
+        }
         t.hold = 2;
         wake(t);
       }
@@ -542,6 +613,8 @@ export function registerAnimation(ctx: Context) {
     setTiming: ({ animationId, duration, delay }: Protocol.Animation.SetTimingRequest) => {
       const t = find(animationId);
       quietly(t, () => t.animation.effect?.updateTiming({ duration, delay }));
+      // Chrome reports a scroll-driven one with an update, its timing back in percent (measured).
+      if (scrollDriven(t.animation)) session.emit('Animation.animationUpdated', { animation: describe(t) });
       wake(t);
     },
     releaseAnimations: ({ animations }: Protocol.Animation.ReleaseAnimationsRequest) => {
