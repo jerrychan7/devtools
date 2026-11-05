@@ -8,6 +8,7 @@
 - Animations 面板列出页面的 CSS 动画、过渡和 Web Animations，能暂停、拖动进度、改时间和调速。能找到 shadow 树（包括声明式的和宿主后插入的）和同源 iframe 里的动画；伪元素动画指向的节点与 Chrome 一致（`::backdrop` 例外，指向其 dialog，因我们的 DOM 没有它的节点）；分别开始的两个 CSS 动画分成两组。和 Chrome 一样报告 `getAnimations()` 漏掉的动画：无 target、不在文档里、立即结束或在第一帧前就取消的（探针挂钩 `animate()`、`new Animation()`、`play()`、`pause()` 和 `cancel()`）。调速会跟随页面自己设的速率，disable 时还给页面；拖动进度条时每个动画各自 seek 到自己的时间，已结束的先播放、停在结尾，与 Chrome 一致。前端删除最后一个动画分组时不再抛错。滚动驱动动画连同其滚动或视图时间线一起列出，以像素为单位，拖动 scrubber 会滚动页面。
 - Rendering 面板和设备模式里的模拟媒体特性（`prefers-color-scheme`、减少动画、对比度、强制颜色等）和媒体类型、安全区、色觉缺陷模拟生效：通过改写页面的样式表，以及和 Chrome 相同的 SVG 滤镜实现。
 - Styles 显示浏览器的「user agent stylesheet」规则，来自随包附带的 Chromium `html.css` 副本 `chromium-html.css`；Computed 窗格会自动刷新。
+- 样式表按原文提供（`<style>` 的文本、重新取回的文件、或 `replace()`、`replaceSync()` 收到的文本），选择器、声明、注释掉的属性和 at 规则条件的 range 与 Chrome 一致；编辑（`setStyleTexts`、`setRuleSelector`、新增的 `setMediaText`、`addRule`、`setStyleSheetText`）按原样改写原文，不动 `<style>` 的文本和 id。页面通过 CSSOM 改样式表时发 `CSS.styleSheetChanged`，此后原文改为序列化文本。没有 CORS 的跨源样式表，`getStyleSheetText` 报错。
 - 网络：屏蔽 URL、附加请求头、禁用缓存、离线和 UA 覆盖对页面的 `fetch()`、XHR 生效；列出页面能看到的 Reporting API 报告。
 - Application 面板的 IndexedDB 和 Cache Storage 视图在页面写入时刷新；Service workers 视图列出页面的注册，能更新和注销；需要 worker 本身的命令返回错误「Not supported in the page」。
 - Layout 窗格的 Grid、Flex、容器查询、scroll-snap 叠加层，隔离模式，设备模式的铰链和刘海，以及 frame 高亮，都在页面里画出。
