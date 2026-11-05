@@ -29,6 +29,8 @@ interface Tracked {
   canceled: 'paused' | 'idle' | null;
   /** Released by the client: not reported again, nor found by id; still slowed by the domain's rate. */
   released: boolean;
+  /** Whether a disable left it pending (see `owed`): a rate the page set meanwhile is reported after the start. */
+  owing: boolean;
 }
 
 /**
@@ -239,18 +241,18 @@ function startOf(animation: Animation): number | null {
   return typeof startTime === 'number' ? startTime : null;
 }
 
-/**
- * What a disable left of an animation pending then (see `stop`), across sessions: the page's own
- * rate, and the `playbackRate` last seen. A session enabled again before it is restored takes the
- * own rate from here, not the slowed `playbackRate`; one enabled after the page changed the rate
- * meanwhile compares with `seen` and reports the change, as Chrome does with an update.
- */
 /** Whether it is paused (pending a pause too) or idle, the states Chrome reports with a cancel. */
 function pausedOrIdle(animation: Animation): 'paused' | 'idle' | null {
   const state = animation.playState;
   return state === 'paused' || state === 'idle' ? state : null;
 }
 
+/**
+ * What a disable left of an animation pending then (see `stop`), across sessions: the page's own
+ * rate, and the `playbackRate` last seen. A session enabled again before it is restored takes the
+ * own rate from here, not the slowed `playbackRate`; one enabled after the page changed the rate
+ * meanwhile compares with `seen` and reports the change, as Chrome does with an update.
+ */
 const owed = new WeakMap<Animation, { own: number; seen: number }>();
 
 /**
@@ -426,6 +428,7 @@ export function registerAnimation(ctx: Context) {
       // never had it, nor one already paused when first seen.
       canceled: pausedOrIdle(animation),
       released: false,
+      owing: owed.has(animation),
     };
     tracked.set(animation, t);
     collected.register(t, t.id);
@@ -479,16 +482,21 @@ export function registerAnimation(ctx: Context) {
       t.start = startOf(animation);
       session.emit('Animation.animationStarted', { animation: describe(t) });
       // A rate the page set while it was pending, taken over from a disable (see `owed`): Chrome
-      // reports it with an update after the start.
-      if (rated) session.emit('Animation.animationUpdated', { animation: describe(t) });
-      return rated;
+      // reports it with an update after the start. One the page set before the start otherwise
+      // (`playbackRate = 2` right after `animate()`) is in the start alone (measured).
+      const update = rated && t.owing;
+      if (update) session.emit('Animation.animationUpdated', { animation: describe(t) });
+      return update;
     }
     if (t.hold > 0) {
       t.hold--;
       return false;
     }
     // A paused one's start time is the pause's doing (or the page's in the task that paused it),
-    // which Chrome reports with the cancel alone (measured).
+    // which Chrome reports with the cancel alone (measured); so is a rate the page sets while it is
+    // paused (measured, with `playbackRate` and `updatePlaybackRate()`): the rate is taken above,
+    // and reported with the update when it plays again, as in Chrome. A scroll-driven one paused is
+    // reported with a cancel as well (measured).
     if (animation.playState === 'paused') return false;
     const start = startOf(animation);
     if ((start !== null && start !== t.start) || rated) {

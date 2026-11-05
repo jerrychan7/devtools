@@ -98,6 +98,34 @@ describe('Animation, play state changes', () => {
     assert.ok(chrome.finished >= 6, `finished at ${chrome.finished}`);
     assert.deepEqual(ours, chrome);
   });
+  test("the page's rate before the start or while paused, a long pending one and a scroll-driven pause, as in Chrome", async () => {
+    const [chrome, ours] = await steps([
+      [
+        'rate set in the task that made it',
+        `window.a = document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000); a.playbackRate = 2`,
+      ],
+      ['pause', 'a.pause()'],
+      ['rate set while paused', 'a.playbackRate = 3'],
+      ['rate updated while paused', 'a.updatePlaybackRate(4)'],
+      ['play', 'a.play()'],
+      [
+        'pending for frames',
+        `window.q = document.body.animate({ opacity: [0, 1] }, { timeline: new ScrollTimeline({ source: document.createElement('div') }) })`,
+      ],
+      ['cancelled after frames', 'q.cancel()'],
+      [
+        'scroll-driven',
+        `window.sc = document.body.appendChild(Object.assign(document.createElement('div'), { style: 'height: 100px; overflow: scroll' }));
+         sc.appendChild(Object.assign(document.createElement('div'), { style: 'height: 1000px' }));
+         window.s = sc.animate({ opacity: [0, 1] }, { timeline: new ScrollTimeline({ source: sc }) })`,
+      ],
+      ['scroll-driven paused', 's.pause()'],
+      ['scroll-driven played', 's.play()'],
+    ]);
+    assert.deepEqual(chrome['rate set in the task that made it'], ['Created 1', 'Started 1']);
+    assert.deepEqual(chrome['scroll-driven paused'], ['Canceled 3']);
+    assert.deepEqual(ours, chrome);
+  });
   test('a cancel or pause before the start reports no start (Chrome: only when a frame ran before it)', async () => {
     const make = (name: string) =>
       `window.${name} = document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 1000);`;
