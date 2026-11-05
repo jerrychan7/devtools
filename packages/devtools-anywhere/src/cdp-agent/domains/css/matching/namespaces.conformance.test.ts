@@ -45,6 +45,22 @@ test('a rule matching the parent, not the element: not matched though the elemen
   for (const target of ['.m1', '.m2', '.m3']) await same(`${at} ${target}`);
 });
 
+test('SVG and MathML elements in a matching element, with a default namespace: only inherit', async () => {
+  const at = await addStyle(
+    t,
+    '@namespace url(http://www.w3.org/1999/xhtml);\ndiv.m8 { color: red }\n.m8 > * { top: 1px }',
+    '<div class="m8"><svg id="m9"><rect id="m10"/></svg><math id="m11"><mi id="m12">x</mi></math></div>'
+  );
+  const all = async (side: Side, selector: string) => {
+    const r = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, selector) });
+    const regular = (list: { rule: Parameters<typeof rule>[0] }[] | undefined) =>
+      (list ?? []).filter(m => m.rule.origin === 'regular').map(m => rule(m.rule).text);
+    return { own: regular(r.matchedCSSRules), inherited: r.inherited?.map(i => regular(i.matchedCSSRules)) };
+  };
+  for (const target of ['#m9', '#m10', '#m11', '#m12'])
+    assert.deepEqual(await all(t.ours, `${at} ${target}`), await all(t.chrome, `${at} ${target}`), target);
+});
+
 test(':host(), ::slotted() and @scope in a sheet declaring namespaces', async () => {
   const at = await addStyle(
     t,

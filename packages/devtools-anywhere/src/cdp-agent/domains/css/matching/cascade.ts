@@ -184,13 +184,18 @@ export class Cascade {
       return text;
     };
     if (!namespacesOf(c.sheet)) return undefined;
-    const probe = (c: Candidate, s: Selector): ((d: string) => string) | null => {
-      if (kind === 'slotted') return s.slotted === null ? null : d => `${s.host}::slotted(${s.slotted}){${d}}`;
-      if (kind === 'host' || !c.scope) return d => `${s.host}{${d}}`;
+    // Only for the elements asked about (`own`), so that few others have their style recalculated;
+    // after the selector, which keeps the default namespace (not applied inside :is()).
+    const probe = (c: Candidate, s: Selector): ((d: string, own: string) => string) | null => {
+      if (kind === 'slotted')
+        return s.slotted === null ? null : (d, own) => `${s.host}::slotted(${s.slotted}:is(${own})){${d}}`;
+      // A host matches `:host()` alone (it is featureless).
+      if (kind === 'host') return d => `${s.host}{${d}}`;
+      if (!c.scope) return (d, own) => `${s.host}:is(${own}){${d}}`;
       // The implicit root of an @scope is the parent of its own sheet's <style>.
       const { start, end } = c.scope;
       if (start === null) return null;
-      return d => `@scope (${start})${end === null ? '' : ` to (${end})`}{${s.host}{${d}}}`;
+      return (d, own) => `@scope (${start})${end === null ? '' : ` to (${end})`}{${s.host}:is(${own}){${d}}}`;
     };
     const key = (c: Candidate, s: Selector) =>
       `${kind}\u0001${c.scope ? `${c.scope.start}\u0002${c.scope.end}` : ''}\u0001${s.host}\u0001${s.slotted}`;
@@ -200,7 +205,7 @@ export class Cascade {
     if (known !== undefined) return known;
     const els = [el];
     if (kind === 'own') for (let p = el.parentElement; p && !byTree.has(p); p = p.parentElement) els.push(p);
-    const bySheet = new Map<CSSStyleSheet, { keys: string[]; rules: ((d: string) => string)[] }>();
+    const bySheet = new Map<CSSStyleSheet, { keys: string[]; rules: ((d: string, own: string) => string)[] }>();
     for (const candidate of group) {
       if (!namespacesOf(candidate.sheet)) continue;
       let entry = bySheet.get(candidate.sheet);

@@ -10,7 +10,7 @@ import type { TreeScope } from './forced-pseudo';
  */
 export interface InNamespaces {
   namespaces: string;
-  rules: ((declarations: string) => string)[];
+  rules: ((declarations: string, subject: string) => string)[];
 }
 
 /**
@@ -34,19 +34,30 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
   if (!accessors || !first) return none();
   const realm = realmOf(first);
   const name = (k: number, i: number) => `--devtools-anywhere-ns-${k}-${i}`;
+  /**
+   * A compound selector for the element: its id, else its classes, so that adopting the probe
+   * recalculates the style of few elements. `*|` for any namespace (the compound would otherwise
+   * be of the default one). Not in :where(): Chrome does not recalculate the elements a rule of
+   * an adopted sheet matches through :where() alone.
+   */
+  const subject = (el: Element) =>
+    `*|${CSS.escape(el.localName)}${el.id ? `#${CSS.escape(el.id)}` : Array.from(el.classList, c => `.${CSS.escape(c)}`).join('')}`;
   /** The values of the properties on `targets`, by sheet, by target, by rule; null on failure. */
   const probe = (targets: Element[], reset: Element[]): boolean[][][] | null => {
-    const own = reset
-      .map(el => `*|${CSS.escape(el.localName)}${Array.from(el.classList, c => `.${CSS.escape(c)}`).join('')}`)
-      .join(',');
+    const subjects = [...new Set(targets.map(subject))];
     const probes: CSSStyleSheet[] = [];
     try {
       for (const [k, { namespaces, rules: made }] of sheets.entries()) {
         const zero = made.map((_, i) => `${name(k, i)}:0`).join(';');
-        // An element slotted in the tree inherits from its slot.
-        const resets = own ? `:where(${own}){${zero}}\n::slotted(:where(${own})){${zero}}` : '';
+        // An element slotted in the tree inherits from its slot. Before the rules setting them:
+        // those win, of no less specificity.
+        const resets = [...new Set(reset.map(subject))]
+          .map(own => `${own}{${zero}}\n::slotted(${own}){${zero}}`)
+          .join('\n');
         // One rule each: an invalid selector drops its rule only.
-        const rules = made.map((rule, i) => rule(`${name(k, i)}:1`)).join('\n');
+        const rules = [...new Set(made.flatMap((rule, i) => subjects.map(own => rule(`${name(k, i)}:1`, own))))].join(
+          '\n'
+        );
         const sheet = new realm.CSSStyleSheet();
         ownEdit(() => sheet.replaceSync(`${namespaces}\n${resets}\n${rules}`));
         probes.push(sheet);
