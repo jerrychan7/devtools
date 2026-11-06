@@ -171,7 +171,7 @@ try {
             if (!worker || !isShellWorker(worker.scriptURL)) return;
             if (r.active && (await shellOpen(r.active))) return;
             await r.unregister();
-            await globalThis.caches?.delete(REWRITE_CACHE);
+            await globalThis.caches?.delete(REWRITE_CACHE).catch(() => {});
           })
         )
       )

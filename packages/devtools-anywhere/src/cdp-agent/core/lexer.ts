@@ -699,10 +699,10 @@ class Lexer {
   }
 }
 
-/** `array` copied into a new array of `length` elements. */
 /** Code units per token the token arrays are first sized for. */
 const FIRST_GUESS = 8;
 
+/** `array` copied into a new array of `length` elements. */
 function resized<T extends Uint8Array | Int32Array>(array: T, length: number): T {
   const copy = new (array.constructor as new (length: number) => T)(length);
   copy.set(array);

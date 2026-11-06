@@ -95,7 +95,7 @@ function isWord(source: string, tokens: Tokens, i: number, value: string): boole
   if (length < value.length) return false;
   let at = start;
   for (let k = 0; at < end && k < value.length && source.charCodeAt(at) === value.charCodeAt(k); k++) at++;
-  return source.charCodeAt(at) === 92 && at < end && text(source, tokens, i) === value;
+  return at < end && source.charCodeAt(at) === 92 && text(source, tokens, i) === value;
 }
 
 /** Token `i` is the punctuator that starts with `value`'s first character. */
