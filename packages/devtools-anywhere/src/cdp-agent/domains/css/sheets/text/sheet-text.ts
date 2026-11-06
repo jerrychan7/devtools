@@ -253,7 +253,8 @@ export class SheetTexts {
     settle();
     if (this.stale.has(sheet)) return undefined;
     const rec = this.recordOf(sheet);
-    if (!rec || rec.pending) return undefined;
+    // Pairing failed, the serialized text too: the registry serializes its own (`text`).
+    if (!rec || rec.pending || rec.source === null) return undefined;
     // A source paired before watching last started is checked again: its text is the same.
     return rec.source ? rec.source : { text: rec.text };
   }
