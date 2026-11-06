@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-测量 `../css-lexer.ts` 的性能，并核对修改后每个词元是否保持不变。两个脚本都不在 `pnpm test` 里：修改词法器时手动运行，并把数据写进提交信息。
+测量 `../css-lexer.ts` 的性能，并核对修改后每个词元是否保持不变；`outline-wasm.bench.ts` 对 WebAssembly 大纲做同样的事。这些脚本都不在 `pnpm test` 里：修改词法器时手动运行，并把数据写进提交信息。
 
 需要 Node 24 或更高版本，在本目录下运行，或带上路径：
 
@@ -85,7 +85,7 @@ node lexer-compare.bench.ts --rev cb7f711~1
 
 ## WebAssembly 词法器
 
-`../css-lexer-wasm.ts` 对 64 个码元及以上的文本用 WebAssembly 模块（由 `../wasm-gen/lexer.ts` 生成）跑同一个词法器；更短的文本，或页面 CSP 不允许编译 WebAssembly 时，用 TypeScript 词法器。500 多万（5 Mi）码元及以上的文本单独创建一个实例（约 0.02ms），用完即丢，这样共享实例只增不减的内存最多约 35MB。`--wasm` 测量并核对它：
+`../css-lexer-wasm.ts` 对 64 个码元及以上的文本用 WebAssembly 模块（写在 `../wasm-gen/lexer.ts`，由 `../wasm-gen/build.ts` 与大纲拼成一个模块）跑同一个词法器；更短的文本，或页面 CSP 不允许编译 WebAssembly 时，用 TypeScript 词法器。500 多万（5 Mi）码元及以上的文本单独创建一个实例（约 0.02ms），用完即丢，这样共享实例只增不减的内存最多约 35MB。`--wasm` 测量并核对它：
 
 ```sh
 # 加上 WebAssembly 词法器及其各阶段的行
@@ -127,3 +127,26 @@ node lexer-compare.bench.ts --rev cb7f711~1 --wasm
 | | 只读下限 | 0.150 |
 
 `mixed` 不是 ASCII，复制进的时间是 UTF-16 复制，加上 `encodeInto` 在第一块就停下的开销；这两行是改为分块编码那笔提交的数据（之前 `encodeInto` 会白跑完整份文本，分别是 0.443 和 0.280）。结果每个词元占 5.0 字节，与 TypeScript 词法器相同，一次调用在 JavaScript 堆上不再分配别的。`node lexer-compare.bench.ts --rev cb7f711~1 --wasm`：304 万 8580 段文本词元相同，两种复制方式都是。
+
+## WebAssembly 大纲
+
+`../css-outline-wasm.ts` 在词法器所在的同一个模块里生成 `../css-outline.ts` 的大纲：`../wasm-gen/outline.ts` 编写大纲部分，`../wasm-gen/build.ts` 把它和 `../wasm-gen/lexer.ts` 拼成一个模块并写出 `../css-wasm-bytes.ts`。词元不离开模块，只把规则表和声明表复制出来。模块只有一个入口，带一个“只做词法”的标识，`tokenize` 传这个标识：只要词法时不进入大纲代码，速度与之前相同。短于 16 个码元的文本（调用开销大于省下的时间，两边都约 1µs）仍用 `../css-outline.ts`；不能编译 WebAssembly 时、模块在某段文本上失败时（内存无法增长，或 `{` 嵌套几千层导致调用栈溢出，此时 css-outline.ts 也可能溢出）同样回退。值里的括号用内存里的栈匹配，嵌套一百万层也没问题。500 多万（5 Mi）码元及以上的文本与词法器一样单独创建实例。
+
+```sh
+# 在材料和 2 × 20 万段随机片段上逐字段对拍两份大纲，再报告时间、分配量、每码元的 wasm 内存
+# 和模块体积；--chrome 同时在 Chrome 里计时
+node --expose-gc outline-wasm.bench.ts [--fragments 200000] [--chrome]
+```
+
+片段由 `outline-fragments.ts` 用 45 种片段（括号、at 规则、含或不含声明的注释、`!important`、`--x`、CDO、非 ASCII 和只有 JavaScript 视为空白的字符……）加随机码元拼成，种子为 1 和 987654321；`../css-outline-wasm.test.ts` 在 `pnpm test` 里每个种子跑 2 万段。
+
+同一台机器，Node 24.21.0、Chrome 157，加入时的提交上 `node --expose-gc outline-wasm.bench.ts --fragments 250000 --chrome`（Node 的时间取不带 `--fragments` 的第二次运行）：
+
+| 材料 | TS ms（Node） | wasm ms（Node） | TS ms（Chrome） | wasm ms（Chrome） | TS 分配 MB | wasm 分配 MB | wasm 字节/码元 |
+| --- | --: | --: | --: | --: | --: | --: | --: |
+| generated | 16.9 | 7.0 | 16.4 | 9.0 | 24.41 | 4.83 | 7.0 |
+| common | 0.248 | 0.127 | 0.3 | 0.2 | 0.51 | 0.06 | 7.9 |
+| mixed | 0.793 | 0.460 | 0.6 | 0.4 | 0.93 | 0.17 | 7.6 |
+| all.css | 0.586 | 0.347 | 0.6 | 0.4 | 1.04 | 0.08 | 7.2 |
+
+50 万零 4 段文本大纲相同。**wasm 字节/码元**是新实例为这段文本增长到的内存（不计词法器的表）除以码元数：大纲的表大多放得进为词元起点预留的空间（只做词法时是每码元 7 字节），每个码元都是一个词元时最多到 14。模块 9190 字节，比只有词法器时多 3651 字节。
