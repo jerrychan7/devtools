@@ -1,4 +1,4 @@
-import { documentOf, styleOf } from '../../../core/realm';
+import { documentOf, isElement, styleOf } from '../../../core/realm';
 import { atName } from '../sheets/text/loose';
 
 /**
@@ -151,7 +151,7 @@ type Table = Map<string, string[]>;
  * The `view-transition-class` of each view transition name of a document. Like Chrome's, the table
  * is set when a transition captures its states: the old elements' classes before its callback runs,
  * the new ones' (which win for a name in both) once it has, and kept until it finishes, class
- * changes in the meantime not counting. That takes `document.startViewTransition`, hooked from the
+ * changes in the meantime not counting. That takes `startViewTransition`, hooked from the
  * first look on; for a transition started before, the current elements are read, again within a
  * task. Elements in shadow trees count for no class, as in Chrome when the class comes from a
  * shadow tree's sheet; `auto` and `match-element` names, which Chrome generates, are not found.
@@ -161,7 +161,7 @@ export class ViewTransitionClasses {
   private readonly captured = new WeakMap<Document, Table>();
   /** Tables read from the current elements, for the current task. */
   private readonly scanned = new WeakMap<Document, Table>();
-  private readonly hooked = new WeakSet<Document>();
+  private readonly hooked = new WeakSet<object>();
 
   /** The classes of the view transition `name` of `doc`. */
   of(doc: Document, name: string): string[] {
@@ -190,44 +190,68 @@ export class ViewTransitionClasses {
     return scanned;
   }
 
-  /** Hooks `doc.startViewTransition`, on the document itself, to capture its tables. */
+  /**
+   * Hooks `startViewTransition` of the realm of `doc`, on `Document.prototype` and, where there is
+   * one, `Element.prototype` (a transition scoped to an element), to capture the tables. Like the
+   * probe's hooks, they are proxies of the page's functions: their name and length stay, and
+   * `toString()` the native form; nothing is added on the document itself. They stay for the
+   * page's life, as the CSS domain's state does, saving a table as they go.
+   */
   hook(doc: Document): void {
-    if (this.hooked.has(doc)) return;
-    this.hooked.add(doc);
-    type Start = (arg?: unknown) => ViewTransition;
-    const start = (doc as Document & { startViewTransition?: Start }).startViewTransition;
-    if (typeof start !== 'function') return;
-    const hooked = (arg?: unknown): ViewTransition => {
-      const old = scan(doc);
-      const update = typeof arg === 'function' ? arg : (arg as { update?: unknown } | undefined)?.update;
-      const capture = () => {
-        const table = new Map(old);
-        for (const [name, list] of scan(doc)) table.set(name, list);
-        this.captured.set(doc, table);
-      };
-      const wrapped = async () => {
-        try {
-          if (typeof update === 'function') await (update as () => unknown)();
-        } finally {
-          capture();
-        }
-      };
-      const options = typeof arg === 'object' && arg !== null ? { ...arg, update: wrapped } : wrapped;
-      const transition = start.call(doc, options);
-      transition.finished.then(
-        () => this.captured.delete(doc),
-        () => this.captured.delete(doc)
-      );
-      return transition;
+    const win = doc.defaultView as (Window & typeof globalThis) | null;
+    if (!win) return;
+    for (const proto of [win.Document.prototype, win.Element.prototype]) {
+      if (this.hooked.has(proto)) continue;
+      this.hooked.add(proto);
+      const start: unknown = (proto as { startViewTransition?: unknown }).startViewTransition;
+      if (typeof start !== 'function') continue;
+      const hooked = new Proxy(start, {
+        apply: (f, self: Document | Element, args: unknown[]) => this.start(f as (...a: unknown[]) => unknown, self, args),
+      });
+      Object.defineProperty(proto, 'startViewTransition', {
+        ...Object.getOwnPropertyDescriptor(proto, 'startViewTransition'),
+        value: hooked,
+      });
+    }
+  }
+
+  /** Starts a transition with the page's `start` on `scope`, capturing its table for its document. */
+  private start(start: (...args: unknown[]) => unknown, scope: Document | Element, args: unknown[]): unknown {
+    const doc = isElement(scope) ? documentOf(scope) : (scope as Document);
+    const [arg] = args;
+    const update = typeof arg === 'function' ? arg : (arg as { update?: unknown } | null | undefined)?.update;
+    // Arguments the page's function rejects are passed on as they are.
+    if (update != null && typeof update !== 'function') return Reflect.apply(start, scope, args);
+    const old = scan(scope);
+    const capture = () => {
+      const table = new Map(old);
+      for (const [name, list] of scan(scope)) table.set(name, list);
+      this.captured.set(doc, table);
     };
-    Object.defineProperty(doc, 'startViewTransition', { value: hooked, configurable: true, writable: true });
+    const wrapped = async () => {
+      try {
+        if (typeof update === 'function') await (update as () => unknown).call(undefined);
+      } finally {
+        capture();
+      }
+    };
+    const options = typeof arg === 'object' && arg !== null ? { ...arg, update: wrapped } : wrapped;
+    const transition = Reflect.apply(start, scope, [options, ...args.slice(1)]) as ViewTransition;
+    const done = () => this.captured.delete(doc);
+    transition.finished.then(done, done);
+    return transition;
   }
 }
 
-/** The view transition names of the elements of `doc` (not of its shadow trees), with their classes. */
-function scan(doc: Document): Table {
+/**
+ * The view transition names of the elements of `scope` (a document, or an element and those in
+ * it), not of its shadow trees, with their classes.
+ */
+function scan(scope: Document | Element): Table {
   const result: Table = new Map();
-  for (const el of Array.from(doc.querySelectorAll('*'))) {
+  const elements = Array.from(scope.querySelectorAll('*'));
+  if (isElement(scope)) elements.unshift(scope);
+  for (const el of elements) {
     const style = styleOf(el);
     const name = atName(style.getPropertyValue('view-transition-name').trim());
     if (!name || name === 'none' || name === 'auto' || name === 'match-element' || result.has(name)) continue;

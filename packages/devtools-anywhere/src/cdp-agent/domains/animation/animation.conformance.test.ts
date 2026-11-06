@@ -764,6 +764,28 @@ describe('Animation, which animations are told apart', () => {
       for (const cls of ['w1', 'w2'])
         document.body.appendChild(Object.assign(document.createElement('div'), { className: cls, textContent: cls }));
     });
+    // We hook startViewTransition on the prototypes, out of the page's sight: nothing on the document,
+    // the name and length of the page's function, a native toString().
+    assert.deepEqual(
+      await t.page.evaluate(() =>
+        [Document.prototype, Element.prototype].map(proto => {
+          const f = (proto as unknown as { startViewTransition?: (...args: unknown[]) => unknown }).startViewTransition;
+          return f && [f.name, f.length, /^function \w* ?\(\) \{ \[native code\] \}$/.test(String(f))];
+        })
+      ),
+      await t.page.evaluate(() => {
+        const frame = document.body.appendChild(document.createElement('iframe'));
+        const w = frame.contentWindow as Window & typeof globalThis;
+        const result = [w.Document.prototype, w.Element.prototype].map(proto => {
+          const f = (proto as unknown as { startViewTransition?: (...args: unknown[]) => unknown }).startViewTransition;
+          return f && [f.name, f.length, true];
+        });
+        frame.remove();
+        return result;
+      }),
+      'as the native functions of a fresh realm'
+    );
+    assert.equal(await t.page.evaluate(() => Object.hasOwn(document, 'startViewTransition')), false);
     for (const side of [t.chrome, t.ours]) await side.clear();
     // The old 1w goes, w2 stays: 1w's old image is an only child, w2's are not.
     await t.page.evaluate(async () => {
