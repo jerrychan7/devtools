@@ -107,11 +107,24 @@ test('changes in a rule: the top-level rule they are in', async () => {
       "sheet.cssRules[1].insertRule('.m2{}')",
       "sheet.cssRules[2].cssRules[0].style.cssText = 'color: blue'",
       "sheet.cssRules[2].cssRules[0].selectorText = '.inner2'",
+      "sheet.cssRules[2].insertRule('&:hover{}', 1)",
+      'sheet.cssRules[2].deleteRule(0)',
       "sheet.cssRules[3].appendRule('to{top:1px}')",
       "sheet.cssRules[3].cssRules[0].keyText = '10%'",
       "sheet.cssRules[4].selectorText = '.s2'",
     ]),
-    [['rule 0'], ['rule 1'], ['rule 1'], ['rule 2'], ['rule 2'], ['rule 3'], ['rule 3'], ['rule 4']]
+    [
+      ['rule 0'],
+      ['rule 1'],
+      ['rule 1'],
+      ['rule 2'],
+      ['rule 2'],
+      ['rule 2'],
+      ['rule 2'],
+      ['rule 3'],
+      ['rule 3'],
+      ['rule 4'],
+    ]
   );
 });
 

@@ -123,7 +123,9 @@ function install(realm: Window & typeof globalThis) {
   hook(sheetProto, 'removeRule', (self, args) =>
     sheetLevel(self, () => ({ kind: 'delete', index: index(args[0], 0) }))
   );
-  for (const name of ['insertRule', 'deleteRule']) hook(realm.CSSGroupingRule.prototype, name, changed);
+  // A style rule's nested rules (CSS nesting) are changed through its own methods.
+  for (const proto of [realm.CSSGroupingRule.prototype, realm.CSSStyleRule.prototype])
+    for (const name of ['insertRule', 'deleteRule']) hook(proto, name, changed);
   if (realm.CSSKeyframesRule)
     for (const name of ['appendRule', 'deleteRule']) hook(realm.CSSKeyframesRule.prototype, name, changed);
   // An element's own style shares the prototype, and belongs to no sheet: its parent rule, read
