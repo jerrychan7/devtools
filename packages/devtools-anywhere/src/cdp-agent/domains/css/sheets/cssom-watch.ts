@@ -124,8 +124,8 @@ function hook(proto: object, name: string, after: After, part: Part = 'value', a
 
 /**
  * The rules whose style the page took (`rule.style`), with the style and its text when taken or
- * last compared (`settle`), oldest first. Those compared are kept, the newest `KEPT`, for a style
- * the page keeps to write later; the others are compared once.
+ * last compared (`settle`): all kept and compared each time, for a style the page keeps to write
+ * later, up to `SUSPECTS_LIMIT`.
  */
 const suspects = new Map<CSSRule, { style: CSSStyleDeclaration; text: string }>();
 /** Top-level rules reported changed since the last `settle`: their whole text is serialized anew. */
@@ -134,12 +134,13 @@ const reported = new Set<CSSRule>();
 let taken = 0;
 /** Nothing taken nor run since the last `settle`: the page has not run since (a microtask). */
 let settled = false;
-const KEPT = 256;
 /**
- * How many rules taken between two `settle`s are compared: past that, the sheets they are in are
- * taken as changed everywhere (their texts serialized anew), rather than reading every style taken.
+ * How many rules are watched: past that, taken between two `settle`s or kept from before, the
+ * sheets they are in are taken as changed everywhere (their texts serialized anew) and none is
+ * watched any more, rather than reading every style taken each time. A style the page keeps from
+ * then on and writes later goes unseen.
  */
-const SUSPECTS_LIMIT = 1024;
+const SUSPECTS_LIMIT = 2048;
 
 /** The sheets of `rules` changed where it is not told: their texts are serialized anew. */
 const lost = (rules: Iterable<CSSRule>) => {
@@ -157,7 +158,12 @@ function taking(rule: unknown, style: unknown) {
   if (!isCssom(style, 'CSSStyleDeclaration')) return;
   suspects.set(rule as CSSRule, { style, text: style.cssText });
   settled = false;
-  if (++taken <= SUSPECTS_LIMIT) return;
+  if (++taken <= SUSPECTS_LIMIT && suspects.size <= SUSPECTS_LIMIT) return;
+  giveUp();
+}
+
+/** Too many rules watched: their sheets are serialized anew, and none is watched. */
+function giveUp() {
   const rules = [...suspects.keys()];
   suspects.clear();
   reported.clear();
@@ -187,12 +193,22 @@ export function settle(): void {
     entry.text = text;
     if (!reported.has(top)) changed.push(top);
   }
-  for (const rule of suspects.keys()) {
-    if (suspects.size <= KEPT) break;
-    suspects.delete(rule);
-  }
   for (const top of new Set(changed)) report(sheetOf(top), undefined, { kind: 'rule', rule: top });
   reported.clear();
+}
+
+/**
+ * Drops what was written through the styles taken of `sheet`'s rules and not reported yet: its
+ * text is serialized anew from its rules, which holds it. The styles are still watched, compared
+ * from now on with their text now, for a style the page keeps to write later.
+ */
+export function forgetSheet(sheet: CSSStyleSheet): void {
+  for (const [rule, entry] of suspects) {
+    if (sheetOf(rule) !== sheet) continue;
+    if (topRuleOf(rule)) entry.text = entry.style.cssText;
+    else suspects.delete(rule);
+  }
+  for (const rule of reported) if (sheetOf(rule) === sheet) reported.delete(rule);
 }
 
 /** A rule's style, read by the CSS domain: not taken by the page. */

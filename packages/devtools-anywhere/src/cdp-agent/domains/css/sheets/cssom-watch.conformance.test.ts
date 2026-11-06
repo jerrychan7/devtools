@@ -13,7 +13,8 @@ import type { Env } from '../../../../../test-support/conformance.ts';
 // Bundled for the page: the sources import each other without extensions.
 const bundled = await build({
   stdin: {
-    contents: "export { watchCssom, recordPageChanges, ownEdit, ownStyle, settle } from './cssom-watch.ts';",
+    contents:
+      "export { watchCssom, recordPageChanges, ownEdit, ownStyle, settle, forgetSheet } from './cssom-watch.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },
@@ -260,9 +261,37 @@ test('the hooked getters: as the native ones while watching, the native ones aft
 });
 
 test('past the limit of styles taken: their sheet, as changed everywhere', async () => {
-  const css = Array.from({ length: 1100 }, (_, i) => `.r${i} { top: 0px; }`).join(' ');
+  const css = Array.from({ length: 2100 }, (_, i) => `.r${i} { top: 0px; }`).join(' ');
   assert.deepEqual(await reports(css, ['for (const r of sheet.cssRules) r.style.top', 'sheet.cssRules[0].style.top']), [
     ['none'],
     [],
   ]);
+});
+
+test('styles kept from earlier rounds: watched up to the limit, then their sheet as changed', async () => {
+  const css = Array.from({ length: 2100 }, (_, i) => `.r${i} { top: 0px; }`).join(' ');
+  assert.deepEqual(
+    await reports(css, [
+      // 1500 styles kept, under the limit: a write through the first, two rounds later, is seen.
+      'globalThis.kept = Array.from(sheet.cssRules).slice(0, 1500).map(r => r.style)',
+      'sheet.cssRules[1600].style.top',
+      "globalThis.kept[0].top = '1px'",
+      // 600 more: 2100 watched in all, past the limit.
+      'for (const r of Array.from(sheet.cssRules).slice(1500)) r.style.top',
+    ]),
+    [[], [], ['rule 0'], ['none']]
+  );
+});
+
+test('a sheet serialized anew: what was written is dropped, the styles taken still watched', async () => {
+  assert.deepEqual(
+    await reports('.a { top: 0px; } .b { top: 0px; }', [
+      'globalThis.kept = sheet.cssRules[0].style',
+      "globalThis.kept.top = '1px'",
+      'globalThis.__cssomWatch.forgetSheet(sheet)',
+      "globalThis.kept.top = '2px'; globalThis.kept.left = '1px'; __cssomWatch.forgetSheet(sheet)",
+      "globalThis.kept.top = '3px'",
+    ]),
+    [[], ['rule 0'], [], [], ['rule 0']]
+  );
 });

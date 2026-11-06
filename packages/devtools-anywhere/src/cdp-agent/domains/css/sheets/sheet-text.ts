@@ -1,6 +1,6 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer-wasm';
-import { type CssomChange, ownEdit, ownStyle, recordPageChanges, settle } from './cssom-watch';
+import { type CssomChange, forgetSheet, ownEdit, ownStyle, recordPageChanges, settle } from './cssom-watch';
 import { type CssOutline, ROOT, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
@@ -272,7 +272,9 @@ export class SheetTexts {
   /** The page changed the sheet through the CSSOM: its text is no longer known. */
   invalidate(sheet: CSSStyleSheet): void {
     const rec = this.recorded.get(sheet);
+    // Serialized anew when next used: what is pending, here and in the styles taken, is in it.
     if (rec) delete rec.pending;
+    forgetSheet(sheet);
     this.stale.add(sheet);
     this.changed(sheet);
   }
@@ -341,6 +343,8 @@ export class SheetTexts {
    * change started (not a new one); null when its rules do not pair with it.
    */
   private serialize(sheet: CSSStyleSheet, rules: CSSRule[]): SheetSource | null {
+    // What was written through the styles taken is in the rules' text now.
+    forgetSheet(sheet);
     const text = rules.map(r => `${r.cssText}\n`).join('');
     const source = pair(text, rules);
     if (!source) return null;
