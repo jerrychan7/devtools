@@ -27,12 +27,62 @@ const work = await loadLexer();
 const ALL = Object.keys(work.normalized);
 
 let checked = 0;
+/**
+ * The `debugger` statements the working tree's own token list gives, by the rules of
+ * debuggerStatementSites: a word `debugger` (escapes decoded) not in a class body, not after `.`
+ * or `#`, and not before `:` or a `(` on the same line.
+ */
+function derivedSites(text: string, module: boolean): { start: number; semicolon: boolean }[] {
+  const flat = flatTokens(need(work.entries['tokenize'])(text, module));
+  const punct = (k: number, ch: string) => flat[k * 6] === 1 && text[need(flat[k * 6 + 1])] === ch;
+  const sites: { start: number; semicolon: boolean }[] = [];
+  for (let k = 0; k * 6 < flat.length; k++) {
+    const [kind, start, end, , parent] = flat.slice(k * 6, k * 6 + 5) as [number, number, number, number, number];
+    if (kind !== 0 || parent === 4 /* Open.ClassBrace */) continue;
+    const word = text
+      .slice(start, end)
+      .replace(/\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))/g, (escape, braced, plain) => {
+        const code = Number.parseInt(typeof braced === 'string' ? braced : String(plain), 16);
+        return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
+      });
+    if (word !== 'debugger' || (k > 0 && punct(k - 1, '.')) || text[start - 1] === '#') continue;
+    if (punct(k + 1, ':') || (punct(k + 1, '(') && flat[(k + 1) * 6 + 5] === 0)) continue;
+    sites.push({ start, semicolon: punct(k + 1, ';') });
+  }
+  return sites;
+}
+
+/**
+ * Before the fix of `-->` in debugger mode, debuggerStatementSites took `-->` anywhere in a script
+ * for a comment. A revision's sites may differ from the working tree's only on a script with `-->`,
+ * and only when the working tree's agree with its own token list.
+ */
+let knownDifferences = 0;
+function knownDifference(entry: string, text: string, module: boolean): boolean {
+  if (module || !text.includes('-->') || (entry !== 'debuggerStatementSites' && entry !== 'debuggerStatements'))
+    return false;
+  const derived = derivedSites(text, module);
+  const sites = need(work.entries['debuggerStatementSites'])(text, module);
+  if (JSON.stringify(sites) !== JSON.stringify(derived)) return false;
+  knownDifferences++;
+  return true;
+}
+
 function same(text: string, entries = ALL, modules = [false, true]): void {
-  for (const module of modules)
+  for (const module of modules) {
+    // The working tree's debugger sites against its own token list, whatever the revision.
+    if (entries.includes('debuggerStatementSites')) {
+      const a = JSON.stringify(derivedSites(text, module));
+      const b = JSON.stringify(need(work.entries['debuggerStatementSites'])(text, module));
+      if (a !== b)
+        throw new Error(
+          `debuggerStatementSites (${module ? 'module' : 'script'}) disagrees with the token list for ${JSON.stringify(text.slice(0, 300))}\n  tokens: ${a}\n  sites: ${b}`
+        );
+    }
     for (const entry of entries) {
       const a = JSON.stringify(need(base.normalized[entry])(text, module));
       const b = JSON.stringify(need(work.normalized[entry])(text, module));
-      if (a !== b) {
+      if (a !== b && !knownDifference(entry, text, module)) {
         const shown = JSON.stringify(text.length > 300 ? text.slice(0, 300) + '…' : text);
         const at = [...a].findIndex((ch, i) => ch !== b[i]);
         throw new Error(
@@ -41,6 +91,7 @@ function same(text: string, entries = ALL, modules = [false, true]): void {
         );
       }
     }
+  }
   checked++;
 }
 
@@ -270,3 +321,7 @@ for (const seedText of values.seed) {
   report(`${count.toLocaleString('en')} random fragments, seed ${seedText}`);
 }
 console.log(`All ${checked.toLocaleString('en')} texts give the same results as ${base.label}.`);
+if (knownDifferences > 0)
+  console.log(
+    `${knownDifferences.toLocaleString('en')} results differ only where ${base.label} took a \`-->\` not at the start of a line for a comment in debugger mode (fixed since); the working tree's agree with its token list.`
+  );

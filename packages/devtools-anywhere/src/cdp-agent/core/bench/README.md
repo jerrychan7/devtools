@@ -53,6 +53,10 @@ That `tokenize` (every token's kind, start, end, depth, parent and newline), `de
 
 It stops at the first difference and prints the text and where the results part.
 
+On every text it also checks the working tree against itself: `debuggerStatementSites` must give what the rules it applies give on the working tree's own `tokenize`, so the streamed debugger mode and the token list cannot part.
+
+One difference with older revisions is known and not counted as one. Up to 42c0468 (and at aff93c5), the debugger mode kept no tokens, so it took a `-->` anywhere in a script for an HTML-like comment (`x-->0; debugger` hid the `debugger`); since the fix, `-->` is a comment only where `tokenize` takes it for one, at the start of the source or after a line break, with only spaces and comments before it. Against such a revision, `debuggerStatementSites` and `debuggerStatements` may differ on a script that contains `-->`, provided the working tree's agree with its token list; the script reports how many did.
+
 ## Reference results
 
 Apple M2, 16 GB, macOS 26, Node 24.21.0, `node --expose-gc lexer.bench.ts --rev 76f3026 --rev 66f4dcf --rev 6c48668 --rev 181329e --rev 42c0468 --material acorn.js --material anywhere_app` at aff93c5, on a machine shared with other work. One step per revision:

@@ -90,6 +90,24 @@ test('top-level lexical names', () => {
   assert.deepEqual(topLevelLexicalNames('<!-- let a\nconst b = 1 --> 0\n--> let c'), ['b']);
 });
 
+test('`-->` starts a comment only at the start of a line, in debugger mode too', () => {
+  // x-- > 0 mid-line: an operator, the debugger after it is a statement.
+  assert.deepEqual(debuggerStatements('x-->0; debugger'), [7]);
+  assert.deepEqual(debuggerStatements('x = 1\nx-->0; debugger'), [13]);
+  // At the start of the source or of a line (after spaces): a comment to the end of the line.
+  assert.deepEqual(debuggerStatements('--> debugger\ndebugger'), [13]);
+  assert.deepEqual(debuggerStatements('x\n  --> debugger\ndebugger'), [17]);
+  // After a comment: a comment too when it is the first thing, or when a line break came before.
+  assert.deepEqual(debuggerStatements('/* c */ --> debugger\ndebugger'), [21]);
+  assert.deepEqual(debuggerStatements('x /*\n*/ --> debugger\ndebugger'), [21]);
+  assert.deepEqual(debuggerStatements('x /* c */ --> 0; debugger'), [17]);
+  // Modules have no HTML-like comments.
+  assert.deepEqual(debuggerStatements('--> 0; debugger', { module: true }), [7]);
+  // The token list agrees.
+  const tokens = tokenize('x-->0; debugger');
+  assert.equal(tokens.length, 7);
+});
+
 test('debugger statements', () => {
   const src = [
     'debugger;',

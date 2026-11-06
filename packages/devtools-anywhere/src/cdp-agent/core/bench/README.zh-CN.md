@@ -53,6 +53,10 @@ node lexer-compare.bench.ts --rev HEAD~1
 
 遇到第一处不同即停止，打印文本和结果分叉的位置。
 
+每份文本还会让工作区和自己核对：`debuggerStatementSites` 的结果必须等于按同样规则从工作区自己的 `tokenize` 推导出的结果，流式的 debugger 模式和 token 列表不能分叉。
+
+与旧版本有一处已知差异，不算作不同。直到 42c0468（以及 aff93c5），debugger 模式不保存 token，于是把脚本里任何位置的 `-->` 都当成 HTML 注释（`x-->0; debugger` 里的 `debugger` 被漏掉）；修复后，`-->` 只在 `tokenize` 也认作注释的地方才是注释：源码开头，或换行之后、前面只有空白和注释。与这类版本对拍时，含 `-->` 的脚本上 `debuggerStatementSites` 和 `debuggerStatements` 可以不同，前提是工作区的结果与它自己的 token 列表一致；脚本会报告这样的结果有多少。
+
 ## 参考结果
 
 Apple M2，16 GB，macOS 26，Node 24.21.0，在 aff93c5 运行 `node --expose-gc lexer.bench.ts --rev 76f3026 --rev 66f4dcf --rev 6c48668 --rev 181329e --rev 42c0468 --material acorn.js --material anywhere_app`，机器同时有别的负载。每个版本对应一步：

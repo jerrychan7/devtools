@@ -114,6 +114,8 @@ class Lexer {
   private newline = false;
   /** Tokens kept so far; stays 0 in debugger mode. */
   private count = 0;
+  /** A token came before: `-->` then starts a comment only after a line break. Set in both modes. */
+  private lexed = false;
   private kinds: Uint8Array;
   private starts: Int32Array;
   private ends: Int32Array;
@@ -209,6 +211,7 @@ class Lexer {
       this.newlines[i] = this.newline ? 1 : 0;
     }
     this.newline = false;
+    this.lexed = true;
   }
 
   /** Debugger mode, for each token: settles the candidate before it, and tells whether it is one. */
@@ -350,7 +353,7 @@ class Lexer {
           !this.module &&
           this.ahead(this.pos + 1) === 45 &&
           this.c(this.pos + 2) === 62 &&
-          (this.newline || this.count === 0)
+          (this.newline || !this.lexed)
         ) {
           this.lineComment();
           return;
