@@ -1,8 +1,8 @@
 /**
- * A WebAssembly binary encoder small enough to read in one sitting, for writing the CSS lexer's
- * module without a compiler (lexer.ts). Instructions are built as arrays of bytes; blocks take a
- * label and a function that returns their body, so a branch names its target instead of counting
- * how deep it is.
+ * A WebAssembly binary encoder small enough to read in one sitting, for writing the CSS lexer and
+ * outline's module without a compiler (lexer.ts, outline.ts). Instructions are built as arrays of
+ * bytes; blocks take a label and a function that returns their body, so a branch names its target
+ * instead of counting how deep it is.
  */
 
 export type Code = number[];
@@ -92,14 +92,27 @@ export const sub = bin(0x6b);
 export const and = bin(0x71);
 export const or = bin(0x72);
 export const shl = bin(0x74);
+export const gtS = bin(0x4a);
+export const gtU = bin(0x4b);
+export const leU = bin(0x4d);
+export const mul = bin(0x6c);
+export const shrU = bin(0x76);
+export const drop = (v: Code): Code => [...v, 0x1a];
+export const unreachable = (): Code => [0x00];
+/** memory.size and memory.grow, in pages; grow gives the old size, or -1. */
+export const memSize = (): Code => [0x3f, 0];
+export const memGrow = (pages: Code): Code => [...pages, 0x40, 0];
 
 /** Loads and stores, with a constant offset added to the address. */
 export const load8 = (addr: Code, offset = 0): Code => [...addr, 0x2d, 0, ...uleb(offset)];
 export const load16 = (addr: Code, offset = 0): Code => [...addr, 0x2f, 1, ...uleb(offset)];
+export const load32 = (addr: Code, offset = 0): Code => [...addr, 0x28, 2, ...uleb(offset)];
 export const store8 = (addr: Code, v: Code, offset = 0): Code => [...addr, ...v, 0x3a, 0, ...uleb(offset)];
 export const store32 = (addr: Code, v: Code, offset = 0): Code => [...addr, ...v, 0x36, 2, ...uleb(offset)];
 /** memory.fill (bulk memory). */
 export const fill = (dest: Code, value: Code, size: Code): Code => [...dest, ...value, ...size, 0xfc, 11, 0];
+/** memory.copy (bulk memory); the ranges may overlap. */
+export const copy = (dest: Code, src: Code, size: Code): Code => [...dest, ...src, ...size, 0xfc, 10, 0, 0];
 
 export interface Func {
   name: string;

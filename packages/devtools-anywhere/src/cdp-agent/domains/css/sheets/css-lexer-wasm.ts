@@ -1,13 +1,14 @@
 /**
  * The CSS lexer of css-lexer.ts, run as WebAssembly where the page lets it compile, and as the
- * TypeScript lexer elsewhere: same tokens, same result (wasm-gen/lexer.ts).
+ * TypeScript lexer elsewhere: same tokens, same result (wasm-gen/lexer.ts). The module also
+ * outlines (css-outline-wasm.ts); `tokenize` asks it to lex only.
  *
  * The text is copied into the module's memory: one byte per code unit with `TextEncoder.encodeInto`
  * when it is all ASCII, else code unit by code unit. Short texts stay with the TypeScript lexer,
  * which is faster for them than the copies and the call are.
  */
 import { tokenize as tokenizeTs, type Tokens } from './css-lexer';
-import { LEXER_WASM } from './css-lexer-wasm-bytes';
+import { CSS_WASM } from './css-wasm-bytes';
 
 export { Tok, type TokKind, type Tokens } from './css-lexer';
 
@@ -20,10 +21,20 @@ const CHUNK = 0x4000;
 /** Texts shorter than this go to the TypeScript lexer: about where the two take as long (bench/README.md). */
 export const WASM_MIN_LENGTH = 64;
 
+/** `run`'s flag to lex only, returning the number of tokens (wasm-gen/outline.ts). */
+export const LEX_ONLY = 1;
+
 export interface Exports {
   m: WebAssembly.Memory;
-  lex16(length: number, kinds: number, starts: number): number;
-  lex8(length: number, kinds: number, starts: number): number;
+  /**
+   * Lexes the text `copyIn` put in, as UTF-16 when `wide`; with LEX_ONLY, returns the number of
+   * tokens, else outlines them and returns the number of rules (css-outline-wasm.ts).
+   */
+  run(length: number, wide: number, kinds: number, starts: number, flags: number): number;
+  /** Where the outline's rule and declaration tables are, and how many declarations. */
+  rb(): number;
+  db(): number;
+  dc(): number;
 }
 
 /** The module's exports; null once compiling it has failed, as under a CSP without `wasm-unsafe-eval`. */
@@ -33,16 +44,17 @@ let compiled: WebAssembly.Module | undefined;
 let encoder: TextEncoder | undefined;
 
 /**
- * Texts of this many code units or more (5 Mi) are lexed by an instance of their own, dropped
- * after: a module's memory grows to fit the longest text (7 bytes per code unit) and never shrinks,
- * so the shared instance keeps at most what a text under this takes, about 35 MB, for the page's
- * life. Each such text pays for an instance (its memory and tables set up) and nothing else.
+ * Texts of this many code units or more (5 Mi) are lexed or outlined by an instance of their own,
+ * dropped after: a module's memory grows to fit the longest text (7 bytes per code unit to lex,
+ * about 11 to outline) and never shrinks, so the shared instance keeps at most what a text under
+ * this takes, about 35 MB to lex and 60 MB to outline, for the page's life. Each such text pays
+ * for an instance (its memory and tables set up) and nothing else.
  */
 export const OWN_INSTANCE_LENGTH = 5 * 1024 * 1024;
 
 function load(): Exports | null {
   try {
-    const bin = atob(LEXER_WASM);
+    const bin = atob(CSS_WASM);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     // Synchronous, as `tokenize` is: the module is far under the main thread's size limit.
@@ -65,16 +77,17 @@ export function wasmAvailable(): boolean {
 export function tokenize(text: string): Tokens {
   const len = text.length;
   if (len < WASM_MIN_LENGTH || !wasmAvailable()) return tokenizeTs(text);
-  if (len >= OWN_INSTANCE_LENGTH && compiled) {
-    try {
-      return tokenizeWasm(instantiate(compiled), text);
-    } catch {
-      // Out of memory for another instance or for its text: the TypeScript lexer needs neither.
-      return tokenizeTs(text);
-    }
+  try {
+    // A large text in an instance of its own.
+    return tokenizeWasm(len >= OWN_INSTANCE_LENGTH ? ownInstance() : (wasm as Exports), text);
+  } catch {
+    // Out of memory for another instance or for the text: the TypeScript lexer needs neither.
+    return tokenizeTs(text);
   }
-  return tokenizeWasm(wasm as Exports, text);
 }
+
+/** A new instance of the module, for a large text; throws where there is no memory for it. */
+export const ownInstance = (): Exports => instantiate(compiled as WebAssembly.Module);
 
 /** Tokenizes `text` with the module whatever its length. Exported for the tests and benchmarks. */
 export function tokenizeWasm(w: Exports, text: string): Tokens {
@@ -85,7 +98,7 @@ export function tokenizeWasm(w: Exports, text: string): Tokens {
 /** Where `copyIn` put the text and where the module is to write its tokens. */
 export interface Layout {
   len: number;
-  /** One byte per code unit (`lex8`), else UTF-16 (`lex16`). */
+  /** One byte per code unit, else UTF-16. */
   narrow: boolean;
   kindsAt: number;
   startsAt: number;
@@ -99,7 +112,8 @@ export function copyIn(w: Exports, text: string, wide = false): Layout {
   const len = text.length;
   // Room for the text as UTF-16; as bytes it takes half of that.
   const kindsAt = IN + 2 * (len + PAD);
-  const startsAt = (kindsAt + len + 3) & ~3;
+  // Past the kinds and a byte more, which the outline sets to Eof after the last token.
+  const startsAt = (kindsAt + len + 4) & ~3;
   const need = startsAt + 4 * (len + 1);
   const have = w.m.buffer.byteLength;
   if (need > have) w.m.grow(Math.ceil((need - have) / 0x10000));
@@ -136,7 +150,8 @@ export function copyIn(w: Exports, text: string, wide = false): Layout {
 }
 
 /** Runs the module on the text `copyIn` put in; returns the number of tokens. */
-export const lex = (w: Exports, at: Layout): number => (at.narrow ? w.lex8 : w.lex16)(at.len, at.kindsAt, at.startsAt);
+export const lex = (w: Exports, at: Layout): number =>
+  w.run(at.len, at.narrow ? 0 : 1, at.kindsAt, at.startsAt, LEX_ONLY);
 
 /** Copies the `n` tokens out of the module's memory. */
 export function copyOut(w: Exports, at: Layout, n: number): Tokens {

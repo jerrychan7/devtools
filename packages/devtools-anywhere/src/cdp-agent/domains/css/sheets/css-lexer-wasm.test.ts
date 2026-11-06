@@ -4,8 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build as bundle } from 'esbuild';
 import { tokenize as tokenizeTs } from './css-lexer.ts';
-import { LEXER_WASM } from './css-lexer-wasm-bytes.ts';
-import { build } from './wasm-gen/lexer.ts';
+import { CSS_WASM } from './css-wasm-bytes.ts';
+import { build } from './wasm-gen/build.ts';
+import { LEX_ONLY } from './wasm-gen/outline.ts';
 
 type WasmModule = typeof import('./css-lexer-wasm.ts');
 
@@ -39,8 +40,9 @@ const texts = [
 /** Long enough for `tokenize` to use the module, ASCII and not. */
 const long = texts.join('\n').repeat(40);
 
-test('the generated module is that of wasm-gen/lexer.ts', () => {
-  assert.equal(LEXER_WASM, Buffer.from(build()).toString('base64'), 'run `node wasm-gen/lexer.ts`');
+test('the generated module is that of wasm-gen/build.ts', async () => {
+  assert.equal(CSS_WASM, Buffer.from(build()).toString('base64'), 'run `node wasm-gen/build.ts`');
+  assert.equal((await load()).LEX_ONLY, LEX_ONLY);
 });
 
 test('the same tokens as the TypeScript lexer, copied in as bytes or as UTF-16', async () => {
