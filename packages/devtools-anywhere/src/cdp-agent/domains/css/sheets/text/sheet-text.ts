@@ -193,13 +193,8 @@ export class SheetTexts {
     // The page's writes of styles' properties by name, seen now.
     settle();
     if (this.stale.has(sheet)) return this.serialize(sheet, rulesOf(sheet));
-    let rec = this.recorded.get(sheet);
+    const rec = this.recordOf(sheet);
     const owner = sheet.ownerNode;
-    if (!rec && isHtml(owner, 'style') && owner.sheet === sheet) {
-      // Made while watched, every change the page made to it seen: no check.
-      this.set(sheet, owner.textContent, this.addedWatched.get(owner) !== this.unseenTimes);
-      rec = this.recorded.get(sheet);
-    }
     // A constructed sheet whose text went unseen (made before anyone watched) is serialized too.
     if (!rec) return !owner && !sheet.ownerRule && !sheet.href ? this.serialize(sheet, rulesOf(sheet)) : null;
     if (rec.pending) {
@@ -233,6 +228,34 @@ export class SheetTexts {
     // Its rules not found in it: the page changed them unseen, in a way the check does not tell
     // (an @import, which replaceSync() leaves out). Serialized then, like a changed sheet.
     return rec.source ?? this.serialize(sheet, rules);
+  }
+
+  /**
+   * The sheet's record, made from its <style>'s text if it has none yet: unchecked when the sheet
+   * was made while watched, every change the page made to it seen.
+   */
+  private recordOf(sheet: CSSStyleSheet): Recorded | undefined {
+    const rec = this.recorded.get(sheet);
+    if (rec) return rec;
+    const owner = sheet.ownerNode;
+    if (!isHtml(owner, 'style') || owner.sheet !== sheet) return undefined;
+    this.set(sheet, owner.textContent, this.addedWatched.get(owner) !== this.unseenTimes);
+    return this.recorded.get(sheet);
+  }
+
+  /**
+   * The text the sheet's header can be given without checking or pairing it (`source` does both,
+   * at its first use): the recorded one, with its line starts once paired. Undefined when that
+   * text is not the one `source` gives as it is: a sheet changed by the page, with changes
+   * pending, or without a recorded text, for which `source` is cheap or gives none.
+   */
+  peek(sheet: CSSStyleSheet): { text: string; lines?: readonly number[] } | undefined {
+    settle();
+    if (this.stale.has(sheet)) return undefined;
+    const rec = this.recordOf(sheet);
+    if (!rec || rec.pending) return undefined;
+    // A source paired before watching last started is checked again: its text is the same.
+    return rec.source ? rec.source : { text: rec.text };
   }
 
   /**

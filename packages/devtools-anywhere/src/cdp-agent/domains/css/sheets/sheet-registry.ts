@@ -405,7 +405,8 @@ export class SheetRegistry {
   }
 
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
-    const source = this.sourceOf(sheet);
+    // The recorded text as it is, its check and pairing left to its first use (`peek`).
+    const source = this.texts.peek(sheet) ?? this.sourceOf(sheet);
     const text = source?.text ?? this.serialized(sheet);
     const end = textEnd(text, source?.lines);
     // Like Chrome, a <style> starts at the start of its text, not where it is in the document's
