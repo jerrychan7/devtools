@@ -25,11 +25,11 @@ const gc = (globalThis as { gc?: () => void }).gc;
 if (!gc) console.warn('Run with --expose-gc for the memory columns.');
 
 const revs = values.rev;
-const timed: Lexer[] = [await loadLexer(), ...(await Promise.all(revs.map(rev => loadLexer(rev))))];
-const counted: Lexer[] = [
-  await loadLexer(undefined, true),
-  ...(await Promise.all(revs.map(rev => loadLexer(rev, true)))),
-];
+// One at a time: a lexer's files are written to its directory, then imported from there.
+const timed: Lexer[] = [];
+const counted: Lexer[] = [];
+for (const rev of [undefined, ...revs]) timed.push(await loadLexer(rev));
+for (const rev of [undefined, ...revs]) counted.push(await loadLexer(rev, true));
 
 const mb = (bytes: number) => (bytes / 1e6).toFixed(2);
 const ms = (t: number) => (t >= 10 ? t.toFixed(1) : t >= 1 ? t.toFixed(2) : t.toFixed(3));

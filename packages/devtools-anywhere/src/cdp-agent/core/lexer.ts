@@ -130,8 +130,11 @@ class Lexer {
   private readonly sites: DebuggerSite[] | undefined;
   private prevKind = -1;
   private prevStart = 0;
+  private prevEnd = 0;
   /** The start of a `debugger` keyword whose next token is still to come (-1 for none). */
   private candidate = -1;
+  /** The candidate begins an object literal member: a `(` after it on a later line still makes it a method name. */
+  private member = false;
   /**
    * The code unit at `peekPos`, read ahead by a scan that stopped before it (the end of a word,
    * the line break after a comment, what follows a `/`): the main loop takes it from here instead
@@ -209,7 +212,7 @@ class Lexer {
 
   private emit(kind: Kind, start: number, end: number, depth: number) {
     const parent = depth > 0 ? this.top(depth - 1).token : Open.None;
-    if (this.sites) this.debuggerToken(kind, start, end, parent);
+    if (this.sites) this.debuggerToken(kind, start, end, parent, depth);
     else {
       const i = this.count++;
       if (i === this.kinds.length) this.grow(end);
@@ -225,25 +228,59 @@ class Lexer {
   }
 
   /** Debugger mode, for each token: settles the candidate before it, and tells whether it is one. */
-  private debuggerToken(kind: Kind, start: number, end: number, parent: Open) {
+  private debuggerToken(kind: Kind, start: number, end: number, parent: Open, depth: number) {
     if (this.candidate !== -1) this.decide(kind, start, this.newline);
     this.candidate = -1;
+    const src = this.src;
+    const prev = this.prevKind === Kind.Punct ? src.charCodeAt(this.prevStart) : -1;
     if (
       kind === Kind.Word &&
       parent !== Open.ClassBrace &&
-      isDebuggerWord(this.src, start, end) &&
-      !(this.prevKind === Kind.Punct && this.src.charCodeAt(this.prevStart) === 46) /* . */ &&
-      this.src.charCodeAt(start - 1) !== 35 /* # */
-    )
+      isDebuggerWord(src, start, end) &&
+      prev !== 46 /* . */ &&
+      src.charCodeAt(start - 1) !== 35 /* # */
+    ) {
       this.candidate = start;
+      this.member = parent === Open.AnyBrace && this.memberStart(prev, depth);
+    }
     this.prevKind = kind;
     this.prevStart = start;
+    this.prevEnd = end;
+  }
+
+  /**
+   * A word after the previous token (punctuator `prev`, -1 for none) in the brace at `depth - 1`
+   * begins an object literal member: after `,` or `*`, after `get`/`set`/`async` on its line, or
+   * first in a brace opened where an expression goes (after `(`, `[`, `,`, `?` or `=`).
+   */
+  private memberStart(prev: number, depth: number): boolean {
+    if (prev === 44 /* , */ || prev === 42 /* * */) return true;
+    const src = this.src;
+    if (prev === -1) {
+      const length = this.prevEnd - this.prevStart;
+      return (
+        this.prevKind === Kind.Word &&
+        !this.newline &&
+        ((length === 3 && (src.startsWith('get', this.prevStart) || src.startsWith('set', this.prevStart))) ||
+          (length === 5 && src.startsWith('async', this.prevStart)))
+      );
+    }
+    if (prev !== 123 /* { */) return false;
+    const at = this.top(depth - 1).pos;
+    const before = at < 0 ? -1 : src.charCodeAt(at);
+    return (
+      before === 40 /* ( */ ||
+      before === 91 /* [ */ ||
+      before === 44 /* , */ ||
+      before === 63 /* ? */ ||
+      before === 61 /* = */
+    );
   }
 
   /** The candidate is a statement unless the token after it (kind -1 for none) makes it a name. */
   private decide(kind: number, start: number, newline: boolean) {
     const next = kind === Kind.Punct ? this.src.charCodeAt(start) : -1;
-    if (next === 58 /* : */ || (next === 40 /* ( */ && !newline)) return;
+    if (next === 58 /* : */ || (next === 40 /* ( */ && (!newline || this.member))) return;
     this.sites?.push({ start: this.candidate, semicolon: next === 59 /* ; */ });
   }
 
@@ -256,8 +293,10 @@ class Lexer {
   /** lexer.c `parse` (main loop only). */
   run(): Tokens {
     if (this.c(0) === 35 /* # */ && this.c(1) === 33 /* ! */) {
-      this.pos = 2;
+      // From the `!`: the comment may be empty, its line terminator at 2.
+      this.pos = 1;
       this.lineComment();
+      this.pos++;
     }
     const src = this.src;
     for (; this.pos < this.end; this.pos++) {
@@ -795,7 +834,11 @@ export function debuggerStatementSites(source: string, options: LexOptions = {})
 function isDebuggerWord(source: string, start: number, end: number): boolean {
   const length = end - start;
   if (length === 8) return source.startsWith('debugger', start);
-  return length > 8 && word(source, start, end) === 'debugger';
+  // Longer only with escapes: no slice for a plain long word.
+  if (length <= 8) return false;
+  for (let i = start; i < end; i++)
+    if (source.charCodeAt(i) === 92 /* \\ */) return word(source, start, end) === 'debugger';
+  return false;
 }
 
 /** A word's text from `start` to `end`, escapes decoded. */

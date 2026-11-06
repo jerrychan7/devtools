@@ -45,6 +45,8 @@ interface Round {
   retexted: boolean;
   /** How many of the rules before are still in the sheet. */
   kept: number;
+  /** How many top-level rules there were before. */
+  rules: number;
   /** The CSSOM and the source, then those of the text replaced and paired anew. */
   got: string;
   want: string;
@@ -104,6 +106,7 @@ async function run(css: string, texts: string[]): Promise<Round[]> {
         return {
           retexted,
           kept: before.filter(r => after.includes(r)).length,
+          rules: before.length,
           got,
           want: same ? want : 'CSSOM differs',
         };
@@ -178,14 +181,30 @@ test('edits one after another, without going back', async () => {
   for (let i = 0; i < 12; i++) {
     text =
       i % 3 === 0
-        ? text.replace(`x${i % 3}{x:`, `x${i % 3}{y:`).replace('1.5e3px', `${i}px`)
+        ? text
+            .replace(`x${(i / 3) % 3}{background`, `x${(i / 3) % 3}{top:${i}px;background`)
+            .replace('1.5e3px', `${i}px`)
         : i % 3 === 1
           ? text.replace('/* ★ */', `@charset "${i}";\n.v${i}{top:${i}px}\n"bad${i}\n`)
           : text.replace('<!-- ', '');
     texts.push(text);
   }
-  for (const r of await run(MIXED, texts)) {
+  (await run(MIXED, texts)).forEach((r, i) => {
     assert.equal(r.got, r.want);
     assert.ok(r.retexted);
-  }
+    // Dropping a CDO changes no rule; the other edits change, add or end up to two.
+    if (i % 3 === 2) assert.equal(r.kept, r.rules, `${i}`);
+    else assert.ok(r.kept >= r.rules - 2, `${i}: ${r.kept} of ${r.rules}`);
+  });
+});
+
+test('many comments before what has no rule: in linear time', async () => {
+  // The comments between two rules, then an @charset: each split of them tried, they took
+  // seconds (24 comments, 3 s).
+  const css = `.a{top:1px}\n${'/**/ '.repeat(40)}@charset "x";\n.b{top:2px}\n`;
+  const started = Date.now();
+  const [r] = await run(css, [css.replace('top:1px', 'top:3px')]);
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(r?.got, r?.want);
+  assert.equal(r?.kept, 1);
 });

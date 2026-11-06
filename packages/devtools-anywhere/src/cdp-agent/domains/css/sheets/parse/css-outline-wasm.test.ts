@@ -118,11 +118,43 @@ test('blocks nested too deep for the call stack fall back to css-outline.ts', as
 test('memory that cannot grow falls back to css-outline.ts', async t => {
   const mod = await load();
   assert.ok(mod.wasmAvailable());
-  t.mock.method(WebAssembly.Memory.prototype, 'grow', function () {
+  const grow = t.mock.method(WebAssembly.Memory.prototype, 'grow', function () {
     throw new RangeError('WebAssembly.Memory.grow(): Maximum memory size exceeded');
   });
   const text = 'a { b: c } .d-1 { e: f; /* g: h */ }\n'.repeat(20000);
   same(text, mod.outline(text), mod.outlineTs(text));
+  // The text did not fit: the fallback was taken, not a memory with room enough.
+  assert.ok(grow.mock.callCount() > 0);
+});
+
+test('a trap in the module, as when its own memory.grow fails, falls back to css-outline.ts', async t => {
+  // The module traps (`unreachable`) where its memory cannot grow for its tables, which no memory
+  // here is short enough of: the trap is thrown in its place, from the shared instance's first
+  // outline, which then outlines the next text as usual.
+  const Instance = WebAssembly.Instance;
+  let traps = 0;
+  t.mock.method(WebAssembly, 'Instance', function (module: WebAssembly.Module) {
+    const real = new Instance(module).exports;
+    const run = real['run'];
+    assert.ok(typeof run === 'function');
+    return {
+      exports: {
+        ...real,
+        run(...args: number[]): number {
+          // Not for lexing alone (`flags`, the last argument).
+          if (args[4] === 0 && traps++ === 0) throw new WebAssembly.RuntimeError('unreachable');
+          return Number(run(...args));
+        },
+      },
+    };
+  });
+  const mod = await load();
+  const text = 'a { b: c } .d-1 { e: f; /* g: h */ }\n'.repeat(10);
+  same(text, mod.outline(text), mod.outlineTs(text));
+  assert.equal(traps, 1);
+  const after = 'a { b: c } @media x { d { e: f } }'.repeat(4);
+  same(after, mod.outline(after), mod.outlineTs(after));
+  assert.equal(traps, 2);
 });
 
 test('a large text has an instance of its own, and the shared memory does not grow', async () => {

@@ -212,19 +212,36 @@ export function tokenize(text: string): Tokens {
       } else p++;
     }
   };
+  /**
+   * Whether the name from `q` to `e` is `url` in any case once its escapes are decoded, as §4.3.4
+   * compares the name consumed, not its text (`\75rl(` is a url too). Code unit by code unit: no
+   * string is made for each function.
+   */
+  const isUrl = (q: number, e: number): boolean => {
+    const end = p;
+    let ok = true;
+    for (let i = 0; i < 3 && ok; i++) {
+      let c = text.charCodeAt(q);
+      if (c === 92) {
+        p = q + 1;
+        escape();
+        c = isHex(text.charCodeAt(q + 1))
+          ? parseInt(text.slice(q + 1, Math.min(q + 7, p)), 16)
+          : text.charCodeAt(q + 1);
+        q = p;
+      } else q++;
+      ok = (c | 32) === 'url'.charCodeAt(i);
+    }
+    p = end;
+    return ok && q === e;
+  };
   /** §4.3.4, for the token from `s`, with `p` past what of its name the caller has checked. */
   const identLike = (s: number): TokKind => {
     name();
     if (nx !== 40) return Tok.Ident;
     nx = -1;
     p++;
-    // `url(`, in any case, compared code unit by code unit: no string is made for each function.
-    const url3 =
-      p - s === 4 &&
-      (text.charCodeAt(s) | 32) === 117 &&
-      (text.charCodeAt(s + 1) | 32) === 114 &&
-      (text.charCodeAt(s + 2) | 32) === 108;
-    if (!url3) return Tok.Func;
+    if (!isUrl(s, p - 1)) return Tok.Func;
     while (isWs(text.charCodeAt(p)) && isWs(text.charCodeAt(p + 1))) p++;
     const q = isWs(text.charCodeAt(p)) ? p + 1 : p;
     if (text.charCodeAt(q) === 34 || text.charCodeAt(q) === 39) return Tok.Func;

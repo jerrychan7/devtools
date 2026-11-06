@@ -49,7 +49,7 @@ const RESERVED = new Set([
 ]);
 
 /** Words after which a line break does not end the statement. */
-const CONTINUING_WORDS = new Set([
+const CONTINUING_WORDS = [
   'else',
   'do',
   'in',
@@ -65,7 +65,7 @@ const CONTINUING_WORDS = new Set([
   'let',
   'const',
   'class',
-]);
+];
 
 /** The kind of token `i`, -1 when there is none. */
 function kindAt(tokens: Tokens, i: number): number {
@@ -112,7 +112,11 @@ function charAt(source: string, tokens: Tokens, i: number): string | undefined {
 function canEndStatement(source: string, tokens: Tokens, i: number): boolean {
   const prev = kindAt(tokens, i - 1);
   if (prev === -1) return true;
-  if (prev === Kind.Word) return !CONTINUING_WORDS.has(text(source, tokens, i - 1));
+  // Without slicing the word out: asked at every line break.
+  if (prev === Kind.Word) {
+    for (const word of CONTINUING_WORDS) if (isWord(source, tokens, i - 1, word)) return false;
+    return true;
+  }
   if (prev !== Kind.Punct) return true;
   const ch = charAt(source, tokens, i - 1);
   if (ch === ')' || ch === ']' || ch === '}') return true;
@@ -124,10 +128,7 @@ function canEndStatement(source: string, tokens: Tokens, i: number): boolean {
 function continuesExpression(source: string, tokens: Tokens, i: number): boolean {
   const kind = kindAt(tokens, i);
   if (kind === -1) return false;
-  if (kind === Kind.Word) {
-    const word = text(source, tokens, i);
-    return word === 'in' || word === 'instanceof';
-  }
+  if (kind === Kind.Word) return isWord(source, tokens, i, 'in') || isWord(source, tokens, i, 'instanceof');
   const start = tokens.starts[i] ?? 0;
   if (kind === Kind.Template) return source[start] === '`';
   if (kind !== Kind.Punct) return false;
@@ -247,6 +248,10 @@ const STATEMENT_WORDS = new Set([
   'export',
   'debugger',
   'with',
+  // Not statements, but what follows a block in one.
+  'else',
+  'catch',
+  'finally',
 ]);
 
 /**
@@ -256,11 +261,33 @@ const STATEMENT_WORDS = new Set([
 export function lastExpressionStatement(source: string, options: LexOptions = {}): number | undefined {
   const tokens = tokenize(source, options);
   let start = -1;
+  /** The last top-level `{` closes a statement's block or a declaration's body, not an object literal. */
+  let block = false;
+  /** That block is a function's body (`!function () {}(x)`): a `(` or `[` after it calls or indexes. */
+  let body = false;
+  let paren = -1;
   for (let i = 0; i < tokens.length; i++) {
     if (tokens.depths[i] !== 0) continue;
+    // A bracket's closer goes on with what it opened: `class A {\n x = 1;\n}` starts nothing at `}`.
+    if (isPunct(source, tokens, i, '}') || isPunct(source, tokens, i, ')') || isPunct(source, tokens, i, ']')) continue;
+    if (isPunct(source, tokens, i, '(')) paren = i;
+    if (isPunct(source, tokens, i, '{')) {
+      body = isPunct(source, tokens, i - 1, ')') && !controlBlock(source, tokens, paren - 1, paren, i - 1);
+      // After `)`, a word, `;`, `}` or nothing; not after an operator (`=>` included) or `:`.
+      block =
+        kindAt(tokens, i - 1) !== Kind.Punct ||
+        isPunct(source, tokens, i - 1, ')') ||
+        isPunct(source, tokens, i - 1, ';') ||
+        isPunct(source, tokens, i - 1, '}');
+    }
     if (
       i === 0 ||
       isPunct(source, tokens, i - 1, ';') ||
+      // `if (a) {} await b`; an operator after it (`function () {} + 1`) goes on with an expression.
+      (block &&
+        isPunct(source, tokens, i - 1, '}') &&
+        !binaryAfterBlock(source, tokens, i) &&
+        !(body && (isPunct(source, tokens, i, '(') || isPunct(source, tokens, i, '[')))) ||
       (tokens.newlines[i] === 1 && canEndStatement(source, tokens, i) && !continuesExpression(source, tokens, i))
     )
       start = i;
@@ -275,8 +302,39 @@ export function lastExpressionStatement(source: string, options: LexOptions = {}
   return tokens.starts[start];
 }
 
+/** Token `i` after a block's `}` is an operator going on with an expression, not `(`, `[` or a word. */
+function binaryAfterBlock(source: string, tokens: Tokens, i: number): boolean {
+  return (
+    kindAt(tokens, i) === Kind.Punct &&
+    !isPunct(source, tokens, i, '(') &&
+    !isPunct(source, tokens, i, '[') &&
+    continuesExpression(source, tokens, i)
+  );
+}
+
 /** Words before `(…) {` where the braces are a statement's block, not a function body. */
 const CONTROL_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'await']);
+
+/**
+ * The word `before` the parentheses `open`…`close` (then `{`) is a statement keyword, not a
+ * method's name: `catch` only after a `}`, no statement with `()`, no name after `.`, `,` or `*`,
+ * in a class body, or after `get` / `set` / `async` / `static` on its line.
+ */
+function controlBlock(source: string, tokens: Tokens, before: number, open: number, close: number): boolean {
+  if (tokens.kinds[before] !== Kind.Word || !CONTROL_WORDS.has(text(source, tokens, before))) return false;
+  if (tokens.parents[before] === Open.ClassBrace) return false;
+  if (isWord(source, tokens, before, 'catch')) return isPunct(source, tokens, before - 1, '}');
+  if (close === open + 1) return false;
+  if (isPunct(source, tokens, before - 1, '.') || isPunct(source, tokens, before - 1, ',')) return false;
+  if (isPunct(source, tokens, before - 1, '*')) return false;
+  return !(
+    tokens.newlines[before] !== 1 &&
+    (isWord(source, tokens, before - 1, 'get') ||
+      isWord(source, tokens, before - 1, 'set') ||
+      isWord(source, tokens, before - 1, 'async') ||
+      isWord(source, tokens, before - 1, 'static'))
+  );
+}
 
 /**
  * A `return` or `new.target` outside every function body: what a function body takes and a
@@ -301,7 +359,6 @@ export function returnOutsideFunction(source: string, options: LexOptions = {}):
     functions[depth + 1] = (functions[depth] ?? 0) + (kind === 'function' ? 1 : 0);
     bodies[depth + 1] = (bodies[depth] ?? 0) + (kind === 'other' ? 0 : 1);
   };
-  const word = (i: number) => (kinds[i] === Kind.Word ? text(source, tokens, i) : '');
   const inside = (depth: number, arrows: boolean) => ((arrows ? bodies[depth] : functions[depth]) ?? 0) > 0;
   for (let i = 0; i < tokens.length; i++) {
     const kind = kinds[i];
@@ -321,8 +378,8 @@ export function returnOutsideFunction(source: string, options: LexOptions = {}):
         let opened: 'function' | 'arrow' | 'other' = 'other';
         if (isPunct(source, tokens, i - 1, '>') && source[(tokens.starts[i - 1] ?? 0) - 1] === '=') opened = 'arrow';
         else if (isPunct(source, tokens, i - 1, ')')) {
-          const before = (paren[depths[i - 1] ?? 0] ?? 0) - 1;
-          if (!CONTROL_WORDS.has(word(before))) opened = 'function';
+          const open = paren[depths[i - 1] ?? 0] ?? 0;
+          if (!controlBlock(source, tokens, open - 1, open, i - 1)) opened = 'function';
         }
         set(depth, opened);
       }

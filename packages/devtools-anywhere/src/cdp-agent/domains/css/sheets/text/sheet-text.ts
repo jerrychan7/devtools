@@ -202,10 +202,15 @@ export class SheetTexts {
       delete rec.pending;
       const rules = rulesOf(sheet);
       const next = rec.seen === this.unseenTimes && source ? applied(source, pending, rules) : null;
-      if (!next) return this.serialize(sheet, rules);
-      rec.text = next.text;
-      rec.source = next;
-      return next;
+      if (next) {
+        rec.text = next.text;
+        rec.source = next;
+        return next;
+      }
+      const serialized = this.serialize(sheet, rules);
+      // Not paired either: the recorded text is not the sheet's any more, nor given again.
+      if (!serialized) this.stale.add(sheet);
+      return serialized;
     }
     if (rec.seen !== this.unseenTimes) {
       rec.seen = this.unseenTimes;

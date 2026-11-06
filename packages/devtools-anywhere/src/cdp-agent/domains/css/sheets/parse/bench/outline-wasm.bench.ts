@@ -56,6 +56,9 @@ const check = (text: string) => {
 };
 for (const m of mats) check(m.text);
 const fragments = Number(values.fragments);
+if (!Number.isInteger(fragments) || fragments < 1) {
+  throw new Error(`--fragments wants a positive integer, got ${values.fragments}`);
+}
 for (const seed of [1, 987654321]) {
   const r = random(seed);
   for (let i = 0; i < fragments; i++) check(fragment(r));

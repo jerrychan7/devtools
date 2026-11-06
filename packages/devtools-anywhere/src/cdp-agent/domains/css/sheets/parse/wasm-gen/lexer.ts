@@ -33,6 +33,7 @@ import {
   ne,
   or,
   ret,
+  shl,
   sub,
 } from './assembler.ts';
 
@@ -132,6 +133,7 @@ export function lexerInto(m: A.Module): void {
     m.declare(fn('escape'), ['p'], 1, ['n']);
     m.declare(fn('name'), ['p'], 1, ['c']);
     m.declare(fn('badUrl'), ['p'], 1, ['c']);
+    m.declare(fn('isUrl'), ['q', 'e'], 1, ['c', 'd', 'n', 'u']);
     m.declare(fn('identLike'), ['s', 'p'], 1, ['c', 'q']);
     m.declare(fn('string'), ['p', 'quote'], 1, ['c', 'd']);
     m.declare(fn('numeric'), ['p', 'c'], 1, ['d', 's']);
@@ -178,6 +180,46 @@ export function lexerInto(m: A.Module): void {
       get('p'),
     ]);
 
+    // `url` once escapes are decoded (§4.3.4 compares the name consumed): `u` holds the code units
+    // left to match, the next in its low byte.
+    m.define(fn('isUrl'), () => [
+      set('u', i32(0x6c7275)),
+      loop('char', () => [
+        set('c', at(get('q'))),
+        if_(
+          eq(get('c'), i32(92)),
+          () => [
+            set('c', at(add(get('q'), i32(1)))),
+            if_(has(get('c'), F.Hex), () => [
+              // The escape's value, from at most 6 hex digits.
+              set('c', i32(0)),
+              set('n', i32(0)),
+              loop('hex', () => [
+                set('d', at(add(get('q'), add(get('n'), i32(1))))),
+                if_(and(ltU(get('n'), i32(6)), has(get('d'), F.Hex)), () => [
+                  set(
+                    'c',
+                    or(
+                      shl(get('c'), i32(4)),
+                      A.select(sub(get('d'), i32(48)), sub(or(get('d'), i32(32)), i32(87)), has(get('d'), F.Digit))
+                    )
+                  ),
+                  inc('n'),
+                  br('hex'),
+                ]),
+              ]),
+            ]),
+            set('q', call(fn('escape'), add(get('q'), i32(1)))),
+          ],
+          () => [inc('q')]
+        ),
+        if_(ne(or(get('c'), i32(32)), and(get('u'), i32(0xff))), () => [ret(i32(0))]),
+        set('u', A.shrU(get('u'), i32(8))),
+        brIf('char', get('u')),
+      ]),
+      eq(get('q'), get('e')),
+    ]);
+
     const toBadUrl = () => [set('k', i32(Tok.BadUrl)), ret(call(fn('badUrl'), get('p')))];
     m.define(fn('identLike'), () => [
       set('p', call(fn('name'), get('p'))),
@@ -185,12 +227,9 @@ export function lexerInto(m: A.Module): void {
       if_(ne(get('nx'), i32(40)), () => [ret(get('p'))]),
       set('nx', i32(-1)),
       inc('p'),
-      // `url(` in any case, else a function.
+      // `url(` in any case, its escapes decoded, else a function.
       set('k', i32(Tok.Func)),
-      if_(ne(sub(get('p'), get('s')), i32(4)), () => [ret(get('p'))]),
-      if_(ne(or(at(get('s')), i32(32)), i32(117)), () => [ret(get('p'))]),
-      if_(ne(or(at(add(get('s'), i32(1))), i32(32)), i32(114)), () => [ret(get('p'))]),
-      if_(ne(or(at(add(get('s'), i32(2))), i32(32)), i32(108)), () => [ret(get('p'))]),
+      if_(eqz(call(fn('isUrl'), get('s'), sub(get('p'), i32(1)))), () => [ret(get('p'))]),
       loop('ws2', () => [
         if_(and(has(at(get('p')), F.Ws), has(at(add(get('p'), i32(1))), F.Ws)), () => [inc('p'), br('ws2')]),
       ]),

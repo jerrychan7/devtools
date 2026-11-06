@@ -85,8 +85,14 @@ const pieces = [
   "'",
   '%',
 ];
+const fragments = Number(values.fragments);
+if (!Number.isInteger(fragments) || fragments < 1) {
+  throw new Error(`--fragments wants a positive integer, got ${values.fragments}`);
+}
 for (const seedArg of values.seed) {
-  let s = Number(seedArg) >>> 0 || 1;
+  // xorshift32 stays at 0 forever, so a seed must be an integer that is not 0 modulo 2^32.
+  let s = Number(seedArg) >>> 0;
+  if (!Number.isInteger(Number(seedArg)) || s === 0) throw new Error(`--seed wants a nonzero integer, got ${seedArg}`);
   const r = (n: number) => {
     s ^= s << 13;
     s >>>= 0;
@@ -95,7 +101,7 @@ for (const seedArg of values.seed) {
     s >>>= 0;
     return s % n;
   };
-  for (let i = 0, n = Number(values.fragments); i < n; i++) {
+  for (let i = 0; i < fragments; i++) {
     let t = '';
     for (let j = r(40); j > 0; j--) {
       const m = r(10);

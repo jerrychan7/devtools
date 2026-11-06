@@ -37,8 +37,9 @@ export function outlineWasm(w: Exports, text: string): CssOutline {
   const at = copyIn(w, text);
   const rules = w.run(at.len, at.narrow ? 0 : 1, at.kindsAt, at.startsAt, 0);
   const buf = w.m.buffer;
-  const rb = w.rb();
-  const db = w.db();
+  // Addresses past 2 GiB come out of the i32 negative: read them unsigned.
+  const rb = w.rb() >>> 0;
+  const db = w.db() >>> 0;
   const decls = w.dc();
   const o = new CssOutline(0, 0);
   o.rules = new Int32Array(buf.slice(rb, rb + rules * RW * 4));

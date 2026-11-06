@@ -314,3 +314,39 @@ test('properties written by name and through setProperty() in one round, a style
     [true, true, true, true]
   );
 });
+
+test('a change neither applied nor serialized and paired: the text before it is not given again', async () => {
+  const got = await page.evaluate(async () => {
+    type Source = { text: string };
+    const m = Reflect.get(globalThis, '__sheetText') as {
+      SheetTexts: new () => {
+        source(s: CSSStyleSheet, f: (s: CSSStyleSheet) => CSSRule[]): Source | null;
+        pageChanged(s: CSSStyleSheet, c: unknown): void;
+        set(s: CSSStyleSheet, t: string): void;
+      };
+      watchCssom(l: () => void, r: () => Window[]): () => void;
+      recordPageChanges(f: (s: CSSStyleSheet, text: string | undefined, change: unknown) => void): void;
+    };
+    const texts = new m.SheetTexts();
+    m.recordPageChanges((s, text, change) => (text === undefined ? texts.pageChanged(s, change) : texts.set(s, text)));
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync('.a { color: red; }');
+    const stop = m.watchCssom(
+      () => {},
+      () => [window]
+    );
+    const rulesOf = (s: CSSStyleSheet) => Array.from(s.cssRules);
+    const first = texts.source(sheet, rulesOf)?.text ?? null;
+    const rule = sheet.cssRules[0] as CSSStyleRule;
+    rule.style.setProperty('color', 'green');
+    await Promise.resolve();
+    // A text its rule is not in: the change does not apply, nor does the serialized text pair.
+    Object.defineProperty(rule, 'cssText', { value: '.z {}', configurable: true });
+    const failed = texts.source(sheet, rulesOf)?.text ?? null;
+    Reflect.deleteProperty(rule, 'cssText');
+    const after = texts.source(sheet, rulesOf)?.text ?? null;
+    stop();
+    return { first, failed, after };
+  });
+  assert.deepEqual(got, { first: '.a { color: red; }\n', failed: null, after: '.a { color: green; }\n' });
+});

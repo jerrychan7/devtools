@@ -122,12 +122,18 @@ function instrument(source: string): string {
 /**
  * Writes the lexer's files at `rev` (or the working tree's) to their own directory under
  * cache.ignore/, under their own names, and imports them. Their imports of each other have no
- * extension, which Node does not resolve: `.ts` is added to them there.
+ * extension, which Node does not resolve: `.ts` is added to them there. A revision's directory is
+ * named by the commit `rev` resolves to, so that two names of one commit share it and two commits
+ * never do.
  */
 export async function loadLexer(rev?: string, countReads = false): Promise<Lexer> {
   const files = lexerFiles(rev);
   const label = rev ?? 'worktree';
-  const dir = `${cacheDir}${label.replace(/[^\w.-]/g, '_')}${countReads ? '-reads' : ''}/`;
+  const dirName =
+    rev === undefined
+      ? 'worktree'
+      : execFileSync('git', ['rev-parse', '--verify', `${rev}^{commit}`], { cwd: coreDir, encoding: 'utf8' }).trim();
+  const dir = `${cacheDir}${dirName}${countReads ? '-reads' : ''}/`;
   mkdirSync(dir, { recursive: true });
   let instrumented = false;
   for (const [name, text] of files) {

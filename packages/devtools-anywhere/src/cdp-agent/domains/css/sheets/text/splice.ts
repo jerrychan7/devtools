@@ -136,7 +136,7 @@ export interface TopEdit {
 }
 
 /** What a text's last top-level rule may leave after it: white space and comments only. */
-const CLEAN_TAIL = /^(?:[ \t\n\r\f]|\/\*[\s\S]*?\*\/)*$/;
+const CLEAN_TAIL = /^(?:[ \t\n\r\f]|\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/)*$/;
 
 /**
  * The source after `edits` (in the order of the text, not overlapping) replaced runs of its
@@ -254,7 +254,7 @@ const terminated = (text: string, o: CssOutline, node: number) =>
  * What may follow a text's last top-level rule for the parser to be where it was at the start:
  * white space, closed comments, and CDO and CDC, which a sheet's top level skips.
  */
-const SHEET_TAIL = /^(?:[ \t\n\r\f]|\/\*[\s\S]*?\*\/|<!--|-->)*$/;
+const SHEET_TAIL = /^(?:[ \t\n\r\f]|\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/|<!--|-->)*$/;
 
 /**
  * The top-level rules of `o`, if each ends cleanly and only what the top level skips (`SHEET_TAIL`)

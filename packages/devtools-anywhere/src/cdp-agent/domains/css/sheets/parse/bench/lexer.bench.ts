@@ -20,6 +20,7 @@ const { values } = parseArgs({
   },
 });
 const runs = Number(values.runs);
+if (!Number.isInteger(runs) || runs < 1) throw new Error(`--runs wants a positive integer, got ${values.runs}`);
 const gc = (globalThis as { gc?: () => void }).gc;
 
 const mats = await materials();

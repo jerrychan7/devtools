@@ -340,6 +340,23 @@ export function registerAnimation(ctx: Context) {
   let frame = 0;
   let stopAnimations: (() => void) | null = null;
 
+  // The browser's own play(), pause() and accessors, as the probe took them before the page's
+  // hooks: the page sees none of the domain's changes, as in Chrome, nor can it change them. The
+  // page's ones without them (an older probe).
+  const natives = ctx.probe.animation;
+  const play = (a: Animation) => (natives ? Reflect.apply(natives.play, a, []) : a.play());
+  const pause = (a: Animation) => (natives ? Reflect.apply(natives.pause, a, []) : a.pause());
+  const rateOf = (a: Animation): number =>
+    natives?.rate?.get ? Number(Reflect.apply(natives.rate.get, a, [])) : a.playbackRate;
+  const setRateOf = (a: Animation, value: number) => {
+    if (natives?.rate?.set) Reflect.apply(natives.rate.set, a, [value]);
+    else a.playbackRate = value;
+  };
+  const seek = (a: Animation, value: CSSNumberish) => {
+    if (natives?.time?.set) Reflect.apply(natives.time.set, a, [value]);
+    else a.currentTime = value;
+  };
+
   /** The current time Chrome reports: in its scroll-timeline milliseconds for a scroll-driven one. */
   const current = (t: Tracked, timeline = timelineOf(ctx, t.animation)) => {
     const value = numberOf(t.animation.currentTime) ?? 0;
@@ -472,7 +489,7 @@ export function registerAnimation(ctx: Context) {
       id: String(++seq),
       animation,
       started: false,
-      rate: owed.get(animation)?.own ?? animation.playbackRate,
+      rate: owed.get(animation)?.own ?? rateOf(animation),
       seen: 0,
       start: null,
       hold: 0,
@@ -486,7 +503,7 @@ export function registerAnimation(ctx: Context) {
     collected.register(t, t.id);
     awake.set(t.id, t);
     // The slowed rate a disable left is no change of the page's; one the page set since is.
-    t.seen = owed.get(animation)?.seen ?? animation.playbackRate;
+    t.seen = owed.get(animation)?.seen ?? rateOf(animation);
     owed.delete(animation);
     syncRate(t);
     session.emit('Animation.animationCreated', { id: t.id });
@@ -505,7 +522,7 @@ export function registerAnimation(ctx: Context) {
   const syncRate = (t: Tracked): boolean => {
     const { animation } = t;
     if (animation.pending) return false;
-    const now = animation.playbackRate;
+    const now = rateOf(animation);
     const changed = now !== t.seen;
     if (changed) t.rate = now === -t.seen ? -t.rate : now;
     // The domain's rate is that of the documents' timelines in Chrome: a scroll-driven animation
@@ -514,10 +531,10 @@ export function registerAnimation(ctx: Context) {
     if (now !== wanted) {
       // The start time this moves is the domain's doing, not the page's.
       const known = startOf(animation) === t.start;
-      animation.playbackRate = wanted;
+      setRateOf(animation, wanted);
       if (known) t.start = startOf(animation) ?? t.start;
     }
-    t.seen = animation.playbackRate;
+    t.seen = rateOf(animation);
     return changed;
   };
 
@@ -610,7 +627,7 @@ export function registerAnimation(ctx: Context) {
     const updated = check(t);
     change();
     t.start = startOf(t.animation) ?? t.start;
-    t.seen = t.animation.playbackRate;
+    t.seen = rateOf(t.animation);
     return updated;
   };
 
@@ -655,10 +672,14 @@ export function registerAnimation(ctx: Context) {
         }
         // Taken by a session enabled since, which writes the rate itself: no longer `seen`. A rate
         // the page set meanwhile is kept, and stays owed for the next session to report.
-        const now = animation.playbackRate;
+        const now = rateOf(animation);
         if (now !== seen && now !== -seen) return;
         owed.delete(animation);
-        animation.playbackRate = now === seen ? own : -own;
+        setRateOf(animation, now === seen ? own : -own);
+        // A session enabled since that took it over saw the slowed rate: the one written here is
+        // ours too, not the page's change to report.
+        const taken = tracked.get(animation);
+        if (taken) taken.seen = rateOf(animation);
       };
       animation.ready.then(restore, restore);
     }
@@ -682,8 +703,8 @@ export function registerAnimation(ctx: Context) {
       const list = animations.map(find);
       for (const t of list) {
         quietly(t, () => {
-          if (paused) t.animation.pause();
-          else if (t.animation.playState === 'paused') t.animation.play();
+          if (paused) pause(t.animation);
+          else if (t.animation.playState === 'paused') play(t.animation);
         });
         wake(t);
       }
@@ -719,10 +740,10 @@ export function registerAnimation(ctx: Context) {
           const percent = range > 0 ? (time / MS_PER_PX / range) * 100 : 0;
           value = CSS.percent(end === null ? percent : Math.min(percent, end));
         }
-        // Only the page's own calls: they throw a DOMException (or a TypeError) the page decides.
+        // The browser's own calls: they throw a DOMException (or a TypeError) for what the page set.
         try {
-          if (animation.playState !== 'paused') animation.play();
-          if (value !== null) animation.currentTime = value;
+          if (animation.playState !== 'paused') play(animation);
+          if (value !== null) seek(animation, value);
         } catch (error) {
           // Of any realm: an iframe's animation throws its window's errors.
           const pageError =

@@ -204,6 +204,14 @@ export interface Intercept {
   noCache?: boolean;
 }
 
+/** @internal See {@link Probe.animation}. */
+export interface AnimationNatives {
+  play: Animation['play'];
+  pause: Animation['pause'];
+  rate: PropertyDescriptor | undefined;
+  time: PropertyDescriptor | undefined;
+}
+
 /** @internal */
 export interface Probe {
   version: 1;
@@ -231,8 +239,17 @@ export interface Probe {
   shadowRoots: WeakMap<Element, ShadowRoot>;
   /** Subscribes to shadow roots being attached. */
   onShadowRoot(listener: (root: ShadowRoot) => void): () => void;
-  /** Subscribes to animations being made with `animate()` or `new Animation()`, played, paused or cancelled. */
+  /**
+   * Subscribes to animations being made with `animate()` or `new Animation()`, played, paused,
+   * cancelled, reversed, finished, or given a rate or a time.
+   */
   onAnimation(listener: (animation: Animation) => void): () => void;
+  /**
+   * `Animation.prototype`'s own `play`, `pause` and accessors of `playbackRate` and `currentTime`,
+   * taken before the probe's hooks and any the page added later: the Animation domain's changes are
+   * not seen by the page, as in Chrome. Undefined without `Animation` (or from an older probe).
+   */
+  animation?: AnimationNatives | undefined;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;
   /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */
