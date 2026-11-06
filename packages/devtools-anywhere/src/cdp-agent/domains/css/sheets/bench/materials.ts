@@ -66,11 +66,21 @@ async function realWorld(): Promise<string> {
   return bytes.toString('utf8');
 }
 
-export async function materials(): Promise<Material[]> {
-  return [
+/**
+ * The four materials. With `offline`, all.css is left out, with a warning, when it is neither
+ * downloaded yet nor can be (the tests run without a network).
+ */
+export async function materials(offline = false): Promise<Material[]> {
+  const list: Material[] = [
     { name: 'generated', about: '2.6 MB, one rule and one @media 20,000 times', text: generated() },
     { name: 'common', about: '49 KB, hand-written-looking rules', text: common() },
     { name: 'mixed', about: '93 KB, escapes, strings, url(), numbers, non-ASCII', text: mixed() },
-    { name: 'all.css', about: '125 KB, webPixelUIengine release (var(), calc())', text: await realWorld() },
   ];
+  try {
+    list.push({ name: 'all.css', about: '125 KB, webPixelUIengine release (var(), calc())', text: await realWorld() });
+  } catch (e) {
+    if (!offline) throw e;
+    console.warn(`all.css left out: ${(e as Error).message}`);
+  }
+  return list;
 }
