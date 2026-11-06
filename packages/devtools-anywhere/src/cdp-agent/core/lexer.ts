@@ -160,9 +160,12 @@ class Lexer {
     };
   }
 
-  /** The code unit at `i`, 0 outside the source (lexer.c pads its buffer the same way). */
+  /**
+   * The code unit at `i`, 0 outside the source (lexer.c pads its buffer the same way): there
+   * `charCodeAt` gives NaN, and `NaN | 0` is 0, without a bounds check of our own.
+   */
   private c(i: number): number {
-    return i >= 0 && i < this.end ? this.src.charCodeAt(i) : 0;
+    return this.src.charCodeAt(i) | 0;
   }
 
   private top(index: number): OpenToken {
@@ -197,7 +200,7 @@ class Lexer {
       this.lineComment();
     }
     for (; this.pos < this.end; this.pos++) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (isBrOrWs(ch)) {
         if (isBr(ch)) this.newline = true;
         continue;
@@ -363,7 +366,7 @@ class Lexer {
   /** lexer.c `templateString`: scans to the closing backtick or to a `${`. */
   private templateString(start: number) {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === 36 && this.c(this.pos + 1) === 123) {
         this.pos++;
         this.push(Open.TemplateBrace, this.pos);
@@ -390,7 +393,7 @@ class Lexer {
   private blockComment() {
     this.pos++;
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (isBr(ch)) this.newline = true;
       else if (ch === 42 && this.c(this.pos + 1) === 47) {
         this.pos++;
@@ -401,13 +404,13 @@ class Lexer {
 
   /** lexer.c `lineComment`. Leaves `pos` before the line terminator. */
   private lineComment() {
-    while (this.pos + 1 < this.end && !isBr(this.c(this.pos + 1))) this.pos++;
+    while (this.pos + 1 < this.end && !isBr(this.src.charCodeAt(this.pos + 1))) this.pos++;
   }
 
   /** lexer.c `stringLiteral`. An unterminated string ends before the line break. */
   private stringLiteral(quote: number) {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === quote) return;
       if (ch === 92) {
         const next = this.c(++this.pos);
@@ -423,7 +426,7 @@ class Lexer {
   /** lexer.c `regularExpression`. An unterminated literal ends before the line break. */
   private regularExpression() {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === 47) return;
       if (ch === 91) {
         if (!this.regexCharacterClass()) return;
@@ -439,7 +442,7 @@ class Lexer {
   /** lexer.c `regexCharacterClass`. */
   private regexCharacterClass(): boolean {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === 93) return true;
       if (ch === 92) this.pos++;
       else if (isBr(ch)) {
