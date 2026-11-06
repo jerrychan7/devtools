@@ -292,3 +292,40 @@ for (const css of [
     assert.equal(chrome.styleEdit, 'ok');
     assert.ok(chrome.text.startsWith('@namespace'));
   });
+
+test('selectors with escapes: setStyleTexts and setRuleSelector edit the text as written', async () => {
+  const css = `.x\\31 0 , .\\78 2\\:b { color: red }
+.x\\31 0 { :\\6e ot(.\\7a) { top: 1px } }
+`;
+  const [ours, chrome] = await each(async (side, t) => {
+    const at = await addStyle(t, css, '<p class="x10 x2:b">x</p>');
+    const target = `${at} p`;
+    const first = await matched(side, target);
+    const res = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, target) });
+    const raws = (res.matchedCSSRules ?? []).map(m => m.rule).filter(r => r.styleSheetId === first.sheet);
+    const both = raws.find(r => r.selectorList.selectors.length === 2);
+    assert.ok(both?.style.range);
+    const styles = await side.send('CSS.setStyleTexts', {
+      edits: [{ styleSheetId: first.sheet, range: both.style.range, text: ' color: blue ' }],
+    });
+    const [a, b] = [both.selectorList.selectors[0]?.range, both.selectorList.selectors[1]?.range];
+    assert.ok(a && b);
+    const selector = await side.send('CSS.setRuleSelector', {
+      styleSheetId: first.sheet,
+      range: { startLine: a.startLine, startColumn: a.startColumn, endLine: b.endLine, endColumn: b.endColumn },
+      selector: '.\\78 2\\:b,  .x\\31 0',
+    });
+    const last = await matched(side, target);
+    return {
+      first: first.rules,
+      styles: styles.styles.map(style),
+      selector: selector.selectorList.selectors.map(s => [s.text, s.range]),
+      rules: last.rules,
+      text: await text(side, last.sheet),
+    };
+  });
+  assert.deepEqual(ours, chrome);
+  // As written and edited, not serialized from the CSSOM.
+  assert.ok(ours.text.includes('.\\78 2\\:b,  .x\\31 0 { color: blue }'), ours.text);
+  assert.ok(ours.text.includes(':\\6e ot(.\\7a)'), ours.text);
+});

@@ -110,6 +110,20 @@ test('selectors the CSSOM writes otherwise, at the top and nested, around droppe
     '.b1'
   ));
 
+test('selectors with escapes the CSSOM writes otherwise or keeps, and an at-rule name with one', () =>
+  same(
+    `.e\\66oo { top: 1px }
+.e\\:b, .\\31 0e { left: 1px }
+.e\\-1\\31, .\\65 foo, .efoo[data-x=y\\ z] { right: 1px }
+@\\6d edia screen { .efoo:\\6e ot(.\\31) { bottom: 1px } }
+.efoo { &.\\31 { margin: 0 } [data-x='\\79'] { padding: 0 } }
+@\\6b eyframes ek1 { from { top: 0 } }
+@-webkit-\\6b eyframes ek2 { to { top: 1px } }
+.efoo:\\4e th-child( \\6f dd ) { animation: ek1 1s, ek2 1s }`,
+    '<p class="efoo e:b 10e" data-x="y">x</p>',
+    '.efoo'
+  ));
+
 test('relative selector lists in nested rules', () =>
   same(
     `.p1 { a, img { color: red } }

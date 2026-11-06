@@ -6,6 +6,7 @@ import { isCssom } from '../../../../core/realm';
 import { ownEdit, ownStyle } from '../watch/cssom-watch';
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
+import { atName, loose } from './loose';
 import { lineStarts } from './text-lines';
 
 /**
@@ -65,42 +66,6 @@ export const childRules = (rule: CSSRule): ArrayLike<CSSRule> => {
   const list: unknown = 'cssRules' in rule ? rule.cssRules : undefined;
   return list && typeof list === 'object' && (list as CSSRuleList).length ? (list as CSSRuleList) : NO_RULES;
 };
-/**
- * Strings, which `CSSOM_WRITES` leaves as they are; a legacy pseudo-element, written with one
- * colon (not escaped, nor the second of two); an attribute selector's value written as an
- * identifier, with its modifier.
- */
-const CSSOM_WRITES =
-  /("(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*')|(?<![:\\]):(before|after|first-line|first-letter)(?![\w\\-])|\[\s*([-\w]+)\s*([~|^$*]?=)\s*(-?[_a-zA-Z][-\w]*)\s*(?:\s([iIsS]))?\s*\]/g;
-
-/**
- * A selector as the CSSOM writes it back, where that is easily told: legacy pseudo-elements with
- * two colons (`::before` for `:before`), attribute values quoted (`[type="file"]`).
- */
-const asCssomWrites = (s: string) =>
-  !s.includes(':') && !s.includes('[')
-    ? s
-    : s.replace(CSSOM_WRITES, (all, str, pseudo, name, op, value, flag) =>
-        str !== undefined
-          ? all
-          : pseudo !== undefined
-            ? `::${(pseudo as string).toLowerCase()}`
-            : `[${name}${op}"${value}"${flag ? ` ${(flag as string).toLowerCase()}` : ''}]`
-      );
-
-/**
- * Without whitespace and comments, and the `&` each selector of a list may start with: the CSSOM
- * adds one to every relative selector (`a, img` in a style rule is `& a, & img`). What the CSSOM
- * writes otherwise and `asCssomWrites` tells is written as the CSSOM does, so that such a selector
- * does not take a style sheet parsed alone to be told the same.
- */
-const loose = (s: string) =>
-  asCssomWrites(s.replace(/\/\*[\s\S]*?(\*\/|$)/g, ''))
-    .replace(/\s+/g, '')
-    .split(',')
-    .map(p => p.replace(/^&/, ''))
-    .join(',');
-
 /**
  * Pairs the CSSOM's rules with those of the text's outline, in order: outline rules the CSSOM
  * dropped (invalid ones, runs of declarations it found all invalid) are passed over; a CSSOM rule
@@ -228,7 +193,9 @@ function matches(
     const written: unknown = Reflect.get(rule, tag === 'CSSStyleRule' ? 'selectorText' : 'keyText');
     if (typeof written !== 'string') return false;
     // As written most often; else without what the CSSOM drops or adds.
-    if (prelude === written || loose(prelude) === loose(written)) return true;
+    if (prelude === written) return true;
+    const loosened = loose(written);
+    if (loose(prelude) === loosened) return true;
     // Serialized otherwise (escapes, `from` for 0%): as the browser serializes the text alone,
     // after the sheet's @namespace rules (`svg|\61` is `svg|a` only where `svg` is declared).
     const sheet = new CSSStyleSheet();
@@ -243,12 +210,11 @@ function matches(
     for (let inner = first && childRules(first)[0]; inner; inner = childRules(inner)[0]) first = inner;
     if (!first || tagOf(first) !== tag) return false;
     const parsed = first && (isCssom(first, 'CSSStyleRule') ? first.selectorText : Reflect.get(first, 'keyText'));
-    return typeof parsed === 'string' && loose(parsed) === loose(written);
+    return typeof parsed === 'string' && loose(parsed) === loosened;
   }
   if (kind !== 'at') return false;
   const name = AT_NAMES[tag];
-  const written = o
-    .name(text, node)
+  const written = atName(o.name(text, node))
     .toLowerCase()
     .replace(/^-webkit-/, '');
   // The margin rules of @page are named after their box.
