@@ -3,7 +3,7 @@ import { frames } from '../../core/frames/frames';
 import { closestOwn, isOwn } from '../../core/nodes/nodes';
 import { isCssom, isElement, isHtml, isNode } from '../../core/realm';
 import { isCompanion, pageRulesRewritten } from '../css/matching/forced-pseudo';
-import { ownEdit, ownStyle } from '../css/sheets/watch/cssom-watch';
+import { ownSet, ownStyle } from '../css/sheets/watch/cssom-watch';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
 export type Rewrite = (text: string) => string;
@@ -119,7 +119,7 @@ function sync(): boolean {
         mediaRewrites,
         () => list.mediaText,
         // Ours, not a change of the page's to report.
-        t => ownEdit(() => (list.mediaText = t))
+        t => ownSet(list, 'mediaText', t)
       ) || changed;
   };
   const visitRules = (rules: CSSRuleList) => {
@@ -134,7 +134,7 @@ function sync(): boolean {
       // Only blocks using env() are read again on every change (with the rewrite gone, those rewritten).
       if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || style.cssText.includes('env('))) {
         // Ours, not a change of the page's to report.
-        const set = (t: string) => ownEdit(() => (style.cssText = t));
+        const set = (t: string) => ownSet(style, 'cssText', t);
         changed = fix(styles, style, seenStyles, valueRewrites, () => style.cssText, set) || changed;
       }
       if (isCssom(rule, 'CSSGroupingRule') || isCssom(rule, 'CSSKeyframesRule')) visitRules(rule.cssRules);

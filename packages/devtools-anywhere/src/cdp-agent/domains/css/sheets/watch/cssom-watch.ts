@@ -7,8 +7,8 @@ import { isCssom, realmOf } from '../../../../core/realm';
  * (`mediaText`, appendMedium(), deleteMedium()), hooked on the prototypes of each realm while
  * someone watches (like adopted.ts). The hooks are proxies of the native functions: their name,
  * length and that they cannot be constructed stay the same, and `toString()` keeps the native
- * form (without the name). The CSS domain's own changes are made through `ownEdit`, and not
- * reported.
+ * form (without the name). The CSS domain's own changes are not reported: made through the
+ * native functions (`ownCall`, `ownSet`), past the hooks, or within `ownEdit`.
  *
  * A MediaList does not tell its rule: the `media` getters of rules note it (`rule.media` is the
  * same list each time), so a list taken before anyone watched goes unseen, as does the sheet's
@@ -211,14 +211,123 @@ export function forgetSheet(sheet: CSSStyleSheet): void {
   for (const rule of reported) if (sheetOf(rule) === sheet) reported.delete(rule);
 }
 
-/** A rule's style, read by the CSS domain: not taken by the page. */
-export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclaration {
-  own++;
-  try {
-    return rule.style;
-  } finally {
-    own--;
+/** What the CSS domain changes the CSSOM with, as `part:name`. */
+const OWN_KEYS = [
+  'value:insertRule',
+  'value:deleteRule',
+  'value:replaceSync',
+  'set:cssText',
+  'set:selectorText',
+  'set:keyText',
+  'set:mediaText',
+  'get:style',
+];
+type Native = (...args: unknown[]) => unknown;
+
+/**
+ * The functions of `OWN_KEYS` on the top window's interface prototypes, by prototype and by
+ * interface name: taken when the agent loads, before our hooks replace them. They are the native
+ * ones unless a page script that ran before the agent replaced them already; those are called
+ * then, as they were before. Web IDL checks the interface, not the realm: the top page's take an
+ * iframe's objects too.
+ */
+const topNatives = new Map<object, Map<string, Native>>();
+const ownNatives = new Map<string, Map<string, Native>>();
+for (const name of Object.getOwnPropertyNames(globalThis)) {
+  if (!/^(CSS\w*|MediaList)$/.test(name)) continue;
+  const proto: unknown = (Reflect.get(globalThis, name) as { prototype?: unknown } | undefined)?.prototype;
+  if (typeof proto !== 'object' || proto === null) continue;
+  const found = new Map<string, Native>();
+  for (const key of OWN_KEYS) {
+    const [part, prop] = key.split(':') as [Part, string];
+    const fn: unknown = Object.getOwnPropertyDescriptor(proto, prop)?.[part];
+    if (typeof fn === 'function') found.set(key, fn as Native);
   }
+  if (!found.size) continue;
+  topNatives.set(proto, found);
+  ownNatives.set(name, found);
+}
+/** The native function found for each prototype and `part:name` (null: none). */
+const nativeCache = new WeakMap<object, Map<string, Native | null>>();
+
+/**
+ * The native function `self`'s `part:name` is, up its prototypes: the top window's own, or, in
+ * another realm, the top window's of the interface the prototype names (`Symbol.toStringTag`),
+ * if it has `name` of its own. The page may rename a prototype: a function that then refuses
+ * `self` is given up (`viaNative`).
+ */
+function nativeOf(self: object, key: string): Native | null {
+  const proto: unknown = Object.getPrototypeOf(self);
+  if (typeof proto !== 'object' || proto === null) return null;
+  let cached = nativeCache.get(proto);
+  if (!cached) nativeCache.set(proto, (cached = new Map()));
+  let fn = cached.get(key);
+  if (fn !== undefined) return fn;
+  fn = null;
+  const [part, prop] = key.split(':') as [Part, string];
+  for (let p: unknown = proto; !fn && typeof p === 'object' && p !== null; p = Object.getPrototypeOf(p)) {
+    const top = topNatives.get(p);
+    if (top) {
+      fn = top.get(key) ?? null;
+      continue;
+    }
+    if (typeof Object.getOwnPropertyDescriptor(p, prop)?.[part] !== 'function') continue;
+    const tag: unknown = Object.getOwnPropertyDescriptor(p, Symbol.toStringTag)?.value;
+    fn = (typeof tag === 'string' && ownNatives.get(tag)?.get(key)) || null;
+  }
+  cached.set(key, fn);
+  return fn;
+}
+
+/**
+ * Runs `native` with `self`'s native function for `key`, or `otherwise` within `ownEdit` when
+ * there is none, or when it refuses `self` (a TypeError: an interface the page renamed).
+ */
+function viaNative<T>(self: object, key: string, native: (fn: Native) => T, otherwise: () => T): T {
+  const fn = nativeOf(self, key);
+  if (fn)
+    try {
+      return native(fn);
+    } catch (e) {
+      if (!(e instanceof TypeError) && (e as { name?: unknown } | null)?.name !== 'TypeError') throw e;
+      nativeCache.get(Object.getPrototypeOf(self) as object)?.set(key, null);
+    }
+  return ownEdit(otherwise);
+}
+
+/**
+ * Calls `self`'s method `name` (insertRule(), deleteRule(), replaceSync()), the CSS domain's own
+ * change: the native function, past the hooks. The hooks do nothing for it (`own`); called
+ * thousands of times when a sheet's text is set rule by rule. Through `ownEdit` for a method with
+ * no native function known.
+ */
+export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
+  return viaNative(
+    self,
+    `value:${name}`,
+    fn => Reflect.apply(fn, self, args) as T,
+    () => Reflect.apply(Reflect.get(self, name) as Native, self, args) as T
+  );
+}
+
+/** Sets `self`'s `name` (`cssText`, `selectorText`, `keyText`, `mediaText`), like `ownCall`. */
+export function ownSet(self: object, name: string, value: unknown): void {
+  viaNative(
+    self,
+    `set:${name}`,
+    fn => void Reflect.apply(fn, self, [value]),
+    () => void Reflect.set(self, name, value)
+  );
+}
+
+/** A rule's style, read by the CSS domain (not taken by the page): through the native getter. */
+export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclaration {
+  return viaNative(
+    rule,
+    'get:style',
+    fn => Reflect.apply(fn, rule, []) as CSSStyleDeclaration,
+    () => rule.style
+  );
 }
 
 /** The rule each media list belongs to, noted when read (`rule.media`). */

@@ -5,6 +5,7 @@
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { replacedLines } from './text-lines';
+import { ownCall } from '../watch/cssom-watch';
 import { type SheetSource, TOP, childRules, pairList, tagOf } from './pair';
 
 /**
@@ -514,7 +515,7 @@ export function retexted(
   // neither moves the many rules after them (as deleting or inserting each first would).
   for (let i = before.length - 1; i >= 0; i--) {
     const k = ruleAt[i] as number;
-    if (!kept[i] && k >= 0) sheet.deleteRule(k);
+    if (!kept[i] && k >= 0) ownCall(sheet, 'deleteRule', k);
   }
   const added: (CSSRule | undefined)[] = [];
   index = a;
@@ -524,7 +525,7 @@ export function retexted(
       if ((ruleAt[i] as number) >= 0) index++;
     } else
       try {
-        sheet.insertRule(textOf(newText, outlined, nodes[j] as number), index);
+        ownCall(sheet, 'insertRule', textOf(newText, outlined, nodes[j] as number), index);
         added[j] = sheet.cssRules[index];
         index++;
       } catch {

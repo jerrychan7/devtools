@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
+import { ownSet } from './sheets/watch/cssom-watch';
 
 export type CSSStyle = Protocol.CSS.CSSStyle;
 export type CSSProperty = Protocol.CSS.CSSProperty;
@@ -132,7 +133,7 @@ export function styleOf(
   const probe = document.createElement('div').style;
   for (const { name, value, shown: asWritten, important, disabled, text, range } of written) {
     // Whether the browser accepts the declaration.
-    probe.cssText = `${name}: ${value}${important ? ' !important' : ''};`;
+    ownSet(probe, 'cssText', `${name}: ${value}${important ? ' !important' : ''};`);
     const parsedOk = probe.length > 0;
     // Like Chrome, values of !important declarations keep the flag.
     const shown = asWritten ?? (important ? `${value} !important` : value);

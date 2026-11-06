@@ -1,6 +1,6 @@
 import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { nativeAdopted, quietly } from '../../../core/nodes/adopted';
-import { ownEdit } from '../sheets/watch/cssom-watch';
+import { ownCall } from '../sheets/watch/cssom-watch';
 import { Tok, tokenize } from '../sheets/parse/css-lexer';
 import type { TreeScope } from './forced-pseudo';
 
@@ -102,7 +102,7 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
         // One rule each: an invalid selector drops its rule only.
         const rules = made.flatMap((rule, i) => subjects.map((own, j) => rule(`${name(k, i)}:${j}`, own))).join('\n');
         const sheet = new realm.CSSStyleSheet();
-        ownEdit(() => sheet.replaceSync(`${namespaces}\n${rules}`));
+        ownCall(sheet, 'replaceSync', `${namespaces}\n${rules}`);
         probes.push(sheet);
       }
     } catch {

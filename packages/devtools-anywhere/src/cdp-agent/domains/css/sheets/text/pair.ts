@@ -3,7 +3,7 @@
 // (selectors loosened to what the CSSOM writes back). Gives the SheetSource the other modules of
 // this directory read and update.
 import { isCssom } from '../../../../core/realm';
-import { ownEdit, ownStyle } from '../watch/cssom-watch';
+import { ownCall, ownStyle } from '../watch/cssom-watch';
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { atName, loose } from './loose';
@@ -201,7 +201,7 @@ function matches(
     const sheet = new CSSStyleSheet();
     try {
       // Our own sheet: not reported as the page's change.
-      ownEdit(() => sheet.replaceSync(namespaces + wrap(prelude)));
+      ownCall(sheet, 'replaceSync', namespaces + wrap(prelude));
     } catch {
       return false;
     }

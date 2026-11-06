@@ -26,8 +26,25 @@ import { offsetsOf } from './sheets/text/ranges';
 import { stopWarming, warmUp } from './sheets/text/warm';
 import { ROOT } from './sheets/parse/css-outline';
 import { outline } from './sheets/parse/css-outline-wasm';
-import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/watch/cssom-watch';
-import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, normalizePseudo, setStyleText, sources } from './style';
+import {
+  editedBy,
+  ownCall,
+  ownEdit,
+  ownSet,
+  ownStyle,
+  watchCssom,
+  watchRealms,
+  watching,
+} from './sheets/watch/cssom-watch';
+import {
+  type CSSStyle,
+  type ComputedStyleResponse,
+  INLINE_PREFIX,
+  buildStyle,
+  normalizePseudo,
+  setStyleText,
+  sources,
+} from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
 const OBSERVED: MutationObserverInit = {
@@ -333,9 +350,9 @@ export function registerCss(ctx: Context) {
     editSheet(
       sheet,
       splice(sheet, edit.range, edit.text),
-      () => setStyleText(style, edit.text, () => (style.cssText = edit.text)),
+      () => setStyleText(style, edit.text, () => ownSet(style, 'cssText', edit.text)),
       () => {
-        style.cssText = old;
+        ownSet(style, 'cssText', old);
         if (oldSource) sources.set(style, oldSource);
         else sources.delete(style);
       },
@@ -451,8 +468,8 @@ export function registerCss(ctx: Context) {
       source.text.slice(o.preludeEnd(node), o.end(node));
     const swap = (ruleText: string) => {
       const i = Array.from(parent.cssRules).indexOf(current);
-      parent.deleteRule(i);
-      parent.insertRule(ruleText, i);
+      ownCall(parent, 'deleteRule', i);
+      ownCall(parent, 'insertRule', ruleText, i);
       current = parent.cssRules[i] ?? current;
     };
     // The rule objects change: the text is paired again whole.
@@ -679,16 +696,16 @@ export function registerCss(ctx: Context) {
       let recorded = false;
       const replace = (text: string) => {
         recorded = false;
-        if (isConstructed(sheet)) return sheet.replaceSync(text);
+        if (isConstructed(sheet)) return ownCall<void>(sheet, 'replaceSync', text);
         if (sheets.texts.retext(sheet, text, s => sheets.rulesOf(s))) {
           recorded = true;
           return;
         }
-        while (sheet.cssRules.length) sheet.deleteRule(sheet.cssRules.length - 1);
+        while (sheet.cssRules.length) ownCall(sheet, 'deleteRule', sheet.cssRules.length - 1);
         const o = outline(text);
         for (let node = o.firstChild(ROOT); node >= 0; node = o.next(node))
           try {
-            sheet.insertRule(text.slice(o.start(node), o.end(node)), sheet.cssRules.length);
+            ownCall(sheet, 'insertRule', text.slice(o.start(node), o.end(node)), sheet.cssRules.length);
           } catch {
             // Dropped, as the parser drops it.
           }
@@ -732,8 +749,8 @@ export function registerCss(ctx: Context) {
       editSheet(
         sheet,
         splice(sheet, params.range, params.selector),
-        () => (rule.selectorText = params.selector),
-        () => (rule.selectorText = old),
+        () => ownSet(rule, 'selectorText', params.selector),
+        () => ownSet(rule, 'selectorText', old),
         params.range
       );
       stylesChanged();
@@ -750,8 +767,8 @@ export function registerCss(ctx: Context) {
       editSheet(
         sheet,
         splice(sheet, params.range, params.text),
-        () => (media.mediaText = params.text),
-        () => (media.mediaText = old),
+        () => ownSet(media, 'mediaText', params.text),
+        () => ownSet(media, 'mediaText', old),
         params.range
       );
       stylesChanged();
@@ -805,15 +822,15 @@ export function registerCss(ctx: Context) {
       const old = rule.keyText;
       // Chrome's error for a key the parser does not take.
       const alone = new CSSStyleSheet();
-      ownEdit(() => alone.replaceSync(`@keyframes x { ${params.keyText} {} }`));
+      ownCall(alone, 'replaceSync', `@keyframes x { ${params.keyText} {} }`);
       const parsed = alone.cssRules[0];
       if (!isCssom(parsed, 'CSSKeyframesRule') || parsed.cssRules.length !== 1)
         throw new CdpError('SyntaxError Keyframe key text is not valid.');
       editSheet(
         sheet,
         splice(sheet, params.range, params.keyText),
-        () => (rule.keyText = params.keyText),
-        () => (rule.keyText = old),
+        () => ownSet(rule, 'keyText', params.keyText),
+        () => ownSet(rule, 'keyText', old),
         params.range
       );
       stylesChanged();
@@ -903,7 +920,7 @@ export function registerCss(ctx: Context) {
       const after = splice(sheet, params.location, params.ruleText)(before);
       let index: number;
       try {
-        index = ownEdit(() => target.insertRule(params.ruleText, at < 0 ? target.cssRules.length : at));
+        index = ownCall<number>(target, 'insertRule', params.ruleText, at < 0 ? target.cssRules.length : at);
       } catch (e) {
         // By name: the sheet may be another frame's, with a DOMException of its own. Chrome 156's
         // messages: a rule before an @import, and one that cannot be in a group rule (@import).
@@ -917,7 +934,7 @@ export function registerCss(ctx: Context) {
       }
       const rule = target.cssRules[index];
       if (!isCssom(rule, 'CSSStyleRule')) {
-        ownEdit(() => target.deleteRule(index));
+        ownCall(target, 'deleteRule', index);
         throw new CdpError('Failed to parse rule text');
       }
       // The generation of the text left (-1: not made yet): undo and redo put back theirs only if
@@ -938,12 +955,12 @@ export function registerCss(ctx: Context) {
       history.record({
         undo: () => {
           const at = Array.from(target.cssRules).indexOf(added);
-          if (at >= 0) ownEdit(() => target.deleteRule(at));
+          if (at >= 0) ownCall(target, 'deleteRule', at);
           record(before);
           stylesChanged();
         },
         redo: () => {
-          const i = ownEdit(() => target.insertRule(text, Math.min(index, target.cssRules.length)));
+          const i = ownCall<number>(target, 'insertRule', text, Math.min(index, target.cssRules.length));
           added = target.cssRules[i] ?? added;
           record(after);
           stylesChanged();
