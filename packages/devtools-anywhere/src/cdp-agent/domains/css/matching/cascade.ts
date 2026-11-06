@@ -1,5 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
-import { documentOf, isCssom, styleOf, isElement, isHtmlElement, isShadowRoot, isSvgElement } from '../../../core/realm';
+import { documentOf, isCssom, isElement, isHtmlElement, isShadowRoot, isSvgElement } from '../../../core/realm';
 import { containerMatches, parentOf } from '../../../core/style/container-query';
 import { type NodeRegistry, isPseudoType } from '../../../core/nodes/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../../../core/style/selectors';
@@ -11,7 +11,8 @@ import { hostMatcher } from './host';
 import { hasDefaultNamespace, matchInNamespaces, withoutNamedPrefix } from './namespaces';
 import { namespaceText } from '../sheets/text/pair';
 import type { UserAgentStyles } from '../user-agent/user-agent';
-import { type CSSStyle, INLINE_PREFIX, buildStyle, logicalSide, pseudoMatches, sources, splitPseudoElement } from '../style';
+import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
+import { ViewTransitionClasses, pseudoClassesMatch, pseudoMatches } from './pseudo-element';
 
 /** A style rule ready for matching: its selectors resolved and split, with forced pseudo-classes rewritten. */
 type Candidate = {
@@ -32,6 +33,8 @@ type Candidate = {
     spec: Protocol.CSS.Specificity;
     /** For `<slot selector>::slotted(<slotted>)`. */
     slotted: string | null;
+    /** The pseudo-classes after its pseudo-element (`:disabled`), or null. */
+    pseudoClasses: string | null;
   }[];
 };
 
@@ -59,6 +62,8 @@ export class Cascade {
   private readonly rules: RuleView;
   /** The user agent style sheet's rules, which come before all others. */
   private readonly userAgent: UserAgentStyles | null;
+  /** The view transitions' classes, for `::view-transition-*(.class)`. */
+  readonly viewTransitions = new ViewTransitionClasses();
 
   constructor(
     sheets: SheetRegistry,
@@ -111,6 +116,7 @@ export class Cascade {
         return {
           index,
           pseudo: slotted === undefined ? split.pseudo : 'slotted',
+          pseudoClasses: slotted === undefined ? split.pseudoClasses : null,
           host: this.forced.rewrite(split.host),
           spec,
           slotted: slotted === undefined ? null : this.forced.rewrite(slotted),
@@ -280,15 +286,6 @@ export class Cascade {
     const byTree = this.request ?? this.candidates();
     // Rules of a shadow tree reach outside it only through `:host` and `::slotted()`.
     const ownShadow = this.nodes.shadowRootOf(el);
-    let vtClasses: Map<string, string[]> | undefined;
-    const classesOf = (name: string) => {
-      vtClasses ??= viewTransitionClasses(documentOf(el));
-      return vtClasses.get(name) ?? [];
-    };
-    const logical = (side: string) => {
-      const style = styleOf(el);
-      return logicalSide(side, style.writingMode, style.direction);
-    };
     const elRoot = el.getRootNode();
     const groups: [Candidate[] | undefined, 'own' | 'host' | 'slotted', HTMLSlotElement | null, number][] = [
       // An element of an iframe's document matches the rules of that document only.
@@ -317,7 +314,9 @@ export class Cascade {
                 (!!slot?.matches(s.host) && el.matches(s.slotted))
               );
             }
-            if (s.pseudo !== pseudo && (!s.pseudo || !pseudo || !pseudoMatches(s.pseudo, pseudo, classesOf, logical)))
+            if (s.pseudo !== pseudo && (!s.pseudo || !pseudo || !pseudoMatches(s.pseudo, pseudo, el, this.viewTransitions)))
+              return false;
+            if (s.pseudoClasses && pseudo && !pseudoClassesMatch(s.pseudoClasses, el, pseudo, this.viewTransitions))
               return false;
             const declared = this.inNamespaces(kind, group ?? [], el, candidate, s);
             if (kind === 'host') {
@@ -409,18 +408,3 @@ export class Cascade {
   }
 }
 
-/**
- * The `view-transition-class` of each `view-transition-name` in `doc`, for `::view-transition-*()`
- * selectors with classes.
- */
-function viewTransitionClasses(doc: Document): Map<string, string[]> {
-  const result = new Map<string, string[]>();
-  for (const el of Array.from(doc.querySelectorAll('*'))) {
-    const style = styleOf(el);
-    const name = style.getPropertyValue('view-transition-name').trim();
-    if (!name || name === 'none' || result.has(name)) continue;
-    const classes = style.getPropertyValue('view-transition-class').trim();
-    result.set(name, classes && classes !== 'none' ? classes.split(/\s+/) : []);
-  }
-  return result;
-}

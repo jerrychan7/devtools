@@ -115,7 +115,9 @@ function parse(text: string): UaRule[] {
   const add = (selectorText: string, decl: CSSStyleDeclaration) => {
     const selectors = splitTopLevel(selectorText, ',').map(raw => {
       const text = raw.trim();
-      const { host, pseudo } = splitPseudoElement(text);
+      const split = splitPseudoElement(text);
+      // Pseudo-classes after a pseudo-element (`::-webkit-scrollbar:horizontal`) are not matched.
+      const { host, pseudo } = split.pseudoClasses ? { host: text, pseudo: null } : split;
       return { text, host, pseudo, spec: specificity(text) };
     });
     rules.push({ selectors, style: styleOf(decl), order: rules.length });

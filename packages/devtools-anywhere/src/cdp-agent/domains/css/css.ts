@@ -118,6 +118,8 @@ export function registerCss(ctx: Context) {
       })
     : null;
   const cascade = new Cascade(sheets, forced, nodes, rules, userAgent);
+  // Captures the classes of view transitions from now on (other frames' when first matched).
+  for (const doc of documents()) cascade.viewTransitions.hook(doc);
   ctx.matchingStyles = (el, pseudo) => {
     // As Chrome reads them, with getPropertyValue: a longhand of a shorthand with var() is empty.
     const declares = (decl: CSSStyleDeclaration) => (name: string) =>
