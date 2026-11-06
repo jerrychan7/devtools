@@ -4,11 +4,14 @@
  * shape whatever the revision returns (token objects, or arrays of token fields).
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cacheDir } from './materials.ts';
 
-/** What every revision of lexer.ts exports, loosely typed: the token list's shape changes. */
+/**
+ * What every revision of lexer.ts (and lexer-queries.ts, once the queries moved there) exports,
+ * loosely typed: the token list's shape changes.
+ */
 interface LexerModule {
   tokenize(source: string, options?: object): unknown;
   debuggerStatementSites(source: string, options?: object): unknown;
@@ -18,7 +21,6 @@ interface LexerModule {
   topLevelVarNames(source: string, options?: object): unknown;
   lastExpressionStatement(source: string, options?: object): unknown;
   returnOutsideFunction(source: string, options?: object): unknown;
-  __readCount?: () => number;
 }
 
 export type Entry = (source: string, module: boolean) => unknown;
@@ -34,7 +36,38 @@ export interface Lexer {
   reads(): number;
 }
 
-const lexerPath = fileURLToPath(new URL('../lexer.ts', import.meta.url));
+const coreDir = fileURLToPath(new URL('../', import.meta.url));
+
+/** The lexer's files: lexer.ts, and the files beside it named lexer*.ts, tests excepted. */
+const isLexerFile = (name: string) => /^lexer[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts');
+
+/** The lexer's files at `rev`, or in the working tree, by name. */
+function lexerFiles(rev?: string): Map<string, string> {
+  const files = new Map<string, string>();
+  if (rev === undefined) {
+    for (const name of readdirSync(coreDir))
+      if (isLexerFile(name)) files.set(name, readFileSync(coreDir + name, 'utf8'));
+    return files;
+  }
+  const dir = execFileSync('git', ['rev-parse', '--show-prefix'], { cwd: coreDir, encoding: 'utf8' }).trim();
+  const list = execFileSync('git', ['ls-tree', '--name-only', '--full-name', '--full-tree', rev, dir], {
+    cwd: coreDir,
+    encoding: 'utf8',
+  });
+  for (const path of list.split('\n')) {
+    const name = path.slice(dir.length);
+    if (!isLexerFile(name)) continue;
+    files.set(
+      name,
+      execFileSync('git', ['show', `${rev}:${path}`], { cwd: coreDir, encoding: 'utf8', maxBuffer: 1 << 24 })
+    );
+  }
+  if (!files.has('lexer.ts')) throw new Error(`no lexer.ts at ${rev}`);
+  return files;
+}
+
+/** Code units read by every counted lexer, on globalThis so that a lexer's files share it. */
+const counter = globalThis as unknown as { __lexerReads?: number };
 
 const KINDS = ['word', 'punct', 'string', 'template', 'regex'];
 
@@ -70,37 +103,49 @@ export function need<T>(value: T | undefined): T {
 
 /**
  * Counting turns every `charCodeAt` on the source (`this.src`, `source`, `src`, `text`) into a
- * counted call. Reads made by `startsWith`, `indexOf`, `slice` and `source[i]` are not counted. The
- * counter slows the lexer: time a lexer loaded without it.
+ * counted call, in each of the lexer's files, all adding to one counter. Reads made by
+ * `startsWith`, `indexOf`, `slice` and `source[i]` are not counted. The counter slows the lexer:
+ * time a lexer loaded without it.
  */
 function instrument(source: string): string {
   const counted = source.replace(/\b(this\.src|source|src|text)\.charCodeAt\(/g, '__read($1, ');
-  if (counted === source) throw new Error('the lexer no longer reads with charCodeAt');
+  if (counted === source) return source;
   return (
-    'let __reads = 0;\nexport const __readCount = () => __reads;\n' +
-    'function __read(s: string, i: number): number {\n  __reads++;\n  return s.charCodeAt(i);\n}\n' +
+    'function __read(s: string, i: number): number {\n' +
+    '  const g = globalThis as unknown as { __lexerReads?: number };\n' +
+    '  g.__lexerReads = (g.__lexerReads ?? 0) + 1;\n' +
+    '  return s.charCodeAt(i);\n}\n' +
     counted
   );
 }
 
+/**
+ * Writes the lexer's files at `rev` (or the working tree's) to their own directory under
+ * cache.ignore/, under their own names, and imports them. Their imports of each other have no
+ * extension, which Node does not resolve: `.ts` is added to them there.
+ */
 export async function loadLexer(rev?: string, countReads = false): Promise<Lexer> {
-  let source: string;
-  if (rev === undefined) source = readFileSync(lexerPath, 'utf8');
-  else {
-    const path = execFileSync('git', ['ls-files', '--full-name', lexerPath], {
-      encoding: 'utf8',
-    }).trim();
-    source = execFileSync('git', ['show', `${rev}:${path}`], {
-      encoding: 'utf8',
-      maxBuffer: 1 << 24,
-    });
-  }
-  if (countReads) source = instrument(source);
+  const files = lexerFiles(rev);
   const label = rev ?? 'worktree';
-  const file = `${cacheDir}lexer-${label.replace(/[^\w.-]/g, '_')}${countReads ? '-reads' : ''}.ts`;
-  mkdirSync(cacheDir, { recursive: true });
-  writeFileSync(file, source);
-  const m = (await import(`${pathToFileURL(file).href}?${Date.now()}`)) as LexerModule;
+  const dir = `${cacheDir}${label.replace(/[^\w.-]/g, '_')}${countReads ? '-reads' : ''}/`;
+  mkdirSync(dir, { recursive: true });
+  let instrumented = false;
+  for (const [name, text] of files) {
+    let source = text.replace(/(from '\.\/lexer[\w-]*)'/g, "$1.ts'");
+    if (countReads) {
+      const counted = instrument(source);
+      instrumented ||= counted !== source;
+      source = counted;
+    }
+    writeFileSync(dir + name, source);
+  }
+  if (countReads && !instrumented) throw new Error('the lexer no longer reads with charCodeAt');
+  const load = async (name: string) =>
+    (await import(`${pathToFileURL(dir + name).href}?${Date.now()}`)) as Partial<LexerModule>;
+  const m = {
+    ...(await load('lexer.ts')),
+    ...(files.has('lexer-queries.ts') ? await load('lexer-queries.ts') : {}),
+  } as LexerModule;
   const o = (module: boolean) => ({ module });
   const entries: Record<string, Entry> = {
     tokenize: (s, module) => m.tokenize(s, o(module)),
@@ -125,12 +170,11 @@ export async function loadLexer(rev?: string, countReads = false): Promise<Lexer
     ...entries,
     tokenize: (s, module) => flatTokens(m.tokenize(s, o(module))),
   };
-  const readCount = m.__readCount;
   return {
     label,
     entries,
     normalized,
-    reads: () => (readCount ? readCount() : 0),
+    reads: () => (countReads ? (counter.__lexerReads ?? 0) : 0),
   };
 }
 

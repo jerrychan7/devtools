@@ -5,16 +5,32 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as acorn from 'acorn';
-import {
+import { build } from 'esbuild';
+
+// Bundled: lexer-queries.ts imports lexer.ts without an extension, which Node does not resolve.
+const bundled = await build({
+  stdin: {
+    contents: "export * from './lexer.ts'; export * from './lexer-queries.ts';",
+    resolveDir: dirname(fileURLToPath(import.meta.url)),
+    loader: 'ts',
+  },
+  bundle: true,
+  format: 'esm',
+  platform: 'neutral',
+  write: false,
+});
+const {
   debuggerStatementSites,
   debuggerStatements,
   Kind,
+  tokenize,
   lastExpressionStatement,
   returnOutsideFunction,
   topLevelLexicalNames,
   topLevelVarNames,
-  tokenize,
-} from './lexer.ts';
+}: typeof import('./lexer.ts') & typeof import('./lexer-queries.ts') = await import(
+  `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
+);
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../../../..');
 

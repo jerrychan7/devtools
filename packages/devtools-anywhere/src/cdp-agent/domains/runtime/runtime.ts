@@ -2,7 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import { registerViolations } from './violations';
 import type { Context } from '../../core/context';
 import type { Frame } from '../../core/frames/frames';
-import { returnOutsideFunction } from '../../core/lexer';
+import { returnOutsideFunction } from '../../core/lexer-queries';
 import { isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
 import { mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
 import { CdpError } from '../../core/session';

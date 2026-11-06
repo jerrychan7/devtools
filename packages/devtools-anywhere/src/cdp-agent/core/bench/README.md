@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-Measures `../lexer.ts`, and checks that a change to it keeps the result of every public entry point the same. Neither script is part of `pnpm test`: run them by hand when the lexer changes, and put their numbers in the commit message.
+Measures the JavaScript lexer, `../lexer.ts` and the queries over its tokens in `../lexer-queries.ts`, and checks that a change to it keeps the result of every public entry point the same. Neither script is part of `pnpm test`: run them by hand when the lexer changes, and put their numbers in the commit message.
 
 Both run on Node 24 or later, from this directory or with its path:
 
@@ -14,7 +14,7 @@ node --expose-gc lexer.bench.ts --rev HEAD~1 --rev 76f3026
 node lexer-compare.bench.ts --rev HEAD~1
 ```
 
-`--rev` takes any git revision. The lexer at that revision is read with `git show` and imported from `cache.ignore/` (ignored by git), so an older lexer is measured and compared without checking it out. `lexer.bench.ts` also takes `--entry <name>` and `--material <name>` (both repeatable) to measure less, and `--runs <n>`.
+`--rev` takes any git revision. The lexer's files at that revision, `lexer.ts` and every other `lexer*.ts` of `core/` but the tests (found with `git ls-tree`), are read with `git show`, written under their own names to `cache.ignore/<rev>/` (ignored by git), with `.ts` added to their imports of each other, and imported from there; so an older lexer is measured and compared without checking it out, before the queries moved to `lexer-queries.ts` as after. The queries come from `lexer-queries.ts` when the revision has it, else from `lexer.ts`. `lexer.bench.ts` also takes `--entry <name>` and `--material <name>` (both repeatable) to measure less, and `--runs <n>`.
 
 ## Materials
 
@@ -34,7 +34,7 @@ For each material, each entry point and each lexer (the working tree's and each 
 
 - **Entry points**: `tokenize` (the token list, what worlds.ts and repl.ts use), `debuggerStatementSites` (service-worker.ts, on every script it serves), `topLevelLexicalNames` (lexical-names.ts), `returnOutsideFunction` (runtime.ts), and `repl`: one `tokenize` whose tokens `topLevelLexicalDeclarations`, `topLevelVarNames` and `lastExpressionStatement` reuse, as repl.ts does.
 - **median ms, min ms**: one call, over enough samples to read about 50 MB of text (at least 10). The lexers take turns sample by sample, so that a busy machine slows them alike, and a collection runs before each sample of a text over 1 MB. On a busy machine the minimum is the steadier number.
-- **reads/unit**: code units read with `charCodeAt` on the source per code unit of the text, counted by a copy of the lexer with each such call wrapped in a counter. Reads made by `startsWith`, `indexOf`, `slice` and `source[i]` are not counted. 1.00 would be every code unit read once.
+- **reads/unit**: code units read with `charCodeAt` on the source per code unit of the text, counted by a copy of the lexer's files with each such call wrapped in a counter they share (on `globalThis`). Reads made by `startsWith`, `indexOf`, `slice` and `source[i]` are not counted. 1.00 would be every code unit read once.
 - **MB alloc**: how much memory (the JS heap and the buffers of typed arrays, which live outside it) grows over one call before any full collection, its result and its garbage (the most of three calls). Young garbage collected during the call is not in it, so it shows above all what lives long enough to be promoted.
 - **MB kept**: what the result keeps once garbage is collected.
 - **read-only floor**: a loop that reads every code unit once with `charCodeAt` and does nothing else, which no lexer can beat.

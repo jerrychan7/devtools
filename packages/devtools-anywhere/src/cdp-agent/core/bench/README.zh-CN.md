@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-测量 `../lexer.ts`，并核对改动后每个公开入口的结果是否不变。两个脚本都不在 `pnpm test` 里：词法器有改动时手动运行，把数据写进提交信息。
+测量 JavaScript 词法器（`../lexer.ts`，以及 token 查询所在的 `../lexer-queries.ts`），并核对改动后每个公开入口的结果是否不变。两个脚本都不在 `pnpm test` 里：词法器有改动时手动运行，把数据写进提交信息。
 
 两者都需要 Node 24 及以上，在本目录下运行，或带上路径：
 
@@ -14,7 +14,7 @@ node --expose-gc lexer.bench.ts --rev HEAD~1 --rev 76f3026
 node lexer-compare.bench.ts --rev HEAD~1
 ```
 
-`--rev` 接受任意 git 版本。该版本的词法器用 `git show` 读出，写到 `cache.ignore/`（被 git 忽略）再导入，所以不用检出就能测量和对拍旧版本。`lexer.bench.ts` 还接受 `--entry <名称>` 和 `--material <名称>`（都可重复）来只测一部分，以及 `--runs <n>`。
+`--rev` 接受任意 git 版本。该版本词法器的各个文件（`core/` 下的 `lexer.ts` 和其他 `lexer*.ts`，不含测试，用 `git ls-tree` 找出）用 `git show` 读出，按原文件名写到 `cache.ignore/<rev>/`（被 git 忽略），互相之间的 import 补上 `.ts` 后再导入。所以不用检出就能测量和对拍旧版本，查询拆到 `lexer-queries.ts` 之前和之后的版本都行。该版本有 `lexer-queries.ts` 时查询从它导入，否则从 `lexer.ts` 导入。`lexer.bench.ts` 还接受 `--entry <名称>` 和 `--material <名称>`（都可重复）来只测一部分，以及 `--runs <n>`。
 
 ## 材料
 
@@ -34,7 +34,7 @@ node lexer-compare.bench.ts --rev HEAD~1
 
 - **入口**：`tokenize`（token 列表，worlds.ts 和 repl.ts 用）、`debuggerStatementSites`（service-worker.ts，对每个经手的脚本）、`topLevelLexicalNames`（lexical-names.ts）、`returnOutsideFunction`（runtime.ts），以及 `repl`：像 repl.ts 那样 `tokenize` 一次，`topLevelLexicalDeclarations`、`topLevelVarNames` 和 `lastExpressionStatement` 复用这份 token。
 - **median ms、min ms**：一次调用的耗时，样本数够读约 50 MB 文本（至少 10 次）。各词法器逐个样本轮流跑，机器忙时大家一起变慢；超过 1 MB 的文本每个样本前先做一次垃圾回收。机器忙时最小值更稳定。
-- **reads/unit**：每码元用 `charCodeAt` 读取源码的次数，由把每次这种调用包上计数器的副本统计。`startsWith`、`indexOf`、`slice` 和 `source[i]` 的读取不计入。1.00 表示每个码元恰好读一次。
+- **reads/unit**：每码元用 `charCodeAt` 读取源码的次数，由把词法器各文件里每次这种调用都包上同一个计数器（放在 `globalThis` 上）的副本统计。`startsWith`、`indexOf`、`slice` 和 `source[i]` 的读取不计入。1.00 表示每个码元恰好读一次。
 - **MB alloc**：一次调用在完整回收前内存（JS 堆，加上类型化数组在堆外的缓冲区）的增长量，含结果和垃圾（三次取最大）。调用期间已回收的新生代垃圾不在其中，所以主要反映活得够久、被晋升的部分。
 - **MB kept**：回收垃圾后结果本身占用的内存。
 - **read-only floor**：用 `charCodeAt` 把每个码元读一遍、别的什么都不做的循环，任何词法器都不可能更快。
