@@ -63,6 +63,15 @@ const addStyle = (id: string, text: string, change = '') =>
     change
   );
 
+/** The header a side sent for the sheet whose text starts like `start`, with its text. */
+async function headerOf(side: typeof t.ours, start: string) {
+  for (const { header } of await side.events('CSS.styleSheetAdded')) {
+    const r = await side.send('CSS.getStyleSheetText', { styleSheetId: header.styleSheetId }).catch(() => null);
+    if (r?.text.startsWith(start)) return { header, text: r.text };
+  }
+  throw new Error(`no sheet starting with ${start}`);
+}
+
 /** The id of the sheet of the <style> `#id` ours sent a header for. */
 async function idOfStyle(id: string): Promise<string> {
   const { root } = await t.ours.send('DOM.getDocument', { depth: -1 });
@@ -120,5 +129,45 @@ test('CSS.enable checks no text; getMatchedStylesForNode and getStyleSheetText c
     assert.equal(await checks('.lz2'), 1);
   } finally {
     await t.ours.send('CSS.disable');
+  }
+});
+
+test('a <style> changed before CSS.enable: added with its text, changed once checked, as Chrome ends', async () => {
+  const text = '.lz3 { color: red }\n.lz3b { top: 1px }';
+  await addStyle('lz3', text, 'sheet.deleteRule(1); sheet.cssRules[0].style.left = "2px";');
+  for (const side of [t.ours, t.chrome]) {
+    await side.send('DOM.enable');
+    await side.clear();
+    await side.send('CSS.enable');
+  }
+  try {
+    const id = await idOfStyle('lz3');
+    const header = (await t.ours.events('CSS.styleSheetAdded')).find(a => a.header.styleSheetId === id)?.header;
+    // Ours: the header of the <style>'s text, not checked yet.
+    assert.deepEqual([header?.length, header?.endLine, header?.endColumn], [text.length, 1, 18]);
+    assert.equal(await checks('.lz3'), 0);
+    // Its first use finds the text is not the sheet's: changed, then served serialized.
+    const served = (await t.ours.send('CSS.getStyleSheetText', { styleSheetId: id })).text;
+    assert.equal(served, '.lz3 { color: red; left: 2px; }\n');
+    const changed = (await t.ours.events('CSS.styleSheetChanged')).map(e => e.styleSheetId);
+    assert.deepEqual(changed, [id]);
+    // A session enabling now is given the serialized text's header.
+    await t.ours.send('CSS.disable');
+    await t.ours.clear();
+    await t.ours.send('CSS.enable');
+    const id2 = await idOfStyle('lz3');
+    const again = (await t.ours.events('CSS.styleSheetAdded')).find(a => a.header.styleSheetId === id2)?.header;
+    const reserved = (await t.ours.send('CSS.getStyleSheetText', { styleSheetId: id2 })).text;
+    assert.equal(again?.length, reserved.length);
+    assert.equal(reserved, served);
+    // Chrome gives its final text at once, header and all, and no styleSheetChanged: the text of
+    // the changed rule spliced in front of the <style>'s, the rule deleted still in it. Ours is
+    // serialized from the rules (docs/limitations.md).
+    const chrome = await headerOf(t.chrome, '.lz3');
+    assert.equal(chrome.text, `.lz3 { color: red; left: 2px; }${text}`);
+    assert.deepEqual([chrome.header.length, chrome.header.endLine], [chrome.text.length, 1]);
+    assert.deepEqual(await t.chrome.events('CSS.styleSheetChanged'), []);
+  } finally {
+    for (const side of [t.ours, t.chrome]) await side.send('CSS.disable');
   }
 });

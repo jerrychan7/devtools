@@ -178,6 +178,7 @@ export function registerCss(ctx: Context) {
   let observer: MutationObserver | null = null;
   let stopAdopted: (() => void) | null = null;
   let stopCssom: (() => void) | null = null;
+  let stopRevised: (() => void) | null = null;
 
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
@@ -573,6 +574,11 @@ export function registerCss(ctx: Context) {
         },
         () => documents().map(realmOf)
       );
+      // A text a header was given found not to be the sheet's at its first use (unchanged since
+      // the page changed the sheet unseen): the client fetches it again, now serialized.
+      stopRevised = sheets.texts.onRevised(sheet => {
+        if (known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
+      });
       stopFrames = ctx.frames.onChange(framesChanged);
       watchDocuments();
       syncSheets();
@@ -593,6 +599,8 @@ export function registerCss(ctx: Context) {
       stopAdopted = null;
       stopCssom?.();
       stopCssom = null;
+      stopRevised?.();
+      stopRevised = null;
       updates.stop();
     },
 

@@ -221,13 +221,13 @@ export class SheetTexts {
       ownEdit(() => alone.replaceSync(text));
       if (!sameRules(alone.cssRules, rules)) {
         this.invalidate(sheet);
-        return this.serialize(sheet, rules);
+        return this.revise(sheet, text, this.serialize(sheet, rules));
       }
     }
     if (rec.source === undefined) rec.source = pair(rec.text, rules);
     // Its rules not found in it: the page changed them unseen, in a way the check does not tell
     // (an @import, which replaceSync() leaves out). Serialized then, like a changed sheet.
-    return rec.source ?? this.serialize(sheet, rules);
+    return rec.source ?? this.revise(sheet, rec.text, this.serialize(sheet, rules));
   }
 
   /**
@@ -256,6 +256,25 @@ export class SheetTexts {
     if (!rec || rec.pending) return undefined;
     // A source paired before watching last started is checked again: its text is the same.
     return rec.source ? rec.source : { text: rec.text };
+  }
+
+  /** Listeners told of a sheet whose header text turned out not to be its text (`revise`). */
+  private revised = new Set<(sheet: CSSStyleSheet) => void>();
+
+  /**
+   * Calls `listener` with each sheet whose recorded text, which its header was given (`peek`),
+   * is found not to be its own when first checked or paired: it is served serialized from then
+   * on. Gives the function that stops it.
+   */
+  onRevised(listener: (sheet: CSSStyleSheet) => void): () => void {
+    this.revised.add(listener);
+    return () => void this.revised.delete(listener);
+  }
+
+  /** Tells the listeners the sheet's text is no longer `was`, when it is not. */
+  private revise(sheet: CSSStyleSheet, was: string, source: SheetSource | null): SheetSource | null {
+    if (source?.text !== was) for (const listener of this.revised) listener(sheet);
+    return source;
   }
 
   /**
