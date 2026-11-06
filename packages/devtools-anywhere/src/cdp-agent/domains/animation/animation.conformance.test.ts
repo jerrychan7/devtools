@@ -621,61 +621,90 @@ describe('Animation, which animations are told apart', () => {
     await t.page.evaluate(() => {
       const style = document.createElement('style');
       style.textContent =
-        '@keyframes q1 { to { opacity: .5 } }' +
+        '@keyframes q1 { to { opacity: .5 } } @keyframes q2 { to { opacity: .5 } }' +
         ' .qd::backdrop { animation: q1 5s } .qd2::backdrop { animation: q1 5s }' +
+        ' .qla::backdrop, .qlb::backdrop { animation: q1 5s }' +
         ' .qdt::backdrop { transition: opacity 5s; opacity: 1 } .qdt.on::backdrop { opacity: .5 }' +
         ' .qs { overflow: auto; height: 20px; scroll-marker-group: after } .qs > div { height: 30px }' +
         ' .qm > div::scroll-marker { content: "o"; animation: q1 5s } .qm2 > div::scroll-marker { content: "o"; animation: q1 5s }' +
-        ' .qg::scroll-marker-group { animation: q1 5s }' +
+        ' .qmt > div::scroll-marker { content: "o"; animation: q1 5s } .qmt > div::scroll-marker:target-current { animation: q2 5s }' +
+        ' .qg::scroll-marker-group { animation: q1 5s } .qs.qgb { scroll-marker-group: before }' +
+        ' .qgb::scroll-marker-group { animation: q1 5s } .qgb > div::scroll-marker { content: "o" }' +
         ' .qb::scroll-button(*) { content: "b"; animation: q1 5s } .qb2::scroll-button(down) { content: "b"; animation: q1 5s }' +
+        ' .qbd::scroll-button(*) { content: "b" } .qbd::scroll-button(*):disabled { animation: q1 5s }' +
+        ' .qbd::scroll-button(*):enabled { animation: q2 5s }' +
         ' .qbr { direction: rtl } .qbr::scroll-button(left) { content: "b"; animation: q1 5s }' +
         ' .qbv { writing-mode: vertical-rl } .qbv::scroll-button(left) { content: "b"; animation: q1 5s }' +
         ' .qbl::scroll-button(inline-end) { content: "b"; animation: q1 5s }' +
-        ' .qc { columns: 2; overflow: auto; height: 20px } .qc::column { animation: q1 5s }';
+        ' .qc { columns: 2; overflow: auto; height: 20px } .qc::column { animation: q1 5s }' +
+        ' .qcm { columns: 2; overflow: auto; height: 20px; scroll-marker-group: after }' +
+        ' .qcm::column::scroll-marker { content: "o"; animation: q1 5s }';
       document.head.append(style);
     });
     const scroller = (cls: string) =>
       `const e = add('qs ${cls}'); e.textContent = ''; e.append(document.createElement('div'), document.createElement('div'))`;
-    const steps: [string, string, number][] = [
-      ['backdrop a', `add('qd', 'dialog').showModal()`, 1],
-      ['backdrop a again', `add('qd', 'dialog').showModal()`, 1],
-      ['backdrop a, inline style', `const d = add('qd', 'dialog'); d.style.color = 'red'; d.showModal()`, 1],
-      ['backdrop b, same declarations', `add('qd2', 'dialog').showModal()`, 1],
+    const steps: [string, string][] = [
+      ['backdrop a', `add('qd', 'dialog').showModal()`],
+      ['backdrop a again', `add('qd', 'dialog').showModal()`],
+      ['backdrop a, inline style', `const d = add('qd', 'dialog'); d.style.color = 'red'; d.showModal()`],
+      ['backdrop b, same declarations', `add('qd2', 'dialog').showModal()`],
+      ['backdrop of a popover, rule a', `const p = add('qd'); p.popover = 'manual'; p.showPopover()`],
+      ['selector list, first', `add('qla', 'dialog').showModal()`],
+      ['selector list, second', `add('qlb', 'dialog').showModal()`],
       [
         'backdrop transition in',
         `const d = add('qdt', 'dialog'); d.id = 'qdt'; d.showModal(); d.getBoundingClientRect(); getComputedStyle(d, '::backdrop').opacity; d.classList.add('on')`,
-        1,
       ],
-      ['backdrop transition out', `document.getElementById('qdt').classList.remove('on')`, 1],
-      ['scroll-marker a', scroller('qm'), 2],
-      ['scroll-marker b', scroller('qm2'), 2],
-      ['scroll-marker-group', scroller('qg'), 1],
-      ['scroll-button(*)', scroller('qb'), 4],
-      ['scroll-button(down)', scroller('qb2'), 1],
-      ['scroll-button(left), right to left', scroller('qbr'), 1],
-      ['scroll-button(left), vertical', scroller('qbv'), 1],
-      ['scroll-button(inline-end)', scroller('qbl'), 1],
-      ['column', `const e = add('qc'); e.textContent = 'a '.repeat(200)`, 1],
-      // No rule: a pseudo-element whose rules we missed would share this one's id.
-      ['inline, no rule', `add('').style.animation = 'q1 5s'`, 1],
+      ['backdrop transition out', `document.getElementById('qdt').classList.remove('on')`],
+      ['scroll-marker a', scroller('qm')],
+      ['scroll-marker b', scroller('qm2')],
+      ['scroll-marker, :target-current', scroller('qmt')],
+      ['scroll-marker-group', scroller('qg')],
+      ['scroll-marker-group before', scroller('qgb')],
+      ['scroll-button(*)', scroller('qb')],
+      ['scroll-button(*), :disabled and :enabled', scroller('qbd')],
+      ['scroll-button(down)', scroller('qb2')],
+      ['scroll-button(left), right to left', scroller('qbr')],
+      ['scroll-button(left), vertical', scroller('qbv')],
+      ['scroll-button(inline-end)', scroller('qbl')],
+      ['column', `const e = add('qc'); e.textContent = 'a '.repeat(200)`],
+      ['column::scroll-marker', `const e = add('qcm'); e.textContent = 'a '.repeat(200)`],
+      // No rule: Chrome hashes no inline style (it has no parent rule), so a pseudo-element whose
+      // rules we missed would share this one's id.
+      ['inline, no rule', `add('').style.animation = 'q1 5s'`],
     ];
     const labels: string[] = [];
     const ids: { chrome: (string | undefined)[]; ours: (string | undefined)[] } = { chrome: [], ours: [] };
-    for (const [label, code, count] of steps) {
-      const got = await run(code, count);
+    for (const [label, code] of steps) {
+      await run(code, 1);
+      // All of them: every column, every button.
+      await fence(t, t.chrome, t.ours);
+      const lists = { chrome: [] as Protocol.Animation.Animation[], ours: [] as Protocol.Animation.Animation[] };
       for (const side of ['chrome', 'ours'] as const) {
-        const own = got[side].filter(a => !a.name.startsWith('fence')).slice(0, count);
-        if (side === 'chrome') labels.push(...own.map((_, i) => `${label} ${i}`));
-        ids[side].push(...own.map(a => a.cssId));
+        lists[side] = (await t[side].events('Animation.animationStarted'))
+          .map(e => e.animation)
+          .filter(a => !a.name.startsWith('fence'))
+          // Their order differs: by keyframes, then id, which the relation does not depend on.
+          .sort((x, y) => x.name.localeCompare(y.name) || String(x.cssId).localeCompare(String(y.cssId)));
       }
-      // Closes the dialogs: one modal at a time shows a backdrop.
-      await t.page.evaluate(() => document.querySelectorAll<HTMLDialogElement>('dialog[open]:not(#qdt)').forEach(d => d.close()));
+      assert.equal(lists.ours.length, lists.chrome.length, label);
+      labels.push(...lists.chrome.map((a, i) => `${label} ${a.name} ${i}`));
+      for (const side of ['chrome', 'ours'] as const) ids[side].push(...lists[side].map(a => a.cssId));
+      // Closes the dialogs and popovers: one modal at a time shows a backdrop.
+      await t.page.evaluate(() => {
+        document.querySelectorAll<HTMLDialogElement>('dialog[open]:not(#qdt)').forEach(d => d.close());
+        document.querySelectorAll<HTMLElement>('[popover]').forEach(p => p.hidePopover());
+      });
     }
-    const relation = (list: (string | undefined)[]) =>
-      list.map(
-        (id, i) =>
-          `${labels[i]}: ${list.flatMap((other, j) => (id !== undefined && other === id ? [labels[j]] : [])).join(', ')}`
-      );
+    // Which animations share an id, within a step and across them; the ids themselves differ.
+    const relation = (list: (string | undefined)[]) => {
+      const first = new Map<string, number>();
+      return list.map((id, i) => {
+        if (id === undefined) return `${labels[i]}: none`;
+        if (!first.has(id)) first.set(id, i);
+        return `${labels[i]}: as ${labels[first.get(id) ?? i]}`;
+      });
+    };
     assert.deepEqual(relation(ids.ours), relation(ids.chrome));
   });
 
@@ -716,6 +745,45 @@ describe('Animation, which animations are told apart', () => {
     // The four groups (root, n1, n2, n3) by `*`, the old images of class c, the new ones of n1 and n2.
     assert.ok(chrome.includes('vg, vg, vg, vg'), chrome.join(' | '));
     assert.ok(chrome.includes('vo, vo'), chrome.join(' | '));
+    assert.deepEqual(await groups(t.ours), chrome);
+    await t.page.evaluate(() => {
+      document.getAnimations().forEach(a => a.finish());
+      document.querySelectorAll('.v1, .v2, .v3').forEach(e => e.remove());
+    });
+  });
+
+  test('cssId of view transition images follows :only-child and escaped names, as in Chrome', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes wo { to { opacity: .5 } } @keyframes wg { to { opacity: .5 } }' +
+        ' .w1 { view-transition-name: \\31 w } .w2 { view-transition-name: w2 }' +
+        ' ::view-transition-old(*):only-child { animation: wo 5s } ::view-transition-old(*) { animation: wo 5s }' +
+        ' ::view-transition-group(\\31 w) { animation: wg 5s } ::view-transition-group(w2) { animation: wg 5s }';
+      document.head.append(style);
+      for (const cls of ['w1', 'w2'])
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: cls, textContent: cls }));
+    });
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    // The old 1w goes, w2 stays: 1w's old image is an only child, w2's are not.
+    await t.page.evaluate(async () => {
+      const transition = document.startViewTransition(() => document.querySelector('.w1')?.remove());
+      await transition.ready;
+    });
+    await fence(t, t.chrome, t.ours);
+    const groups = async (side: Side) => {
+      const byId = new Map<string, string[]>();
+      for (const { animation } of await side.events('Animation.animationStarted')) {
+        if (animation.name.startsWith('fence') || !animation.cssId) continue;
+        byId.set(animation.cssId, [...(byId.get(animation.cssId) ?? []), animation.name]);
+      }
+      return [...byId.values()].map(names => names.sort().join(', ')).sort();
+    };
+    const chrome = await groups(t.chrome);
+    // The old image of 1w alone (an only child), those of w2 and the root together; the groups of
+    // 1w and w2 apart.
+    assert.ok(chrome.includes('wo') && chrome.includes('wo, wo'), chrome.join(' | '));
+    assert.equal(chrome.filter(g => g === 'wg').length, 2, chrome.join(' | '));
     assert.deepEqual(await groups(t.ours), chrome);
     await t.page.evaluate(() => document.getAnimations().forEach(a => a.finish()));
   });
