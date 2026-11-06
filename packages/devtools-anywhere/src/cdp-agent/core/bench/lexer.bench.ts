@@ -74,13 +74,18 @@ function memory(f: Entry, text: string): { alloc: string; kept: string } {
   if (!gc) return { alloc: '', kept: '' };
   let alloc = 0;
   let kept = 0;
-  for (let i = 0; i < 3; i++) {
+  // Typed arrays' buffers are freed after their collection: collect twice to see them gone.
+  const collect = () => {
     gc();
+    gc();
+  };
+  for (let i = 0; i < 3; i++) {
+    collect();
     const h0 = used();
     let result: unknown = f(text, false);
     alloc = Math.max(alloc, used() - h0);
-    gc();
-    kept = used() - h0;
+    collect();
+    kept = Math.max(kept, used() - h0);
     if (result === Symbol.iterator) console.log(result);
     result = undefined;
   }
