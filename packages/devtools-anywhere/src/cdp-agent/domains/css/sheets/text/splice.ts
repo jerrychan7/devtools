@@ -237,8 +237,11 @@ function forget(nodes: Map<CSSRule, number>, rule: CSSRule): void {
   for (let i = 0; i < children.length; i++) forget(nodes, children[i] as CSSRule);
 }
 
-/** Rules that may only come first in a sheet: kept or replaced with all the others. */
-const POSITIONAL = /^(?:import|namespace|charset)$/i;
+/**
+ * Rules that may only come first in a sheet: kept or replaced with all the others. Not @charset,
+ * which the CSSOM has no rule for: insertRule() refuses it, wherever it is, as the parser drops it.
+ */
+const POSITIONAL = /^(?:import|namespace)$/i;
 /** The most insertions and deletions the rules are compared for (`commonRuns`). */
 const MAX_EDITS = 1024;
 
@@ -247,9 +250,15 @@ const terminated = (text: string, o: CssOutline, node: number) =>
   o.blockStart(node) >= 0 ? o.closed(node) : text.charCodeAt(o.end(node) - 1) === 59; /* ; */
 
 /**
- * The top-level rules of `o`, if each ends cleanly and only white space and closed comments follow
- * the last to the end of `text`: the parser is then where it was at the start, so that what would
- * come after is parsed as it would be alone. Null otherwise.
+ * What may follow a text's last top-level rule for the parser to be where it was at the start:
+ * white space, closed comments, and CDO and CDC, which a sheet's top level skips.
+ */
+const SHEET_TAIL = /^(?:[ \t\n\r\f]|\/\*[\s\S]*?\*\/|<!--|-->)*$/;
+
+/**
+ * The top-level rules of `o`, if each ends cleanly and only what the top level skips (`SHEET_TAIL`)
+ * follows the last to the end of `text`: the parser is then where it was at the start, so that
+ * what would come after is parsed as it would be alone. Null otherwise.
  */
 function wholeRules(text: string, o: CssOutline): number[] | null {
   const nodes: number[] = [];
@@ -259,7 +268,7 @@ function wholeRules(text: string, o: CssOutline): number[] | null {
     nodes.push(n);
     tail = o.end(n);
   }
-  return CLEAN_TAIL.test(text.slice(tail)) ? nodes : null;
+  return SHEET_TAIL.test(text.slice(tail)) ? nodes : null;
 }
 
 /**
@@ -341,6 +350,34 @@ function search(nodes: number[], after: (node: number) => boolean): number {
 }
 
 /**
+ * The top-level nodes of `[from, ...)` of `text`, from the end of top-level rule `a - 1` of `o` to
+ * the start of rule `b` (`nodes` its paired top-level rules), outlined alone: null when only white
+ * space, comments, CDO and CDC are between those rules, so that they are the only nodes there.
+ */
+function unpaired(
+  text: string,
+  o: CssOutline,
+  nodes: number[],
+  a: number,
+  b: number,
+  from: number
+): { text: string; outline: CssOutline; nodes: number[] } | null {
+  const end = b < nodes.length ? o.start(nodes[b] as number) : text.length;
+  let clean = true;
+  for (let i = a, at = from; clean && i <= b; i++) {
+    const until = i < b ? o.start(nodes[i] as number) : end;
+    clean = SHEET_TAIL.test(text.slice(at, until));
+    if (i < b) at = o.end(nodes[i] as number);
+  }
+  if (clean) return null;
+  const slice = text.slice(from, end);
+  const alone = outline(slice);
+  const tops: number[] = [];
+  for (let r = alone.firstChild(ROOT); r >= 0; r = alone.next(r)) tops.push(r);
+  return { text: slice, outline: alone, nodes: tops };
+}
+
+/**
  * The source of `sheet` once its text is `text`, its CSSOM changed to the rules of that text (each
  * top-level rule inserted alone, as CSS.setStyleSheetText does) by deleting the top-level rules
  * whose text is gone and inserting those whose text is new: those whose text is the same are kept,
@@ -351,12 +388,17 @@ function search(nodes: number[], after: (node: number) => boolean): number {
  * The top-level rules are compared by their texts (`commonRuns`), either:
  * - locally, when the text changed in one place: the paired rules the change leaves whole before
  *   and after it are kept, and the text between them, outlined alone, must be whole rules
- *   (`wholeRules`). Its records are grafted onto the outline, as `respliced` does for one rule;
+ *   (`wholeRules`). Its records are grafted onto the outline, as `respliced` does for one rule.
+ *   What the CSSOM has no rule for between the rules kept (@charset, invalid rules: top-level
+ *   nodes not paired) is compared too, outlined alone (`unpaired`): kept, removed or added, it
+ *   changes no rule, an added one being refused by insertRule() as the parser drops it;
  * - or over the whole text outlined anew, which must end with whole rules (not in a comment, nor
  *   in a rule left open).
  * Texts too different to compare (`commonRuns`) have all their rules replaced, as the caller
- * would, with the outline made. Neither way when a rule removed or inserted is an @import, @namespace or @charset rule, or would go
- * before one: those may only come first, and would be dropped or refused elsewhere.
+ * would, with the outline made. Neither way when a rule removed or inserted is an @import or
+ * @namespace rule, or would go before one: those may only come first, and would be dropped or
+ * refused elsewhere; nor when one the CSSOM has no rule for is kept, which a change before it
+ * could make a rule.
  *
  * The rules kept keep their records' order and number (pre-order, those of a rule follow each
  * other), so that their pairs move by an offset. Those inserted are paired with the records they
@@ -407,17 +449,39 @@ export function retexted(
 
   // The texts of the rules compared: slices, compared only along the way the diff takes.
   const textOf = (t: string, out: CssOutline, node: number) => t.slice(out.start(node), out.end(node));
-  const before: string[] = [];
-  for (let i = a; i < b; i++) before.push(textOf(old, o, topNodes[i] as number));
   const outlined = n;
   const after = nodes.map(node => textOf(newText, outlined, node));
+  let oldSide = local ? unpaired(old, o, topNodes, a, b, from) : null;
+  // For each rule compared on the old side, its index in the CSSOM, or -1 for a top-level node
+  // the CSSOM has no rule for (@charset, invalid rules), which only a local change compares.
+  const ruleAt: number[] = [];
+  const before: string[] = [];
+  let paired = a;
+  if (oldSide) {
+    for (const node of oldSide.nodes) {
+      const rule = paired < b && oldSide.outline.start(node) + from === o.start(topNodes[paired] as number);
+      ruleAt.push(rule ? paired++ : -1);
+      before.push(textOf(oldSide.text, oldSide.outline, node));
+    }
+    // Its rules not where they were outlined with the rest: compared alone.
+    if (paired < b) {
+      oldSide = null;
+      ruleAt.length = before.length = 0;
+    }
+  }
+  if (!oldSide)
+    for (let i = a; i < b; i++) {
+      ruleAt.push(i);
+      before.push(textOf(old, o, topNodes[i] as number));
+    }
   // Too different: all replaced, with the text's outline already made.
   const runs = commonRuns(before, after) ?? [];
   const kept = new Uint8Array(before.length);
-  const same = new Uint8Array(after.length);
+  // For each rule of the new text kept, 1 + the old one it is.
+  const same = new Int32Array(after.length);
   for (const [i, j] of runs) {
     kept[i] = 1;
-    same[j] = 1;
+    same[j] = i + 1;
   }
   /** Walks the edit: `del(i)` for each rule removed, `ins(j)` inserted, `keep(i, j)`, in order. */
   const walk = (del: (i: number) => void, ins: (j: number) => void, keep: (i: number, j: number) => void) => {
@@ -426,28 +490,39 @@ export function retexted(
       else if (j < after.length && !same[j]) ins(j++);
       else keep(i++, j++);
   };
-  // Rules that must come first are neither removed nor inserted, nor any rule before them.
+  // Rules that must come first are neither removed nor inserted, nor any rule before them. Nodes
+  // without a rule are not in the CSSOM to remove; kept, they must not be ones that could become
+  // rules once those before them change (an @import after a style rule).
   let index = a;
   let fixed = false;
   walk(
     i => {
-      if (index < lead || POSITIONAL.test(o.name(old, topNodes[a + i] as number))) fixed = true;
+      const k = ruleAt[i] as number;
+      if (k >= 0 && (index < lead || POSITIONAL.test(o.name(old, topNodes[k] as number)))) fixed = true;
     },
     j => {
       if (index < lead || POSITIONAL.test(outlined.name(newText, nodes[j] as number))) fixed = true;
     },
-    () => index++
+    i => {
+      if ((ruleAt[i] as number) >= 0) index++;
+      else if (oldSide && POSITIONAL.test(oldSide.outline.name(oldSide.text, oldSide.nodes[i] as number))) fixed = true;
+    }
   );
   if (fixed) return undefined;
 
   // The CSSOM: the rules removed deleted from the last, then those inserted in order, so that
   // neither moves the many rules after them (as deleting or inserting each first would).
-  for (let i = before.length - 1; i >= 0; i--) if (!kept[i]) sheet.deleteRule(a + i);
+  for (let i = before.length - 1; i >= 0; i--) {
+    const k = ruleAt[i] as number;
+    if (!kept[i] && k >= 0) sheet.deleteRule(k);
+  }
   const added: (CSSRule | undefined)[] = [];
   index = a;
   for (let j = 0; j < after.length; j++) {
-    if (same[j]) index++;
-    else
+    const i = (same[j] as number) - 1;
+    if (i >= 0) {
+      if ((ruleAt[i] as number) >= 0) index++;
+    } else
       try {
         sheet.insertRule(textOf(newText, outlined, nodes[j] as number), index);
         added[j] = sheet.cssRules[index];
@@ -464,6 +539,9 @@ export function retexted(
     const head = nodes[0];
     if (head !== undefined) base = o.graft(outlined, head, from) - head;
     for (let i = a; i < b; i++) o.dead += o.size(topNodes[i] as number);
+    if (oldSide)
+      for (let i = 0; i < before.length; i++)
+        if ((ruleAt[i] as number) < 0) o.dead += oldSide.outline.size(oldSide.nodes[i] as number);
   }
   const segRules: CSSRule[] = [];
   const segNodes: number[] = [];
@@ -488,16 +566,22 @@ export function retexted(
   };
   walk(
     // Gone, its pairs with it when they stay in the map.
-    i => local && eachRule(topRules[a + i] as CSSRule, r => pairs.delete(r)),
+    i => {
+      const k = ruleAt[i] as number;
+      if (local && k >= 0) eachRule(topRules[k] as CSSRule, r => pairs.delete(r));
+    },
     j => {
       if (runStart < 0) runStart = j;
       const rule = added[j];
       if (rule) run.push(rule);
     },
     (i, j) => {
+      const k = ruleAt[i] as number;
+      // Without a rule: the rules inserted around it are paired past it.
+      if (k < 0) return;
       flush();
-      const rule = topRules[a + i] as CSSRule;
-      const node = topNodes[a + i] as number;
+      const rule = topRules[k] as CSSRule;
+      const node = topNodes[k] as number;
       const copy = (nodes[j] as number) + base;
       eachRule(rule, r => {
         const at = source.nodes.get(r);
