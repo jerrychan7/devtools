@@ -2,7 +2,7 @@
 
 English | [简体中文](usage.zh-CN.md)
 
-Reference for setting devtools-anywhere up. Quick start: [README](../README.md). How it works: [design](design.md).
+Reference for setting devtools-anywhere up. Quick start: [README](../README.md). How it works: [design](design.md). What works, what cannot be done, and how it differs from Chrome: [limitations](limitations.md).
 
 ## Pick a setup
 
@@ -36,7 +36,7 @@ From jsDelivr or unpkg, pin an exact version: the probe loads the frontend of th
 | | Self-hosted | CDN (jsDelivr, unpkg) |
 |---|---|---|
 | `data-devtools-frontend-url` | Required | Optional: the frontend of the same version on the CDN |
-| Shell mode | ✅ On by default | ✅ On by default, without the [Service Worker](#service-worker) |
+| Shell mode | On by default | On by default, without the [Service Worker](#service-worker) |
 | UI languages | All, with `@devtools-anywhere/devtools-frontend-locales` in the frontend's directory | English and Chinese |
 
 - After the page loads, the probe mounts one `<devtools-anywhere>` under `<html>`, whatever the page has; a second probe only warns.
@@ -74,6 +74,7 @@ A page cannot reach a cross-origin iframe's document. When the iframe's page loa
 - An entry is an exact origin, or `https://*.example.com` for every subdomain at any depth (not `example.com` itself); scheme and port are exact. `*` alone is ignored, with a warning.
 - While linked, the iframe's own F12 button and panel are hidden.
 - The link survives the iframe's reloads and navigations to pages that link again; iframes in the iframe link the same way, level by level.
+- Without the probe in the iframe's page or both lists, the iframe is shown as elements only. Linked, it differs from Chrome in a few places (its document's request, breakpoints after a navigation, detaching, `DOM.scrollIntoViewIfNeeded` answering before the parents scroll): see [limitations](limitations.md#cross-origin-iframes).
 
 ### Sandboxed iframes
 
@@ -89,7 +90,8 @@ An iframe sandboxed without `allow-same-origin` has an opaque (`null`) origin: t
 - Off by default: `sandboxed` in the parent's `data-frame-origins` (it can be listed with origins) turns it on, and the sandboxed document lists the parent's origin in `data-parent-origins`. The parent's DevTools can run any code in the iframe, and the iframe may load third-party scripts.
 - Only for a `src` of the page's origin, `about:blank` or `srcdoc`. One whose `src` is of another origin is refused, of the same site too (which Chrome keeps in the page's target): shown as elements only, not listed in the frame tree.
 - The check is on the iframe's `src`, not on the document it holds: a sandboxed document has the `null` origin, so the page cannot tell where it came from. Once the iframe navigates (a link followed in it, or its `src` redirected) to another origin, a document there that speaks the probe's handshake is merged too, and what it reports shows up in the page's DevTools. Turn it on only for iframes that stay on your own pages.
-- Without it, or without the probe in the sandboxed document, the iframe is shown as in the [limitations](#limitations).
+- Merged, it differs from Chrome in a few places: see [limitations](limitations.md#sandboxed-iframes).
+- Without it, or without the probe in the sandboxed document, the iframe is [shown as elements only](limitations.md#sandboxed-iframes-not-merged).
 
 ## Vite
 
@@ -163,7 +165,7 @@ The top-level page is replaced by a shell: the page runs in an iframe next to De
 | | Shell mode | Without |
 |---|---|---|
 | DevTools across reloads and navigations | Stays open, logs kept | Reopens with the page |
-| Device mode | ✅ | Screencast instead |
+| Device mode | Available | Screencast instead |
 | Layout | The page shrinks next to DevTools | The panel covers the page |
 
 On by default for the top-level page, when the bundle and frontend (and Service Worker) are where the probe trusts: on its origin, or from jsDelivr or unpkg, in the probe's package and the frontend's at the same version. It is off when:
@@ -175,10 +177,7 @@ On by default for the top-level page, when the bundle and frontend (and Service 
 | The page cannot be framed (`X-Frame-Options`, CSP `frame-ancestors`) | For the rest of the session |
 | The page keeps navigating the shell away | For the rest of the session |
 
-Caveats:
-
-- In an iframe, `100vh`, `position: fixed`, `window.top` and the viewport may behave differently.
-- The page's HTML is requested twice; a page returned for a form POST is requested again with GET.
+Caveats: in an iframe, [`100vh`, `position: fixed`, `window.top` and the viewport may behave differently, and the page's HTML is requested twice](limitations.md#shell-mode).
 
 ### Service Worker
 
@@ -225,7 +224,7 @@ The server serves the probe, bundle and frontend itself, and the frontend runs o
 - Several DevTools windows can inspect one page, each in its own session.
 - The target list can be filtered and shows how many DevTools each page has.
 - With a frontend too (`data-devtools-frontend-url`, or the probe from jsDelivr or unpkg), the page also has its own panel; `data-no-panel` goes without it.
-- Breakpoints still need the browser's own debugger (`chrome://inspect`, Safari Web Inspector): the page runs the same in-page agent.
+- [Breakpoints still need the browser's own debugger](limitations.md#breakpoints-and-profiling) (`chrome://inspect`, Safari Web Inspector).
 
 `data-remote` with a value names the server, when the probe comes from elsewhere. It resolves like a link:
 
@@ -253,57 +252,6 @@ In shell mode:
 | `/json/list` | Targets, in Chrome's format (needs the token) |
 | `anywhere_app.html?ws=<host:port/path>` | A frontend opened by itself connects to a target, as Chrome's `devtools_app.html?ws=` (`wss=` over HTTPS; also `#?ws=`) |
 
-## Limitations
-
-Gaps are filled exactly or not at all: nothing approximate is shown as fact.
-
-| Feature | Status | Details |
-|---|---|---|
-| Breakpoints, Profiler, Memory, Performance | ❌ Panels not included | No JS API. `debugger;` does not pause; in shell mode it logs a warning with its stack |
-| Network timing | ❌ | No JS API |
-| Sources | ⚠️ | Documents, external scripts and style sheets, images, fonts; no inline scripts; snippets work |
-| Browser default styles | ⚠️ | "user agent stylesheet" rules in Styles, from a copy of Chromium's `html.css` (`chromium-html.css`, loaded next to the bundle on first use). Rules with Blink-internal selectors are left out, `@supports blink-feature()` takes the feature-off branch, and only `html.css` is used (not Chrome's other default sheets); with the bundle inlined (no URL), none are shown. The Computed pane refreshes on DOM mutations and DevTools' own edits, not on every style change; not for nodes in merged sandboxed iframes |
-| Event listeners | ⚠️ | Only those added after the probe ran; no source location |
-| WebSocket | ⚠️ | Connections and frames; no handshake headers |
-| Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it |
-| Isolated worlds | ⚠️ | `Page.createIsolatedWorld` and `Runtime.addBinding` (`Runtime.bindingCalled`), as the Animations panel uses them, simulated in the page's own JavaScript world. A world's code runs with its own global: a view of the page's window (a `Window`, with `window`, `self`, `globalThis` and the top-level `this`) whose properties set there, bindings included, and names assigned without a declaration stay in the world; a name that exists nowhere throws a ReferenceError and is not `in window`, and `typeof` of it is 'undefined', as in Chrome (the world's code is rewritten for that: `typeof name`, also in parentheses, calls a lookup; so code `eval` runs within the world is not, and there `typeof` of such a name throws, a function the world defines shows the rewritten code in `toString()`, and columns in its stack traces are off). A node a function is called on (`DOM.resolveNode` in the world, then `Runtime.callFunctionOn`) is the page's node itself. The properties the world keeps on it are put on the node for the call and taken back after its synchronous part, and again once the promise it returns settles (what it writes after an `await` is on the node until then). After the synchronous part, every property added, changed or removed on the node is the world's however written (`Object.assign`, a computed key, `Object.defineProperty`), but for those a page listener wrote during an event the call dispatched (`dispatchEvent`, and `click`, `focus`, `blur` of HTML and SVG elements, watched meanwhile): they stay the page's, also under a name the world uses, whose world value is then the one it had before the event. The watched methods are proxies during the call: their name, length and `toString()` are the native ones, and a replacement the page makes meanwhile stays, but the page reads another function than before (`===` fails). Page code run otherwise during the call has its writes taken for the world's: an event dispatched by another method (`requestSubmit()`, `select()`, …), a custom element's callbacks, a getter or setter of the page's that the world uses. After an `await`, only the names the world's code assigns or deletes (`.name =`, `['name'] =`, `delete x.name`) or gets as string arguments are taken back: others written then, such as through `Object.assign` or a computed key, stay on the page's node. During the call the page sees the world's properties on the node, and the world the page's: a listener it runs reads the world's value, and after the event the world reads what the listener wrote under the same name, until the call ends (Chrome keeps the two apart). Otherwise the world shares the page's JavaScript: it reads the page's globals (a binding of the page's own context too) and changes to built-ins, `document.defaultView`, and `this` in a sloppy-mode function called plainly, are the page's window rather than the world's global; `new.target` at a world's top level is undefined (Chrome throws a SyntaxError); other objects' properties it sets are the page's, and `var` and function declarations of `Runtime.evaluate` do not stay. On a page whose CSP forbids `eval`, worlds are made and announced, but code run in them fails with an EvalError, as in the page's own context (Chrome's worlds are not bound by the page's CSP). Worlds of same-origin frames only: a merged sandboxed iframe's frame is refused ("No frame for given id found"). Like Chrome, a world is the page's, with one id for every session, and comes again with a new id in each document its frame loads; a binding added by several sessions reports each call to each; its function stays after `Runtime.removeBinding`, its calls no longer reported |
-| Sandboxed iframes (no `allow-same-origin`) | ⚠️ | [Merged](#sandboxed-iframes) into the page's target, as in Chrome: their DOM, styles, execution context, console, requests and scripts in the page's, highlighted, inspected and given input. Merged: moving or copying a node across the iframe's edge fails; `DOM.performSearch` lists the page's results first, then the iframe's; when the iframe's document reloads, its new `contentDocument` comes with its child count, without `childNodeCountUpdated` or `scrollableFlagUpdated`; the execution context Chrome reports for the iframe's initial about:blank is missing; a request to the iframe for its document, a node or a point unanswered within 1 s is taken as the iframe not answering (its document is not grafted, a point over it hits the `<iframe>` itself); an uncaught error thrown later by code run from the Console in the iframe (in a timer, say) has no exception object (`exception` is null), no position and no stack, as the iframe's document sees the probe's script as cross-origin and mutes its errors; its own scripts' errors are not affected; its scripts' sources are fetched again by the page from their URLs, so only those the page can fetch; in inspect mode the hover highlight is clipped by the iframe, and a `highlightNode` highlight of its node does not follow scrolling; `frameNavigated` keeps the same `loaderId` after the iframe's document navigates; after the frame navigates to a page without the probe, the page still shows the old document. Not merged (off, or no probe in it): listed in the frame tree as in Chrome, but shown as elements only, with no execution context or child frames of their own, and of its requests only its document's. The URL is the iframe's `src` (or `srcdoc`) as of its last load, not where its scripts navigated it; the MIME type is always text/html; the name is the iframe's `name` attribute, not a name its scripts set. The navigation is seen at the load event |
-| Cross-origin iframes | ⚠️ | Only with the probe in the iframe's page and both [origin lists](#cross-origin-iframes); otherwise shown as elements only. Linked once the iframe's probe runs: its document's own request is reported in its session, not the parent's; breakpoints by URL are not set again after it navigates. A page that does not link again after a navigation is detached up to 10 s later |
-| Cross-origin style sheets | ⚠️ | Need CORS; read-only. Without CORS, `CSS.getStyleSheetText` fails (Chrome has the text) and no rules are shown |
-| Style sheet text | ⚠️ | The text a sheet was written in, with Chrome's ranges, and edits made in it as written. A `<style>` starts at 0:0, not where it is in the HTML. Once the page changes a sheet through the CSSOM (not `replace()` or `replaceSync()`), its text is serialized from the CSSOM as Chrome serializes a sheet it first sees changed: each rule's text, `@import` ones included, followed by a line break (for a sheet whose text it knew, Chrome splices the rules' texts into it and lags behind); so it is when the rules found in the text cannot be paired with the CSSOM's, and for a constructed sheet made before DevTools opened. Changes made with `style.color = …` and the like, or to a media list's text, are not seen (no `CSS.styleSheetChanged`; Styles may show the text as it was). While CSS is enabled, an element's own `style.cssText = …` writes cost about 40% more (they pass through a hook); assigning single properties (`el.style.left = …`) is not affected. Editing the condition of an `@supports`, `@container` or `@scope` replaces the rule (the CSSOM cannot change it): rule objects the page holds for it and the rules in it are detached, where Chrome keeps them. The file of a `<link>` or `@import` is fetched again (from the HTTP cache when it may). Unlike Chrome, when one client edits a sheet (`CSS.setStyleSheetText`, `CSS.setStyleTexts`, `CSS.addRule` and the like), every client sees the latest text, with its ranges (one enabling CSS later too), and the other clients are sent `CSS.styleSheetChanged` (Chrome tells them nothing and they keep the old text). Undoing an edit after another client or the page changed the sheet serves the serialized text. Also unlike Chrome: `CSS.setRuleSelector` and `CSS.addRule` accept selectors with a namespace prefix declared by the sheet's `@namespace` (such as `h|p`); Chrome rejects them because it checks the text in an empty sheet without the namespaces |
-| `@namespace` | ⚠️ | Selectors of a sheet declaring namespaces (prefixes, a default namespace, in `:host()`, `::slotted()` and `@scope` too) are matched by adopting a sheet of our own for a moment, which costs a walk of the document and the restyle of the elements the sheet's rules could match by their last compound (some 15 ms per request with 60,000 elements, 20,000 of them matching). In an `@scope` without a prelude they are matched as if no namespace were declared; in an `@scope` whose root has a namespace prefix, its proximity is not known and taken as the farthest. |
-| Forced `:hover`, `:focus`, … | ⚠️ | Not for `@import` and `adoptedStyleSheets` sheets |
-| Screencast (device button outside shell mode) | ⚠️ | Redrawn by [snapDOM](https://github.com/zumerlab/snapdom) from the DOM: canvas, video and cross-origin images may be missing; ≤ 2 fps. Input replayed with `isTrusted: false` |
-| Screenshots | ⚠️ | See [below](#screenshots) |
-| Device mode | ⚠️ | Shell mode only. Sets the size only: no pixel ratio, user agent or touch; its screenshots are snapDOM's, at the page's pixel ratio. `Emulation.setDeviceMetricsOverride` works there from any client (a remote agent too), the last one set applying, as in Chrome; elsewhere it fails. Remote clients' overrides survive page reloads, as in Chrome. The override's params are checked as Chrome checks them, with Chrome's errors, except that "Invalid parameters" data leaves out Chrome's "at position N" (a byte offset in Chrome's own encoding), and a `devicePosture` of an unknown type is taken, where Chrome stops answering |
-| Fullscreen pages | ⚠️ | While an element is fullscreen, DevTools cannot be used, in shell mode too. Esc leaves fullscreen |
-| Rendering panel emulation | ⚠️ | "Emulate a focused page" cannot be done: using DevTools in the page really takes focus from its elements, and their `:focus` styles go; turning it on fails. Auto dark mode and resetting the pinch zoom cannot be done either and fail. Every command the page cannot carry out fails with "Not supported in the page: <why>"; those that could be done but are not yet are in the [roadmap](roadmap.md) |
-| Accessibility tree | ⚠️ | The Elements panel's Accessibility pane and `Accessibility.getPartialAXTree`, `getFullAXTree`, `queryAXTree`, `getRootAXNode`, `getChildAXNodes`, `getAXNodeAndAncestors`: computed in the page from the DOM, ARIA attributes and computed styles, compared with Chrome's. No inline text boxes, list markers or nodes of user-agent shadow trees; the default names of inputs (such as "Submit") are in English; no `loadComplete` or `nodesUpdated` events. Computed by `accessibility.js` (about 29 KB), loaded on first use from next to the bundle: self-hosted, serve it in the same directory |
-| Animations panel | ⚠️ | CSS animations, transitions and Web Animations from `getAnimations()`, and those made with `animate()` or `new Animation()` (without a target, out of the document, over at once): listed, paused, seeked, retimed. The playback rate is set on each animation, not on the timeline as in Chrome, so the page reads it multiplied in `playbackRate` (a rate the page sets is kept, but one equal to the negated rate is taken for `reverse()`); one that ended outside `getAnimations()` and is restarted other than by `play()` is not seen; only the page's documents and its same-origin frames. Animations in shadow trees are listed (declarative ones, hosts inserted later, and those in iframes too), but not those in closed declarative shadow roots (the page has no handle on them) or in user-agent shadow trees (such as `input::placeholder`'s). A `::backdrop` animation names its `<dialog>`, which the Elements panel shows. `cssId` (what the panel groups by) follows the rules that win the animation's properties, as in Chrome, so the same declarations in two rules are two groups, and a `:hover` transition and the one back are too; rules of `@import`ed sheets and those our CSS matching misses are not seen, and for a pseudo-element other than `::before`, `::after` and `::marker` it is approximated from the computed styles. `seekAnimations` takes `currentTimes` in milliseconds, as the protocol says (Chrome 156 takes them as seconds). While the rate is changed, an animation started meanwhile gets another start time than in Chrome, which slows the document timeline instead. An animation that stays pending (its timeline inactive) keeps the panel's rate after `disable`. An animation cancelled or paused before it started is reported created and cancelled only: when a frame's animation update ran before the cancel (a frame, then a timer that cancels it), Chrome reports a start first, which is missing here. An animation the page dropped and that was garbage-collected can no longer be found by its id (Chrome keeps it until `disable`). While a document is still being parsed, the animations and style sheets of its declarative shadow roots may come late; all are there once parsing ends. Scroll-driven animations (`scroll()`, `view()`, `ScrollTimeline`, `ViewTimeline`) report their `viewOrScrollTimeline` (the root scroller's as `document`), with Chrome's time unit of 16 µs per pixel. Seeking one that runs has no effect; a paused one is seeked to the converted time, clamped to its end. The playback rate does not apply to them (the panel disables its rate buttons while a scroll-driven group is selected). The scrubber follows the page's own scrolling, through an isolated world (see "Isolated worlds" above), and dragging it sets the scroll position |
-| Emulated media | ⚠️ | `prefers-color-scheme`, `prefers-reduced-motion`, `prefers-reduced-data`, `prefers-reduced-transparency`, `prefers-contrast`, `forced-colors`, `color-gamut` and the media type, by rewriting the page's style sheets. Not in cross-origin sheets, inline styles or `matchMedia()`; the colors `light-dark()` and forced colors pick are not changed |
-| Emulated safe area insets | ⚠️ | `env(safe-area-inset-*)` replaced in the page's style sheets: not in cross-origin sheets or inline styles; Styles shows the replaced values |
-| Vision deficiencies | ✅ | SVG filters on `<html>`, as in Chrome: they replace a `filter` of the page's own on `<html>`, apply to an embedded panel too, and `getComputedStyle` sees them |
-| Layout overlays | ⚠️ | Grid, flex, container query, scroll-snap, isolation, hinge, display cutout and frame overlays, drawn approximately from the computed styles: grids have no line labels; isolation mode's resizing does not reach into iframes |
-| Network conditions | ⚠️ | Blocked URLs, extra headers, cache disabled, offline and the user agent override apply to the `fetch()` and XHR the probe hooks only, not the document's own request or other subresources. Disabling the cache of XHR works for same-origin requests only; extra headers on a cross-origin request make it need a CORS preflight; the user agent is overridden in the page and its same-origin iframes found so far. Throttling is not supported. Reporting API: the reports the page sees only |
-| Application panel | ⚠️ | IndexedDB and Cache Storage views refresh on writes of this window only (not workers or other windows); the storage bucket is the page's default one. Service workers: listed, updated and unregistered; whether one is running cannot be seen, so it shows running until redundant; inspecting, starting and stopping workers fail |
-| Issues panel | ⚠️ | CSP violations, deprecations, quirks mode and form issues. CSP and deprecations of the top document only; no interventions, no low contrast (Chrome has no such check either); cookies, CORS and mixed content are the browser's |
-| Console violations | ⚠️ | `[Violation]` messages for slow handlers and forced reflows from `long-animation-frame` entries, without line numbers; the browser needs long-animation-frame, otherwise `Log.startViolationsReport` fails |
-| `DOM.scrollIntoViewIfNeeded` in a cross-origin iframe | ✅ | Scrolls the parent pages on too, asynchronously after the answer |
-| Frontend on the page's origin | ⚠️ | DevTools' settings share the page's `localStorage`: host it on another origin |
-| Browsers | ⚠️ | Page side: any modern browser. DevTools UI: verified in Chrome only; newer frontends may need compatibility patches |
-
-snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `accessibility.js` only for the accessibility tree; `chromium-html.css` only for the browser default styles. It is a copy of Chromium's `html.css`, the package's only file under the LGPL (2.0 or later; its license is next to it as `chromium-html.LICENSE.txt`, and in THIRD_PARTY_LICENSES.md). A site that does not want it can leave both files out: Styles then shows no user agent stylesheet rules, and nothing else changes.
-
-### Screenshots
-
-`Page.captureScreenshot`, for tools and agents that drive the page over CDP:
-
-- Rendered by snapDOM like the screencast, and marked `approximate: true` (a field Chrome does not send).
-- `clip` is in page coordinates; the image is in device pixels (`devicePixelRatio` × `clip.scale`).
-- `captureBeyondViewport` without `clip` takes the whole page.
-- Past the canvas limits (32767 px a side, 16384 on Safari, 16384 × 16384 in area) the image is scaled down; snapDOM warns in the console.
-- WebP falls back to PNG where it cannot be encoded (Safari).
-
 ## Packages
 
 | Package | Contents |
@@ -313,3 +261,5 @@ snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `acces
 | `@devtools-anywhere/devtools-frontend-locales` | The other 80 UI languages; serve from the frontend's directory. Missing languages fall back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
 | `@devtools-anywhere/remote-server` | Remote debugging server and CLI (`devtools-anywhere-remote`) |
+
+snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `accessibility.js` only for the accessibility tree; `chromium-html.css` only for the browser default styles. It is a copy of Chromium's `html.css`, the package's only file under the LGPL (2.0 or later; its license is next to it as `chromium-html.LICENSE.txt`, and in THIRD_PARTY_LICENSES.md). A site that does not want it can leave both files out: Styles then shows no user agent stylesheet rules, and nothing else changes.

@@ -17,7 +17,7 @@
 | | devtools-anywhere | eruda / vConsole | Chii |
 |---|---|---|---|
 | 界面 | 最新的 Chrome DevTools | 自己实现的面板 | 旧版 Chrome DevTools（约 122） |
-| 页面最早的日志和报错 | ✅ 从第一行脚本开始 | ❌ 初始化前的会丢 | ✅ |
+| 页面最早的日志和报错 | 从第一行脚本开始捕获 | 初始化前的会丢 | 能捕获 |
 | 接入 | 一行 `<script>` 或 Vite 插件 | 一行 `<script>` | 比较繁琐 |
 
 ## 快速上手
@@ -68,16 +68,16 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 
 | 面板 | 支持情况 |
 |---|---|
-| 元素、样式 | ✅ 不显示浏览器默认样式 |
-| 控制台 | ✅ 包括页面最早的输出 |
-| 网络 | ✅ 没有真实的时序；WebSocket 握手头看不到 |
-| 源代码 | ⚠️ 能看文件、用代码段，不能下断点 |
-| 应用 | ✅ |
-| 设备模式 | ⚠️ 仅外壳模式，只改尺寸，不改像素比、UA 和触摸 |
-| 投屏、截图 | ⚠️ 从 DOM 重绘，不是屏幕像素 |
-| 性能、内存、Profiler | ❌ 页面脚本拿不到这些数据 |
+| 元素、样式 | 完整支持：不显示浏览器默认样式 |
+| 控制台 | 完整支持：包括页面最早的输出 |
+| 网络 | 完整支持：没有真实的时序；WebSocket 握手头看不到 |
+| 源代码 | 部分支持：能看文件、用代码段，不能下断点 |
+| 应用 | 完整支持 |
+| 设备模式 | 部分支持：仅外壳模式，只改尺寸，不改像素比、UA 和触摸 |
+| 投屏、截图 | 部分支持：从 DOM 重绘，不是屏幕像素 |
+| 性能、内存、Profiler | 不支持：页面脚本拿不到这些数据 |
 
-页面这边只用标准 Web API，现代浏览器都能用；DevTools 界面只在 Chrome 上验证过。完整的限制见[使用指南](docs/usage.zh-CN.md#能力边界)。
+页面这边只用标准 Web API，现代浏览器都能用；DevTools 界面只在 Chrome 上验证过。完整的限制见[能力边界](docs/limitations.zh-CN.md)。
 
 ## 包
 
@@ -91,7 +91,8 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 
 ## 文档
 
-- [使用指南](docs/usage.zh-CN.md)：所有接入方式、选项、限制
+- [使用指南](docs/usage.zh-CN.md)：所有接入方式、选项
+- [能力边界](docs/limitations.zh-CN.md)：做不到的事，以及与 Chrome 的差异
 - [设计](docs/design.zh-CN.md)：工作原理和取舍
 - [开发指南](DEV.zh-CN.md)：搭建环境、测试、发布
 

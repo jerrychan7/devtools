@@ -2,7 +2,7 @@
 
 [English](usage.md) | 简体中文
 
-devtools-anywhere 的接入参考。快速上手见 [README](../README.zh-CN.md)，工作原理见[设计文档](design.zh-CN.md)。
+devtools-anywhere 的接入参考。快速上手见 [README](../README.zh-CN.md)，工作原理见[设计文档](design.zh-CN.md)。哪些能用、哪些做不到、与 Chrome 有何不同，见[能力边界](limitations.zh-CN.md)。
 
 ## 选择接入方式
 
@@ -36,7 +36,7 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 | | 自己部署 | CDN（jsDelivr、unpkg） |
 |---|---|---|
 | `data-devtools-frontend-url` | 必填 | 可选：默认用 CDN 上同版本的前端 |
-| 外壳模式 | ✅ 默认开启 | ✅ 默认开启，但没有 [Service Worker](#service-worker) |
+| 外壳模式 | 默认开启 | 默认开启，但没有 [Service Worker](#service-worker) |
 | 界面语言 | 全部（`@devtools-anywhere/devtools-frontend-locales` 放在前端目录下） | 英文和中文 |
 
 - 页面加载完成后，探针在 `<html>` 下挂载一个 `<devtools-anywhere>`，不管页面里有没有；第二个探针只会警告。
@@ -74,6 +74,7 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 - 每一项是确切的源，或者 `https://*.example.com`，表示任意层级的子域（不含 `example.com` 本身）；协议和端口要完全一致。单独的 `*` 会被忽略并给出警告。
 - 连上以后，iframe 自己的 F12 按钮和面板会隐藏。
 - iframe 重新加载、或者导航到同样会连接的页面，连接都会保留；iframe 里再嵌的跨域 iframe 也按同样方式逐级连上。
+- iframe 页面没加载探针或任一方没配名单时，只显示为元素。连上后与 Chrome 有几处不同（它的文档本身的请求、导航后的断点、断开、`DOM.scrollIntoViewIfNeeded` 先应答后滚动父页面）：见[能力边界](limitations.zh-CN.md#cross-origin-iframes)。
 
 ### 沙箱 iframe
 
@@ -89,7 +90,8 @@ npm i devtools-anywhere @devtools-anywhere/devtools-frontend
 - 默认关闭：父页面的 `data-frame-origins` 写上 `sandboxed` 才开启（可以和源写在一起），沙箱文档的 `data-parent-origins` 写父页面的源。父页面的 DevTools 能在 iframe 里执行任意代码，而沙箱文档可能加载第三方脚本。
 - 只对 `src` 与页面同源、`about:blank` 或 `srcdoc` 的生效。`src` 跨源的一律拒绝，同站的也一样（Chrome 把它留在页面的 target 里）：只显示为元素，不列在 frame 树里。
 - 校验看的是 iframe 的 `src`，不是它实际装着的文档：沙箱文档的源是 `null`，页面分辨不出它从哪来。iframe 一旦导航到别的源（在框里点了链接，或 `src` 被重定向），那边的文档只要实现了探针的握手，同样会被并入，它回报的内容会出现在页面的 DevTools 里。只对始终停留在自己页面上的 iframe 开启。
-- 没有开启，或者沙箱文档没加载探针时，按[能力边界](#能力边界)里说的显示。
+- 并入后与 Chrome 有几处不同：见[能力边界](limitations.zh-CN.md#sandboxed-iframes)。
+- 没有开启，或者沙箱文档没加载探针时，[只显示为元素](limitations.zh-CN.md#sandboxed-iframes-not-merged)。
 
 ## Vite
 
@@ -163,7 +165,7 @@ export default { plugins: [devtoolsAnywhere()] }
 | | 外壳模式 | 非外壳模式 |
 |---|---|---|
 | 刷新、跳转时的 DevTools | 保持打开，日志保留 | 随页面重新打开 |
-| 设备模式 | ✅ | 换成投屏 |
+| 设备模式 | 可用 | 换成投屏 |
 | 布局 | 页面在 DevTools 旁边缩小 | 面板盖在页面上 |
 
 bundle、前端（以及 Service Worker）在探针信任的位置时，顶层页面默认开启外壳模式。信任的位置是：与探针同源；探针来自 jsDelivr 或 unpkg 时，则只限探针所在的包和同版本的前端包。以下情况关闭：
@@ -175,10 +177,7 @@ bundle、前端（以及 Service Worker）在探针信任的位置时，顶层�
 | 页面禁止被嵌入（`X-Frame-Options`、CSP `frame-ancestors`） | 本次会话内一直关闭 |
 | 页面反复把外壳跳转走 | 本次会话内一直关闭 |
 
-注意：
-
-- 在 iframe 里，`100vh`、`position: fixed`、`window.top` 和视口的表现可能不同。
-- 页面的 HTML 会请求两次；表单 POST 返回的页面会用 GET 再请求一次。
+注意：在 iframe 里，[`100vh`、`position: fixed`、`window.top` 和视口的表现可能不同，页面的 HTML 会请求两次](limitations.zh-CN.md#shell-mode)。
 
 ### Service Worker
 
@@ -225,7 +224,7 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 - 多个 DevTools 窗口可以同时调试一个页面，各自一个会话。
 - 目标列表可以筛选，并显示每个页面连着几个 DevTools。
 - 同时有前端时（写了 `data-devtools-frontend-url`，或探针来自 jsDelivr、unpkg），页面还有自己的面板；不要面板时加 `data-no-panel`。
-- 断点仍要靠浏览器自带的调试器（`chrome://inspect`、Safari Web Inspector）：页面里运行的仍是同一个页面内 agent。
+- [断点仍要靠浏览器自带的调试器](limitations.zh-CN.md#breakpoints-and-profiling)（`chrome://inspect`、Safari Web Inspector）。
 
 探针来自别处时，用带值的 `data-remote` 指定服务端，按链接的规则解析：
 
@@ -253,57 +252,6 @@ npx -p @devtools-anywhere/remote-server devtools-anywhere-remote
 | `/json/list` | 目标列表，格式同 Chrome（需要令牌） |
 | `anywhere_app.html?ws=<host:port/path>` | 单独打开的前端连接某个目标，同 Chrome 的 `devtools_app.html?ws=`（HTTPS 用 `wss=`；也可写在 `#?ws=`） |
 
-## 能力边界
-
-拿不到的数据要么精确补上，要么不显示：不把近似值当成事实。
-
-| 功能 | 状态 | 说明 |
-|---|---|---|
-| 断点、Profiler、内存、性能 | ❌ 不打包这些面板 | 没有 JS API。`debugger;` 不会暂停；外壳模式下改为输出一条带堆栈的警告 |
-| 网络时序 | ❌ | 没有 JS API |
-| 源代码 | ⚠️ | 文档、外链脚本和样式表、图片、字体；不列内联脚本；代码段可用 |
-| 浏览器默认样式 | ⚠️ | Styles 里显示「user agent stylesheet」规则，来自 Chromium 的 `html.css` 副本（`chromium-html.css`，首次使用时从 bundle 旁边加载）。含 Blink 内部选择器的规则不显示，`@supports blink-feature()` 按特性关闭处理，只用 `html.css`（不含 Chrome 的其他默认样式表）；bundle 内联（没有 URL）时不显示。Computed 窗格在 DOM 变动和 DevTools 自己修改样式时刷新，不是每次样式变化都刷新；合并的沙箱 iframe 里的节点不刷新 |
-| 事件监听器 | ⚠️ | 只有探针运行之后添加的；没有源码位置 |
-| WebSocket | ⚠️ | 连接和帧；没有握手头 |
-| 同源 iframe | ⚠️ | iframe 的导航要到 load 事件才发现，比 Chrome 晚：在此之前的日志和请求拿不到，srcdoc 和空 iframe 除外；在此之前 iframe 脚本附加的 closed shadow root 也拿不到 |
-| 隔离世界 | ⚠️ | 支持 Animations 面板所用的 `Page.createIsolatedWorld` 和 `Runtime.addBinding`（`Runtime.bindingCalled`），在页面自己的 JavaScript 世界里模拟。世界里的代码有自己的全局对象：页面 window 的一个视图（是 `Window`，`window`、`self`、`globalThis` 和顶层 `this` 都指向它），在上面设的属性（包括 binding）和不加声明直接赋值的名字都只留在世界里；哪里都不存在的名字会抛 ReferenceError，也不在 `window` 里（`in` 为 false），对它用 `typeof` 得到 'undefined'，与 Chrome 相同（为此会改写世界的代码：`typeof 名字`（包括加括号的）改为调用一个查询函数；因此世界里用 `eval` 执行的代码不改写，其中对这类名字用 `typeof` 会抛错；世界定义的函数 `toString()` 会露出改写后的代码；异常栈的列号会偏移）。在世界里 `DOM.resolveNode` 后再 `Runtime.callFunctionOn` 时，`this` 就是页面的真节点。世界在它上面保留的属性，调用前放回节点，调用的同步部分结束后收回，返回的 Promise 结束后再收回一次（`await` 之后写的属性在此之前留在节点上）。同步部分结束后，节点上新增、改动或删除的属性，不论怎么写的（`Object.assign`、计算属性名、`Object.defineProperty`），都归世界；例外是调用派发的事件（调用期间监视 `dispatchEvent`，以及 HTML 和 SVG 元素的 `click`、`focus`、`blur`）里页面监听器写的属性，它们留给页面，与世界同名时也一样，此时世界保留事件之前它自己的值。调用期间这几个被监视的方法是代理：name、length 和 `toString()` 与原生的一致，页面在此期间换掉的方法也会保留，但页面读到的函数与之前不是同一个（`===` 不成立）。调用期间以其他方式运行的页面代码写的属性，会被当成世界的收走：经其他方法派发的事件（`requestSubmit()`、`select()` 等）、自定义元素的回调、世界用到的页面 getter 和 setter。`await` 之后，只收回世界代码赋值或删除过的属性名（`.name =`、`['name'] =`、`delete x.name`）和作为字符串参数传入的名字；此时用 `Object.assign`、计算属性名等其他写法写的属性会留在页面的节点上。调用期间页面能在节点上看到世界的属性，世界也能看到页面的：它触发的监听器读到的是世界的值；事件之后、调用结束之前，世界读到的是监听器写的同名属性（Chrome 里二者互不可见）。除此之外世界与页面共享 JavaScript：能读到页面的全局变量（页面默认上下文的 binding 也看得到）和对内置对象的改动；`document.defaultView`，以及宽松模式下直接调用的普通函数里的 `this`，是页面的 window 而不是世界的全局对象；世界顶层的 `new.target` 是 undefined（Chrome 报 SyntaxError）；在其他对象上设的属性页面也看得到；`Runtime.evaluate` 的 `var` 和函数声明不会保留。页面 CSP 禁止 `eval` 时，世界照常创建和宣告，但在里面执行代码会像在页面默认上下文里一样失败，返回 EvalError（Chrome 的世界不受页面 CSP 限制）。只支持同源 frame 的世界：合并的沙箱 iframe 的 frame 会被拒绝（"No frame for given id found"）。与 Chrome 相同：世界属于页面，各会话拿到同一个 id；frame 每加载一个文档，世界都以新 id 重新出现；多个会话添加同一个 binding 时，每次调用每个会话都会收到；`Runtime.removeBinding` 后函数仍在，只是调用不再上报 |
-| 沙箱 iframe（没有 `allow-same-origin`） | ⚠️ | [并入](#沙箱-iframe)父页面的 target 后和 Chrome 一样：它的 DOM、样式、执行上下文、console、请求和脚本都显示在父页面里，能高亮、检查和输入。并入后：跨沙箱边界移动或复制节点会报错；`DOM.performSearch` 的结果父页面在前、沙箱在后；沙箱文档重新加载时，新的 `contentDocument` 直接带着子节点数，不发 `childNodeCountUpdated` 和 `scrollableFlagUpdated`；Chrome 为沙箱 iframe 起初的 about:blank 报的执行上下文没有；向沙箱取文档、节点或坐标的请求 1 秒内没有应答，就按沙箱未应答处理（不嫁接它的文档，落在它上面的坐标命中 `<iframe>` 本身）；从 Console 在沙箱里执行的代码，之后抛出的未捕获异常（比如在定时器里）不带异常对象（`exception` 为 null），也没有位置和堆栈：沙箱文档把探针脚本当作跨源脚本，屏蔽了它的错误详情；沙箱页自己脚本的异常不受影响；沙箱脚本的源码由父页面按 URL 重新获取，只能拿到父页面能取到的；检查模式下悬停高亮被 iframe 边界裁剪，`highlightNode` 画的沙箱节点高亮不随滚动更新；沙箱文档导航后 `frameNavigated` 的 `loaderId` 不变；沙箱 frame 导航到没有探针的页面后，父页面仍留着旧文档。未并入（没有开启，或沙箱文档没加载探针）：和 Chrome 一样列在 frame 树里，但它的不透明文档拿不到：只显示为元素，没有它自己的执行上下文和子 frame，请求只有它的文档本身。URL 取 iframe 上次 load 时的 `src`（或 `srcdoc`），不是它的脚本导航去的地址；MIME 类型固定为 text/html；名称取 iframe 的 `name` 属性，不是脚本设的名称。导航要到 load 事件才发现 |
-| 跨域 iframe | ⚠️ | 需要 iframe 页面也加载探针，并且双方都配了[源名单](#跨域-iframe)，否则只显示为元素。要等 iframe 的探针运行后才连上：它的文档本身的请求报在它自己的会话里，而不是父页面的；导航后按 URL 设置的断点不会重新设上。导航后没有重新连接的页面，最多 10 秒后断开 |
-| 跨源样式表 | ⚠️ | 需要 CORS；只读。没有 CORS 时 `CSS.getStyleSheetText` 报错（Chrome 拿得到原文），也不显示规则 |
-| 样式表原文 | ⚠️ | 返回样式表的原文，range 与 Chrome 一致，编辑按原样写入原文。`<style>` 从 0:0 起算，不是它在 HTML 里的位置。页面通过 CSSOM 改过样式表后（`replace()`、`replaceSync()` 除外），原文改为从 CSSOM 序列化，格式与 Chrome 首次见到已被改过的样式表时一致：每条规则（含 `@import`）的文本后跟一个换行（Chrome 对已知原文的样式表是把规则文本拼进原文，且会滞后）；原文里找到的规则与 CSSOM 配不上时、DevTools 打开前就构造的样式表，也是如此。通过 `style.color = …` 这类属性赋值或改媒体列表文本所做的修改看不到（不发 `CSS.styleSheetChanged`；Styles 可能仍显示旧原文）。CSS 启用期间，元素行内样式的 `style.cssText = …` 写入约有 40% 额外开销（经过钩子）；逐属性赋值（`el.style.left = …`）不受影响。编辑 `@supports`、`@container`、`@scope` 的条件会整条替换该规则（CSSOM 无法修改它们的条件）：页面持有的该规则及其内部规则对象会脱离，Chrome 则保持原对象。`<link>` 和 `@import` 的文件会再取一次（能用 HTTP 缓存时走缓存）。与 Chrome 不同：一个客户端编辑样式表（`CSS.setStyleSheetText`、`CSS.setStyleTexts`、`CSS.addRule` 等）后，所有客户端（包括之后才启用 CSS 的）都看到最新原文及其 range，其他客户端收到 `CSS.styleSheetChanged`（Chrome 不通知它们，它们保留旧原文）。其他客户端或页面改过该表后再撤销编辑，原文改为序列化文本。同样与 Chrome 不同：`CSS.setRuleSelector` 和 `CSS.addRule` 接受带本表 `@namespace` 所声明前缀的选择器（如 `h|p`）；Chrome 会拒绝，因为它是在一张没有命名空间的空表里校验文本的 |
-| `@namespace` | ⚠️ | 声明了命名空间的样式表，其选择器（前缀、默认命名空间，含 `:host()`、`::slotted()`、`@scope` 内）靠临时采用一张我们自己的表来匹配，每次请求要遍历一遍文档，并重算按最后一段复合选择器可能被这些规则命中的元素（6 万个元素、其中 2 万个可能命中时约 15 ms）。没有前奏的 `@scope` 内仍按未声明命名空间匹配；根选择器带命名空间前缀的 `@scope`，算不出远近，按最远处理。 |
-| 强制 `:hover`、`:focus` 等 | ⚠️ | 不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表 |
-| 投屏（非外壳模式下的设备按钮） | ⚠️ | 由 [snapDOM](https://github.com/zumerlab/snapdom) 从 DOM 重绘：canvas、视频、跨源图片可能缺失；每秒最多约 2 帧。输入以 `isTrusted: false` 的事件回放 |
-| 截图 | ⚠️ | 见[下文](#截图) |
-| 设备模式 | ⚠️ | 仅外壳模式。只改尺寸，不改像素比、UA 和触摸；它的截图由 snapDOM 生成，按页面自身的像素比。外壳模式下任何客户端（包括远程连入的 agent）都能用 `Emulation.setDeviceMetricsOverride`，以最后一次设置为准，与 Chrome 一致；其他模式下返回错误。远程客户端的设置在页面重新加载后仍然有效，与 Chrome 一致。参数按 Chrome 的规则检查，报错也与 Chrome 相同，但有两处例外："Invalid parameters" 的 data 不带 Chrome 的 "at position N"（这是 Chrome 内部编码里的字节偏移）；`devicePosture` 的 type 不认识时照常接受，而 Chrome 会不再应答 |
-| Rendering 面板的模拟 | ⚠️ | 「模拟页面处于焦点」做不到：在页面里使用 DevTools 时，焦点真的会离开页面元素，`:focus` 样式随之消失，开启时返回错误。自动深色模式、双指缩放重置同样做不到，返回错误。页面做不到的命令一律返回错误「Not supported in the page: <原因>」，能做但还没做的见[路线图](roadmap.zh-CN.md) |
-| 全屏的页面 | ⚠️ | 有元素全屏时用不了 DevTools，外壳模式下也一样。按 Esc 退出全屏即可 |
-| 无障碍树 | ⚠️ | Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。没有 InlineTextBox、列表标记和 UA shadow 树里的节点；input 的默认名称（如 "Submit"）是英文；不发 `loadComplete`、`nodesUpdated` 事件。由 `accessibility.js`（约 29 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录 |
-| Animations 面板 | ⚠️ | 来自 `getAnimations()` 的 CSS 动画、过渡和 Web Animations，以及用 `animate()` 或 `new Animation()` 创建的动画（无 target、不在文档中、立即结束的）：列出、暂停、拖动进度、改时间。调速设在每个动画上，而不是像 Chrome 那样设在时间线上，所以页面读到的 `playbackRate` 是乘过的（页面自己设的速率会保留，但恰好等于取负速率的值会被当作 `reverse()`）；`getAnimations()` 之外已结束的动画若不是通过 `play()` 重新开始，则看不到；只覆盖页面自己和同源 frame 的文档。shadow 树里的动画也会列出（包括声明式的、宿主后插入的、iframe 里的），但拿不到 closed 声明式 shadow root 里的（页面拿不到它的引用），也拿不到 UA shadow 树里的（如 `input::placeholder` 的）。`::backdrop` 的动画指向它的 `<dialog>`，即 Elements 面板能显示的节点。`cssId`（面板据此分组）与 Chrome 一样按赢得动画属性的规则生成，两条规则里的相同声明分两组，`:hover` 的过渡和移出时的反向过渡也分两组；`@import` 样式表的规则和我们的 CSS 匹配漏掉的规则看不到，`::before`、`::after`、`::marker` 以外伪元素的动画仍按计算样式近似。`seekAnimations` 的 `currentTimes` 按协议的毫秒处理（Chrome 156 当成秒）。调速期间新开始的动画，开始时间与 Chrome 有偏差，因为 Chrome 是把文档时间线放慢。一直 pending 的动画（时间线不活动）在 `disable` 后保留面板设的速率。动画在开始前被取消或暂停时，只报告创建和取消：若取消前已跑过一帧动画更新（先出帧、后在定时器里取消），Chrome 还会先报告一次开始，这里少报这一次。页面丢弃且已被垃圾回收的动画，按 id 查不到（Chrome 会保留到 `disable`）。文档还在流式解析时，其声明式 shadow root 里的动画和样式表可能晚到，解析结束时补齐。滚动驱动动画（`scroll()`、`view()`、`ScrollTimeline`、`ViewTimeline`）会报告 `viewOrScrollTimeline`（根滚动容器报为 `document`），时间单位与 Chrome 相同，为每像素 16µs。正在运行的滚动驱动动画 seek 无效；暂停的按换算后的时间 seek，截到终点。调速不作用于它们（面板选中滚动分组时调速按钮被禁用）。页面自己滚动时 scrubber 会跟随（通过隔离世界，见上面「隔离世界」一行），拖动 scrubber 也能改滚动位置 |
-| 模拟媒体特性 | ⚠️ | `prefers-color-scheme`、`prefers-reduced-motion`、`prefers-reduced-data`、`prefers-reduced-transparency`、`prefers-contrast`、`forced-colors`、`color-gamut` 和媒体类型，通过改写页面的样式表实现。跨域样式表、内联样式和 `matchMedia()` 不受影响；`light-dark()` 和强制颜色选的配色不会变 |
-| 模拟安全区 | ⚠️ | 在页面的样式表里替换 `env(safe-area-inset-*)`：跨域样式表和内联样式不受影响；Styles 里显示的是替换后的值 |
-| 色觉缺陷模拟 | ✅ | 和 Chrome 一样在 `<html>` 上加 SVG 滤镜：会覆盖页面自己在 `<html>` 上的 `filter`，内嵌的面板也会被滤镜，`getComputedStyle` 能看到 |
-| 布局叠加层 | ⚠️ | Grid、Flex、容器查询、scroll-snap、隔离、铰链、刘海和 frame 叠加层，按计算样式近似绘制：grid 没有线编号；隔离模式的拖拽调整大小不跨 iframe |
-| 网络条件 | ⚠️ | 屏蔽 URL、附加请求头、禁用缓存、离线和 UA 覆盖只对探针拦截的 `fetch()`、XHR 生效，文档本身的请求和其他子资源不受影响。XHR 禁用缓存只对同源请求有效；跨源请求附加请求头会触发 CORS 预检；UA 只覆盖页面和已发现的同源 iframe。不支持限速。Reporting API 只有页面能看到的报告 |
-| Application 面板 | ⚠️ | IndexedDB 和 Cache Storage 视图只在本窗口写入时刷新（worker 和其他窗口的看不到）；存储桶是页面的默认桶。Service Worker：能列出、更新、注销；看不到是否在运行，所以在变成 redundant 之前都显示为运行中；调试、启动、停止 worker 返回错误 |
-| 问题面板 | ⚠️ | CSP 违规、弃用、怪异模式和表单问题。CSP 和弃用只有顶层文档的；没有干预，没有低对比度（Chrome 也已没有这项检查）；Cookie、CORS、混合内容只有浏览器知道 |
-| Console 违规提示 | ⚠️ | 由 `long-animation-frame` 条目得出慢 handler 和强制重排的 `[Violation]` 消息，没有行号；浏览器需要支持 long-animation-frame，否则 `Log.startViolationsReport` 返回错误 |
-| 跨域 iframe 里的 `DOM.scrollIntoViewIfNeeded` | ✅ | 会继续滚动父页面，在应答之后异步进行 |
-| 前端与页面同源 | ⚠️ | DevTools 的设置会和页面共用 `localStorage`：前端放在别的源 |
-| 浏览器 | ⚠️ | 页面这边：现代浏览器都行。DevTools 界面：只在 Chrome 上验证过；新版前端可能需要兼容补丁 |
-
-snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js` 只在用到无障碍树时加载；`chromium-html.css` 只在显示浏览器默认样式时加载。它是 Chromium `html.css` 的副本，也是包里唯一采用 LGPL（2.0 或更高版本）的文件；许可全文放在它旁边的 `chromium-html.LICENSE.txt`，也列在 THIRD_PARTY_LICENSES.md 里。不想分发它的站点可以把这两个文件一起删掉：Styles 里就不再显示 user agent stylesheet 规则，其他功能不受影响。
-
-### 截图
-
-`Page.captureScreenshot`，供通过 CDP 操作页面的工具和 agent 使用：
-
-- 和投屏一样由 snapDOM 绘制，并标注 `approximate: true`（Chrome 不返回这个字段）。
-- `clip` 用页面坐标；图片按设备像素计算（`devicePixelRatio` × `clip.scale`）。
-- 没有 `clip` 时，`captureBeyondViewport` 截整个页面。
-- 超出画布上限（每边 32767 像素，Safari 为 16384，面积 16384 × 16384）时缩小，snapDOM 会在控制台警告。
-- 不支持编码 WebP 的浏览器（Safari）退回 PNG。
-
 ## 包
 
 | 包 | 内容 |
@@ -313,3 +261,5 @@ snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js
 | `@devtools-anywhere/devtools-frontend-locales` | 其余 80 种界面语言；和前端放在同一目录。缺少的语言退回英文 |
 | `@devtools-anywhere/vite-plugin` | Vite 插件 |
 | `@devtools-anywhere/remote-server` | 远程调试服务端和命令行（`devtools-anywhere-remote`） |
+
+snapDOM（gzip 后约 90 KB）只在投屏和截图时加载；`accessibility.js` 只在用到无障碍树时加载；`chromium-html.css` 只在显示浏览器默认样式时加载。它是 Chromium `html.css` 的副本，也是包里唯一采用 LGPL（2.0 或更高版本）的文件；许可全文放在它旁边的 `chromium-html.LICENSE.txt`，也列在 THIRD_PARTY_LICENSES.md 里。不想分发它的站点可以把这两个文件一起删掉：Styles 里就不再显示 user agent stylesheet 规则，其他功能不受影响。
