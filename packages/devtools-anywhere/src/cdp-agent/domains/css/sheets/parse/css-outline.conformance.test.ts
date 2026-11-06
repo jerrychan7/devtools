@@ -80,9 +80,15 @@ async function check(text: string, nested = true) {
   // Nested rules: as many, at each level, as CSSOM keeps of the rules it keeps. Only for texts
   // whose nested rules and declarations are all valid: CSSOM drops nested rules with invalid
   // selectors, and makes no nested declarations rule of a run of invalid declarations.
-  if (!nested) return rules.length;
-  const shape = (t: Tree[]): unknown => t.map(([, kids]) => shape(kids));
   const kept = rules.filter((_, i) => alone[i]?.length);
+  // The kinds too: a run of declarations taken for a nested style rule, or the other way round,
+  // would be as many rules.
+  assert.deepEqual(
+    kept.map(r => r.kind),
+    whole.map(([name]) => kindOf(name))
+  );
+  if (!nested) return rules.length;
+  const shape = (t: Tree[]): unknown => t.map(([name, kids]) => [kindOf(name), shape(kids)]);
   kept.forEach((r, i) =>
     assert.deepEqual(
       shape(ours(r)),
@@ -92,6 +98,17 @@ async function check(text: string, nested = true) {
   );
   return rules.length;
 }
+
+/**
+ * The outline's kind of a rule of Chrome's, by its constructor's name, or the kind itself. A
+ * keyframe (`from {}`, `50% {}`) is a qualified rule in the syntax, as the outline takes it.
+ */
+const kindOf = (name: string): string =>
+  name === 'CSSStyleRule' || name === 'CSSKeyframeRule' || name === 'qualified'
+    ? 'qualified'
+    : name === 'CSSNestedDeclarations' || name === 'nested'
+      ? 'nested'
+      : 'at';
 
 test("Chrome's user agent style sheet", async () => {
   const text = readFileSync(new URL('../../user-agent/html.css', import.meta.url), 'utf8');

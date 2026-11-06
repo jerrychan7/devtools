@@ -21,18 +21,26 @@ const bundled = await build({
 const modules = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 )) as typeof Modules & typeof CacheModule;
-const { RewriteCache, hashBytes, hashText } = modules;
+const { RewriteCache, cacheStore, hashBytes, hashText } = modules;
 type RecordStore = CacheModule.RecordStore;
 
-/** A record store in memory, counting its writes. */
-function memoryStore(initial?: string): RecordStore & { record: string | undefined; saves: number } {
+/** A record store in memory, counting its writes; `written` settles on the next one. */
+function memoryStore(
+  initial?: string
+): RecordStore & { record: string | undefined; saves: number; written: Promise<void> } {
+  let wrote = () => {};
+  const next = () => new Promise<void>(resolve => (wrote = resolve));
   const store = {
     record: initial,
     saves: 0,
+    written: next(),
     load: async () => store.record,
     save: async (record: string) => {
       store.saves++;
       store.record = record;
+      const done = wrote;
+      store.written = next();
+      done();
     },
   };
   return store;
@@ -83,10 +91,15 @@ test('entries outlive the worker in the record, but not no-store ones', async ()
 });
 
 test('a broken, older or missing record is an empty cache', async () => {
+  const entry = JSON.stringify([await hashText('/a.js'), 'a', 'utf-8', [3]]);
+  // The same entry is found in a record of this format and build.
+  const current = new RewriteCache({ store: memoryStore(`{"version":"2:dev","entries":[${entry}]}`) });
+  assert.deepEqual(await current.get('/a.js', 'a', 'utf-8'), [3]);
   for (const record of [
     '{',
-    '{"version":0,"entries":[["/a.js","a","utf-8",[]]]}',
-    '{"version":"2:dev","entries":[["/a.js",1]]}',
+    `{"version":"1:dev","entries":[${entry}]}`,
+    `{"version":0,"entries":[${entry}]}`,
+    `{"version":"2:dev","entries":[["${await hashText('/a.js')}",1]]}`,
   ]) {
     const cache = new RewriteCache({ store: memoryStore(record) });
     assert.equal(await cache.get('/a.js', 'a', 'utf-8'), undefined, record);
@@ -151,10 +164,58 @@ test('evicting a persisted entry rewrites the record', async () => {
   const over = memoryStore(store.record);
   const small = new RewriteCache({ store: over, max: 1 });
   assert.equal(small.size, 0);
+  const written = over.written;
   await small.get('/none.js', 'n', 'utf-8');
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await written;
   assert.equal(over.saves, 1);
   assert.equal((JSON.parse(over.record ?? '') as { entries: unknown[] }).entries.length, 1);
+});
+
+/**
+ * A Cache API as the spec has it: a deleted cache is orphaned, so that a handle opened before
+ * still works but what it holds is no longer in the storage.
+ */
+function fakeCaches() {
+  const named = new Map<string, Map<string, string>>();
+  const handle = (entries: Map<string, string>) => ({
+    match: async (key: string) => {
+      const text = entries.get(key);
+      return text === undefined ? undefined : new Response(text);
+    },
+    put: async (key: string, response: Response) => {
+      entries.set(key, await response.text());
+    },
+  });
+  return {
+    named,
+    open: async (name: string) => {
+      let entries = named.get(name);
+      if (!entries) named.set(name, (entries = new Map()));
+      return handle(entries);
+    },
+    delete: async (name: string) => named.delete(name),
+  };
+}
+
+test("the worker's store keeps one record in its cache, and does not make the cache again once deleted", async t => {
+  const fake = fakeCaches();
+  Object.defineProperty(globalThis, 'caches', { value: fake, configurable: true });
+  t.after(() => Reflect.deleteProperty(globalThis, 'caches'));
+  const url = 'https://example.test/app.js?token=s3cr3t';
+  const cache = new RewriteCache({ store: cacheStore('https://example.test/sw.js'), build: 'b' });
+  await cache.set(url, 'h', 'utf-8', [4], true);
+  const [[name, entries] = []] = fake.named;
+  assert.equal(name, 'devtools-anywhere-service-worker-rewrites');
+  assert.deepEqual([...(entries?.keys() ?? [])], ['https://example.test/__devtools-anywhere-rewrites']);
+  assert.doesNotMatch([...(entries?.values() ?? [])].join(), /s3cr3t|app\.js/);
+  // A worker started later reads it back.
+  const restarted = new RewriteCache({ store: cacheStore('https://example.test/sw.js'), build: 'b' });
+  assert.deepEqual(await restarted.get(url, 'h', 'utf-8'), [4]);
+  // Shell mode ends (or a new worker activates): the cache is deleted while this worker still writes.
+  await fake.delete('devtools-anywhere-service-worker-rewrites');
+  await cache.set('/b.js', 'b', 'utf-8', [6], true);
+  await restarted.set('/c.js', 'c', 'utf-8', [8], true);
+  assert.equal(fake.named.size, 0, 'no record put back');
 });
 
 test('hashBytes is SHA-256 in hex', async () => {
@@ -162,4 +223,18 @@ test('hashBytes is SHA-256 in hex', async () => {
     await hashBytes(new TextEncoder().encode('abc')),
     'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
   );
+});
+
+test("the worker's own deletion on activation: the store opens the cache again", async t => {
+  const fake = fakeCaches();
+  Object.defineProperty(globalThis, 'caches', { value: fake, configurable: true });
+  t.after(() => Reflect.deleteProperty(globalThis, 'caches'));
+  const store = cacheStore('https://example.test/sw.js');
+  const cache = new RewriteCache({ store, build: 'b' });
+  // The worker loads the record at start, then activates and deletes the cache.
+  assert.equal(await cache.get('/a.js', 'a', 'utf-8'), undefined);
+  await fake.delete('devtools-anywhere-service-worker-rewrites');
+  store.forget();
+  await cache.set('/b.js', 'b', 'utf-8', [6], true);
+  assert.equal(fake.named.size, 1, 'the record is in a cache again');
 });

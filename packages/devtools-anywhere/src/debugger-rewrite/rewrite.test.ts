@@ -116,10 +116,14 @@ test('the same bytes in another charset have a plan of their own', async () => {
   // 0xA0 is a no-break space (a separator) in windows-1252, and not valid UTF-8 alone.
   const bytes = Uint8Array.from([...new TextEncoder().encode('a;'), 0xa0, ...new TextEncoder().encode('debugger')]);
   const latin = { 'content-type': 'text/javascript; charset=windows-1252' };
-  const out = await rewriteDebugger(script(bytes, latin), { cache, url: URL_A });
+  const writes: Promise<unknown>[] = [];
+  const waitUntil = (p: Promise<unknown>): void => void writes.push(p);
+  const out = await rewriteDebugger(script(bytes, latin), { cache, url: URL_A, waitUntil });
+  await Promise.all(writes);
   assert.deepEqual([...new Uint8Array(await out.arrayBuffer())].slice(3), [...new TextEncoder().encode('_$dbg();')]);
   // As UTF-8 the script cannot be decoded: left as it is, and remembered as such.
-  const utf8 = await rewriteDebugger(script(bytes), { cache, url: URL_A });
+  const utf8 = await rewriteDebugger(script(bytes), { cache, url: URL_A, waitUntil });
+  await Promise.all(writes);
   assert.deepEqual(new Uint8Array(await utf8.arrayBuffer()), bytes);
   assert.deepEqual(await cache.get(URL_A, await hashBytes(bytes), 'utf-8'), []);
   assert.equal(await cache.get(URL_A, await hashBytes(bytes), 'windows-1252'), undefined, 'one plan per URL');

@@ -3,7 +3,7 @@
 // text; a sheet changed in the task that adopts it is added, then changed, as in Chrome.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown, waitForBoth } from '../../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -126,7 +126,8 @@ test('replaceSync, adopt and replaceSync in one task: added, then changed, as in
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, s];
     s.replaceSync('.ad  { color : blue }');
   });
-  await new Promise(r => setTimeout(r, 300));
+  // Chrome adds the sheet, then changes it: both sides done once each has the change.
+  await waitForBoth(t, 'CSS.styleSheetChanged');
   const counts = async (side: typeof t.ours) => [
     (await side.events('CSS.styleSheetAdded')).length,
     (await side.events('CSS.styleSheetChanged')).length,
@@ -215,7 +216,18 @@ const unspy = () =>
     const w = window as unknown as { __replaceSync: (text: string) => void };
     CSSStyleSheet.prototype.replaceSync = w.__replaceSync;
   });
-const settled = () => new Promise(r => setTimeout(r, 100));
+/** Waits until a sheet holding `marker` is added (then as `textWith()`). */
+async function addedWith(marker: string): Promise<{ text: string; checks: number }> {
+  const start = Date.now();
+  for (;;) {
+    const r = await textWith(marker);
+    if (r.text) return r;
+    if (Date.now() - start > 5000) throw new Error(`timed out waiting for a sheet with ${marker}`);
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+/** Lets the page run a task, so that its mutation observers have been called. */
+const nextTask = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
 
 test('a <style> added while watched: its text taken unchecked; one there before: checked', async () => {
   for (const side of [t.ours, t.chrome]) await side.send('CSS.disable');
@@ -233,8 +245,7 @@ test('a <style> added while watched: its text taken unchecked; one there before:
       s.textContent = '.fw1 { color: red }\n.fw1b {  top: 1px }';
       document.head.appendChild(s);
     });
-    await settled();
-    assert.deepEqual(await textWith('.fw1'), { text: '.fw1 { color: red }\n.fw1b {  top: 1px }', checks: 0 });
+    assert.deepEqual(await addedWith('.fw1'), { text: '.fw1 { color: red }\n.fw1b {  top: 1px }', checks: 0 });
     assert.deepEqual(await textWith('.fw0'), { text: '.fw0 { color: red }', checks: 1 });
   } finally {
     await t.ours.send('CSS.disable');
@@ -253,7 +264,7 @@ test('a <style> added while watched, changed while none watched: checked when wa
       s.textContent = '.fw2 { color: red }\n.fw2b { top: 1px }';
       document.head.appendChild(s);
     });
-    await settled();
+    await addedWith('.fw2');
     await t.ours.send('CSS.disable');
     await t.page.evaluate(() => (document.getElementById('fw2') as HTMLStyleElement).sheet?.deleteRule(1));
     await t.ours.clear();
@@ -276,8 +287,7 @@ test('a <style> added while watched and changed in the same task: the change is 
     const r = s.sheet?.cssRules[0];
     if (r instanceof CSSStyleRule) r.style.left = '2px';
   });
-  await settled();
-  const { text } = await textWith('.fw3');
+  const { text } = await addedWith('.fw3');
   assert.equal(text, '.fw3 { color: red; left: 2px; }\n.fw3b { top: 1px; }\n');
   await t.ours.send('CSS.disable');
 });
@@ -297,8 +307,7 @@ test('a <style> there before, given a new text while watched: taken unchecked', 
     await t.page.evaluate(() => {
       (document.getElementById('fw4') as HTMLStyleElement).textContent = '.fw4 {  color: blue }';
     });
-    await settled();
-    assert.deepEqual(await textWith('.fw4'), { text: '.fw4 {  color: blue }', checks: 0 });
+    assert.deepEqual(await addedWith('.fw4'), { text: '.fw4 {  color: blue }', checks: 0 });
   } finally {
     await t.ours.send('CSS.disable');
     await unspy();
@@ -316,14 +325,13 @@ test('a <style> added to a shadow tree while watched: taken unchecked', async ()
       host.attachShadow({ mode: 'open' });
       document.body.appendChild(host);
     });
-    await settled();
+    await nextTask();
     await t.page.evaluate(() => {
       const s = document.createElement('style');
       s.textContent = '.fw5 {  color: red }';
       document.getElementById('fw5')?.shadowRoot?.appendChild(s);
     });
-    await settled();
-    assert.deepEqual(await textWith('.fw5'), { text: '.fw5 {  color: red }', checks: 0 });
+    assert.deepEqual(await addedWith('.fw5'), { text: '.fw5 {  color: red }', checks: 0 });
   } finally {
     await t.ours.send('CSS.disable');
     await unspy();

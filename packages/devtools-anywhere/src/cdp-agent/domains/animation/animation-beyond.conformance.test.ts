@@ -23,9 +23,15 @@ describe('Animation, beyond getAnimations()', () => {
         document.createElement('div').animate({ opacity: [0, 1] }, 10000).id = 'detached';
         new Animation(null).id = 'unplayed';
       });
-      await sleep(300);
+      await fence(t, side);
       return reports(side);
     });
+    // Chrome's own reports first: both sides reporting nothing would compare equal.
+    for (const name of ['loose', 'detached'])
+      assert.ok(
+        chrome.some(r => r.startsWith('Started ') && r.split(' ')[2] === name),
+        `Chrome announces ${name}: ${JSON.stringify(chrome)}`
+      );
     assert.deepEqual(ours, chrome);
   });
 
@@ -37,7 +43,7 @@ describe('Animation, beyond getAnimations()', () => {
           .animate({ opacity: [0, 1] }, 1000)
           .cancel()
       );
-      await sleep(200);
+      await fence(t, side);
       const sameTask = await reports(side);
       await t.page.evaluate(
         () =>
@@ -47,11 +53,19 @@ describe('Animation, beyond getAnimations()', () => {
             requestAnimationFrame(() => resolve(animation.cancel()));
           })
       );
-      await sleep(200);
+      await fence(t, side);
       // Cancelled in a task between animate() and the next frame, Chrome reports a start too, while
       // still pending, which the page cannot tell apart from a cancel in that frame: not compared.
       return { sameTask, nextFrame: await reports(side) };
     });
+    assert.ok(
+      chrome.sameTask.some(r => r.startsWith('Canceled ')),
+      `same task: ${JSON.stringify(chrome.sameTask)}`
+    );
+    assert.ok(
+      chrome.nextFrame.some(r => r.startsWith('Canceled ')),
+      `next frame: ${JSON.stringify(chrome.nextFrame)}`
+    );
     assert.deepEqual(ours, chrome);
   });
 
@@ -63,22 +77,75 @@ describe('Animation, beyond getAnimations()', () => {
         animation.id = 'again';
         Reflect.set(window, '__again', animation);
       });
-      await sleep(400);
+      // Run to its end, which is reported or not by the time a fence is.
+      const ended = () => t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).finished.then(() => {}));
+      await ended();
+      await fence(t, side);
       const finished = await reports(side);
       const found = await side.send('Animation.getCurrentTime', { id: '1' }).then(
         () => 'found',
         () => 'missing'
       );
       await t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).play());
-      await sleep(300);
+      await ended();
+      await fence(t, side);
       const replayed = await reports(side);
       await t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).cancel());
-      await sleep(200);
+      await fence(t, side);
       const canceled = await reports(side);
       await t.page.evaluate(() => (Reflect.get(window, '__again') as Animation).play());
-      await sleep(300);
+      await ended();
+      await fence(t, side);
       return { finished, found, replayed, canceled, again: await reports(side) };
     });
+    assert.ok(
+      chrome.finished.some(r => r.startsWith('Started ') && r.split(' ')[2] === 'again'),
+      `finished: ${JSON.stringify(chrome.finished)}`
+    );
+    assert.equal(chrome.found, 'found');
+    assert.ok(chrome.replayed.length > 0, 'Chrome reports the replay');
+    assert.ok(
+      chrome.canceled.some(r => r.startsWith('Canceled ')),
+      `canceled: ${JSON.stringify(chrome.canceled)}`
+    );
+    assert.ok(chrome.again.length > 0, 'Chrome reports the second replay');
+    assert.deepEqual(ours, chrome);
+  });
+
+  test('an ended animation without a target run again by reverse() or a new time is reported, as in Chrome', async () => {
+    const [chrome, ours] = await onEachSide(async (t, side) => {
+      await t.page.evaluate(async () => {
+        const loose = new Animation(new KeyframeEffect(null, { opacity: [0, 1] }, 100));
+        loose.id = 'rerun';
+        Reflect.set(window, '__rerun', loose);
+        loose.play();
+        await loose.finished;
+      });
+      const id = (
+        await until(
+          async () => (await side.events('Animation.animationStarted')).find(e => e.animation.name === 'rerun'),
+          'the start'
+        )
+      ).animation.id;
+      await fence(t, side);
+      // Its own reports, by kind, without the fence's.
+      const own = async () => (await reports(side)).filter(r => r.split(' ')[1] === id).map(r => r.split(' ')[0]);
+      await own();
+      const steps: Record<string, string[]> = {};
+      // Run to its end by its play state, not `finished`: under load Chrome left the promise of the
+      // new time unsettled (and the time running on past 0), while its play state said finished.
+      const ended = 'while (__rerun.playState !== "finished") await new Promise(r => requestAnimationFrame(r))';
+      for (const [name, code] of [
+        ['reversed', '__rerun.reverse()'],
+        ['moved', '__rerun.currentTime = 50'],
+      ]) {
+        await t.page.evaluate(`(async () => { ${code}; ${ended} })()`);
+        await fence(t, side);
+        steps[name] = await own();
+      }
+      return steps;
+    });
+    assert.ok(chrome.reversed?.length, 'Chrome reports the reverse');
     assert.deepEqual(ours, chrome);
   });
 
@@ -88,7 +155,7 @@ describe('Animation, beyond getAnimations()', () => {
         const div = document.body.appendChild(document.createElement('div'));
         Reflect.set(window, '__rate', div.animate({ opacity: [0, 1] }, 10000));
       });
-      await sleep(200);
+      await fence(t, side);
       await side.clear();
       await t.page.evaluate(() => (Reflect.get(window, '__rate') as Animation).reverse());
       // Under load Chrome reported the reverse after 200 ms (1 run in 24): waited for, then a fence.
@@ -99,7 +166,7 @@ describe('Animation, beyond getAnimations()', () => {
         .map(e => e.animation.playbackRate);
       await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
       await t.page.evaluate(() => ((Reflect.get(window, '__rate') as Animation).playbackRate = 2));
-      await sleep(200);
+      await fence(t, side);
       await side.send('Animation.disable');
       const after = await t.page.evaluate(() => (Reflect.get(window, '__rate') as Animation).playbackRate);
       return { reversed, after };
@@ -115,10 +182,10 @@ describe('Animation, beyond getAnimations()', () => {
         const div = document.body.appendChild(document.createElement('div'));
         Reflect.set(window, '__cancel', div.animate({ opacity: [0, 1] }, 10000));
       });
-      await sleep(200);
+      await fence(t, side);
       await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
       await t.page.evaluate(() => (Reflect.get(window, '__cancel') as Animation).cancel());
-      await sleep(200);
+      await fence(t, side);
       await side.send('Animation.disable');
       return t.page.evaluate(() => (Reflect.get(window, '__cancel') as Animation).playbackRate);
     });
@@ -166,6 +233,7 @@ describe('Animation, beyond getAnimations()', () => {
         const div = document.body.appendChild(document.createElement('div'));
         Reflect.set(window, '__pending', div.animate({ opacity: [0, 1] }, 10000));
       });
+      // Sleeps, not fences: a fence's own animation moves the frame the reverse is taken in.
       await sleep(200);
       await side.clear();
       // The rate is set while the reverse is pending, in the same frame as a rule (not guaranteed).
@@ -195,8 +263,9 @@ describe('Animation, beyond getAnimations()', () => {
         animation.startTime = Number(animation.startTime) - 1000;
       });
       await side.send('Animation.setTiming', { animationId: id, duration: 20000, delay: 0 });
-      await sleep(300);
-      return (await side.events('Animation.animationUpdated')).length;
+      await fence(t, side);
+      return (await side.events('Animation.animationUpdated')).filter(e => !e.animation.name.startsWith('fence'))
+        .length;
     });
     // Only that the result matches Chrome's: the two changes may fall in different frames here, so
     // this passes without the fix too. The test below puts them in one frame, on our side only.
@@ -292,6 +361,39 @@ describe('Animation, beyond getAnimations()', () => {
         return animation.playbackRate;
       });
       assert.equal(rate, 1);
+    } finally {
+      await t.page.close();
+    }
+  });
+
+  test('an animation a disable left pending and the page left alone is not reported updated by the next session (ours)', async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      const result = await t.page.evaluate(async () => {
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        const call = (method: string, params = {}) => window.__session.call(method, params);
+        await call('Animation.enable');
+        const div = document.body.appendChild(document.createElement('div'));
+        const animation = div.animate({ opacity: [0, 1] }, 100000);
+        await frame();
+        await frame();
+        await call('Animation.setPlaybackRate', { playbackRate: 0.5 });
+        // Pending (a play after a pause), the page's rate untouched: the disable gives it back once
+        // it is ready, after the next session took it over.
+        animation.pause();
+        animation.play();
+        void call('Animation.disable');
+        void call('Animation.enable');
+        window.__ours.length = 0;
+        for (let i = 0; i < 5; i++) await frame();
+        const kinds = window.__ours
+          .map(e => e.method)
+          .filter(m => m === 'Animation.animationStarted' || m === 'Animation.animationUpdated');
+        await call('Animation.disable');
+        return { rate: animation.playbackRate, kinds };
+      });
+      assert.deepEqual(result, { rate: 1, kinds: ['Animation.animationStarted'] });
     } finally {
       await t.page.close();
     }

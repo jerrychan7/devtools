@@ -258,6 +258,15 @@ test('the Service Worker makes debugger statements log a warning', async () => {
     return pageWindow.fetch('/tests/e2e/pages/assets/debugger-classic.js').then(r => r.text());
   });
   assert.match(source, /^ {2}const é = x; debugger$/m);
+  // The test server sends every file with `Cache-Control: no-store`: the worker keeps the plans
+  // in memory only, and writes nothing about these scripts to the Cache API.
+  const record = () =>
+    page.evaluate(async () => {
+      if (!(await caches.has('devtools-anywhere-service-worker-rewrites'))) return undefined;
+      const cache = await caches.open('devtools-anywhere-service-worker-rewrites');
+      return (await cache.match('/__devtools-anywhere-rewrites'))?.text();
+    });
+  assert.doesNotMatch((await record()) ?? '', /"entries":\[\[/, 'no-store scripts are not persisted');
 
   // Loaded again, the scripts are rewritten from the plans the worker kept for them.
   const before = (await hits()).length;
@@ -383,6 +392,8 @@ test('leaving shell mode unregisters the Service Worker', async () => {
   await waitFor(() => page.evaluate(() => !document.getElementById('devtools-anywhere-page')));
   const registrations = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
   assert.equal(registrations, 0);
+  // Nor are the plans of its rewrites left behind.
+  assert.equal(await page.evaluate(() => caches.has('devtools-anywhere-service-worker-rewrites')), false);
 });
 
 test('the Service Worker passes requests through once the shell is gone without leaving it', async () => {

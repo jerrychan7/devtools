@@ -71,7 +71,8 @@ const shellKey = (id: string) =>
 const probed = new Map<string, Set<string>>();
 
 /** Where the `debugger` statements of the scripts served before are. */
-const rewrites = new RewriteCache({ store: cacheStore(self.location.href), build: DEVTOOLS_ANYWHERE_REWRITE_BUILD });
+const rewriteStore = cacheStore(self.location.href);
+const rewrites = new RewriteCache({ store: rewriteStore, build: DEVTOOLS_ANYWHERE_REWRITE_BUILD });
 
 /** Client ids of shell documents that made the handshake (loaded lazily from the cache). */
 let shells: Promise<Set<string>> | undefined;
@@ -118,7 +119,13 @@ self.addEventListener('message', event => {
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event =>
   // Plans an older worker made may come from an older lexer.
-  event.waitUntil(Promise.all([self.clients.claim(), caches.delete(REWRITE_CACHE)]))
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+      // A handle opened before this deletion would be orphaned: the record must go in the new cache.
+      caches.delete(REWRITE_CACHE).then(() => rewriteStore.forget()),
+    ])
+  )
 );
 
 self.addEventListener('fetch', event => {

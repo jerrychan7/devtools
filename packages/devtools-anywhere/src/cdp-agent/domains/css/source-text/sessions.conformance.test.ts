@@ -109,11 +109,40 @@ setUpAndTearDown(
       await side.send('DOM.enable');
       await side.send('CSS.enable');
     }
-    await new Promise(r => setTimeout(r, 300));
+    // Each client has heard of the sheet before what it heard so far is dropped.
+    for (const { otherText } of sides) await until(otherText, x => x.includes('.s1'));
+    // And of the @import's sheet, added once it has loaded.
+    await until(
+      () => a.page.evaluate(() => (Reflect.get(window, '__secondIds') as string[]).length),
+      n => n >= 2
+    );
+    await until(
+      async () => ids.length,
+      n => n >= 2
+    );
     for (const { other } of sides) await other();
   },
   () => env?.close()
 );
+
+/** Calls `get` until `ok` holds of what it returns, or 5s pass; returns the last of it. */
+async function until<T>(get: () => Promise<T>, ok: (value: T) => boolean): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const value = await get();
+    if (ok(value) || Date.now() - start > 5000) return value;
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+
+/** `get` as a call returning all that its calls so far returned. */
+function gathered<T>(get: () => Promise<T[]>): () => Promise<T[]> {
+  const all: T[] = [];
+  return async () => {
+    all.push(...(await get()));
+    return all;
+  };
+}
 
 async function each<T>(fn: (s: (typeof sides)[number]) => Promise<T>): Promise<[T, T]> {
   const [a, b] = sides;
@@ -131,8 +160,12 @@ test("one client's edit: unlike Chrome, the other is sent styleSheetChanged and 
     await side.send('CSS.setStyleTexts', {
       edits: [{ styleSheetId: rule.styleSheetId, range: rule.style.range, text: ' color: blue ' }],
     });
-    await new Promise(r => setTimeout(r, 200));
-    return { events: await other(), otherText: await otherText() };
+    // Ours waits for the event and the text; Chrome's other client hears nothing, and what it
+    // would have heard is in once a call of its own (getStyleSheetText) has come back.
+    const isOurs = side === sides[0]?.side;
+    const text = await until(otherText, x => !isOurs || x.includes('color: blue'));
+    const events = await until(gathered(other), e => !isOurs || e.includes('CSS.styleSheetChanged'));
+    return { events, otherText: text };
   });
   assert.deepEqual(chrome, { events: [], otherText: CSS });
   assert.deepEqual(ours, {
@@ -165,7 +198,8 @@ test('setStyleSheetText keeps the sheet, replaces its rules: those the page held
         attached: held.rules.map(r => !!r.parentStyleSheet),
       };
     });
-    return { objects, other: await other() };
+    // Chrome's events come in after the call has returned.
+    return { objects, other: await until(gathered(other), e => e.includes('CSS.styleSheetRemoved')) };
   });
   // The other client is told of the sheet removed (the @import's), and with ours, of the change.
   assert.deepEqual(ours.objects, chrome.objects);
@@ -179,13 +213,10 @@ test("after another client's setStyleSheetText, this one serves the new text (Ch
     const { sheet } = await matched(side, '#s1');
     const text = '.s1 { color: olive }\n.s3 { top: 3px }';
     await side.send('CSS.setStyleSheetText', { styleSheetId: sheet, text });
-    await new Promise(r => setTimeout(r, 200));
-    const after = await otherText();
-    return {
-      kept: after === before,
-      isNew: after === text,
-      changed: (await other()).includes('CSS.styleSheetChanged'),
-    };
+    const isOurs = side === sides[0]?.side;
+    const after = await until(otherText, x => !isOurs || x === text);
+    const events = await until(gathered(other), e => !isOurs || e.includes('CSS.styleSheetChanged'));
+    return { kept: after === before, isNew: after === text, changed: events.includes('CSS.styleSheetChanged') };
   });
   assert.deepEqual(chrome, { kept: true, isNew: false, changed: false });
   assert.deepEqual(ours, { kept: false, isNew: true, changed: true });
@@ -237,13 +268,19 @@ test("the other client's addRule: this one takes the text and is sent styleSheet
     ruleText: '.s9 { left: 9px }',
     location: { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 },
   });
-  await new Promise(r => setTimeout(r, 200));
-  assert.ok((await side.events('CSS.styleSheetChanged')).some(e => e.styleSheetId === sheet));
+  const changed = await until(
+    () => side.events('CSS.styleSheetChanged'),
+    e => e.some(x => x.styleSheetId === sheet)
+  );
+  assert.ok(changed.some(e => e.styleSheetId === sheet));
   assert.equal(
     (await side.send('CSS.getStyleSheetText', { styleSheetId: sheet })).text,
     '.s1 { color: green }\n.s9 { left: 9px }'
   );
   // Ranges of the text as written.
   const { rules } = await matched(side, '#s1');
-  assert.ok(rules.length > 0);
+  assert.deepEqual(
+    rules.map(r => ({ text: r.text, selectors: r.selectors, style: r.style.range })),
+    [{ text: '.s1', selectors: [{ text: '.s1', range: '0:0-0:3' }], style: '0:5-0:19' }]
+  );
 });

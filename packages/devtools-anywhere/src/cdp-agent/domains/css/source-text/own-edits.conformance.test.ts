@@ -17,7 +17,14 @@ setUpAndTearDown(
     await page.evaluate(() => {
       const s = document.createElement('style');
       s.id = 'own';
-      s.textContent = Array.from({ length: 40 }, (_, i) => `.own${i} { top: ${i}px; }`).join('\n');
+      s.textContent = [
+        ...Array.from({ length: 40 }, (_, i) => `.own${i} { top: ${i}px; }`),
+        '@media screen { .m { top: 1px; } }',
+        '@keyframes k { from { top: 0px; } }',
+      ].join('\n');
+      const constructed = new CSSStyleSheet();
+      constructed.replaceSync('.c { top: 0px; }');
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, constructed];
       document.head.append(s);
     });
     await page.addScriptTag({ url: env.baseUrl + '/packages/devtools-anywhere/dist/devtools-anywhere.iife.js' });
@@ -29,7 +36,7 @@ test("the CSS domain's edits call none of the page's CSSOM functions, and report
   const seen = await page.evaluate(async () => {
     const session = window.DevtoolsAnywhere.createCdpSession();
     const changed: string[] = [];
-    const added: { styleSheetId: string; ownerNode?: number; length: number }[] = [];
+    const added: { styleSheetId: string; ownerNode?: number; length: number; isConstructed: boolean }[] = [];
     session.onMessage(m => {
       const msg = JSON.parse(m) as { method?: string; params?: { header?: (typeof added)[number] } };
       if (msg.method === 'CSS.styleSheetChanged') changed.push(msg.method);
@@ -42,6 +49,7 @@ test("the CSS domain's edits call none of the page's CSSOM functions, and report
     await new Promise(r => setTimeout(r, 0));
     const sheet = (document.getElementById('own') as HTMLStyleElement).sheet as CSSStyleSheet;
     const styleSheetId = [...added].sort((a, b) => b.length - a.length)[0]?.styleSheetId as string;
+    const constructedId = added.find(h => h.isConstructed)?.styleSheetId as string;
     const original = (await call('CSS.getStyleSheetText', { styleSheetId })).text ?? '';
 
     // The page's functions over the CSSOM's (and our hooks), counting their calls.
@@ -62,6 +70,8 @@ test("the CSS domain's edits call none of the page's CSSOM functions, and report
     for (const [proto, name] of [
       [CSSStyleRule.prototype, 'selectorText'],
       [CSSStyleDeclaration.prototype, 'cssText'],
+      [MediaList.prototype, 'mediaText'],
+      [CSSKeyframeRule.prototype, 'keyText'],
     ] as [object, string][]) {
       const d = Object.getOwnPropertyDescriptor(proto, name) as PropertyDescriptor;
       Object.defineProperty(proto, name, {
@@ -95,20 +105,57 @@ test("the CSS domain's edits call none of the page's CSSOM functions, and report
       range: { startLine: line, startColumn: 0, endLine: line, endColumn: 5 },
       selector: '.mine',
     });
+    // A media text, a keyframe key, a rule added, a constructed sheet's text.
+    const lines = original.split('\n');
+    const media = lines.findIndex(l => l.startsWith('@media'));
+    await call('CSS.setMediaText', {
+      styleSheetId,
+      range: { startLine: media, startColumn: 7, endLine: media, endColumn: 13 },
+      text: 'print',
+    });
+    const keyframes = lines.findIndex(l => l.startsWith('@keyframes'));
+    await call('CSS.setKeyframeKey', {
+      styleSheetId,
+      range: { startLine: keyframes, startColumn: 15, endLine: keyframes, endColumn: 19 },
+      keyText: '0%',
+    });
+    const before = lines.indexOf('.own5 { top: 5px; }');
+    await call('CSS.addRule', {
+      styleSheetId,
+      ruleText: '.new {}',
+      location: { startLine: before, startColumn: 0, endLine: before, endColumn: 0 },
+    });
+    await call('CSS.setStyleSheetText', { styleSheetId: constructedId, text: '.c { top: 1px; }' });
     const text = Array.from(sheet.cssRules, r => r.cssText);
-    await new Promise(r => setTimeout(r, 0));
-    const ours = { calls, changed: changed.length };
-
-    // The page's own change is still seen.
+    // Nothing reported for ours, told by order rather than by a wait: a change of the page made
+    // after them is, and alone.
+    const changes = async (count: number) => {
+      for (let deadline = Date.now() + 5000; changed.length < count && Date.now() < deadline;)
+        await new Promise(r => setTimeout(r, 20));
+      return { calls, changed: changed.length };
+    };
     sheet.insertRule('.page {}');
-    await new Promise(r => setTimeout(r, 0));
-    return { kept, rules: text.length, third: text[3], ours, page: { calls, changed: changed.length } };
+    const page = await changes(1);
+    // Its text no longer known: all the rules are replaced, natively too.
+    await call('CSS.setStyleSheetText', { styleSheetId, text: original });
+    const rules = sheet.cssRules.length;
+    const constructed = document.adoptedStyleSheets.at(-1);
+    constructed?.replaceSync('.c { top: 2px; }');
+    return {
+      kept,
+      rules: text.length,
+      third: text[3],
+      at: text.slice(-2),
+      page,
+      after: { ...(await changes(2)), rules },
+    };
   });
   assert.deepEqual(seen, {
     kept: true,
-    rules: 40,
+    rules: 43,
     third: '.mine { left: 1px; }',
-    ours: { calls: 0, changed: 0 },
+    at: ['@media print {\n  .m { top: 1px; }\n}', '@keyframes k { \n  0% { top: 0px; }\n}'],
     page: { calls: 1, changed: 1 },
+    after: { calls: 2, changed: 2, rules: 42 },
   });
 });

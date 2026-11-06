@@ -19,8 +19,11 @@
 // up, while a lookup in memory stays by URL.
 //
 // The record carries the build that made it: a worker of another build (maybe another lexer)
-// ignores it. The new worker also deletes the cache when it activates, but the old one may still
-// be writing (its `waitUntil`) and put a record back afterwards.
+// ignores it. The new worker also deletes the cache when it activates, and the page when shell mode
+// ends. A worker opens the cache once and keeps that handle (dropped only after its own deletion
+// on activation, made maybe after the handle was opened): once another deletes the cache, it is
+// orphaned, so what a worker still finishing (its `waitUntil`) writes afterwards goes nowhere
+// instead of making the cache again.
 import { REWRITE_CACHE } from '../shell-messages';
 
 /** Scripts remembered, by URL; the least recently used goes first. */
@@ -47,16 +50,32 @@ export interface RecordStore {
   save(record: string): Promise<void>;
 }
 
-/** The record in a Cache API cache, under one synthetic URL of the worker's origin. */
-export function cacheStore(base: string): RecordStore {
+/**
+ * The record in a Cache API cache, under one synthetic URL of the worker's origin. The cache is
+ * opened once: deleted after that, it is not made again by this store.
+ */
+export function cacheStore(base: string): RecordStore & { forget(): void } {
   const key = new URL('/__devtools-anywhere-rewrites', base).href;
+  let opened: Promise<Cache> | undefined;
+  const open = () => {
+    if (!opened) {
+      opened = caches.open(REWRITE_CACHE);
+      // A failed open is tried again next time.
+      opened.catch(() => (opened = undefined));
+    }
+    return opened;
+  };
   return {
+    /** Drops the handle, for a deletion this worker made itself: the next use makes the cache again. */
+    forget() {
+      opened = undefined;
+    },
     async load() {
-      const cache = await caches.open(REWRITE_CACHE);
+      const cache = await open();
       return (await cache.match(key))?.text();
     },
     async save(record) {
-      const cache = await caches.open(REWRITE_CACHE);
+      const cache = await open();
       await cache.put(key, new Response(record, { headers: { 'content-type': 'application/json' } }));
     },
   };

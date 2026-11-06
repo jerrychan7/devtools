@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffSubset, openPage } from '../../../../test-support/conformance.ts';
 import type { Protocol } from 'devtools-protocol';
-import { EVENTS, env, sleep, until, noneMissing } from '../../../../test-support/animation-conformance.ts';
+import { EVENTS, env, until, fence, settle, noneMissing } from '../../../../test-support/animation-conformance.ts';
 
 describe('Animation, scroll-driven', () => {
   /** A scroller with `scroll()` and `view()` CSS animations, and a ScrollTimeline and ViewTimeline of the Web Animations API. */
@@ -88,14 +88,17 @@ describe('Animation, scroll-driven', () => {
         })
       );
       const animations = list.map(a => a.id);
+      // Those reported once a fence is: by then Chrome has sent its own, under load too.
+      const updates = async () =>
+        (await side.events('Animation.animationUpdated')).filter(e => !e.animation.name.startsWith('fence'));
       await side.clear();
       await t.page.evaluate(() => {
         const sc = document.getElementById('sc');
         if (sc) sc.scrollTop = 500;
         if (document.scrollingElement) document.scrollingElement.scrollTop = 500;
       });
-      await sleep(300);
-      const scrolledUpdates = (await side.events('Animation.animationUpdated')).length;
+      await fence(t, side);
+      const scrolledUpdates = (await updates()).length;
       const times = async () => {
         const result: Record<string, number> = {};
         for (const a of list) {
@@ -116,10 +119,10 @@ describe('Animation, scroll-driven', () => {
         animations,
         currentTime: 30,
       });
-      await sleep(100);
+      await settle(t, side);
       const seekedRunning = await pageTimes();
       await side.send('Animation.setPaused', { animations, paused: true });
-      await sleep(100);
+      await settle(t, side);
       // Paused ones are moved, in Chrome's scroll-timeline milliseconds. Chrome takes `currentTimes`
       // a thousand times larger, as it does for any animation (see "seeking each animation to its
       // own time"); ours takes them as `currentTime`, as the panel means them.
@@ -127,17 +130,17 @@ describe('Animation, scroll-driven', () => {
         animations,
         currentTime: 0.5,
       });
-      await sleep(100);
+      await settle(t, side);
       const seekedPaused = [await pageTimes(), await times()];
       await side.send('Animation.seekAnimations', {
         animations,
         currentTimes: animations.map((_, i) => (chrome ? 0.0001 : 0.1) * i),
       });
-      await sleep(100);
+      await settle(t, side);
       const pausedTimes = [await pageTimes(), await times()];
       await side.send('Animation.setPaused', { animations, paused: false });
       await side.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
-      await sleep(100);
+      await settle(t, side);
       const rated = await pageTimes();
       await side.clear();
       await side.send('Animation.setTiming', {
@@ -145,8 +148,8 @@ describe('Animation, scroll-driven', () => {
         duration: 500,
         delay: 10,
       });
-      await sleep(300);
-      const timed = (await side.events('Animation.animationUpdated')).map(e => ({
+      await fence(t, side);
+      const timed = (await updates()).map(e => ({
         ...e.animation,
         id: undefined,
         cssId: undefined,
@@ -168,8 +171,8 @@ describe('Animation, scroll-driven', () => {
         !chrome
       );
       if (chrome) await side.send('Animation.setTiming', timing);
-      await sleep(300);
-      const retimed = (await side.events('Animation.animationUpdated')).map(e => e.animation.playbackRate);
+      await fence(t, side);
+      const retimed = (await updates()).map(e => e.animation.playbackRate);
       await side.send('Animation.disable');
       return {
         announced,

@@ -11,7 +11,19 @@ let page: Page;
 let frontend: Frame;
 /** Uncaught errors in the frontend. */
 const errors: string[] = [];
-const { showView, count, shownText, clickNth } = frontendHelpers(() => frontend);
+const { showView, count, clickNth } = frontendHelpers(() => frontend);
+
+/** The names the Animations panel's timeline shows, shadow DOM included. */
+const timelineNames = () =>
+  frontend.evaluate(() => {
+    const names: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
+      for (const el of root.querySelectorAll('.animation-name')) names.push(el.textContent?.trim() ?? '');
+      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+    };
+    walk(document);
+    return names;
+  });
 
 setUpAndTearDown(
   async () => {
@@ -65,7 +77,8 @@ test('the Animations panel lists the CSS and Web Animations the page runs', { sk
       const previews = await count('.animation-buffer-preview');
       for (let i = before; i < previews; i++) {
         await clickNth('.animation-buffer-preview', i);
-        for (const line of await shownText()) if (line === 'rf-spin' || line === 'rf-web') names.add(line);
+        // Only the timeline's names: the Elements panel and the Styles pane show 'rf-spin' too.
+        for (const line of await timelineNames()) if (line === 'rf-spin' || line === 'rf-web') names.add(line);
       }
       return names.size === 2;
     });
@@ -109,8 +122,14 @@ test('the Animations panel keeps a group for each of two CSS animations started 
 
 test('the Animations panel removes its last group without an error', { skip }, async () => {
   await showView('animations');
-  // The previous test leaves the panel empty, so the group added here is its only one.
-  assert.equal(await count('.animation-buffer-preview'), 0);
+  // Emptied first, so the group added here is its only one.
+  await clearPanel();
+  // Clicking "Clear all" focused it: blur it, so that only the removal can focus it again.
+  await frontend.evaluate(() => {
+    let el: Element | null = document.activeElement;
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    if (el instanceof HTMLElement) el.blur();
+  });
   const before = errors.length;
   await page.evaluate(() => {
     const el = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'rf-last' }));
@@ -129,9 +148,20 @@ test('the Animations panel removes its last group without an error', { skip }, a
       if (button instanceof HTMLElement) button.click();
     });
     await waitFor(async () => (await count('.animation-buffer-preview')) === 0);
-    // Upstream focused a toolbar button it never assigned, and threw (patches/animation-remove-last-group.patch).
-    await new Promise(r => setTimeout(r, 200));
+    // Upstream focused a toolbar button it never assigned, and threw (patches/animation-remove-last-group.patch):
+    // the click handler throws synchronously, so the error, if any, is in by now.
     assert.deepEqual(errors.slice(before), []);
+    // The focus goes to the toolbar's "Clear all" button instead.
+    const focused = await frontend.evaluate(() => {
+      const labels: string[] = [];
+      let el: Element | null = document.activeElement;
+      while (el) {
+        labels.push(el.getAttribute('title') ?? el.getAttribute('aria-label') ?? '');
+        el = el.shadowRoot?.activeElement ?? null;
+      }
+      return labels;
+    });
+    assert.ok(focused.includes('Clear all'), `focused ${JSON.stringify(focused)}`);
   } finally {
     await page.evaluate(() => {
       for (const animation of document.getAnimations()) animation.cancel();
@@ -220,9 +250,10 @@ test('the Animations panel plays a shadow tree animation it is shown, and pauses
 
 /**
  * Selects the scroll-driven group `add` makes, checks the panel shows it in pixels, drags the
- * scrubber to about half the timeline, and gives the scroll position `top` then reads.
+ * scrubber to about half the timeline, and gives the scroll position and the scroller's furthest
+ * one, as `top` then reads them.
  */
-async function scrubScrollDriven(add: () => void, top: () => number, remove: () => void) {
+async function scrubScrollDriven(add: () => void, top: () => { top: number; max: number }, remove: () => void) {
   await showView('animations');
   const before = await count('.animation-buffer-preview');
   await page.evaluate(add);
@@ -263,7 +294,7 @@ async function scrubScrollDriven(add: () => void, top: () => number, remove: () 
     await page.mouse.up();
     return await waitFor(async () => {
       const value = await page.evaluate(top);
-      return value > 100 ? value : null;
+      return value.top > 100 ? value : null;
     });
   } finally {
     await page.evaluate(remove);
@@ -282,10 +313,13 @@ test(
         scroller.innerHTML =
           '<style>@keyframes rf-fade { to { opacity: 0.5 } } #rf-scrolled { height: 1000px; animation: rf-fade linear; animation-timeline: scroll(nearest) }</style><div id="rf-scrolled"></div>';
       },
-      () => document.getElementById('rf-scroller')?.scrollTop ?? 0,
+      () => {
+        const scroller = document.getElementById('rf-scroller');
+        return { top: scroller?.scrollTop ?? 0, max: scroller ? scroller.scrollHeight - scroller.clientHeight : 0 };
+      },
       () => document.getElementById('rf-scroller')?.remove()
     );
-    assert.ok(top < 900, `scrolled to ${top}px`);
+    assert.ok(top.top < top.max, `scrolled to ${top.top}px of ${top.max}px`);
   }
 );
 
@@ -300,14 +334,18 @@ test('the Animations panel scrolls the page with the scrubber of a scroll(root) 
         'html { height: 3000px } @keyframes rf-root { to { opacity: 0.5 } } #rf-root { animation: rf-root linear; animation-timeline: scroll(root) }';
       document.body.appendChild(document.createElement('div')).id = 'rf-root';
     },
-    () => document.scrollingElement?.scrollTop ?? 0,
+    () => {
+      const scroller = document.scrollingElement;
+      return { top: scroller?.scrollTop ?? 0, max: scroller ? scroller.scrollHeight - scroller.clientHeight : 0 };
+    },
     () => {
       document.getElementById('rf-root-style')?.remove();
       document.getElementById('rf-root')?.remove();
       document.scrollingElement?.scrollTo(0, 0);
     }
   );
-  assert.ok(top < 3000, `scrolled to ${top}px`);
+  // About half the way, not to the end: the furthest the page scrolls is well under the 3000px it is tall.
+  assert.ok(top.top > top.max * 0.25 && top.top < top.max * 0.75, `scrolled to ${top.top}px of ${top.max}px`);
 });
 
 test(

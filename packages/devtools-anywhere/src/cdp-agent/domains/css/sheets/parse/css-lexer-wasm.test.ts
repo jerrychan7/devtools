@@ -66,6 +66,111 @@ test('the same tokens as the TypeScript lexer, copied in as bytes or as UTF-16',
   }
 });
 
+test('the same tokens as the TypeScript lexer on short texts at the edges of each branch', async () => {
+  const mod = await load();
+  const w = mod.wasmExports();
+  assert.ok(w);
+  const edges = [
+    '1url(a"b)',
+    '#url(a',
+    'url(a\\\n) x)',
+    'url(\x01)',
+    '\\75rl(a;b{c})',
+    'u\\72l( "a" )',
+    '<!-',
+    '--->',
+    '@1',
+    '@-x',
+    '1.',
+    '1e+',
+    '1-a',
+    '\\\n',
+    '\\',
+    '-.a',
+    '-\\\n',
+    'a\u{1f600}b(',
+    '"a\\\r\nb"',
+  ];
+  // Every three of the code units the lexer branches on, alone and inside `url(`.
+  const some = [
+    ' ',
+    '\n',
+    '\r',
+    '\f',
+    '"',
+    "'",
+    '#',
+    '(',
+    ')',
+    '+',
+    '-',
+    '.',
+    '/',
+    '*',
+    '<',
+    '!',
+    '@',
+    '\\',
+    '1',
+    'e',
+    '%',
+    'u',
+    'r',
+    'l',
+    'é',
+    '\0',
+    ';',
+    '{',
+    '>',
+    '7',
+  ];
+  const corpus = [...edges];
+  for (const x of some) for (const y of some) for (const z of some) corpus.push(x + y + z, `url(${x}${y}${z}`);
+  for (const text of corpus) {
+    const expected = tokenizeTs(text);
+    for (const wide of [false, true]) {
+      const at = mod.copyIn(w, text, wide);
+      const got = mod.copyOut(w, at, mod.lex(w, at));
+      assert.deepEqual(
+        [[...got.kinds], [...got.starts]],
+        [[...expected.kinds], [...expected.starts]],
+        JSON.stringify(text)
+      );
+    }
+  }
+});
+
+test('falls back to the TypeScript lexer where memory runs out, and the module goes on after', async t => {
+  const mod = await load();
+  const w = mod.wasmExports();
+  assert.ok(w);
+  mod.tokenize(long);
+  const before = w.m.buffer.byteLength;
+  // A text the shared memory has to grow for, where it cannot.
+  const grow = t.mock.method(w.m, 'grow', () => {
+    throw new RangeError('WebAssembly.Memory.grow(): Maximum memory size exceeded');
+  });
+  const big = 'a { b: c } .d-1 '.repeat(Math.ceil(before / 16));
+  assert.deepEqual(mod.tokenize(big), tokenizeTs(big));
+  assert.equal(grow.mock.callCount(), 1);
+  grow.mock.restore();
+  assert.equal(w.m.buffer.byteLength, before);
+  // A large text, where there is no memory for an instance of its own.
+  const instance = t.mock.method(WebAssembly, 'Instance', function () {
+    throw new RangeError('WebAssembly.Instance(): Out of memory');
+  });
+  const large = 'a{}'.repeat(Math.ceil(mod.OWN_INSTANCE_LENGTH / 3));
+  assert.deepEqual(mod.tokenize(large), tokenizeTs(large));
+  assert.equal(instance.mock.callCount(), 1);
+  instance.mock.restore();
+  // The shared instance is as it was, and lexes as before.
+  assert.equal(w.m.buffer.byteLength, before);
+  const at = mod.copyIn(w, long);
+  const got = mod.copyOut(w, at, mod.lex(w, at));
+  assert.deepEqual(got, tokenizeTs(long));
+  assert.deepEqual(mod.tokenize(long), got);
+});
+
 test('a large text has an instance of its own, and the shared memory does not grow', async () => {
   const mod = await load();
   const w = mod.wasmExports();

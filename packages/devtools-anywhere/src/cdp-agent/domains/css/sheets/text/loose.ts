@@ -173,7 +173,7 @@ export const atName = (name: string) => (name.includes('\\') ? unescape(name, 0,
  * identifier, with its modifier.
  */
 const CSSOM_WRITES =
-  /("(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*')|(?<![:\\]):(before|after|first-line|first-letter)(?![\w\\-])|\[\s*([-\w]+)\s*([~|^$*]?=)\s*(-?[_a-zA-Z][-\w]*)\s*(?:\s([iIsS]))?\s*\]/g;
+  /("(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*')|(?<![:\\]):(before|after|first-line|first-letter)(?![\w\\-])|\[\s*([-\w]+)\s*([~|^$*]?=)\s*(-?[_a-zA-Z][-\w]*)\s*(?:\s([iIsS]))?\s*\]/gi;
 
 /**
  * A selector as the CSSOM writes it back, where that is easily told: legacy pseudo-elements with

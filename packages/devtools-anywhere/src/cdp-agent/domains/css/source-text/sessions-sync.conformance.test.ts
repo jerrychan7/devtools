@@ -113,22 +113,32 @@ async function sheetWith(css: (cls: string) => string): Promise<string> {
   return cls;
 }
 
-const settle = () => new Promise(r => setTimeout(r, 100));
+/** Calls `client.events` until `event` is among what they returned, or 5s pass; returns all of it. */
+async function eventsUntil(client: Client, event: string): Promise<string[]> {
+  const all: string[] = [];
+  for (const start = Date.now(); ;) {
+    all.push(...(await client.events()));
+    if (all.includes(event) || Date.now() - start > 5000) return all;
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
 
 test('setRuleSelector of one session: the other gets the text, styleSheetChanged; the editor no event', async () => {
   const cls = await sheetWith(c => `/* a */\n.${c} {\n  color: red;\n}\n`);
   const [a, b] = [await client(), await client()];
   const { sheet, selector } = await a.rule(cls);
-  await settle();
-  await Promise.all([a.events(), b.events()]);
+  const theirs = (await b.rule(cls)).sheet;
+  // What they heard of the sheet so far is dropped.
+  await Promise.all([eventsUntil(a, `CSS.styleSheetAdded ${sheet}`), eventsUntil(b, `CSS.styleSheetAdded ${theirs}`)]);
   await a.call('CSS.setRuleSelector', { styleSheetId: sheet, range: selector, selector: `.${cls}, i` });
-  await settle();
+  const changed = `CSS.styleSheetChanged ${theirs}`;
+  // The other's event first: the editor's would have come by then.
+  assert.deepEqual(await eventsUntil(b, changed), [changed]);
   const text = `/* a */\n.${cls}, i {\n  color: red;\n}\n`;
   assert.equal(await a.text(sheet), text);
-  const theirs = (await b.rule(cls)).sheet;
   assert.equal(await b.text(theirs), text);
   assert.deepEqual(await a.events(), []);
-  assert.deepEqual(await b.events(), [`CSS.styleSheetChanged ${theirs}`]);
+  assert.deepEqual(await b.events(), []);
 });
 
 test('setMediaText of one session: the other gets the text, and edits it in place', async () => {

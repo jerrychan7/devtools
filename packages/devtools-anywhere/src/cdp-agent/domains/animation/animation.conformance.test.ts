@@ -673,8 +673,8 @@ describe('Animation, which animations are told apart', () => {
       // rules we missed would share this one's id.
       ['inline, no rule', `add('').style.animation = 'q1 5s'`],
     ];
-    const labels: string[] = [];
-    const ids: { chrome: (string | undefined)[]; ours: (string | undefined)[] } = { chrome: [], ours: [] };
+    type Step = { label: string; animations: Protocol.Animation.Animation[] };
+    const recorded: { chrome: Step[]; ours: Step[] } = { chrome: [], ours: [] };
     for (const [label, code] of steps) {
       await run(code, 1);
       // All of them: every column, every button.
@@ -683,29 +683,39 @@ describe('Animation, which animations are told apart', () => {
       for (const side of ['chrome', 'ours'] as const) {
         lists[side] = (await t[side].events('Animation.animationStarted'))
           .map(e => e.animation)
-          .filter(a => !a.name.startsWith('fence'))
-          // Their order differs: by keyframes, then id, which the relation does not depend on.
-          .sort((x, y) => x.name.localeCompare(y.name) || String(x.cssId).localeCompare(String(y.cssId)));
+          .filter(a => !a.name.startsWith('fence'));
       }
       assert.equal(lists.ours.length, lists.chrome.length, label);
-      labels.push(...lists.chrome.map((a, i) => `${label} ${a.name} ${i}`));
-      for (const side of ['chrome', 'ours'] as const) ids[side].push(...lists[side].map(a => a.cssId));
+      for (const side of ['chrome', 'ours'] as const) recorded[side].push({ label, animations: lists[side] });
       // Closes the dialogs and popovers: one modal at a time shows a backdrop.
       await t.page.evaluate(() => {
         document.querySelectorAll<HTMLDialogElement>('dialog[open]:not(#qdt)').forEach(d => d.close());
         document.querySelectorAll<HTMLElement>('[popover]').forEach(p => p.hidePopover());
       });
     }
-    // Which animations share an id, within a step and across them; the ids themselves differ.
-    const relation = (list: (string | undefined)[]) => {
-      const first = new Map<string, number>();
-      return list.map((id, i) => {
-        if (id === undefined) return `${labels[i]}: none`;
-        if (!first.has(id)) first.set(id, i);
-        return `${labels[i]}: as ${labels[first.get(id) ?? i]}`;
+    /**
+     * Which animations share an id, within a step and across them; the ids themselves differ, and so
+     * does the order of a step's animations. Each step's ids become their keyframes, each named after
+     * the step and keyframes it first came with.
+     */
+    const relation = (list: Step[]) => {
+      const first = new Map<string, string>();
+      return list.map(({ label, animations }) => {
+        const byId = new Map<string, string[]>();
+        const none: string[] = [];
+        for (const { name, cssId } of animations)
+          if (cssId === undefined) none.push(`${name}: none`);
+          else byId.set(cssId, [...(byId.get(cssId) ?? []), name]);
+        const shared = [...byId].map(([id, names]) => {
+          const group = names.sort().join(', ');
+          const as = first.get(id);
+          return `${group}: ${as === undefined ? 'new' : `as ${as}`}`;
+        });
+        for (const [id, names] of byId) if (!first.has(id)) first.set(id, `${label} [${names.join(', ')}]`);
+        return `${label}: ${[...none, ...shared].sort().join(' | ')}`;
       });
     };
-    assert.deepEqual(relation(ids.ours), relation(ids.chrome));
+    assert.deepEqual(relation(recorded.ours), relation(recorded.chrome));
   });
 
   test('cssId of view transition pseudo-elements follows their rules, by name, * and class, as in Chrome', async () => {
@@ -749,6 +759,47 @@ describe('Animation, which animations are told apart', () => {
     await t.page.evaluate(() => {
       document.getAnimations().forEach(a => a.finish());
       document.querySelectorAll('.v1, .v2, .v3').forEach(e => e.remove());
+    });
+  });
+
+  test('cssId of view transition images takes the old classes before the update, as in Chrome', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes xo { to { opacity: .5 } } @keyframes xn { to { opacity: .5 } }' +
+        ' .x1 { view-transition-name: x1 } .x2 { view-transition-name: x2 } .x3 { view-transition-name: x3 }' +
+        ' .xc { view-transition-class: c }' +
+        ' ::view-transition-old(.c) { animation: xo 5s } ::view-transition-new(.c) { animation: xn 5s }';
+      document.head.append(style);
+      for (const cls of ['x1 xc', 'x2', 'x3 xc'])
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: cls, textContent: cls }));
+    });
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    // x1 goes with class c, x2 takes it and x3 drops it in the update: the old images of x1 and x3 are
+    // of class c, the new one of x2 alone.
+    await t.page.evaluate(async () => {
+      const transition = document.startViewTransition(() => {
+        document.querySelector('.x1')?.remove();
+        document.querySelector('.x2')?.classList.add('xc');
+        document.querySelector('.x3')?.classList.remove('xc');
+      });
+      await transition.ready;
+    });
+    await fence(t, t.chrome, t.ours);
+    const groups = async (side: Side) => {
+      const byId = new Map<string, string[]>();
+      for (const { animation } of await side.events('Animation.animationStarted')) {
+        if (!animation.name.startsWith('x') || !animation.cssId) continue;
+        byId.set(animation.cssId, [...(byId.get(animation.cssId) ?? []), animation.name]);
+      }
+      return [...byId.values()].map(names => names.sort().join(', ')).sort();
+    };
+    const chrome = await groups(t.chrome);
+    assert.deepEqual(chrome, ['xn', 'xo, xo']);
+    assert.deepEqual(await groups(t.ours), chrome);
+    await t.page.evaluate(() => {
+      document.getAnimations().forEach(a => a.finish());
+      document.querySelectorAll('.x2, .x3').forEach(e => e.remove());
     });
   });
 

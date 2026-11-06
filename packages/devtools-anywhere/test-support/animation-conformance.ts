@@ -164,15 +164,37 @@ export function stateOf(t: TestPage, name: string) {
   );
 }
 
-/** What a side reported, by kind (created, started, updated, canceled), without times. */
+/**
+ * Per side, the ids of its fences (see `fence`), whose events `reports` leaves out, the later ones
+ * too; and the others' ids as `reports` gives them: numbered in the order they were announced, as
+ * though no fence had taken an id.
+ */
+const fenceIds = new WeakMap<Side, Set<string>>();
+const ownIds = new WeakMap<Side, Map<string, string>>();
+
+/** What a side reported, by kind (created, started, updated, canceled), without times nor fences. */
 export async function reports(side: Side) {
+  const fenced = fenceIds.get(side) ?? new Set<string>();
+  fenceIds.set(side, fenced);
+  const ids = ownIds.get(side) ?? new Map<string, string>();
+  ownIds.set(side, ids);
+  for (const method of ['Animation.animationStarted', 'Animation.animationUpdated'] as const)
+    for (const e of await side.events(method)) if (e.animation.name.startsWith('fence')) fenced.add(e.animation.id);
+  const idOf = (id: string) => {
+    let own = ids.get(id);
+    if (own === undefined) ids.set(id, (own = String(ids.size + 1)));
+    return own;
+  };
   const out: string[] = [];
   for (const method of EVENTS)
     for (const e of await side.events(method)) {
       const kind = method.slice('Animation.animation'.length);
-      if ('id' in e) out.push(`${kind} ${e.id}`);
-      else
-        out.push(`${kind} ${e.animation.id} ${e.animation.name} ${e.animation.playState} ${e.animation.playbackRate}`);
+      if ('id' in e) {
+        if (!fenced.has(e.id)) out.push(`${kind} ${idOf(e.id)}`);
+      } else if (!fenced.has(e.animation.id))
+        out.push(
+          `${kind} ${idOf(e.animation.id)} ${e.animation.name} ${e.animation.playState} ${e.animation.playbackRate}`
+        );
     }
   await side.clear();
   return out;

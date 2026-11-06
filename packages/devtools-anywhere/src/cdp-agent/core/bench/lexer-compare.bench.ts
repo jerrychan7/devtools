@@ -54,16 +54,22 @@ function derivedSites(text: string, module: boolean): { start: number; semicolon
 
 /**
  * Before the fix of `-->` in debugger mode, debuggerStatementSites took `-->` anywhere in a script
- * for a comment. A revision's sites may differ from the working tree's only on a script with `-->`,
- * and only when the working tree's agree with its own token list.
+ * for a comment. Against such a revision only (one that finds no `debugger` in `x-->0;debugger`),
+ * the sites and statements may differ from the working tree's on a script with `-->`, and only when
+ * the working tree's agree with its own token list.
  */
+const baseBeforeFix = JSON.stringify(need(base.entries['debuggerStatements'])('x-->0;debugger', false)) === '[]';
 let knownDifferences = 0;
 function knownDifference(entry: string, text: string, module: boolean): boolean {
-  if (module || !text.includes('-->') || (entry !== 'debuggerStatementSites' && entry !== 'debuggerStatements'))
-    return false;
+  if (!baseBeforeFix || module || !text.includes('-->')) return false;
   const derived = derivedSites(text, module);
-  const sites = need(work.entries['debuggerStatementSites'])(text, module);
-  if (JSON.stringify(sites) !== JSON.stringify(derived)) return false;
+  const result =
+    entry === 'debuggerStatementSites'
+      ? JSON.stringify(derived)
+      : entry === 'debuggerStatements'
+        ? JSON.stringify(derived.map(site => site.start))
+        : undefined;
+  if (result === undefined || JSON.stringify(need(work.entries[entry])(text, module)) !== result) return false;
   knownDifferences++;
   return true;
 }
