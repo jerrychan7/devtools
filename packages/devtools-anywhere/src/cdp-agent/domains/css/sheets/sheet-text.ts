@@ -1,5 +1,5 @@
 import { isCssom, isHtml } from '../../../core/realm';
-import { Tok, tokenize } from './css-lexer';
+import { Tok, tokenize } from './css-lexer-wasm';
 import { ownEdit, recordPageChanges } from './cssom-watch';
 import { type CssDecl, type CssRule, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';

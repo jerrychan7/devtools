@@ -8,7 +8,7 @@
  *
  * Offsets are UTF-16 code units. Ranges are half-open, `[start, end)`.
  */
-import { Tok, tokenize, type TokKind } from './css-lexer';
+import { Tok, tokenize, type TokKind } from './css-lexer-wasm';
 
 export interface CssDecl {
   /** `comment`: a comment in a block whose text is one declaration (a disabled property). */
