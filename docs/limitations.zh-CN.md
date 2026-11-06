@@ -150,7 +150,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 - **文档范围**：只覆盖页面自己和同源 frame 的文档。
 - **shadow 树**：shadow 树里的动画也会列出（包括声明式的、宿主后插入的、iframe 里的），但拿不到 closed 声明式 shadow root 里的（页面拿不到它的引用），也拿不到 UA shadow 树里的（如 `input::placeholder` 的）。
 - **`::backdrop`**：Chrome 指向伪元素本身。这里 `::backdrop` 的动画指向它的 `<dialog>`，即 Elements 面板能显示的节点（还没有 `::backdrop` 节点：见[路线图](roadmap.zh-CN.md#其他能在页面里补上的功能)）。
-- **分组（`cssId`）**：与 Chrome 相同，`cssId` 按赢得动画属性的规则生成，两条规则里的相同声明分两组，`:hover` 的过渡和移出时的反向过渡也分两组。也与 Chrome 相同，`@import` 进来的样式表和构造样式表（没有 `ownerNode`）里的规则不参与 `cssId`。与 Chrome 不同的是：我们的 CSS 匹配漏掉的规则看不到，`::before`、`::after`、`::marker` 以外伪元素的动画仍按计算样式近似。
+- **分组（`cssId`）**：与 Chrome 相同，`cssId` 按赢得动画属性的规则生成，两条规则里的相同声明分两组，`:hover` 的过渡和移出时的反向过渡也分两组。伪元素也一样，包括 Elements 面板不显示的 `::backdrop`、`::scroll-marker`、`::scroll-marker-group`、`::scroll-button()`、`::column`、`::view-transition-group()` 等（按名字、`*` 和 `view-transition-class` 匹配）。也与 Chrome 相同，`@import` 进来的样式表和构造样式表（没有 `ownerNode`）里的规则不参与 `cssId`。与 Chrome 不同的是：我们的 CSS 匹配漏掉的规则看不到；伪元素后的伪类只判定滚动按钮的 `:disabled`/`:enabled`、`:target-current`（按滚动位置近似）和视图过渡图像的 `:only-child`；视图过渡的 class 只有在 DevTools 之后开始的过渡才在开始时取，否则取当时元素的；shadow 树里的元素不算 class，`auto`、`match-element` 名字不按 class 匹配。
 - **`seekAnimations`**：`currentTimes` 按协议的毫秒处理；Chrome 156 当成秒。
 - **开始前被取消**：动画在开始前被取消或暂停时，只报告创建和取消。若取消前已跑过一帧动画更新（先出帧、后在定时器里取消），Chrome 还会先报告一次开始，这里少报这一次。
 - **被垃圾回收的动画**：页面丢弃且已被垃圾回收的动画，按 id 查不到；Chrome 会保留到 `disable`。
