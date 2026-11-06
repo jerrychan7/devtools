@@ -10,6 +10,17 @@ import { isCssom, realmOf } from '../../../core/realm';
  * goes unseen: a MediaList does not tell its rule. The CSS domain's own changes are made through
  * `ownEdit`, and not reported.
  */
+/**
+ * Where in its sheet a change of the page is, for a text serialized from the CSSOM to be changed
+ * there alone: the top-level rule whose text is now another (what is in it, or its selector, or
+ * its style, changed), or the index of a top-level rule inserted or deleted. None when not known:
+ * the text changes everywhere (replace(), replaceSync()), or where is not told.
+ */
+export type CssomChange =
+  | { kind: 'rule'; rule: CSSRule }
+  | { kind: 'insert'; index: number }
+  | { kind: 'delete'; index: number };
+
 /** `by`: the CSS domain session that made the change, for one of its own edits. */
 type Listener = (sheet: CSSStyleSheet, text?: string, by?: object) => void;
 type After = (self: unknown, args: unknown[], result: unknown) => void;
@@ -19,18 +30,20 @@ const listeners = new Set<Listener>();
 const natives = new Map<object, Map<string, { descriptor: PropertyDescriptor; hook: unknown }>>();
 let own = 0;
 
+type Recorder = (sheet: CSSStyleSheet, text?: string, change?: CssomChange) => void;
+
 /** Records a change of the page in the texts the sessions share, before they are told. */
-let record: (sheet: CSSStyleSheet, text?: string) => void = () => {};
+let record: Recorder = () => {};
 
 /** Sets what records each change the page makes, once for every session. */
-export function recordPageChanges(fn: (sheet: CSSStyleSheet, text?: string) => void): void {
+export function recordPageChanges(fn: Recorder): void {
   record = fn;
 }
 
-function notify(sheet: CSSStyleSheet | null | undefined, text?: string) {
+function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
   if (!sheet || own || !listeners.size) return;
   try {
-    record(sheet, text);
+    record(sheet, text, change);
   } catch {
     // Ours, not the page's: its call goes on.
   }
@@ -50,6 +63,22 @@ function sheetOf(target: unknown): CSSStyleSheet | null {
     ? sheetOf(Reflect.get(target, 'parentStyleSheet'))
     : null;
 }
+
+/** The top-level rule a rule is in, or is; null for one no longer in a sheet. */
+function topRuleOf(rule: CSSRule): CSSRule | null {
+  let top = rule;
+  for (let up = top.parentRule; up; up = up.parentRule) top = up;
+  return top.parentStyleSheet ? top : null;
+}
+
+/** A change of what is in `rule`, or of `rule` itself, at its top-level rule. */
+function inRule(rule: unknown): CssomChange | undefined {
+  const top = typeof rule === 'object' && rule !== null && 'parentRule' in rule ? topRuleOf(rule as CSSRule) : null;
+  return top ? { kind: 'rule', rule: top } : undefined;
+}
+
+/** An index argument as Web IDL's `unsigned long` takes it. */
+const index = (value: unknown, otherwise: number) => (value === undefined ? otherwise : Number(value) >>> 0);
 
 /** Hooks a method, or with `setter`, an accessor's setter, calling `after` past the native one. */
 function hook(proto: object, name: string, after: After, setter = false) {
@@ -74,9 +103,27 @@ function hook(proto: object, name: string, after: After, setter = false) {
 }
 
 function install(realm: Window & typeof globalThis) {
-  const changed: After = self => notify(sheetOf(self));
-  for (const proto of [realm.CSSStyleSheet.prototype, realm.CSSGroupingRule.prototype])
-    for (const name of ['insertRule', 'deleteRule', 'addRule', 'removeRule']) hook(proto, name, changed);
+  const changed: After = self => notify(sheetOf(self), undefined, inRule(self));
+  const sheetProto = realm.CSSStyleSheet.prototype;
+  // Where a sheet's method inserted (insertRule's result; addRule's, -1, is none: its index or
+  // the end) or deleted, as the browser took the arguments: the call returned, so they were good.
+  const sheetLevel = (self: unknown, change: (sheet: CSSStyleSheet) => CssomChange) => {
+    const sheet = sheetOf(self);
+    if (sheet) notify(sheet, undefined, change(sheet));
+  };
+  hook(sheetProto, 'insertRule', (self, _args, result) =>
+    sheetLevel(self, () => ({ kind: 'insert', index: Number(result) }))
+  );
+  hook(sheetProto, 'addRule', (self, args) =>
+    sheetLevel(self, sheet => ({ kind: 'insert', index: index(args[2], sheet.cssRules.length - 1) }))
+  );
+  hook(sheetProto, 'deleteRule', (self, args) =>
+    sheetLevel(self, () => ({ kind: 'delete', index: index(args[0], 0) }))
+  );
+  hook(sheetProto, 'removeRule', (self, args) =>
+    sheetLevel(self, () => ({ kind: 'delete', index: index(args[0], 0) }))
+  );
+  for (const name of ['insertRule', 'deleteRule']) hook(realm.CSSGroupingRule.prototype, name, changed);
   if (realm.CSSKeyframesRule)
     for (const name of ['appendRule', 'deleteRule']) hook(realm.CSSKeyframesRule.prototype, name, changed);
   // An element's own style shares the prototype, and belongs to no sheet: its parent rule, read
@@ -89,7 +136,7 @@ function install(realm: Window & typeof globalThis) {
     } catch {
       return; // Not a style.
     }
-    if (rule) notify(sheetOf(rule));
+    if (rule) notify(sheetOf(rule), undefined, inRule(rule));
   };
   for (const name of ['setProperty', 'removeProperty']) hook(realm.CSSStyleDeclaration.prototype, name, styleChanged);
   // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are no
@@ -115,7 +162,6 @@ function install(realm: Window & typeof globalThis) {
     if (proto)
       for (const name of Object.getOwnPropertyNames(proto))
         if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, changed, true);
-  const sheetProto = realm.CSSStyleSheet.prototype;
   hook(sheetProto, 'replaceSync', (self, args) => notify(sheetOf(self), String(args[0])));
   hook(sheetProto, 'replace', (self, args, result) => {
     const sheet = sheetOf(self);
