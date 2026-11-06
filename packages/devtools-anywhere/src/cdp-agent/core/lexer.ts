@@ -129,6 +129,13 @@ class Lexer {
   private prevStart = 0;
   /** The start of a `debugger` keyword whose next token is still to come (-1 for none). */
   private candidate = -1;
+  /**
+   * The code unit at `peekPos`, read ahead by a scan that stopped before it (the end of a word,
+   * the line break after a comment, what follows a `/`): the main loop takes it from here instead
+   * of reading it again. The source does not change, so an old one is still right.
+   */
+  private peekPos = -1;
+  private peek = 0;
 
   constructor(source: string, module: boolean, sites?: DebuggerSite[]) {
     this.src = source;
@@ -239,8 +246,9 @@ class Lexer {
       this.pos = 2;
       this.lineComment();
     }
+    const src = this.src;
     for (; this.pos < this.end; this.pos++) {
-      const ch = this.src.charCodeAt(this.pos);
+      const ch = this.pos === this.peekPos ? this.peek : src.charCodeAt(this.pos);
       if (isBrOrWs(ch)) {
         if (isBr(ch)) this.newline = true;
         continue;
@@ -259,14 +267,13 @@ class Lexer {
       case 99 /* c */:
         // `class{` too (minified code). Only the brace at the keyword's depth is the body, not one
         // in the heritage (`class A extends f({}) {`).
-        if (
-          this.src.startsWith('class', this.pos) &&
-          this.keywordStart(this.pos) &&
-          (isBrOrWs(this.c(this.pos + 5)) || this.c(this.pos + 5) === 123) /* { */
-        )
-          this.classDepth = this.depth;
+        // keywordStart reads the code units before the keyword again: only for a `class`.
+        if (this.src.startsWith('class', this.pos) && this.keywordStart(this.pos)) {
+          const after = this.c(this.pos + 5);
+          if (isBrOrWs(after) || after === 123 /* { */) this.classDepth = this.depth;
+        }
         kind = Kind.Word;
-        this.skipTokenRun();
+        this.skipTokenRun(ch);
         break;
       case 40 /* ( */:
         this.push(Open.AnyParen, this.lastTokenPos);
@@ -302,7 +309,7 @@ class Lexer {
         break;
       case 47 /* / */: {
         // lexer.c `handleSlash`.
-        const next = this.c(this.pos + 1);
+        const next = this.ahead(this.pos + 1);
         if (next === 47) {
           this.lineComment();
           return;
@@ -314,7 +321,7 @@ class Lexer {
         if (this.lastTokenEndsExpression()) {
           kind = Kind.Regex;
           this.regularExpression();
-          while (isTokenRunChar(this.c(this.pos + 1))) this.pos++;
+          while (isTokenRunChar(this.ahead(this.pos + 1))) this.pos++;
           this.lastSlashWasDivision = false;
         } else {
           this.lastSlashWasDivision = true;
@@ -328,7 +335,12 @@ class Lexer {
         this.lastTokenPos = this.pos;
         return;
       case 60 /* < */:
-        if (!this.module && this.c(this.pos + 1) === 33 && this.c(this.pos + 2) === 45 && this.c(this.pos + 3) === 45) {
+        if (
+          !this.module &&
+          this.ahead(this.pos + 1) === 33 &&
+          this.c(this.pos + 2) === 45 &&
+          this.c(this.pos + 3) === 45
+        ) {
           this.lineComment();
           return;
         }
@@ -336,7 +348,7 @@ class Lexer {
       case 45 /* - */:
         if (
           !this.module &&
-          this.c(this.pos + 1) === 45 &&
+          this.ahead(this.pos + 1) === 45 &&
           this.c(this.pos + 2) === 62 &&
           (this.newline || this.count === 0)
         ) {
@@ -347,30 +359,49 @@ class Lexer {
       default:
         if (!isTokenRunChar(ch)) break;
         kind = Kind.Word;
-        this.skipTokenRun();
+        this.skipTokenRun(ch);
     }
     this.emit(kind, start, this.pos + 1, depth);
     this.lastTokenPos = this.pos;
   }
 
-  /** Skips the rest of a word; a `\\u{…}` escape is part of it (lexer.c `skipBracedEscape`). */
-  private skipTokenRun() {
-    for (;;) {
-      this.skipBracedEscape();
-      if (!isTokenRunChar(this.c(this.pos + 1))) return;
-      this.pos++;
-    }
+  /** The code unit at `i`, from the one read ahead when it is that one, else read and kept as it. */
+  private ahead(i: number): number {
+    if (i === this.peekPos) return this.peek;
+    const code = this.src.charCodeAt(i) | 0;
+    this.peekPos = i;
+    this.peek = code;
+    return code;
   }
 
-  private skipBracedEscape() {
-    if (this.c(this.pos) !== 92 || this.c(this.pos + 1) !== 117 || this.c(this.pos + 2) !== 123) return;
-    const close = this.src.indexOf('}', this.pos + 3);
-    if (close > 0 && /^[0-9a-fA-F]+$/.test(this.src.slice(this.pos + 3, close))) this.pos = close;
+  /**
+   * Skips the rest of a word whose code unit at `pos` is `ch`, each code unit read once; a `\\u{…}`
+   * escape is part of it (lexer.c `skipBracedEscape`). Leaves the code unit after it read ahead.
+   */
+  private skipTokenRun(ch: number) {
+    const src = this.src;
+    let pos = this.pos;
+    for (;;) {
+      if (ch === 92 && src.charCodeAt(pos + 1) === 117 && src.charCodeAt(pos + 2) === 123) {
+        const close = src.indexOf('}', pos + 3);
+        if (close > 0 && /^[0-9a-fA-F]+$/.test(src.slice(pos + 3, close))) pos = close;
+      }
+      const next = src.charCodeAt(pos + 1) | 0;
+      if (!isTokenRunChar(next)) {
+        this.pos = pos;
+        this.peekPos = pos + 1;
+        this.peek = next;
+        return;
+      }
+      pos++;
+      ch = next;
+    }
   }
 
   /**
    * lexer.c `lastTokenEndsExpression`: true when the last token cannot end an operand, so a `/`
-   * here starts a regular expression.
+   * here starts a regular expression. It reads the last token and the keyword before it again:
+   * only on a `/`, and the history it needs is not worth keeping for every token.
    */
   private lastTokenEndsExpression(): boolean {
     const p = this.lastTokenPos;
@@ -403,7 +434,7 @@ class Lexer {
     return this.isBreakOrContinue(tokenPos);
   }
 
-  /** lexer.c `templateString`: scans to the closing backtick or to a `${`. */
+  /** lexer.c `templateString`: scans to the closing backtick or to a `${` (a `$` alone reads what follows twice). */
   private templateString(start: number) {
     while (++this.pos < this.end) {
       const ch = this.src.charCodeAt(this.pos);
@@ -429,22 +460,45 @@ class Lexer {
     if (last >= 0 && this.starts[last] === start) this.ends[last] = Math.min(this.pos + 1, this.end);
   }
 
-  /** lexer.c `blockComment`. */
+  /** lexer.c `blockComment`, each code unit read once: the `*` before the `/` is remembered. */
   private blockComment() {
-    this.pos++;
-    while (++this.pos < this.end) {
-      const ch = this.src.charCodeAt(this.pos);
-      if (isBr(ch)) this.newline = true;
-      else if (ch === 42 && this.c(this.pos + 1) === 47) {
-        this.pos++;
+    const src = this.src;
+    const end = this.end;
+    let pos = this.pos + 1;
+    let prev = 0;
+    while (++pos < end) {
+      const ch = src.charCodeAt(pos);
+      if (prev === 42 && ch === 47) {
+        this.pos = pos;
         return;
       }
+      if (isBr(ch)) this.newline = true;
+      prev = ch;
     }
+    this.pos = end;
   }
 
-  /** lexer.c `lineComment`. Leaves `pos` before the line terminator. */
+  /** lexer.c `lineComment`. Leaves `pos` before the line terminator, read ahead. */
   private lineComment() {
-    while (this.pos + 1 < this.end && !isBr(this.src.charCodeAt(this.pos + 1))) this.pos++;
+    const src = this.src;
+    let pos = this.pos;
+    while (pos + 1 < this.end) {
+      const ch = src.charCodeAt(pos + 1);
+      if (isBr(ch)) {
+        this.peekPos = pos + 1;
+        this.peek = ch;
+        break;
+      }
+      pos++;
+    }
+    this.pos = pos;
+  }
+
+  /** Steps back before the line terminator `ch` at `pos`, left read ahead: an unterminated literal ends there. */
+  private backBefore(ch: number) {
+    this.peekPos = this.pos;
+    this.peek = ch;
+    this.pos--;
   }
 
   /** lexer.c `stringLiteral`. An unterminated string ends before the line break. */
@@ -456,7 +510,7 @@ class Lexer {
         const next = this.c(++this.pos);
         if (next === 13 && this.c(this.pos + 1) === 10) this.pos++;
       } else if (ch === 10 || ch === 13) {
-        this.pos--;
+        this.backBefore(ch);
         return;
       }
     }
@@ -472,7 +526,7 @@ class Lexer {
         if (!this.regexCharacterClass()) return;
       } else if (ch === 92) this.pos++;
       else if (isBr(ch)) {
-        this.pos--;
+        this.backBefore(ch);
         return;
       }
     }
@@ -486,7 +540,7 @@ class Lexer {
       if (ch === 93) return true;
       if (ch === 92) this.pos++;
       else if (isBr(ch)) {
-        this.pos--;
+        this.backBefore(ch);
         return false;
       }
     }
