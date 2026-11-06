@@ -45,10 +45,12 @@ let encoder: TextEncoder | undefined;
 
 /**
  * Texts of this many code units or more (5 Mi) are lexed or outlined by an instance of their own,
- * dropped after: a module's memory grows to fit the longest text (7 bytes per code unit to lex,
- * about 11 to outline) and never shrinks, so the shared instance keeps at most what a text under
- * this takes, about 35 MB to lex and 60 MB to outline, for the page's life. Each such text pays
- * for an instance (its memory and tables set up) and nothing else.
+ * dropped after: a module's memory grows to fit the longest text and never shrinks. It takes 7
+ * bytes per code unit to lex; the outline's tables mostly fit in what is set aside for the starts
+ * of tokens a text has fewer of than code units (7 to 8 bytes in all on real sheets), up to 14
+ * when every code unit is a token. So the shared instance keeps at most what a text under this
+ * takes, about 35 MB (70 MB at worst), for the page's life. Each such text pays for an instance
+ * (its memory and tables set up) and nothing else.
  */
 export const OWN_INSTANCE_LENGTH = 5 * 1024 * 1024;
 

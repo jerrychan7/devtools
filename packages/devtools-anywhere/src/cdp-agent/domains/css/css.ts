@@ -23,7 +23,8 @@ import {
   isConstructed,
 } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
-import { ROOT, outline } from './sheets/css-outline';
+import { ROOT } from './sheets/css-outline';
+import { outline } from './sheets/css-outline-wasm';
 import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 

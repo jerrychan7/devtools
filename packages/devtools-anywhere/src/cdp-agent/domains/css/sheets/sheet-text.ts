@@ -1,7 +1,8 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer-wasm';
 import { type CssomChange, forgetSheet, ownEdit, ownStyle, recordPageChanges, settle } from './cssom-watch';
-import { type CssOutline, ROOT, outline } from './css-outline';
+import { type CssOutline, ROOT } from './css-outline';
+import { outline } from './css-outline-wasm';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
 import { type CSSStyle, type Written, styleOf } from '../style';
