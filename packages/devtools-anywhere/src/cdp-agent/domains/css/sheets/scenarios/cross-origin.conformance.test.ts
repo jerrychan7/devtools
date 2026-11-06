@@ -183,8 +183,8 @@ async function intercept(query: string, answer: (n: number) => Promise<'ok' | 'f
 const answers = new Map<string, () => Promise<'ok' | 'fail'>>();
 let intercepting = false;
 
-/** Adds a <link> to the cross-origin file with `query`, once loaded. */
-const link = (query: string) =>
+/** Adds a <link> to the cross-origin file with `query` (from `origin`, if given), once loaded. */
+const link = (query: string, origin = env?.baseUrl.replace('localhost', '127.0.0.1')) =>
   t.page.evaluate(
     href =>
       new Promise<void>(resolve => {
@@ -194,7 +194,7 @@ const link = (query: string) =>
         l.onload = () => resolve();
         document.head.appendChild(l);
       }),
-    `${env?.baseUrl.replace('localhost', '127.0.0.1')}/packages/devtools-anywhere/test-support/assets/cross.css?${query}`
+    `${origin}/packages/devtools-anywhere/test-support/assets/cross.css?${query}`
   );
 
 /** Every session of ours in the page disables CSS, then the first one enables it again. */
@@ -209,18 +209,66 @@ async function unwatched() {
   await first('CSS.enable');
 }
 
-test('a session that disabled CSS before its copy came is not told of it', async () => {
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Makes a session of ours that keeps CSS enabled: gives what it was told of the sheets of the
+ * cross-origin file with `query` (`added`, `changed`), and the function that disables it.
+ */
+async function watcher(query: string) {
+  await t.page.evaluate(async () => {
+    const s = window.DevtoolsAnywhere.createCdpSession();
+    const seen: string[] = [];
+    s.onMessage(m => {
+      const msg: {
+        method?: string;
+        params?: { styleSheetId?: string; header?: { styleSheetId: string; sourceURL: string } };
+      } = JSON.parse(m);
+      if (msg.method === 'CSS.styleSheetAdded' && msg.params?.header)
+        seen.push(`added ${msg.params.header.styleSheetId} ${msg.params.header.sourceURL}`);
+      if (msg.method === 'CSS.styleSheetChanged') seen.push(`changed ${msg.params?.styleSheetId}`);
+    });
+    Reflect.set(window, '__crossWatcher', { s, seen });
+    await s.call('DOM.enable', {});
+    await s.call('CSS.enable', {});
+  });
+  const seen = async () => {
+    const all = await t.page.evaluate(() => (Reflect.get(window, '__crossWatcher') as { seen: string[] }).seen.slice());
+    const ids = all.filter(e => e.startsWith('added ') && e.endsWith(`?${query}`)).map(e => e.split(' ')[1]);
+    return all.filter(e => e.startsWith('changed ') && ids.includes(e.split(' ')[1]));
+  };
+  const stop = () =>
+    t.page.evaluate(async () => {
+      const { s } = Reflect.get(window, '__crossWatcher') as {
+        s: ReturnType<typeof window.DevtoolsAnywhere.createCdpSession>;
+      };
+      await s.call('CSS.disable', {});
+    });
+  return { seen, stop };
+}
+
+test('a session that disabled CSS before its copy came is not told of it; one enabled is, once', async () => {
+  const w = await watcher('held');
   let release = () => {};
   const held = new Promise<void>(r => (release = r));
   const fetches = await intercept('held', async () => (await held, 'ok'));
   await t.ours.clear();
   await link('held');
-  for (let i = 0; i < 30 && fetches() < 1; i++) await new Promise(r => setTimeout(r, 100));
+  for (let i = 0; i < 30 && fetches() < 1; i++) await sleep(100);
   assert.equal(fetches(), 1, 'the copy is being fetched');
   await first('CSS.disable');
+  // The page changes its sheets meanwhile: each sync asks for the copies again.
+  for (let i = 0; i < 3; i++) {
+    await t.page.evaluate(() => document.head.appendChild(document.createElement('style')).classList.add('held'));
+    await sleep(100);
+  }
   release();
-  await new Promise(r => setTimeout(r, 300));
+  for (let i = 0; i < 50 && !(await w.seen()).length; i++) await sleep(100);
+  await sleep(100);
+  assert.equal((await w.seen()).length, 1, 'the enabled session is told of the copy, once');
   assert.deepEqual(await t.ours.events('CSS.styleSheetChanged'), []);
+  await w.stop();
+  await t.page.evaluate(() => document.querySelectorAll('style.held').forEach(s => s.remove()));
   await first('CSS.enable');
 });
 
@@ -236,4 +284,40 @@ test('a copy that could not be fetched is fetched again after every session disa
   await unwatched();
   for (let i = 0; i < 30 && fetches() < 2; i++) await new Promise(r => setTimeout(r, 100));
   assert.equal(fetches(), 2);
+});
+
+test('a sheet removed while its copy was fetched is not told of', async () => {
+  let release = () => {};
+  const held = new Promise<void>(r => (release = r));
+  const fetches = await intercept('removed', async () => (await held, 'ok'));
+  await link('removed');
+  for (let i = 0; i < 30 && fetches() < 1; i++) await sleep(100);
+  assert.equal(fetches(), 1, 'the copy is being fetched');
+  await t.ours.clear();
+  await t.page.evaluate(() => document.querySelector('link[href$="?removed"]')?.remove());
+  for (let i = 0; i < 30 && !(await t.ours.events('CSS.styleSheetRemoved')).length; i++) await sleep(100);
+  assert.equal((await t.ours.events('CSS.styleSheetRemoved')).length, 1);
+  release();
+  // Reading a sheet's text waits for the copies being fetched.
+  await appRule(first);
+  assert.deepEqual(await t.ours.events('CSS.styleSheetChanged'), []);
+});
+
+test("a same-origin file's text fetched after the sheet was given a text does not replace it", async () => {
+  let release = () => {};
+  const held = new Promise<void>(r => (release = r));
+  const fetches = await intercept('same', async () => (await held, 'ok'));
+  await t.ours.clear();
+  await link('same', env?.baseUrl);
+  for (let i = 0; i < 30 && fetches() < 1; i++) await sleep(100);
+  assert.equal(fetches(), 1, "the file's text is being fetched");
+  const header = (await t.ours.events('CSS.styleSheetAdded')).find(e => e.header.sourceURL.endsWith('?same'))?.header;
+  assert.ok(header);
+  const text = '#app  {  color:  rgb(1, 2, 3)  }';
+  await first('CSS.setStyleSheetText', { styleSheetId: header.styleSheetId, text });
+  release();
+  // Reading the text waits for the fetch.
+  const got = (await first('CSS.getStyleSheetText', { styleSheetId: header.styleSheetId })) as { text: string };
+  assert.equal(got.text, text);
+  await t.page.evaluate(() => document.querySelector('link[href$="?same"]')?.remove());
 });

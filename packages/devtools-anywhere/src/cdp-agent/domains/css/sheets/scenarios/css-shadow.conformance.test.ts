@@ -234,6 +234,27 @@ test('sheets of shadow roots attached out of tree order are announced in tree or
   assert.deepEqual(await order(t.ours), ['order-1', 'order-2']);
 });
 
+test('a <style> put in the shadow tree of a connected host, a task after attachShadow, is announced', async () => {
+  await t.page.evaluate(() => {
+    document.body.appendChild(document.createElement('div')).id = 'sh-connected';
+  });
+  // Ours has listed the shadow roots again by the time the root is attached.
+  await t.ours.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(t.ours, 'sh-in') });
+  await t.page.evaluate(() => document.getElementById('sh-connected')?.attachShadow({ mode: 'open' }));
+  await new Promise(r => setTimeout(r, 100));
+  for (const side of [t.ours, t.chrome]) await side.clear();
+  // No request in between: only watching the new shadow tree sees the <style>.
+  await t.page.evaluate(() => {
+    const root = document.getElementById('sh-connected')?.shadowRoot;
+    if (!root) throw new Error('no shadow root');
+    root.innerHTML = '<style>.sh-connected-in {}</style>';
+  });
+  await new Promise(r => setTimeout(r, 200));
+  const count = async (side: Side) => (await side.events('CSS.styleSheetAdded')).length;
+  assert.equal(await count(t.ours), 1);
+  assert.equal(await count(t.ours), await count(t.chrome));
+});
+
 test('moving a host takes forced pseudo-classes off the elements of its shadow tree', async () => {
   const result: unknown[] = [];
   for (const side of [t.ours, t.chrome]) {

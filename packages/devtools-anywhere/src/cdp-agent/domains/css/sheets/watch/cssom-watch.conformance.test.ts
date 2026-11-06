@@ -296,6 +296,92 @@ test('a sheet serialized anew: what was written is dropped, the styles taken sti
   );
 });
 
+test("a counter style's setters: the rule", async () => {
+  assert.deepEqual(
+    await reports('.a{} @counter-style c { system: cyclic; symbols: a b; }', [
+      'sheet.cssRules[1].prefix = \'"x"\'',
+      "sheet.cssRules[1].symbols = 'c d'",
+      "sheet.cssRules[1].name = 'd'",
+    ]),
+    [['rule 1'], ['rule 1'], ['rule 1']]
+  );
+});
+
+test("the page's objects as arguments: converted once, by the browser alone", async () => {
+  assert.deepEqual(
+    await reports('.a{} .b{} .c{}', [
+      'globalThis.n = 0; sheet.deleteRule({ valueOf() { n++; return 1; } }); if (n !== 1) throw 0; globalThis.ok = 1',
+      "globalThis.n = 0; sheet.replaceSync({ toString() { n++; return '.d{}'; } }); if (n !== 1) sheet.insertRule('.bad{}')",
+      "sheet.addRule('.e', '', { valueOf() { throw new Error('again'); } })",
+    ]),
+    // No place known, nor the text; the last call refused by the browser itself.
+    [['none'], ['none'], []]
+  );
+});
+
+test("replace() and then replaceSync(): the text of replace() not taken, it is no longer the sheet's", async () => {
+  const seen = await page.evaluate(async () => {
+    const w = (
+      globalThis as unknown as {
+        __cssomWatch: { recordPageChanges: typeof recordPageChanges; watchCssom: typeof watchCssom };
+      }
+    ).__cssomWatch;
+    const sheet = new CSSStyleSheet();
+    // No text (serialized anew) as null: undefined in an array crosses evaluate() as null.
+    const texts: (string | null)[] = [];
+    w.recordPageChanges((s: CSSStyleSheet, text: string | undefined) => {
+      if (s === sheet) texts.push(text ?? null);
+    });
+    const stop = w.watchCssom(
+      () => {},
+      () => [window]
+    );
+    try {
+      const done = sheet.replace('.a{}');
+      sheet.replaceSync('.b{}');
+      await done;
+      await new Promise(r => setTimeout(r, 0));
+      // Alone, it is.
+      await sheet.replace('.c{}');
+      await new Promise(r => setTimeout(r, 0));
+    } finally {
+      stop();
+    }
+    return texts;
+  });
+  assert.deepEqual(seen, ['.b{}', null, '.c{}']);
+});
+
+test("a frame's prototypes made unhookable: left alone, the others watched and given back", async () => {
+  const seen = await page.evaluate(() => {
+    const w = (
+      globalThis as unknown as {
+        __cssomWatch: { recordPageChanges: typeof recordPageChanges; watchCssom: typeof watchCssom };
+      }
+    ).__cssomWatch;
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const realm = frame.contentWindow as Window & typeof globalThis;
+    Object.freeze(realm.CSSStyleSheet.prototype);
+    const sheet = new CSSStyleSheet();
+    let reported = 0;
+    w.recordPageChanges(s => {
+      if (s === sheet) reported++;
+    });
+    const native = CSSStyleSheet.prototype.insertRule;
+    const stop = w.watchCssom(
+      () => {},
+      () => [realm, window]
+    );
+    sheet.insertRule('.a{}');
+    const hooked = CSSStyleSheet.prototype.insertRule !== native;
+    stop();
+    frame.remove();
+    return { reported, hooked, back: CSSStyleSheet.prototype.insertRule === native };
+  });
+  assert.deepEqual(seen, { reported: 1, hooked: true, back: true });
+});
+
 test("the CSS domain's own changes: the native functions, past the hooks and the page's, in every realm", async () => {
   const seen = await page.evaluate(() => {
     const w = (

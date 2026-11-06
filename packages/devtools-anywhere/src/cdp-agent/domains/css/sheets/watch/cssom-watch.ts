@@ -42,6 +42,9 @@ const listeners = new Set<Listener>();
 /** The functions replaced, by prototype and `part:name`, with the one hooked for each. */
 const natives = new Map<object, Map<string, { part: Part; name: string; native: unknown; hook: unknown }>>();
 let own = 0;
+/** How many times each sheet was reported changed, or edited by a session: for replace(). */
+const versions = new WeakMap<CSSStyleSheet, number>();
+const changedAgain = (sheet: CSSStyleSheet) => versions.set(sheet, (versions.get(sheet) ?? 0) + 1);
 
 type Recorder = (sheet: CSSStyleSheet, text?: string, change?: CssomChange) => void;
 
@@ -60,6 +63,7 @@ function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?:
 /** Records and tells a change of the page, even from within the CSS domain's code (`settle`). */
 function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
   if (!sheet || !listeners.size) return;
+  changedAgain(sheet);
   if (change?.kind === 'rule' && suspects.size) reported.add(change.rule);
   try {
     record(sheet, text, change);
@@ -90,14 +94,33 @@ function topRuleOf(rule: CSSRule): CSSRule | null {
   return top.parentStyleSheet ? top : null;
 }
 
+/** A rule no longer in a sheet, or in one of a document unloaded (a frame removed or gone). */
+function gone(rule: CSSRule): boolean {
+  if (!topRuleOf(rule)) return true;
+  const doc = rule.parentStyleSheet?.ownerNode?.ownerDocument;
+  return !!doc && !doc.defaultView;
+}
+
 /** A change of what is in `rule`, or of `rule` itself, at its top-level rule. */
 function inRule(rule: unknown): CssomChange | undefined {
   const top = typeof rule === 'object' && rule !== null && 'parentRule' in rule ? topRuleOf(rule as CSSRule) : null;
   return top ? { kind: 'rule', rule: top } : undefined;
 }
 
-/** An index argument as Web IDL's `unsigned long` takes it. */
-const index = (value: unknown, otherwise: number) => (value === undefined ? otherwise : Number(value) >>> 0);
+/**
+ * An index argument as Web IDL's `unsigned long` takes it; undefined for an object, which the
+ * page's own conversion (`valueOf()`, `toString()`) would see called again.
+ */
+const index = (value: unknown, otherwise: number) =>
+  value === undefined
+    ? otherwise
+    : typeof value === 'object' || typeof value === 'function'
+      ? undefined
+      : Number(value) >>> 0;
+
+/** A text argument, as the native function took it; undefined for an object, as for `index`. */
+const textOf = (value: unknown) =>
+  (typeof value === 'object' && value !== null) || typeof value === 'function' ? undefined : String(value);
 
 /**
  * Hooks a method, or with `part`, an accessor's setter or getter, calling `after` past the native
@@ -109,17 +132,27 @@ function hook(proto: object, name: string, after: After, part: Part = 'value', a
   if (hooked?.has(key)) return;
   const descriptor = Object.getOwnPropertyDescriptor(proto, name);
   const native: unknown = descriptor?.[part];
-  if (!descriptor || typeof native !== 'function') return;
+  // A property the page made non-configurable (a frozen prototype) is left alone, unseen.
+  if (!descriptor?.configurable || typeof native !== 'function') return;
   const proxy = new Proxy(native, {
     apply(f, self, args) {
       const result: unknown = Reflect.apply(f, self, args);
-      if (listeners.size && (always || !own)) after(self, args, result);
+      if (listeners.size && (always || !own))
+        try {
+          after(self, args, result);
+        } catch {
+          // Ours, not the page's: its call went through.
+        }
       return result;
     },
   });
+  try {
+    Object.defineProperty(proto, name, { ...descriptor, [part]: proxy });
+  } catch {
+    return;
+  }
   if (!hooked) natives.set(proto, (hooked = new Map()));
   hooked.set(key, { part, name, native, hook: proxy });
-  Object.defineProperty(proto, name, { ...descriptor, [part]: proxy });
 }
 
 /**
@@ -184,7 +217,7 @@ export function settle(): void {
   const changed: CSSRule[] = [];
   for (const [rule, entry] of suspects) {
     const top = topRuleOf(rule);
-    if (!top) {
+    if (!top || gone(rule)) {
       suspects.delete(rule);
       continue;
     }
@@ -205,8 +238,8 @@ export function settle(): void {
 export function forgetSheet(sheet: CSSStyleSheet): void {
   for (const [rule, entry] of suspects) {
     if (sheetOf(rule) !== sheet) continue;
-    if (topRuleOf(rule)) entry.text = entry.style.cssText;
-    else suspects.delete(rule);
+    if (gone(rule)) suspects.delete(rule);
+    else entry.text = entry.style.cssText;
   }
   for (const rule of reported) if (sheetOf(rule) === sheet) reported.delete(rule);
 }
@@ -338,22 +371,21 @@ function install(realm: Window & typeof globalThis) {
   const sheetProto = realm.CSSStyleSheet.prototype;
   // Where a sheet's method inserted (insertRule's result; addRule's, -1, is none: its index or
   // the end) or deleted, as the browser took the arguments: the call returned, so they were good.
-  const sheetLevel = (self: unknown, change: (sheet: CSSStyleSheet) => CssomChange) => {
+  // An index not known (`index`): no place.
+  const sheetLevel = (self: unknown, change: (sheet: CSSStyleSheet) => CssomChange | undefined) => {
     const sheet = sheetOf(self);
     if (sheet) notify(sheet, undefined, change(sheet));
   };
+  const at = (kind: 'insert' | 'delete', i: number | undefined): CssomChange | undefined =>
+    i === undefined ? undefined : { kind, index: i };
   hook(sheetProto, 'insertRule', (self, _args, result) =>
     sheetLevel(self, () => ({ kind: 'insert', index: Number(result) }))
   );
   hook(sheetProto, 'addRule', (self, args) =>
-    sheetLevel(self, sheet => ({ kind: 'insert', index: index(args[2], sheet.cssRules.length - 1) }))
+    sheetLevel(self, sheet => at('insert', index(args[2], sheet.cssRules.length - 1)))
   );
-  hook(sheetProto, 'deleteRule', (self, args) =>
-    sheetLevel(self, () => ({ kind: 'delete', index: index(args[0], 0) }))
-  );
-  hook(sheetProto, 'removeRule', (self, args) =>
-    sheetLevel(self, () => ({ kind: 'delete', index: index(args[0], 0) }))
-  );
+  hook(sheetProto, 'deleteRule', (self, args) => sheetLevel(self, () => at('delete', index(args[0], 0))));
+  hook(sheetProto, 'removeRule', (self, args) => sheetLevel(self, () => at('delete', index(args[0], 0))));
   // A style rule's nested rules (CSS nesting) are changed through its own methods.
   for (const proto of [realm.CSSGroupingRule.prototype, realm.CSSStyleRule.prototype])
     for (const name of ['insertRule', 'deleteRule']) hook(proto, name, changed);
@@ -386,15 +418,6 @@ function install(realm: Window & typeof globalThis) {
   for (const proto of styles)
     for (const name of Object.getOwnPropertyNames(proto))
       if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, styleChanged, 'set');
-  for (const proto of [
-    realm.CSSStyleRule.prototype,
-    realm.CSSKeyframeRule?.prototype,
-    realm.CSSKeyframesRule?.prototype,
-    realm.CSSPageRule?.prototype,
-  ])
-    if (proto)
-      for (const name of Object.getOwnPropertyNames(proto))
-        if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, changed, 'set');
   // A style the page takes, to write its properties by name, and a rule's media list. Reading
   // `rule.style` costs more while watching (Chrome 157, 100k reads of one rule: 8.3 ms against
   // 1.6; of 1000 rules, each taken once, 9.3 ms), and stays at 6.2 ms once the native getter is
@@ -403,6 +426,12 @@ function install(realm: Window & typeof globalThis) {
     if (!/^CSS\w*(Rule|Declarations)$/.test(name)) continue;
     const proto: unknown = (Reflect.get(realm, name) as { prototype?: unknown } | undefined)?.prototype;
     if (typeof proto !== 'object' || proto === null) continue;
+    // The setters of each kind of rule (a selector, a key, a counter style's `system`, a font
+    // feature's `fontFamily`…); CSSRule's `cssText` sets nothing, and `media` is forwarded to the
+    // list's `mediaText`, watched below.
+    if (name !== 'CSSRule' && name.endsWith('Rule'))
+      for (const prop of Object.getOwnPropertyNames(proto))
+        if (prop !== 'media' && Object.getOwnPropertyDescriptor(proto, prop)?.set) hook(proto, prop, changed, 'set');
     hook(proto, 'style', (self, _args, style) => taking(self, style), 'get');
     hook(
       proto,
@@ -422,17 +451,33 @@ function install(realm: Window & typeof globalThis) {
     hook(realm.MediaList.prototype, 'mediaText', listChanged, 'set');
     for (const name of ['appendMedium', 'deleteMedium']) hook(realm.MediaList.prototype, name, listChanged);
   }
-  hook(sheetProto, 'replaceSync', (self, args) => notify(sheetOf(self), String(args[0])));
+  hook(sheetProto, 'replaceSync', (self, args) => notify(sheetOf(self), textOf(args[0])));
   hook(sheetProto, 'replace', (self, args, result) => {
     const sheet = sheetOf(self);
-    const text = String(args[0]);
-    // A promise of the sheet's realm.
+    const text = textOf(args[0]);
+    const version = sheet ? versions.get(sheet) : undefined;
+    // A promise of the sheet's realm. The sheet changed again since (replaceSync() in the same
+    // task, a session's edit): its text is no longer this one, but serialized anew.
     if (typeof result === 'object' && result !== null && 'then' in result)
       void Promise.resolve(result).then(
-        () => notify(sheet, text),
+        () => notify(sheet, sheet && versions.get(sheet) === version ? text : undefined),
         () => {}
       );
   });
+}
+
+/** The realms hooked since watching started: hooking one again would only find its hooks there. */
+let installed = new WeakSet<object>();
+
+/** Hooks a realm, as far as it lets: what the page made unhookable is not watched. */
+function tryInstall(realm: Window & typeof globalThis) {
+  if (installed.has(realm)) return;
+  installed.add(realm);
+  try {
+    install(realm);
+  } catch {
+    // The page's realm refused: watching goes on with what was hooked.
+  }
 }
 
 function uninstall() {
@@ -444,15 +489,18 @@ function uninstall() {
       Object.defineProperty(proto, name, { ...now, [part]: native });
       hooked.delete(key);
     }
+  // Not to hold the prototypes, and through them their realms, of frames gone since.
+  for (const [proto, hooked] of natives) if (!hooked.size) natives.delete(proto);
   suspects.clear();
   reported.clear();
   taken = 0;
+  installed = new WeakSet();
 }
 
 /** Calls `listener` with each sheet the page changes, and the text it replaces one with. */
 export function watchCssom(listener: Listener, realms: () => (Window & typeof globalThis)[]): () => void {
   listeners.add(listener);
-  realms().forEach(install);
+  realms().forEach(tryInstall);
   return () => {
     listeners.delete(listener);
     if (!listeners.size) uninstall();
@@ -466,7 +514,7 @@ export function watching(): boolean {
 
 /** Hooks the realms of documents seen since watching started. */
 export function watchRealms(docs: Document[]): void {
-  if (listeners.size) for (const doc of docs) install(realmOf(doc));
+  if (listeners.size) for (const doc of docs) tryInstall(realmOf(doc));
 }
 
 /**
@@ -475,6 +523,7 @@ export function watchRealms(docs: Document[]): void {
  * styleSheetChanged.
  */
 export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefined): void {
+  changedAgain(sheet);
   for (const listener of listeners)
     try {
       listener(sheet, text, by);

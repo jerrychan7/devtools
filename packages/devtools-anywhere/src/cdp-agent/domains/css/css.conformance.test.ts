@@ -368,4 +368,22 @@ describe('CSS', () => {
       assert.deepEqual(o, asOurs(c));
     });
   });
+
+  test('setStyleSheetText with CSS disabled reports no sheets', async () => {
+    const [header] = await t.ours.events('CSS.styleSheetAdded');
+    assert.ok(header);
+    const { styleSheetId } = header.header;
+    const { text } = await t.ours.send('CSS.getStyleSheetText', { styleSheetId });
+    const count = (await t.ours.events('CSS.styleSheetAdded')).length;
+    await t.ours.send('CSS.disable');
+    try {
+      // The @import brings a sheet: like Chrome, a disabled CSS domain does not report it.
+      await t.ours.send('CSS.setStyleSheetText', { styleSheetId, text: `@import url("data:text/css,b{}");\n${text}` });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await t.ours.events('CSS.styleSheetAdded')).length, count);
+      await t.ours.send('CSS.setStyleSheetText', { styleSheetId, text });
+    } finally {
+      await t.ours.send('CSS.enable');
+    }
+  });
 });

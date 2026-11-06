@@ -1,12 +1,23 @@
 import type { Protocol } from 'devtools-protocol';
-import { documentOf, isCssom, isElement, isHtml, isHtmlElement, isNode, isSvgElement, realmOf } from '../../core/realm';
+import {
+  documentOf,
+  isCssom,
+  isDocument,
+  isElement,
+  isHtml,
+  isHtmlElement,
+  isNode,
+  isShadowRoot,
+  isSvgElement,
+  realmOf,
+} from '../../core/realm';
 import { type Context, type MatchingStyle } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes/nodes';
 import { parentOf } from '../../core/style/container-query';
 import { CdpError } from '../../core/session';
 import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
-import { historyOf } from '../../core/nodes/history';
+import { historyOf, type Action } from '../../core/nodes/history';
 import { adoptedOf, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { ForcedPseudoClasses } from './matching/forced-pseudo';
 import { backgroundsBehind } from './color';
@@ -290,10 +301,10 @@ export function registerCss(ctx: Context) {
    * Loads copies of cross-origin sheets; the client re-reads a sheet once its copy is in, if CSS
    * is still enabled (the fetch, its own or another session's, may end after CSS.disable).
    */
-  const loadCopies = () =>
-    sheets.loadCopies(sheet => {
-      if (enabled) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
-    });
+  const copyLoaded = (sheet: CSSStyleSheet) => {
+    if (enabled && known.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
+  };
+  const loadCopies = () => sheets.loadCopies(copyLoaded);
 
   const element = (nodeId: number) => resolveElement(ctx, { nodeId });
 
@@ -304,10 +315,13 @@ export function registerCss(ctx: Context) {
     return { el: element(nodeId), pseudo: null };
   };
 
+  /** The edits of a setStyleTexts so far, recorded once all are applied; null outside of one. */
+  let batch: { revert: () => void; action: Action }[] | null = null;
+
   /** Runs `apply` and records it for DOM.undo, `revert` taking it back. */
   function perform(apply: () => void, revert: () => void) {
     apply();
-    history.record({
+    const action: Action = {
       undo: () => {
         revert();
         stylesChanged();
@@ -316,7 +330,9 @@ export function registerCss(ctx: Context) {
         apply();
         stylesChanged();
       },
-    });
+    };
+    if (batch) batch.push({ revert, action });
+    else history.record(action);
   }
 
   /** Rules of fetched copies are shown, but editing them would not affect the page. */
@@ -466,6 +482,13 @@ export function registerCss(ctx: Context) {
       source.text.slice(o.start(node), o.preludeStart(node)) +
       text +
       source.text.slice(o.preludeEnd(node), o.end(node));
+    // A condition that leaves the rule unparsable is refused before the rule is taken out, as
+    // Chrome leaves it.
+    try {
+      ownCall(new CSSStyleSheet(), 'insertRule', after, 0);
+    } catch {
+      throw new CdpError('SyntaxError Rule text is not valid.');
+    }
     const swap = (ruleText: string) => {
       const i = Array.from(parent.cssRules).indexOf(current);
       ownCall(parent, 'deleteRule', i);
@@ -483,18 +506,38 @@ export function registerCss(ctx: Context) {
     return current;
   }
 
-  /** The @keyframes of the element's animations, as Chrome: the last of each name, in their order. */
+  /**
+   * The @keyframes of the element's animations, as Chrome's FindKeyframesRule: of the element's
+   * own shadow tree, then of its tree, then of its document, the last of each name in effect (not
+   * in a disabled sheet, nor under a media or condition that does not apply), in their order.
+   */
   function keyframesOf(el: Element, pseudo: PseudoType | null): Protocol.CSS.CSSKeyframesRule[] {
     const value = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null).animationName;
     const names = [...new Set(value.split(',').map(n => n.trim()))].filter(n => n && n !== 'none');
     if (!names.length) return [];
+    const scopes = [nodes.shadowRootOf(el), el.getRootNode(), documentOf(el)];
+    const byTree = new Map(sheets.trees().map(({ tree, sheets }) => [tree, sheets]));
     const found = new Map<string, { sheet: CSSStyleSheet; rule: CSSKeyframesRule }>();
+    const inScope = new Map<string, { sheet: CSSStyleSheet; rule: CSSKeyframesRule }>();
+    const realm = realmOf(el);
+    const applies = (media: MediaList) => !media.mediaText || realm.matchMedia(media.mediaText).matches;
     const walk = (sheet: CSSStyleSheet, list: CSSRule[]) => {
       for (const rule of list)
-        if (isCssom(rule, 'CSSKeyframesRule')) found.set(rule.name, { sheet, rule });
-        else if (isCssom(rule, 'CSSGroupingRule')) walk(sheet, sheets.rulesOf(rule));
+        if (isCssom(rule, 'CSSKeyframesRule')) inScope.set(rule.name, { sheet, rule });
+        else if (isCssom(rule, 'CSSImportRule')) {
+          if (rule.styleSheet && applies(rule.media)) walk(rule.styleSheet, sheets.rulesOf(rule.styleSheet));
+        } else if (isCssom(rule, 'CSSMediaRule')) {
+          if (applies(rule.media)) walk(sheet, sheets.rulesOf(rule));
+        } else if (isCssom(rule, 'CSSSupportsRule')) {
+          if (realm.CSS.supports(rule.conditionText)) walk(sheet, sheets.rulesOf(rule));
+        } else if (isCssom(rule, 'CSSGroupingRule')) walk(sheet, sheets.rulesOf(rule));
     };
-    for (const sheet of sheets.all()) walk(sheet, sheets.rulesOf(sheet));
+    for (const scope of new Set(scopes)) {
+      const list = isNode(scope) && (isDocument(scope) || isShadowRoot(scope)) ? byTree.get(scope) : undefined;
+      inScope.clear();
+      for (const sheet of list ?? []) if (!sheet.disabled && applies(sheet.media)) walk(sheet, sheets.rulesOf(sheet));
+      for (const [name, f] of inScope) if (!found.has(name)) found.set(name, f);
+    }
     return names.flatMap(name => {
       const f = found.get(name);
       return f ? [rules.keyframes(f.sheet, f.rule)] : [];
@@ -635,6 +678,9 @@ export function registerCss(ctx: Context) {
       stopRevised = null;
       stopWarming(warmer);
       updates.stop();
+      // Enabled again, the sheets are all reported anew.
+      known = new Set();
+      changedUnseen.clear();
     },
 
     async getMatchedStylesForNode(
@@ -719,23 +765,34 @@ export function registerCss(ctx: Context) {
         undefined,
         () => recorded
       );
-      // @import rules gone or new bring or take sheets.
-      void syncSheets();
+      // @import rules gone or new bring or take sheets; with CSS disabled, none is reported.
+      if (enabled) void syncSheets();
+      else void loadCopies();
       stylesChanged();
       return {};
     },
 
     setStyleTexts(params: Protocol.CSS.SetStyleTextsRequest): Protocol.CSS.SetStyleTextsResponse {
-      const styles = params.edits.map((edit, i) => {
-        try {
-          return applyEdit(edit);
-        } catch (e) {
-          // Like Chrome, a range that is no style's names the edit.
-          if (e instanceof CdpError && e.message === STYLE_MISMATCH)
-            throw new CdpError(`Failed applying edit #${i}: ${e.message}`);
-          throw e;
-        }
-      });
+      // Like Chrome, all or none: an edit failing takes back those before it, unrecorded.
+      const done: { revert: () => void; action: Action }[] = [];
+      batch = done;
+      let styles: CSSStyle[];
+      try {
+        styles = params.edits.map((edit, i) => {
+          try {
+            return applyEdit(edit);
+          } catch (e) {
+            for (const { revert } of done.reverse()) revert();
+            // Like Chrome, a range that is no style's names the edit.
+            if (e instanceof CdpError && e.message === STYLE_MISMATCH)
+              throw new CdpError(`Failed applying edit #${i}: ${e.message}`);
+            throw e;
+          }
+        });
+      } finally {
+        batch = null;
+      }
+      for (const { action } of done) history.record(action);
       stylesChanged();
       return { styles };
     },
