@@ -200,4 +200,4 @@ The keyword step shows on acorn.js (`returnOutsideFunction` 2.47 to 2.21 ms); on
 | | e9dfe07 | 89.7 | 84.6 | 1.02 | 35.98 | 0.30 |
 | read-only floor | | 14.9 | 12.0 | 1.00 | | |
 
-`node lexer-compare.bench.ts --rev 55110e2` at e9dfe07: every entry point gives the same results on 1,448,976 texts.
+`node lexer-compare.bench.ts --rev 55110e2` at e9dfe07: every entry point gives the same results on 1,448,976 texts. The count grows with the string literals of `lexer.test.ts`, which the script reads from the working tree: 1,448,962 at 55110e2, 1,448,968 at 5cefe1a (6 more test strings), 1,448,976 at e9dfe07 (8 more).

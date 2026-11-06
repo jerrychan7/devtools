@@ -200,4 +200,4 @@ Apple M2，16 GB，macOS 26，Node 24.21.0，在 aff93c5 运行 `node --expose-g
 | | e9dfe07 | 89.7 | 84.6 | 1.02 | 35.98 | 0.30 |
 | read-only floor | | 14.9 | 12.0 | 1.00 | | |
 
-在 e9dfe07 运行 `node lexer-compare.bench.ts --rev 55110e2`：每个入口在 1,448,976 份文本上结果都相同。
+在 e9dfe07 运行 `node lexer-compare.bench.ts --rev 55110e2`：每个入口在 1,448,976 份文本上结果都相同。文本数随 `lexer.test.ts` 的字符串字面量增加，脚本从工作区读取它：55110e2 时 1,448,962，5cefe1a 时 1,448,968（多了 6 个测试字符串），e9dfe07 时 1,448,976（又多 8 个）。
