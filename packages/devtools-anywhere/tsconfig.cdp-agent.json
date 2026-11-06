@@ -9,5 +9,5 @@
     "noEmit": true
   },
   "include": ["src/cdp-agent"],
-  "exclude": ["src/cdp-agent/**/*.test.ts"]
+  "exclude": ["src/cdp-agent/**/*.test.ts", "src/cdp-agent/**/bench/**"]
 }

@@ -20,6 +20,7 @@
   "include": [
     "tests/**/*.ts",
     "packages/*/src/**/*.test.ts",
+    "packages/*/src/**/bench/*.ts",
     "packages/*/test-support/**/*.ts",
     "playground/**/*.ts",
     "experiments/**/*.ts"

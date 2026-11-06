@@ -145,6 +145,8 @@ A test sits next to what it tests, as `<name>.test.ts`; only tests that span pac
 
 A test that needs the bundle's internals loads `packages/devtools-anywhere/dist-test/` instead of `dist/`: `build.ts` builds the two scripts there a second time (not published) with `DEVTOOLS_ANYWHERE_TEST` set, and only that build exposes them as `window.__devtoolsAnywhereTest` (`iife.ts`; its type is in `tests/globals.d.ts`). Add a test-only hook there, behind `DEVTOOLS_ANYWHERE_TEST`, never to the published bundle or its API.
 
+Benchmarks sit in a `bench/` directory next to what they measure, as `*.bench.ts`, with a `README.md` saying how to run them and giving reference results; they are type-checked with the tests but not run by `pnpm test`. The CSS lexer's ([`domains/css/sheets/bench/`](packages/devtools-anywhere/src/cdp-agent/domains/css/sheets/bench/README.md)) times it against any earlier revision and checks that its tokens stay the same: run both when the lexer changes and put the numbers in the commit message.
+
 ### Working on the frontend
 
 `packages/devtools-frontend` builds the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) at a pinned revision and keeps only what its entrypoint can load. How it fits into upstream with as few patches as possible:
@@ -209,7 +211,7 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 ### Commits
 
 - One logical step per commit.
-- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `docs`, `test`, `build`, `ci`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `service-worker`, `readme`.
+- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `perf`, `docs`, `test`, `build`, `ci`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `service-worker`, `readme`.
 
 ### Branches and pull requests
 

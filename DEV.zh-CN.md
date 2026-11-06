@@ -145,6 +145,8 @@ pnpm typecheck                                # 先构建，再检查所有包�
 
 需要读取包内部状态的测试加载 `packages/devtools-anywhere/dist-test/` 而不是 `dist/`：`build.ts` 在那里把两个脚本再构建一遍（不发布），并设置 `DEVTOOLS_ANYWHERE_TEST`，只有这份构建会把内部状态暴露为 `window.__devtoolsAnywhereTest`（`iife.ts`；类型在 `tests/globals.d.ts`）。测试专用的钩子加在那里、放在 `DEVTOOLS_ANYWHERE_TEST` 之后，不要加进发布的包或其 API。
 
+基准测试放在被测代码旁的 `bench/` 目录里，命名为 `*.bench.ts`，并附 `README.md` 说明运行方法和参考结果；它们随测试一起做类型检查，但 `pnpm test` 不运行它们。CSS 词法器的基准（[`domains/css/sheets/bench/`](packages/devtools-anywhere/src/cdp-agent/domains/css/sheets/bench/README.zh-CN.md)）可以与任意历史版本比较耗时，并核对词元是否不变：修改词法器时两者都要跑，并把数据写进提交信息。
+
 ### 修改前端
 
 `packages/devtools-frontend` 按钉住的版本构建官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend)，只保留入口能加载到的文件。为了尽量少改上游：
@@ -209,7 +211,7 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 ### 提交
 
 - 每个提交只做一步。
-- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`ci`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
+- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`perf`、`docs`、`test`、`build`、`ci`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
 
 ### 分支与 PR
 
