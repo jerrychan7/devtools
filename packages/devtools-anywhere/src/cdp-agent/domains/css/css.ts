@@ -338,14 +338,16 @@ export function registerCss(ctx: Context) {
   /**
    * Edits a sheet through the CSSOM with `apply` (`revert` undoes it), and its text the same way:
    * `next` gives the new one from the old, null when the text is not known. The edit is the
-   * CSS domain's own: no CSS.styleSheetChanged for it.
+   * CSS domain's own: no CSS.styleSheetChanged for it. `recorded` tells whether `apply` or `revert`
+   * recorded the text it left itself, with its rules paired.
    */
   function editSheet(
     sheet: CSSStyleSheet,
     next: (text: string | null) => string | null,
     apply: () => void,
     revert: () => void,
-    span?: Protocol.CSS.SourceRange
+    span?: Protocol.CSS.SourceRange,
+    recorded?: () => boolean
   ) {
     const source = sheets.sourceOf(sheet);
     const before = source?.text ?? null;
@@ -358,16 +360,19 @@ export function registerCss(ctx: Context) {
     // only if no one (a session, the page) changed it since; the text is unknown otherwise, and
     // stays so for later ones (-2).
     let left = -1;
-    const restore = (text: string | null) => {
-      const known = sheets.texts.generation(sheet) === left ? text : null;
-      record(known);
+    // Told before the edit, which may record its text itself (`recorded`).
+    const fresh = () => sheets.texts.generation(sheet) === left;
+    const restore = (text: string | null, unchanged: boolean) => {
+      const known = unchanged ? text : null;
+      if (known === null || !recorded?.()) record(known);
       left = known === null ? -2 : sheets.texts.generation(sheet);
       editedBy(sheets, sheet, known ?? undefined);
     };
     perform(
       () => {
+        const unchanged = fresh();
         ownEdit(apply);
-        if (left !== -1) return restore(after);
+        if (left !== -1) return restore(after, unchanged);
         if (offsets && before !== null && after !== null)
           sheets.texts.splice(
             sheet,
@@ -375,13 +380,14 @@ export function registerCss(ctx: Context) {
             offsets[1],
             after.slice(offsets[0], after.length - (before.length - offsets[1]))
           );
-        else record(after);
+        else if (after === null || !recorded?.()) record(after);
         left = sheets.texts.generation(sheet);
         editedBy(sheets, sheet, after ?? undefined);
       },
       () => {
+        const unchanged = fresh();
         ownEdit(revert);
-        restore(before);
+        restore(before, unchanged);
       }
     );
   }
@@ -634,8 +640,16 @@ export function registerCss(ctx: Context) {
       assertEditable(sheet);
       // Like Chrome, the text is the sheet's as given, invalid rules and all; that of a <style> is
       // left as it is (setting it would make another sheet). Its rules are replaced through the CSSOM.
+      // Only the top-level rules whose text changed are replaced, when that can be told; the
+      // others stay the same objects, and the text is recorded with them paired (`recorded`).
+      let recorded = false;
       const replace = (text: string) => {
+        recorded = false;
         if (isConstructed(sheet)) return sheet.replaceSync(text);
+        if (sheets.texts.retext(sheet, text, s => sheets.rulesOf(s))) {
+          recorded = true;
+          return;
+        }
         while (sheet.cssRules.length) sheet.deleteRule(sheet.cssRules.length - 1);
         const o = outline(text);
         for (let node = o.firstChild(ROOT); node >= 0; node = o.next(node))
@@ -650,7 +664,9 @@ export function registerCss(ctx: Context) {
         sheet,
         () => params.text,
         () => replace(params.text),
-        () => replace(old)
+        () => replace(old),
+        undefined,
+        () => recorded
       );
       // @import rules gone or new bring or take sheets.
       void syncSheets();

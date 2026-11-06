@@ -272,8 +272,8 @@ export class CssOutline {
    * `dead` by the caller).
    */
   graft(from: CssOutline, r: number, delta: number): number {
-    // In pre-order, the last top-level rule and those in it are the last records, from `r` on; and
-    // so are their declarations.
+    // In pre-order, the last top-level rules and those in them are the last records, from `r` on;
+    // and so are their declarations.
     const firstDecl = from.firstDecl(r);
     const rules = from.ruleCount - r;
     const decls = from.declCount - firstDecl;
