@@ -148,3 +148,73 @@ test('edits one after another', async () => {
   // Back to the start in one go.
   await compare(BASE, text);
 });
+
+/**
+ * Three times what the CSSOM has no rule for (@charset, CDO and CDC, invalid rules, a top-level
+ * `--var:{}` whose `;` makes the next rule invalid too, bad strings) around three rules.
+ */
+const MIXED = [0, 1, 2]
+  .map(
+    i =>
+      `@charset "utf-8";\n<!-- .a\\31 b${i} { content: "q\\"uo\\\nte"; } -->\n.é\\E9 x${i}{background:url( a\\(b.png ) ;b:url(bad"x)}\n` +
+      `/* ★ */#\\31 23${i}{width:1.5e3px;height:-.5em}\n--var:{a};@-moz-x u+1?? ;"bad\nstr" 'unterminated\n\u0000 😀 \r\n\f\t!important\\\n.n${i}{x:${i}}\n`
+  )
+  .join('');
+/** Its rules: .a\31 b, .é\E9 x, #\31 23, three times. */
+const KEPT = [T, T, T, T, T, T, T, T, T];
+/** All kept but rule `i`. */
+const but = (i: number) => KEPT.map((_, j) => j !== i);
+
+test('mixed: a rule changed next to what has no rule, only that rule new', async () => {
+  const edits: [string, string, number][] = [
+    ['#\\31 230{width:1.5e3px', '#\\31 230{width:2px', 2],
+    ['#\\31 231{width:1.5e3px', '#\\31 231{width:7px', 5],
+    ['#\\31 232{width:1.5e3px', '#\\31 232{width:3px', 8],
+    ['.a\\31 b0 { content', '.a\\31 b0 { top: 0; content', 0],
+    ['.a\\31 b1 { content', '.a\\31 b1 { color: red; content', 3],
+    ['x1{background', 'x1{top:0;background', 4],
+  ];
+  for (const [from, to, i] of edits) assert.deepEqual(await compare(MIXED.replace(from, to), MIXED), but(i), to);
+});
+
+test('mixed: what has no rule added, removed and changed, all rules kept', async () => {
+  const edits = [
+    // @charset removed, added twice, changed.
+    MIXED.replace('@charset "utf-8";\n<!-- .a\\31 b1', '<!-- .a\\31 b1'),
+    MIXED.replace('/* ★ */#\\31 231', '@charset "x";\n@charset "y";\n#\\31 231'),
+    MIXED.replace('@charset "utf-8"', '@charset "latin1"'),
+    // CDO and CDC, bad strings and invalid rules added and removed, first and last.
+    MIXED.replace('/* ★ */#\\31 231', '<!-- --> <!--\n#\\31 231'),
+    MIXED.replace(' -->\n.é\\E9 x1', '\n.é\\E9 x1'),
+    MIXED.replace('/* ★ */#\\31 231', '"bad\nstr" ;\n:::x{top:0}\n@nope;\n#\\31 231'),
+    MIXED.replace('--var:{a};@-moz-x u+1?? ;"bad\nstr" \'unterminated\n\u0000 😀 \r\n\f\t!important\\\n.n1{x:1}\n', ''),
+    MIXED.replace('.n2{x:2}', '.n2{x:3}'),
+    MIXED.replace('.n0{x:0}', '.n0{x:0} --w:{b}'),
+    `<!-- ${MIXED}`,
+  ];
+  for (const text of edits) assert.deepEqual(await compare(text, MIXED), KEPT, text);
+});
+
+test('mixed: rules added among what has no rule', async () => {
+  const edits: [string, string, boolean[]][] = [
+    // After `--var:{a};`: part of the invalid rule the `;` starts.
+    ['.n1{x:1}\n', '.n1{x:1}\n.v{top:1px}\n', KEPT],
+    ['@charset "utf-8";\n<!-- .a\\31 b1', '@charset "utf-8";\n.v{top:1px}\n<!-- .a\\31 b1', KEPT],
+    ['/* ★ */#\\31 231', '/* ★ */.v{top:1px}\n#\\31 231', KEPT],
+    // A rule removed with what has no rule around it.
+    ['/* ★ */#\\31 231{width:1.5e3px;height:-.5em}\n--var:{a};', '--var:{a};', but(5)],
+  ];
+  for (const [from, to, kept] of edits) assert.deepEqual(await compare(MIXED.replace(from, to), MIXED), kept, to);
+});
+
+test('an @namespace that a rule removed before it makes valid: all replaced', async () => {
+  const text = '@charset "utf-8";\n.x { top: 1px }\n@namespace s url(http://www.w3.org/2000/svg);\ns|a { top: 2px }\n';
+  // Whether `s|a` is a rule after the @namespace dropped depends on the sheet's past, in Chrome too.
+  for (const from of [MIXED, BASE]) {
+    await compare(text, from);
+    const removed = await compare(text.replace('.x { top: 1px }\n', ''), text);
+    assert.ok(removed.every(k => !k));
+    const changed = await compare(text.replace('.x { top: 1px }', '.x { top: 3px }'), text);
+    assert.ok(changed.every(k => !k));
+  }
+});
