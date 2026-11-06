@@ -4,7 +4,7 @@
 // outlines and pairs only what changed, or gives up (null) for the caller to pair anew.
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
-import { lineStarts } from './text-lines';
+import { replacedLines } from './text-lines';
 import { type SheetSource, TOP, childRules, pairList, tagOf } from './pair';
 
 /**
@@ -176,7 +176,13 @@ export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource 
   }
   parts.push(source.text.slice(at));
   const text = parts.join('');
-  const result: SheetSource = { ...source, text, lines: lineStarts(text), topRules: [], topNodes: [] };
+  const result: SheetSource = {
+    ...source,
+    text,
+    lines: replacedLines(source.lines, edits),
+    topRules: [],
+    topNodes: [],
+  };
   // Outlined and paired first, the source moved only once they all are.
   const added: number[][] = [];
   let delta = 0;
@@ -463,7 +469,8 @@ export function retexted(
   const segNodes: number[] = [];
   const next: SheetSource = {
     text,
-    lines: lineStarts(text),
+    // Only the lines between the texts' common start and end are counted again.
+    lines: replacedLines(source.lines, [{ start: p, end: old.length - s, insert: text.slice(p, text.length - s) }]),
     outline: local ? o : outlined,
     nodes: pairs,
     topRules: segRules,
