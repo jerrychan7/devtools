@@ -21,8 +21,10 @@ export interface SheetSource {
   outline: CssOutline;
   /** The outline node (rule index) each CSSOM rule was written as. */
   nodes: Map<CSSRule, number>;
-  /** The top-level rules, each with its node, in the order of the text. */
-  top: [CSSRule, number][];
+  /** The top-level rules, in the order of the text. */
+  topRules: CSSRule[];
+  /** The node of each of `topRules`, at the same index: no object for each pair. */
+  topNodes: number[];
   /**
    * The sheet's @namespace rules as the CSSOM serializes them: a selector parsed alone is parsed
    * after them, so that its namespace prefixes are declared.
@@ -98,8 +100,9 @@ const isLead = (rule: CSSRule) => {
  * rules are replaced by the others (`replaceTops`).
  */
 function applied(source: SheetSource, pending: Pending, rules: CSSRule[]): SheetSource | null {
-  const top = source.top;
-  const runs: Run[] = top.length ? [[0, top.length]] : [];
+  const { topRules, topNodes } = source;
+  const count = topRules.length;
+  const runs: Run[] = count ? [[0, count]] : [];
   for (const { kind, index } of pending.moves) {
     const p = runAt(runs, index);
     if (p < 0) return null;
@@ -118,11 +121,11 @@ function applied(source: SheetSource, pending: Pending, rules: CSSRule[]): Sheet
   let j = 0;
   const keep = (k: number, at: number): boolean => {
     if (k > from || at > j) {
-      for (let i = from; i < k; i++) if (isLead((top[i] as [CSSRule, number])[0])) return false;
+      for (let i = from; i < k; i++) if (isLead(topRules[i] as CSSRule)) return false;
       const added = rules.slice(j, at);
       if (added.some(isLead)) return false;
-      const start = from < top.length ? o.start((top[from] as [CSSRule, number])[1]) : text.length;
-      const end = k < top.length ? o.start((top[k] as [CSSRule, number])[1]) : text.length;
+      const start = from < count ? o.start(topNodes[from] as number) : text.length;
+      const end = k < count ? o.start(topNodes[k] as number) : text.length;
       const insert = added.map(r => `${r.cssText}\n`).join('');
       edits.push({ from, count: k - from, start, end, insert, rules: added });
     }
@@ -138,11 +141,11 @@ function applied(source: SheetSource, pending: Pending, rules: CSSRule[]): Sheet
     }
     for (let k = first; k < first + n; k++, at++) {
       const rule = rules[at];
-      if (!rule || rule !== (top[k] as [CSSRule, number])[0]) return null;
+      if (!rule || rule !== topRules[k]) return null;
       if (!pending.changed.has(rule) && !keep(k, at)) return null;
     }
   }
-  if (at !== rules.length || !keep(top.length, rules.length)) return null;
+  if (at !== rules.length || !keep(count, rules.length)) return null;
   return edits.length ? replaceTops(source, edits) : source;
 }
 
@@ -223,7 +226,7 @@ export class SheetTexts {
     const pending = (rec.pending ??= { moves: [], changed: new Set() });
     if (change.kind === 'rule') pending.changed.add(change.rule);
     else pending.moves.push({ kind: change.kind, index: change.index });
-    if (pending.moves.length + pending.changed.size > pendingLimit(rec.source.top.length))
+    if (pending.moves.length + pending.changed.size > pendingLimit(rec.source.topRules.length))
       return this.invalidate(sheet);
     this.changed(sheet);
   }
@@ -442,7 +445,15 @@ const loose = (s: string) =>
 function pair(text: string, rules: CSSRule[]): SheetSource | null {
   const o = outline(text);
   const namespaces = namespaceText(rules);
-  const source: SheetSource = { text, lines: lineStarts(text), outline: o, nodes: new Map(), top: [], namespaces };
+  const source: SheetSource = {
+    text,
+    lines: lineStarts(text),
+    outline: o,
+    nodes: new Map(),
+    topRules: [],
+    topNodes: [],
+    namespaces,
+  };
   let lead = rules.findIndex(r => !isCssom(r, 'CSSImportRule') && !isCssom(r, 'CSSNamespaceRule'));
   if (lead < 0) lead = rules.length;
   // Out of order only as a fallback for a text CSS.addRule put a rule in before the @namespace
@@ -456,12 +467,20 @@ function pair(text: string, rules: CSSRule[]): SheetSource | null {
     if (node < 0) return null;
     (used ??= new Set()).add(node);
     source.nodes.set(rule, node);
-    source.top.push([rule, node]);
+    source.topRules.push(rule);
+    source.topNodes.push(node);
     node = o.next(node);
   }
   if (!pairList(source, o.firstChild(ROOT), lead ? rules.slice(lead) : rules, TOP, true, used)) return null;
   // In the order of the text, which SheetTexts.splice relies on.
-  if (used) source.top.sort((a, b) => o.start(a[1]) - o.start(b[1]));
+  if (used) {
+    const { topRules, topNodes } = source;
+    const order = topNodes
+      .map((_, i) => i)
+      .sort((a, b) => o.start(topNodes[a] as number) - o.start(topNodes[b] as number));
+    source.topRules = order.map(i => topRules[i] as CSSRule);
+    source.topNodes = order.map(i => topNodes[i] as number);
+  }
   return source;
 }
 
@@ -483,7 +502,7 @@ const TOP: Wrap = p => `${p}{}`;
 
 /**
  * Pairs `cssom` with the outline's rules from `first` on (siblings, but those in `skip`) into
- * `source.nodes` (and with `top`, its top-level pairs).
+ * `source.nodes` (and with `top`, `topRules` and `topNodes`).
  */
 function pairList(
   source: SheetSource,
@@ -502,7 +521,10 @@ function pairList(
       if (node < 0) return false;
       if (skip?.has(node) || !matches(source.text, o, node, rule, tag, wrap, source.namespaces)) continue;
       source.nodes.set(rule, node);
-      if (top) source.top.push([rule, node]);
+      if (top) {
+        source.topRules.push(rule);
+        source.topNodes.push(node);
+      }
       const inner: Wrap =
         tag === 'CSSStyleRule' ? p => `:root{${p}{}}` : tag === 'CSSKeyframesRule' ? p => `@keyframes x{${p}{}}` : wrap;
       if (!pairList(source, o.firstChild(node), childRules(rule), inner)) return false;
@@ -520,10 +542,10 @@ function pairList(
  */
 function respliced(source: SheetSource, start: number, end: number, insert: string): SheetSource | null {
   const o = source.outline;
-  const k = source.top.findIndex(([, n]) => o.start(n) <= start && end <= o.end(n));
-  const old = source.top[k];
-  if (!old) return null;
-  const [rule, node] = old;
+  const k = source.topNodes.findIndex(n => o.start(n) <= start && end <= o.end(n));
+  if (k < 0) return null;
+  const rule = source.topRules[k] as CSSRule;
+  const node = source.topNodes[k] as number;
   const from = o.start(node);
   const to = o.end(node);
   const slice = source.text.slice(from, start) + insert + source.text.slice(end, to);
@@ -560,24 +582,25 @@ const CLEAN_TAIL = /^(?:[ \t\n\r\f]|\/\*[\s\S]*?\*\/)*$/;
  * records take: once they are as many as the live ones, null is returned, for the text to be
  * outlined and paired anew, which leaves none. Records are not compacted in place, as the nodes in
  * `nodes`, indices, would all have to be renumbered. The outline's sibling links from `ROOT` keep
- * the replaced rules: `top` is what tells the top-level rules from then on.
+ * the replaced rules: `topRules` is what tells the top-level rules from then on.
  *
  * The old source is changed in place, and gives up its `outline` and `nodes` to the new one, even
  * when null is returned: callers replace it right away and must not use it again.
  */
 export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource | null {
   const o = source.outline;
-  const top = source.top;
+  const { topRules, topNodes } = source;
+  const count = topRules.length;
   if (o.dead * 2 > o.ruleCount) return null;
   const parts: string[] = [];
   let at = 0;
   let next = 0;
   for (const e of edits) {
     const last = e.from + e.count;
-    if (e.from < next || last > top.length || e.start < at || e.end < e.start) return null;
-    const before = top[e.from - 1];
-    const after = top[last];
-    if ((before && o.end(before[1]) > e.start) || (after ? o.start(after[1]) < e.end : e.end > source.text.length))
+    if (e.from < next || last > count || e.start < at || e.end < e.start) return null;
+    const before = e.from > 0 ? (topNodes[e.from - 1] as number) : -1;
+    const after = last < count ? (topNodes[last] as number) : -1;
+    if ((before >= 0 && o.end(before) > e.start) || (after >= 0 ? o.start(after) < e.end : e.end > source.text.length))
       return null;
     parts.push(source.text.slice(at, e.start), e.insert);
     at = e.end;
@@ -585,9 +608,9 @@ export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource 
   }
   parts.push(source.text.slice(at));
   const text = parts.join('');
-  const result: SheetSource = { ...source, text, lines: lineStarts(text), top: [] };
+  const result: SheetSource = { ...source, text, lines: lineStarts(text), topRules: [], topNodes: [] };
   // Outlined and paired first, the source moved only once they all are.
-  const added: [CSSRule, number][][] = [];
+  const added: number[][] = [];
   let delta = 0;
   for (const e of edits) {
     const alone = outline(e.insert);
@@ -602,29 +625,33 @@ export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource 
     } else if (!CLEAN_TAIL.test(e.insert)) return null;
     const first = tops[0];
     if (first !== undefined && !pairList(result, o.graft(alone, first, e.start + delta), e.rules, TOP)) return null;
-    added.push(e.rules.map(r => [r, result.nodes.get(r) as number]));
+    added.push(e.rules.map(r => result.nodes.get(r) as number));
     delta += e.insert.length - (e.end - e.start);
   }
   delta = 0;
   let k = 0;
   const keep = (until: number) => {
     for (; k < until; k++) {
-      const kept = top[k] as [CSSRule, number];
-      if (delta) o.shift(kept[1], delta);
-      result.top.push(kept);
+      const node = topNodes[k] as number;
+      if (delta) o.shift(node, delta);
+      result.topRules.push(topRules[k] as CSSRule);
+      result.topNodes.push(node);
     }
   };
   edits.forEach((e, i) => {
     keep(e.from);
     for (; k < e.from + e.count; k++) {
-      const [rule, node] = top[k] as [CSSRule, number];
-      o.dead += o.size(node);
-      forget(result.nodes, rule);
+      o.dead += o.size(topNodes[k] as number);
+      forget(result.nodes, topRules[k] as CSSRule);
     }
-    result.top.push(...(added[i] ?? []));
+    const nodes = added[i] ?? [];
+    for (let j = 0; j < nodes.length; j++) {
+      result.topRules.push(e.rules[j] as CSSRule);
+      result.topNodes.push(nodes[j] as number);
+    }
     delta += e.insert.length - (e.end - e.start);
   });
-  keep(top.length);
+  keep(count);
   return result;
 }
 
@@ -640,8 +667,6 @@ function forget(nodes: Map<CSSRule, number>, rule: CSSRule): void {
 const POSITIONAL = /^(?:import|namespace|charset)$/i;
 /** The most insertions and deletions the rules are compared for (`commonRuns`). */
 const MAX_EDITS = 1024;
-
-type Pair = [CSSRule, number];
 
 /** Whether top-level rule `node` ends where a rule after it is parsed as it would be alone. */
 const terminated = (text: string, o: CssOutline, node: number) =>
@@ -729,13 +754,13 @@ function eachRule(rule: CSSRule, f: (rule: CSSRule) => void): void {
   for (let i = 0; i < list.length; i++) eachRule(list[i] as CSSRule, f);
 }
 
-/** The first of `top` for which `after` holds, `after` holding for all after it too. */
-function search(top: Pair[], after: (node: number) => boolean): number {
+/** The first of `nodes` for which `after` holds, `after` holding for all after it too. */
+function search(nodes: number[], after: (node: number) => boolean): number {
   let lo = 0;
-  let hi = top.length;
+  let hi = nodes.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (after((top[mid] as Pair)[1])) hi = mid;
+    if (after(nodes[mid] as number)) hi = mid;
     else lo = mid + 1;
   }
   return lo;
@@ -769,13 +794,14 @@ function retexted(
   text: string,
   rules: CSSRule[]
 ): SheetSource | null | undefined {
-  const { outline: o, top, text: old } = source;
+  const { outline: o, topRules, topNodes, text: old } = source;
+  const count = topRules.length;
   // The pairs in the CSSOM's order: not after CSS.addRule put a rule before @namespace ones.
-  if (top.length !== rules.length) return undefined;
+  if (count !== rules.length) return undefined;
   let lead = 0;
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i] as CSSRule;
-    if ((top[i] as Pair)[0] !== rule) return undefined;
+    if (topRules[i] !== rule) return undefined;
     const tag = tagOf(rule);
     if (tag === 'CSSImportRule' || tag === 'CSSNamespaceRule') lead = i + 1;
   }
@@ -788,11 +814,11 @@ function retexted(
   while (p < shortest && old.charCodeAt(p) === text.charCodeAt(p)) p++;
   let s = 0;
   while (s < shortest - p && old.charCodeAt(old.length - 1 - s) === text.charCodeAt(text.length - 1 - s)) s++;
-  let a = search(top, node => o.end(node) > p);
-  while (a > 0 && !terminated(old, o, (top[a - 1] as Pair)[1])) a--;
-  let b = search(top, node => o.start(node) >= old.length - s);
-  const from = a ? o.end((top[a - 1] as Pair)[1]) : 0;
-  const slice = text.slice(from, (b < top.length ? o.start((top[b] as Pair)[1]) : old.length) + delta);
+  let a = search(topNodes, node => o.end(node) > p);
+  while (a > 0 && !terminated(old, o, topNodes[a - 1] as number)) a--;
+  let b = search(topNodes, node => o.start(node) >= old.length - s);
+  const from = a ? o.end(topNodes[a - 1] as number) : 0;
+  const slice = text.slice(from, (b < count ? o.start(topNodes[b] as number) : old.length) + delta);
   let n = o.dead * 2 > o.ruleCount ? null : outline(slice);
   let nodes = n && wholeRules(slice, n);
   const local = !!nodes;
@@ -801,14 +827,14 @@ function retexted(
     n = outline(text);
     nodes = wholeRules(text, n);
     newText = text;
-    [a, b] = [0, top.length];
+    [a, b] = [0, count];
   }
   if (!n || !nodes) return undefined;
 
   // The texts of the rules compared: slices, compared only along the way the diff takes.
   const textOf = (t: string, out: CssOutline, node: number) => t.slice(out.start(node), out.end(node));
   const before: string[] = [];
-  for (let i = a; i < b; i++) before.push(textOf(old, o, (top[i] as Pair)[1]));
+  for (let i = a; i < b; i++) before.push(textOf(old, o, topNodes[i] as number));
   const outlined = n;
   const after = nodes.map(node => textOf(newText, outlined, node));
   // Too different: all replaced, with the text's outline already made.
@@ -831,7 +857,7 @@ function retexted(
   let fixed = false;
   walk(
     i => {
-      if (index < lead || POSITIONAL.test(o.name(old, (top[a + i] as Pair)[1]))) fixed = true;
+      if (index < lead || POSITIONAL.test(o.name(old, topNodes[a + i] as number))) fixed = true;
     },
     j => {
       if (index < lead || POSITIONAL.test(outlined.name(newText, nodes[j] as number))) fixed = true;
@@ -863,15 +889,17 @@ function retexted(
   if (local) {
     const head = nodes[0];
     if (head !== undefined) base = o.graft(outlined, head, from) - head;
-    for (let i = a; i < b; i++) o.dead += o.size((top[i] as Pair)[1]);
+    for (let i = a; i < b; i++) o.dead += o.size(topNodes[i] as number);
   }
-  const segment: Pair[] = [];
+  const segRules: CSSRule[] = [];
+  const segNodes: number[] = [];
   const next: SheetSource = {
     text,
     lines: lineStarts(text),
     outline: local ? o : outlined,
     nodes: pairs,
-    top: segment,
+    topRules: segRules,
+    topNodes: segNodes,
     namespaces: source.namespaces,
   };
   let ok = true;
@@ -885,7 +913,7 @@ function retexted(
   };
   walk(
     // Gone, its pairs with it when they stay in the map.
-    i => local && eachRule((top[a + i] as Pair)[0], r => pairs.delete(r)),
+    i => local && eachRule(topRules[a + i] as CSSRule, r => pairs.delete(r)),
     j => {
       if (runStart < 0) runStart = j;
       const rule = added[j];
@@ -893,20 +921,23 @@ function retexted(
     },
     (i, j) => {
       flush();
-      const [rule, node] = top[a + i] as Pair;
+      const rule = topRules[a + i] as CSSRule;
+      const node = topNodes[a + i] as number;
       const copy = (nodes[j] as number) + base;
       eachRule(rule, r => {
         const at = source.nodes.get(r);
         if (at !== undefined) pairs.set(r, at - node + copy);
       });
-      segment.push([rule, copy]);
+      segRules.push(rule);
+      segNodes.push(copy);
     }
   );
   flush();
   if (!ok) return null;
   if (local) {
-    for (let i = b; i < top.length; i++) o.shift((top[i] as Pair)[1], delta);
-    next.top = top.slice(0, a).concat(segment, top.slice(b));
+    for (let i = b; i < count; i++) o.shift(topNodes[i] as number, delta);
+    next.topRules = topRules.slice(0, a).concat(segRules, topRules.slice(b));
+    next.topNodes = topNodes.slice(0, a).concat(segNodes, topNodes.slice(b));
   }
   return next;
 }

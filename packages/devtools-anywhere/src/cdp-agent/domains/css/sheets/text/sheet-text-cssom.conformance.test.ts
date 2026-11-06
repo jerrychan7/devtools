@@ -60,7 +60,8 @@ async function run(css: string, rounds: string[][], authored = false): Promise<O
         lines: number[];
         outline: unknown;
         nodes: Map<CSSRule, number>;
-        top: [CSSRule, number][];
+        topRules: CSSRule[];
+        topNodes: number[];
       };
       const m = (globalThis as unknown as { __sheetText: Record<string, never> }).__sheetText as unknown as {
         SheetTexts: new () => { source(s: CSSStyleSheet, f: (s: CSSStyleSheet) => CSSRule[]): Source | null };
@@ -93,9 +94,9 @@ async function run(css: string, rounds: string[][], authored = false): Promise<O
             if ('cssRules' in rule) walk(rule.cssRules as CSSRuleList, `${path}${i}.`);
           });
         walk(sheet.cssRules, '');
-        const top = source.top.map(([rule, node]) => [
+        const top = source.topRules.map((rule, i) => [
           Array.prototype.indexOf.call(sheet.cssRules, rule),
-          (m.ruleObject(source.text, source.outline, node) as { start: number }).start,
+          (m.ruleObject(source.text, source.outline, source.topNodes[i] as number) as { start: number }).start,
         ]);
         return JSON.stringify({ text: source.text, lines: source.lines, top, rules }, null, 1);
       };
