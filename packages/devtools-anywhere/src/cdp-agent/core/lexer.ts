@@ -621,9 +621,28 @@ function isWsNotBr(c: number): boolean {
   );
 }
 
+/** Classes of ASCII code units, a bit each. */
+const WS = 1;
+const RUN = 2;
+const PUNCT = 4;
+const EXPRESSION_PUNCT = 8;
+
+/** What each ASCII code unit is: one load instead of a chain of comparisons in the hot loops. */
+const ASCII = new Uint8Array(128);
+function mark(chars: string, bit: number) {
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars.charCodeAt(i);
+    ASCII[c] = (ASCII[c] ?? 0) | bit;
+  }
+}
+mark('\t\n\v\f\r ', WS);
+mark('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$_\\', RUN);
+mark('!%&()*+,-./:;<=>?[]^{}|~', PUNCT);
+mark('!%&(*+,-.:;<=>?[^{|~', EXPRESSION_PUNCT);
+
 /** lexer.c `isBrOrWs`. */
 function isBrOrWs(c: number): boolean {
-  return isBr(c) || isWsNotBr(c);
+  return c < 128 ? ((ASCII[c] ?? 0) & WS) !== 0 : isBr(c) || isWsNotBr(c);
 }
 
 /** lexer.c `isBrOrWsOrPunctuatorNotDot`. */
@@ -631,46 +650,19 @@ function isBrOrWsOrPunctuatorNotDot(c: number): boolean {
   return isBrOrWs(c) || (isPunctuator(c) && c !== 46);
 }
 
-/** lexer.c `isTokenRunChar`: identifier, keyword and number characters. */
+/** lexer.c `isTokenRunChar`: identifier, keyword and number characters ([A-Za-z0-9$_\\] in ASCII). */
 function isTokenRunChar(c: number): boolean {
-  return (
-    (c >= 97 && c <= 122) ||
-    (c >= 65 && c <= 90) ||
-    (c >= 48 && c <= 57) ||
-    c === 36 ||
-    c === 95 ||
-    c === 92 ||
-    (c > 127 && !isBrOrWs(c))
-  );
+  return c < 128 ? ((ASCII[c] ?? 0) & RUN) !== 0 : !isBr(c) && !isWsNotBr(c);
 }
 
 /** lexer.c `isPunctuator`: !%&()*+,-./:;<=>?[]^{}|~ */
 function isPunctuator(ch: number): boolean {
-  return (
-    ch === 33 ||
-    ch === 37 ||
-    ch === 38 ||
-    (ch > 39 && ch < 48) ||
-    (ch > 57 && ch < 64) ||
-    ch === 91 ||
-    ch === 93 ||
-    ch === 94 ||
-    (ch > 122 && ch < 127)
-  );
+  return ch < 128 && ((ASCII[ch] ?? 0) & PUNCT) !== 0;
 }
 
 /** lexer.c `isExpressionPunctuator`: !%&(*+,-.:;<=>?[^{|~ */
 function isExpressionPunctuator(ch: number): boolean {
-  return (
-    ch === 33 ||
-    ch === 37 ||
-    ch === 38 ||
-    (ch > 39 && ch < 47 && ch !== 41) ||
-    (ch > 57 && ch < 64) ||
-    ch === 91 ||
-    ch === 94 ||
-    (ch > 122 && ch < 127 && ch !== 125)
-  );
+  return ch < 128 && ((ASCII[ch] ?? 0) & EXPRESSION_PUNCT) !== 0;
 }
 
 // Queries over the token stream (not in es-module-lexer).
