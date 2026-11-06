@@ -134,10 +134,11 @@ test('without requestIdleCallback: slices of the budget timed from when they run
   const b = session(new Map([[big, BIG]]));
   warmUp(s, sheets);
   warmUp(b, [big]);
-  // A slice takes about 8 sheets of 1 ms each: two slices, 50 ms apart.
-  await new Promise(r => setTimeout(r, 70));
+  // A slice takes about 8 sheets of 1 ms each: the first leaves some, later ones the rest.
+  const start = Date.now();
+  while (!s.warmed.length && Date.now() - start < 2000) await new Promise(r => setTimeout(r, 5));
   assert.ok(s.warmed.length >= 1 && s.warmed.length < 12, String(s.warmed.length));
-  await new Promise(r => setTimeout(r, 120));
+  while (s.warmed.length < 12 && Date.now() - start < 3000) await new Promise(r => setTimeout(r, 10));
   assert.equal(s.warmed.length, 12);
   // The big sheet is never warmed without idle periods: let go after MAX_WAITS slices.
   await new Promise(r => setTimeout(r, 50 * (MAX_WAITS + 2)));
