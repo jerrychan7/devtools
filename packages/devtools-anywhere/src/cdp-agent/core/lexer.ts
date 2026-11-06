@@ -89,8 +89,11 @@ interface OpenToken {
   pos: number;
 }
 
-/** Takes each token as it is lexed, instead of the token list. */
-type Sink = (kind: Kind, start: number, end: number, parent: Open, newline: boolean) => void;
+/** A `debugger` statement: the keyword's offset, and whether a `;` comes next. */
+export interface DebuggerSite {
+  start: number;
+  semicolon: boolean;
+}
 
 /** Tokenizes `source`. Never throws: on a syntax error it recovers and goes on. */
 export function tokenize(source: string, options: LexOptions = {}): Tokens {
@@ -109,7 +112,7 @@ class Lexer {
   private readonly stack: OpenToken[] = [];
   private depth = 0;
   private newline = false;
-  /** Tokens kept so far; stays 0 with a sink. */
+  /** Tokens kept so far; stays 0 in debugger mode. */
   private count = 0;
   private kinds: Uint8Array;
   private starts: Int32Array;
@@ -117,15 +120,23 @@ class Lexer {
   private depths: Int32Array;
   private parents: Uint8Array;
   private newlines: Uint8Array;
-  private readonly sink: Sink | undefined;
+  /**
+   * Debugger mode (`debuggerStatementSites`): the `debugger` statements found so far, kept instead
+   * of the tokens. Only the previous token and a candidate keyword are remembered.
+   */
+  private readonly sites: DebuggerSite[] | undefined;
+  private prevKind = -1;
+  private prevStart = 0;
+  /** The start of a `debugger` keyword whose next token is still to come (-1 for none). */
+  private candidate = -1;
 
-  constructor(source: string, module: boolean, sink?: Sink) {
+  constructor(source: string, module: boolean, sites?: DebuggerSite[]) {
     this.src = source;
     this.module = module;
     this.end = source.length;
-    this.sink = sink;
+    this.sites = sites;
     // A token every 4 to 5 code units in minified code: most sources never grow the arrays.
-    const capacity = sink ? 0 : Math.ceil(source.length / 3) + 16;
+    const capacity = sites ? 0 : Math.ceil(source.length / 3) + 16;
     this.kinds = new Uint8Array(capacity);
     this.starts = new Int32Array(capacity);
     this.ends = new Int32Array(capacity);
@@ -179,7 +190,7 @@ class Lexer {
 
   private emit(kind: Kind, start: number, end: number, depth: number) {
     const parent = depth > 0 ? this.top(depth - 1).token : Open.None;
-    if (this.sink) this.sink(kind, start, end, parent, this.newline);
+    if (this.sites) this.debuggerToken(kind, start, end, parent);
     else {
       const i = this.count++;
       if (i === this.kinds.length) this.grow();
@@ -191,6 +202,35 @@ class Lexer {
       this.newlines[i] = this.newline ? 1 : 0;
     }
     this.newline = false;
+  }
+
+  /** Debugger mode, for each token: settles the candidate before it, and tells whether it is one. */
+  private debuggerToken(kind: Kind, start: number, end: number, parent: Open) {
+    if (this.candidate !== -1) this.decide(kind, start, this.newline);
+    this.candidate = -1;
+    if (
+      kind === Kind.Word &&
+      parent !== Open.ClassBrace &&
+      isDebuggerWord(this.src, start, end) &&
+      !(this.prevKind === Kind.Punct && this.src.charCodeAt(this.prevStart) === 46) /* . */ &&
+      this.src.charCodeAt(start - 1) !== 35 /* # */
+    )
+      this.candidate = start;
+    this.prevKind = kind;
+    this.prevStart = start;
+  }
+
+  /** The candidate is a statement unless the token after it (kind -1 for none) makes it a name. */
+  private decide(kind: number, start: number, newline: boolean) {
+    const next = kind === Kind.Punct ? this.src.charCodeAt(start) : -1;
+    if (next === 58 /* : */ || (next === 40 /* ( */ && !newline)) return;
+    this.sites?.push({ start: this.candidate, semicolon: next === 59 /* ; */ });
+  }
+
+  /** Debugger mode: lexes the whole source, and settles a candidate at its end. */
+  debuggerSites(): void {
+    this.run();
+    if (this.candidate !== -1) this.decide(-1, 0, false);
   }
 
   /** lexer.c `parse` (main loop only). */
@@ -1111,42 +1151,18 @@ export function debuggerStatements(source: string, options: LexOptions = {}): nu
 }
 
 /** Like `debuggerStatements`, also telling whether the next token is a `;` (ending the statement). */
-export function debuggerStatementSites(
-  source: string,
-  options: LexOptions = {}
-): { start: number; semicolon: boolean }[] {
-  const sites: { start: number; semicolon: boolean }[] = [];
-  // Streamed: a whole bundle's tokens are not kept, only the previous one and a candidate.
-  const punct = (kind: number, start: number, value: number) =>
-    kind === Kind.Punct && source.charCodeAt(start) === value;
-  let prevKind = -1;
-  let prevStart = 0;
-  /** The start of a `debugger` keyword whose next token is still to come (-1 for none). */
-  let candidate = -1;
-  const decide = (keyword: number, kind: number, start: number, newline: boolean) => {
-    if (punct(kind, start, 58 /* : */)) return;
-    if (punct(kind, start, 40 /* ( */) && !newline) return;
-    sites.push({ start: keyword, semicolon: punct(kind, start, 59 /* ; */) });
-  };
-  const take: Sink = (kind, start, end, parent, newline) => {
-    if (candidate !== -1) decide(candidate, kind, start, newline);
-    candidate = -1;
-    if (
-      kind === Kind.Word &&
-      parent !== Open.ClassBrace &&
-      // Cheap check first: most words are shorter (an escaped `debugger` is longer).
-      end - start >= 8 &&
-      word(source, start, end) === 'debugger' &&
-      !punct(prevKind, prevStart, 46 /* . */) &&
-      source[start - 1] !== '#'
-    )
-      candidate = start;
-    prevKind = kind;
-    prevStart = start;
-  };
-  new Lexer(source, options.module === true, take).run();
-  if (candidate !== -1) decide(candidate, -1, 0, false);
+export function debuggerStatementSites(source: string, options: LexOptions = {}): DebuggerSite[] {
+  const sites: DebuggerSite[] = [];
+  // Streamed: a whole bundle's tokens are not kept.
+  new Lexer(source, options.module === true, sites).debuggerSites();
   return sites;
+}
+
+/** The word from `start` to `end` is `debugger`, written as is or with escapes (then longer). */
+function isDebuggerWord(source: string, start: number, end: number): boolean {
+  const length = end - start;
+  if (length === 8) return source.startsWith('debugger', start);
+  return length > 8 && word(source, start, end) === 'debugger';
 }
 
 /** A word's text from `start` to `end`, escapes decoded. */
