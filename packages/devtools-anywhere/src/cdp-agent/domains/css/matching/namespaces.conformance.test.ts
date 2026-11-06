@@ -235,3 +235,19 @@ div span { top: 1px }
   assert.equal(chrome?.length, 2);
   assert.deepEqual(await shadow(t.ours), chrome);
 });
+
+test('what an element inherits is not taken for a match: an id twice, an @scope limit, a slot', async () => {
+  const at = await addStyle(
+    t,
+    `${NS}h|div#n17 { top: 1px }\nh|div.n18 h|div { left: 1px }\n` +
+      '@scope (h|div.n19) to (h|div.n21) { h|div { right: 1px } }\nh|section h|b { order: 1 }',
+    '<div id="n17" class="n18"><div id="n17" class="n20"><div class="n19"><div><div class="n21"><div>x</div></div></div></div></div></div>' +
+      '<section class="n22"><b>y</b></section>'
+  );
+  for (const target of ['.n18', '.n20', '.n19', '.n19 > div', '.n21', '.n21 > div']) await same(`${at} ${target}`);
+  await t.page.evaluate(at => {
+    const host = document.querySelector(`${at} .n22`) as HTMLElement;
+    host.attachShadow({ mode: 'open' }).innerHTML = '<section><slot></slot></section>';
+  }, at);
+  await same(`${at} .n22 > b`);
+});
