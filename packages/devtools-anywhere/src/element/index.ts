@@ -19,7 +19,7 @@ import {
   type SnapdomLoader,
 } from '../cdp-agent';
 import { connectFrontend, emulateInShell, relayShell } from '../connection';
-import { SHELL_HANDSHAKE } from '../shell-messages';
+import { REWRITE_CACHE, SHELL_HANDSHAKE } from '../shell-messages';
 import type { Grip } from '../grip';
 import { isDockSide, isEmbedderRequest } from './request';
 import {
@@ -402,6 +402,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
           ?.getRegistration(config.serviceWorker)
           .catch(() => undefined);
         await registration?.unregister();
+        // The worker's notes on the scripts it rewrote are of no use without it.
+        await globalThis.caches?.delete(REWRITE_CACHE).catch(() => {});
       }
     } finally {
       // Reload even if the worker could not be unregistered: shell mode is already off.

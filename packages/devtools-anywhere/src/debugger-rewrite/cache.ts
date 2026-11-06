@@ -15,9 +15,8 @@
 // a put of the record or a match is about 1 ms, where 300 separate entries would cost 30 ms for
 // a `keys()`. Scripts served with `Cache-Control: no-store` stay in memory only, so nothing about
 // them is written to disk.
+import { REWRITE_CACHE } from '../shell-messages';
 
-/** Cache API cache holding the record: deleted when the worker activates and when it is unregistered. */
-export const REWRITE_CACHE = 'devtools-anywhere-service-worker-rewrites';
 /** Scripts remembered, by URL; the least recently used goes first. */
 export const MAX_ENTRIES = 256;
 /** Bumped when what the record holds, or how the lexer finds the sites, changes. */

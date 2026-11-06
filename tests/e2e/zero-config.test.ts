@@ -258,6 +258,25 @@ test('the Service Worker makes debugger statements log a warning', async () => {
     return pageWindow.fetch('/tests/e2e/pages/assets/debugger-classic.js').then(r => r.text());
   });
   assert.match(source, /^ {2}const é = x; debugger$/m);
+
+  // Loaded again, the scripts are rewritten from the plans the worker kept for them.
+  const before = (await hits()).length;
+  await navigatePageFrame('/tests/e2e/pages/no-probe.html');
+  await navigatePageFrame('/tests/e2e/pages/debugger-page.html');
+  await waitFor(async () => (await hits()).length >= before + 5);
+  const again = (await hits()).slice(before);
+  assert.deepEqual(
+    again
+      .map(m => (m.params as Protocol.Runtime.ConsoleAPICalledEvent).stackTrace?.callFrames[0])
+      .filter(f => f?.url.endsWith('debugger-classic.js'))
+      .map(f => [f?.lineNumber, f?.columnNumber]),
+    [
+      [5, 15],
+      [7, 9],
+      [8, 9],
+      [9, 9],
+    ]
+  );
 });
 
 test('the Service Worker leaves the same-origin DevTools frontend alone', async () => {

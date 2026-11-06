@@ -1,6 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { type RecordStore, RewriteCache, hashBytes } from './cache.ts';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import type * as Modules from './rewrite.ts';
+import type * as CacheModule from './cache.ts';
+
+// Bundled: the modules import each other without an extension, which Node does not resolve.
+const bundled = await build({
+  stdin: {
+    contents: "export * from './cache.ts'; export * from './rewrite.ts';",
+    resolveDir: dirname(fileURLToPath(import.meta.url)),
+    loader: 'ts',
+  },
+  bundle: true,
+  format: 'esm',
+  platform: 'neutral',
+  write: false,
+});
+const modules = (await import(
+  `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
+)) as typeof Modules & typeof CacheModule;
+const { RewriteCache, hashBytes } = modules;
+type RecordStore = CacheModule.RecordStore;
 
 /** A record store in memory, counting its writes. */
 function memoryStore(initial?: string): RecordStore & { record: string | undefined; saves: number } {

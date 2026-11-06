@@ -32,18 +32,20 @@
 // and the probe defines it as it runs. Scripts of workers (importScripts, which also has the
 // `script` destination) are not rewritten: the probe is not in workers. Neither are scripts with
 // an integrity hash (the rewrite would fail the check) or in an encoding that is not UTF-8 or
-// single-byte.
+// single-byte. What each script needs is remembered by the hash of its bytes (see
+// debugger-rewrite/cache.ts), so a script served again is not lexed again; that memory is dropped
+// when a new version of this worker activates.
 //
 // A Service Worker needs a secure context (HTTPS or localhost), and its scope must cover
 // the pages: serve this file from the site root or with `Service-Worker-Allowed: /`.
 
 // Type-checked with the WebWorker library (tsconfig.service-worker.json), separately from the DOM code.
 declare const self: ServiceWorkerGlobalScope;
-// The lexer alone: the agent's entry points would bring DOM code into the worker.
-// oxlint-disable-next-line no-restricted-imports
-import { debuggerStatementSites } from './cdp-agent/core/lexer';
+// The lexer alone (through the rewrite): the agent's entry points would bring DOM code into the worker.
+import { RewriteCache, cacheStore } from './debugger-rewrite/cache';
+import { rewriteDebugger } from './debugger-rewrite/rewrite';
 import { RESPONSE_DETAILS, type ResponseDetails } from './cdp-agent/probe/messages';
-import { SHELL_HANDSHAKE, SHELL_QUERY } from './shell-messages';
+import { REWRITE_CACHE, SHELL_HANDSHAKE, SHELL_QUERY } from './shell-messages';
 
 const params = new URL(self.location.href).searchParams;
 const probe = params.get('probe');
@@ -55,13 +57,6 @@ const FRONTEND =
   /<meta\b[^>]*\bname\s*=\s*["']?devtools-anywhere-frontend\b|entrypoints\/anywhere_app\/anywhere_app\.js/i;
 const DESTINATIONS = new Set(['style', 'script', 'image', 'font']);
 const SHELL_CACHE = 'devtools-anywhere-service-worker-shells';
-/**
- * `debugger` (8 characters) becomes a call of the probe's hook (keep the name in sync with the
- * probe), a statement of its own whatever follows on the next line. When the next token is a `;`
- * (past comments and line breaks), the call takes no other one: `if (a) debugger; else …` must stay one statement.
- */
-const DEBUGGER_CALL = '_$dbg();';
-const DEBUGGER_CALL_BEFORE_SEMICOLON = '_$dbg() ';
 const shellKey = (id: string) =>
   new URL(`/__devtools-anywhere-shell/${encodeURIComponent(id)}`, self.location.href).href;
 
@@ -72,6 +67,9 @@ const shellKey = (id: string) =>
  * frontend) there is no probe to define the hook. Documents that are gone are dropped.
  */
 const probed = new Map<string, Set<string>>();
+
+/** Where the `debugger` statements of the scripts served before are. */
+const rewrites = new RewriteCache(cacheStore(self.location.href));
 
 /** Client ids of shell documents that made the handshake (loaded lazily from the cache). */
 let shells: Promise<Set<string>> | undefined;
@@ -116,7 +114,10 @@ self.addEventListener('message', event => {
 });
 
 self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
+self.addEventListener('activate', event =>
+  // Plans an older worker made may come from an older lexer.
+  event.waitUntil(Promise.all([self.clients.claim(), caches.delete(REWRITE_CACHE)]))
+);
 
 self.addEventListener('fetch', event => {
   const request = event.request;
@@ -158,7 +159,11 @@ async function report(event: FetchEvent, fromWindow: boolean): Promise<Response>
     request.destination === 'script' &&
     !request.integrity &&
     !integrityUrls.has(request.url)
-      ? await rewriteDebugger(original)
+      ? await rewriteDebugger(original, {
+          cache: rewrites,
+          url: request.url,
+          waitUntil: promise => event.waitUntil(promise),
+        })
       : original;
   event.waitUntil(
     self.clients.get(event.clientId).then(client =>
@@ -173,97 +178,6 @@ async function report(event: FetchEvent, fromWindow: boolean): Promise<Response>
     )
   );
   return response;
-}
-
-/** The response's charset label, UTF-8 by default. */
-function charsetOf(type: string): string {
-  return /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(type)?.[1]?.toLowerCase() ?? 'utf-8';
-}
-
-/** Single-byte charsets with no-break space at 0xA0, like the lexer takes it. */
-const SINGLE_BYTE = /^(?:windows-125\d|iso-8859-\d+|iso8859-\d+|latin1|iso-latin-1|l1|cp125\d|us-ascii|ascii)$/;
-
-/**
- * The script as text, and the byte offset of each of its characters; undefined for an encoding
- * this cannot map back to bytes (UTF-16, Shift_JIS and the other multi-byte ones), or a UTF-8
- * script that is not valid UTF-8. A BOM decides the encoding first, as it does for the page.
- */
-function decodeScript(
-  bytes: Uint8Array,
-  charset: string
-): { text: string; byteOffset: (index: number) => number } | undefined {
-  const utf16Bom = (bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe);
-  const utf8Bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
-  if (utf16Bom) return undefined;
-  if (utf8Bom || charset === 'utf-8' || charset === 'utf8' || charset === 'unicode-1-1-utf-8') {
-    let text: string;
-    try {
-      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    } catch {
-      return undefined;
-    }
-    const offsets = new Uint32Array(text.length + 1);
-    let at = 0;
-    for (let i = 0; i < text.length; i++) {
-      offsets[i] = at;
-      const code = text.charCodeAt(i);
-      // A surrogate pair is 4 bytes, counted on its first half.
-      if (code < 0x80) at += 1;
-      else if (code < 0x800) at += 2;
-      else if (code >= 0xd800 && code < 0xdc00) at += 4;
-      else if (code >= 0xdc00 && code < 0xe000) at += 0;
-      else at += 3;
-    }
-    offsets[text.length] = at;
-    return { text, byteOffset: index => offsets[index] ?? at };
-  }
-  // One character per byte: the offsets are the byte offsets. Decoded in its own charset, since
-  // the letters differ (0xD7 is `Ч` in windows-1251, `×` in latin1); a label this browser does
-  // not know is left alone.
-  if (!SINGLE_BYTE.test(charset)) return undefined;
-  try {
-    return { text: new TextDecoder(charset).decode(bytes), byteOffset: index => index };
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Replaces the `debugger` statements of a JavaScript response with `DEBUGGER_CALL`, in place in
- * its bytes: the replacement is ASCII of the same length, so every other byte stays as it is. A
- * response with nothing to replace is returned as it is.
- *
- * Scripts are lexed as classic ones, which only differ from modules in taking `<!--` (and `-->`
- * at the start of a line) as comments. The request does not tell the two apart (a classic script
- * with `crossorigin` is a CORS request too), and classic is the safer guess: in a module `<!--`
- * is near impossible (`a <!--b`, a comparison with a negated decrement), while a classic script
- * read as a module would have its HTML-like comments lexed as code.
- */
-async function rewriteDebugger(response: Response): Promise<Response> {
-  const type = response.headers.get('content-type') || '';
-  if (!response.ok || !response.body || !/javascript|ecmascript/i.test(type)) return response;
-  // Read from a copy, so the original goes to the page untouched when nothing is replaced.
-  const bytes = new Uint8Array(await response.clone().arrayBuffer());
-  const decoded = decodeScript(bytes, charsetOf(type));
-  if (!decoded) return response;
-  const { text, byteOffset } = decoded;
-  let replaced = false;
-  if (text.includes('debugger')) {
-    for (const { start: offset, semicolon } of debuggerStatementSites(text)) {
-      // An escaped keyword is not valid code: only the plain one is replaced.
-      if (!text.startsWith('debugger', offset)) continue;
-      const call = semicolon ? DEBUGGER_CALL_BEFORE_SEMICOLON : DEBUGGER_CALL;
-      const at = byteOffset(offset);
-      for (let i = 0; i < call.length; i++) bytes[at + i] = call.charCodeAt(i);
-      replaced = true;
-    }
-  }
-  if (!replaced) return response;
-  const headers = new Headers(response.headers);
-  // The body is already decoded, and its length is now that of the bytes.
-  headers.delete('content-encoding');
-  headers.delete('content-length');
-  return new Response(bytes, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function inject(request: Request, probeUrl: string, clientId: string): Promise<Response> {
