@@ -208,10 +208,12 @@ const AT_NAMES: Record<string, string> = {
 const MARGINS = /^(top|bottom)-(left-corner|left|center|right|right-corner)$|^(left|right)-(top|middle|bottom)$/;
 
 const tagOf = (rule: CSSRule) => Object.prototype.toString.call(rule).slice(8, -1);
-const childRules = (rule: CSSRule): CSSRule[] =>
-  'cssRules' in rule && rule.cssRules && typeof rule.cssRules === 'object'
-    ? Array.from(rule.cssRules as CSSRuleList)
-    : [];
+const NO_RULES: ArrayLike<CSSRule> = [];
+/** The rules in `rule`, read in place: a style rule's list is most often empty. */
+const childRules = (rule: CSSRule): ArrayLike<CSSRule> => {
+  const list: unknown = 'cssRules' in rule ? rule.cssRules : undefined;
+  return list && typeof list === 'object' && (list as CSSRuleList).length ? (list as CSSRuleList) : NO_RULES;
+};
 /**
  * Without whitespace and comments, and the `&` each selector of a list may start with: the CSSOM
  * adds one to every relative selector (`a, img` in a style rule is `& a, & img`).
@@ -243,7 +245,8 @@ function pair(text: string, rules: CSSRule[]): SheetSource | null {
   const used = new Set<CssRule>();
   let j = 0;
   for (const rule of rules.slice(0, lead)) {
-    while (top[j] && !matches(text, top[j] as CssRule, rule, TOP, '')) j++;
+    const tag = tagOf(rule);
+    while (top[j] && !matches(text, top[j] as CssRule, rule, tag, TOP, '')) j++;
     const node = top[j++];
     if (!node) return null;
     used.add(node);
@@ -259,10 +262,14 @@ function pair(text: string, rules: CSSRule[]): SheetSource | null {
 
 /** The @namespace rules among `rules` as the CSSOM serializes them, on one line. */
 export function namespaceText(rules: CSSRule[]): string {
-  return rules
-    .filter(r => isCssom(r, 'CSSNamespaceRule'))
-    .map(r => r.cssText)
-    .join(' ');
+  const texts: string[] = [];
+  for (const r of rules) {
+    const tag = tagOf(r);
+    if (tag === 'CSSNamespaceRule') texts.push(r.cssText);
+    // They follow only @import and @layer statements: none comes after any other rule.
+    else if (tag !== 'CSSImportRule' && tag !== 'CSSLayerStatementRule') break;
+  }
+  return texts.join(' ');
 }
 
 /** `wrap` puts a prelude where it was, for the browser to parse it alone. */
@@ -270,16 +277,23 @@ type Wrap = (prelude: string) => string;
 const TOP: Wrap = p => `${p}{}`;
 
 /** Pairs `cssom` with `outlined` into `source.nodes` (and with `top`, its top-level pairs). */
-function pairList(source: SheetSource, outlined: CssRule[], cssom: CSSRule[], wrap: Wrap, top = false): boolean {
+function pairList(
+  source: SheetSource,
+  outlined: CssRule[],
+  cssom: ArrayLike<CSSRule>,
+  wrap: Wrap,
+  top = false
+): boolean {
   let j = 0;
-  for (const rule of cssom) {
+  for (let i = 0; i < cssom.length; i++) {
+    const rule = cssom[i] as CSSRule;
+    const tag = tagOf(rule);
     for (;;) {
       const node = outlined[j++];
       if (!node) return false;
-      if (!matches(source.text, node, rule, wrap, source.namespaces)) continue;
+      if (!matches(source.text, node, rule, tag, wrap, source.namespaces)) continue;
       source.nodes.set(rule, node);
       if (top) source.top.push([rule, node]);
-      const tag = tagOf(rule);
       const inner: Wrap =
         tag === 'CSSStyleRule' ? p => `:root{${p}{}}` : tag === 'CSSKeyframesRule' ? p => `@keyframes x{${p}{}}` : wrap;
       if (!pairList(source, node.rules, childRules(rule), inner)) return false;
@@ -344,11 +358,11 @@ function respliced(source: SheetSource, start: number, end: number, insert: stri
   return next;
 }
 
-function matches(text: string, node: CssRule, rule: CSSRule, wrap: Wrap, namespaces: string): boolean {
-  const tag = tagOf(rule);
+/** Whether `node` is where `rule`, of the CSSOM type `tag` (`tagOf`), was written. */
+function matches(text: string, node: CssRule, rule: CSSRule, tag: string, wrap: Wrap, namespaces: string): boolean {
   if (tag === 'CSSNestedDeclarations') {
     // Some declaration of the run is one the CSSOM kept.
-    const style = isCssom(rule, 'CSSNestedDeclarations') ? rule.style : null;
+    const style = (rule as CSSNestedDeclarations).style as CSSStyleDeclaration | undefined;
     return (
       node.kind === 'nested' &&
       !!style &&
@@ -358,9 +372,10 @@ function matches(text: string, node: CssRule, rule: CSSRule, wrap: Wrap, namespa
   if (tag === 'CSSStyleRule' || tag === 'CSSKeyframeRule') {
     if (node.kind !== 'qualified') return false;
     const prelude = text.slice(node.preludeStart, node.preludeEnd);
-    const written = isCssom(rule, 'CSSStyleRule') ? rule.selectorText : Reflect.get(rule, 'keyText');
+    const written: unknown = Reflect.get(rule, tag === 'CSSStyleRule' ? 'selectorText' : 'keyText');
     if (typeof written !== 'string') return false;
-    if (loose(prelude) === loose(written)) return true;
+    // As written most often; else without what the CSSOM drops or adds.
+    if (prelude === written || loose(prelude) === loose(written)) return true;
     // Serialized otherwise (escapes, `from` for 0%): as the browser serializes the text alone,
     // after the sheet's @namespace rules (`svg|\61` is `svg|a` only where `svg` is declared).
     const sheet = new CSSStyleSheet();
