@@ -8,7 +8,7 @@ import type { RuleView } from './rule-view';
 import { type Entry, type StyleRule, ancestorsOf, resolveSelector, sheetApplies } from './rules';
 import type { SheetRegistry } from '../sheets/sheet-registry';
 import { hostMatcher } from './host';
-import { matchInNamespaces } from './namespaces';
+import { hasDefaultNamespace, matchInNamespaces, withoutNamedPrefix } from './namespaces';
 import { namespaceText } from '../sheets/text/sheet-text';
 import type { UserAgentStyles } from '../user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
@@ -48,6 +48,8 @@ export class Cascade {
   /** The namespaces of sheets, and what was matched in them (see inNamespaces), for one request. */
   private namespaceCache: {
     namespaces: Map<CSSStyleSheet, string>;
+    /** Whether a selector needs its sheet's @namespace rules to be matched. */
+    declared: Map<Selector, boolean>;
     matched: Map<TreeScope, Map<Element, Map<CSSStyleSheet, Map<string, boolean>>>>;
   } | null = null;
 
@@ -177,15 +179,33 @@ export class Cascade {
    * tree at once, and for an element of the tree, for its ancestors too: they are matched next.
    */
   private inNamespaces(kind: Kind, group: Candidate[], el: Element, c: Candidate, s: Selector): boolean | undefined {
-    const cache = (this.namespaceCache ??= { namespaces: new Map(), matched: new Map() });
+    const cache = (this.namespaceCache ??= { namespaces: new Map(), declared: new Map(), matched: new Map() });
     const namespacesOf = (sheet: CSSStyleSheet) => {
       let text = cache.namespaces.get(sheet);
       if (text === undefined) cache.namespaces.set(sheet, (text = namespaceText(this.sheets.rulesOf(sheet))));
       return text;
     };
-    if (!namespacesOf(c.sheet)) return undefined;
+    /**
+     * Whether matching `s` needs the sheet's @namespace rules: a named prefix in it (or in the
+     * @scope around it), or a default namespace, which applies to every compound without a
+     * prefix, in :is() and :not() too (as in Chrome). Element.matches() matches the others.
+     */
+    const declared = (c: Candidate, s: Selector) => {
+      const text = namespacesOf(c.sheet);
+      if (!text) return false;
+      let known = cache.declared.get(s);
+      if (known === undefined)
+        cache.declared.set(
+          s,
+          (known =
+            hasDefaultNamespace(text) ||
+            ![s.host, s.slotted, c.scope?.start, c.scope?.end].every(t => !t || withoutNamedPrefix(t)))
+        );
+      return known;
+    };
+    if (!declared(c, s)) return undefined;
     // Only for the elements asked about (`own`), so that few others have their style recalculated;
-    // after the selector, which keeps the default namespace (not applied inside :is()).
+    // after the selector, with `*|` (the subject's own namespace, whatever the default one).
     const probe = (c: Candidate, s: Selector): ((d: string, own: string) => string) | null => {
       if (kind === 'slotted')
         return s.slotted === null ? null : (d, own) => `${s.host}::slotted(${s.slotted}:is(${own})){${d}}`;
@@ -207,12 +227,12 @@ export class Cascade {
     if (kind === 'own') for (let p = el.parentElement; p && !byTree.has(p); p = p.parentElement) els.push(p);
     const bySheet = new Map<CSSStyleSheet, { keys: string[]; rules: ((d: string, own: string) => string)[] }>();
     for (const candidate of group) {
-      if (!namespacesOf(candidate.sheet)) continue;
-      let entry = bySheet.get(candidate.sheet);
-      if (!entry) bySheet.set(candidate.sheet, (entry = { keys: [], rules: [] }));
       for (const selector of candidate.selectors) {
+        if (!declared(candidate, selector)) continue;
         const rule = probe(candidate, selector);
         const k = key(candidate, selector);
+        let entry = bySheet.get(candidate.sheet);
+        if (!entry) bySheet.set(candidate.sheet, (entry = { keys: [], rules: [] }));
         if (rule && !entry.keys.includes(k)) {
           entry.keys.push(k);
           entry.rules.push(rule);

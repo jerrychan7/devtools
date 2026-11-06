@@ -2,7 +2,35 @@ import { isCssom, realmOf } from '../../../core/realm';
 import { nativeAdopted, quietly } from '../../../core/nodes/adopted';
 import { parentOf } from '../../../core/style/container-query';
 import { ownEdit } from '../sheets/watch/cssom-watch';
+import { Tok, tokenize } from '../sheets/parse/css-lexer';
 import type { TreeScope } from './forced-pseudo';
+
+/** Whether `namespaces` (@namespace rules as the CSSOM serializes them) declares a default one. */
+export const hasDefaultNamespace = (namespaces: string) => /@namespace\s+url\(/.test(namespaces);
+
+/**
+ * Whether Element.matches() matches `selector` as a sheet declaring namespaces would, when that
+ * sheet declares no default namespace: matches() knows the prefixes `*|` (any namespace) and `|`
+ * (none) wherever they are, in :is() and attribute selectors too, so only a named prefix needs
+ * the sheet's declarations. A `|` before `=` (`[a|=v]`) or another `|` (`||`) is no prefix, and
+ * one in a string is no token of its own.
+ */
+export function withoutNamedPrefix(selector: string): boolean {
+  if (!selector.includes('|')) return true;
+  const { kinds, starts } = tokenize(selector);
+  let prev: number = Tok.Ws;
+  for (let i = 0; i < kinds.length; i++) {
+    const kind = kinds[i];
+    if (kind === Tok.Delim && selector.charCodeAt(starts[i] ?? 0) === 124) {
+      const next = kinds[i + 1] === Tok.Delim ? selector.charCodeAt(starts[i + 1] ?? 0) : 0;
+      if (next === 61) continue; // |=
+      if (next === 124) return false; // || or a prefix of it: let the probe tell
+      if (prev === Tok.Ident) return false;
+    }
+    prev = kind ?? Tok.Ws;
+  }
+  return true;
+}
 
 /**
  * Rules of a sheet, to be matched after its @namespace rules: each makes the rule matching what is

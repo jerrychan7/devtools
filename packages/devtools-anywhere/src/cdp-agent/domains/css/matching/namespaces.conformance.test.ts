@@ -114,3 +114,88 @@ test('a wrapper of the page over adoptedStyleSheets is not called by matching', 
     });
   }
 });
+
+const XLINK = '@namespace xlink url(http://www.w3.org/1999/xlink);\n';
+
+test('`*|`, `|`, `|=` and selectors without a prefix in a sheet declaring namespaces', async () => {
+  const at = await addStyle(
+    t,
+    `${NS}*|div.n1 { top: 1px }\n*|*.n1 > *|p { left: 1px }\n.n1 p { right: 1px }\np[lang|=en] { order: 1 }\n` +
+      `[*|lang|="en"] { bottom: 1px }\n|p { color: red }\np[title="a|b"] { z-index: 1 }\n:is(*|div) > :is(.n2) { width: 1px }`,
+    '<div class="n1"><p class="n2" lang="en-US" title="a|b">x</p></div>'
+  );
+  await same(`${at} .n1`);
+  await same(`${at} .n2`);
+});
+
+test('a default namespace, in :is() and :not() too', async () => {
+  const at = await addStyle(
+    t,
+    '@namespace url(http://www.w3.org/1999/xhtml);\n@namespace svg url(http://www.w3.org/2000/svg);\n' +
+      '.n3 * { top: 1px }\n.n3 :is(rect) { left: 1px }\n.n3 :is(:is(*)) { right: 1px }\n.n3 svg|*:is(*) { bottom: 1px }\n' +
+      '.n3 svg|*:not(*) { order: 1 }\n.n3 :not(svg|rect) { z-index: 1 }\n.n3 *|rect { width: 1px }\n' +
+      '.n3 :is(svg|svg) > :where(svg|rect) { height: 1px }',
+    '<div class="n3"><span class="n4">x</span><svg class="n5"><rect class="n6"/></svg></div>'
+  );
+  for (const target of ['.n4', '.n5', '.n6']) await same(`${at} ${target}`);
+});
+
+test('SVG: `[xlink|href]`, `svg|`, unprefixed and `*|` selectors, nested :is()', async () => {
+  const at = await addStyle(
+    t,
+    `${NS}${XLINK}svg|a[xlink|href] { top: 1px }\na[href] { left: 1px }\n*|a[*|href="#y"] { right: 1px }\n` +
+      'svg|svg :is(svg|g :is(svg|rect)) { order: 1 }\nsvg rect { bottom: 1px }\nh|rect { z-index: 1 }\n' +
+      ':is(svg, h|div) rect { width: 1px }',
+    '<svg class="n7"><g><a xlink:href="#y" class="n8"><rect class="n9"/></a><rect/></g></svg>'
+  );
+  await same(`${at} .n8`);
+  await same(`${at} .n9`);
+  await same(`${at} .n7 g > rect:not([class])`);
+});
+
+test('ancestors with neither id nor class, and what they pass on', async () => {
+  const at = await addStyle(
+    t,
+    `${NS}h|section h|div { top: 1px }\nh|section > h|div > h|div { left: 1px }\nh|div { right: 1px }\n` +
+      'section div { order: 1 }\nh|b { bottom: 1px }',
+    '<section><div><div><b>x</b></div></div></section>'
+  );
+  await same(`${at} b`);
+  await same(`${at} section > div > div`);
+  await same(`${at} section > div`);
+});
+
+test('elements of a shadow tree, slotted ones too, in a sheet declaring namespaces', async () => {
+  const at = await addStyle(t, '', '<div class="n10"><p>light</p></div>');
+  await t.page.evaluate(at => {
+    const host = document.querySelector(`${at} .n10`) as HTMLElement;
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `<style>@namespace h url(http://www.w3.org/1999/xhtml);@namespace svg url(http://www.w3.org/2000/svg);
+h|div h|span { top: 1px }
+div > span { left: 1px }
+*|span { right: 1px }
+svg|span { order: 1 }
+h|div > h|slot::slotted(h|p) { bottom: 1px }
+::slotted(*|p) { z-index: 1 }
+</style><div><div><span>x</span><span class="n11">y</span></div><slot></slot></div>`;
+  }, at);
+  type N = { nodeId: number; children?: N[]; shadowRoots?: N[] };
+  const shadow = async (side: Side, css: string) => {
+    const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+    const host = (await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: `${at} .n10` })).nodeId;
+    const find = (n: N): N | undefined =>
+      n.nodeId === host ? n : [...(n.children ?? []), ...(n.shadowRoots ?? [])].map(find).find(Boolean);
+    const sr = find(root as N)?.shadowRoots?.[0];
+    assert.ok(sr);
+    const { nodeId } = await side.send('DOM.querySelector', { nodeId: sr.nodeId, selector: css });
+    return (await side.send('CSS.getMatchedStylesForNode', { nodeId })).matchedCSSRules
+      ?.filter(m => m.rule.origin === 'regular')
+      .map(m => rule(m.rule));
+  };
+  for (const css of ['span:not([class])', '.n11']) {
+    const chrome = await shadow(t.chrome, css);
+    assert.ok(chrome?.length, css);
+    assert.deepEqual(await shadow(t.ours, css), chrome, css);
+  }
+  await same(`${at} .n10 > p`);
+});
