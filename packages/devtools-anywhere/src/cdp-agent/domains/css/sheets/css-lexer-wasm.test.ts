@@ -64,6 +64,18 @@ test('the same tokens as the TypeScript lexer, copied in as bytes or as UTF-16',
   }
 });
 
+test('a large text has an instance of its own, and the shared memory does not grow', async () => {
+  const mod = await load();
+  const w = mod.wasmExports();
+  assert.ok(w);
+  mod.tokenize(long);
+  const before = w.m.buffer.byteLength;
+  const large = 'a { b: c } .d-1 '.repeat(Math.ceil(mod.OWN_INSTANCE_LENGTH / 16));
+  assert.ok(large.length >= mod.OWN_INSTANCE_LENGTH);
+  assert.deepEqual(mod.tokenize(large), tokenizeTs(large));
+  assert.equal(w.m.buffer.byteLength, before);
+});
+
 test('falls back to the TypeScript lexer where WebAssembly does not compile', async t => {
   // As under a CSP without 'wasm-unsafe-eval', where compiling throws.
   t.mock.method(WebAssembly, 'Module', function () {

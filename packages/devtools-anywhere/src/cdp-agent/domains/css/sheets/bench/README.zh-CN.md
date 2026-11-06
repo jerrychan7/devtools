@@ -85,7 +85,7 @@ node lexer-compare.bench.ts --rev cb7f711~1
 
 ## WebAssembly 词法器
 
-`../css-lexer-wasm.ts` 对 64 个码元及以上的文本用 WebAssembly 模块（由 `../wasm-gen/lexer.ts` 生成）跑同一个词法器；更短的文本，或页面 CSP 不允许编译 WebAssembly 时，用 TypeScript 词法器。`--wasm` 测量并核对它：
+`../css-lexer-wasm.ts` 对 64 个码元及以上的文本用 WebAssembly 模块（由 `../wasm-gen/lexer.ts` 生成）跑同一个词法器；更短的文本，或页面 CSP 不允许编译 WebAssembly 时，用 TypeScript 词法器。500 多万（5 Mi）码元及以上的文本单独创建一个实例（约 0.02ms），用完即丢，这样共享实例只增不减的内存最多约 35MB。`--wasm` 测量并核对它：
 
 ```sh
 # 加上 WebAssembly 词法器及其各阶段的行

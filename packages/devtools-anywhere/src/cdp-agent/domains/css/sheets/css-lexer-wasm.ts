@@ -28,7 +28,17 @@ export interface Exports {
 
 /** The module's exports; null once compiling it has failed, as under a CSP without `wasm-unsafe-eval`. */
 let wasm: Exports | null | undefined;
+/** The compiled module, for an instance of a large text's own. */
+let compiled: WebAssembly.Module | undefined;
 let encoder: TextEncoder | undefined;
+
+/**
+ * Texts of this many code units or more (5 Mi) are lexed by an instance of their own, dropped
+ * after: a module's memory grows to fit the longest text (7 bytes per code unit) and never shrinks,
+ * so the shared instance keeps at most what a text under this takes, about 35 MB, for the page's
+ * life. Each such text pays for an instance (its memory and tables set up) and nothing else.
+ */
+export const OWN_INSTANCE_LENGTH = 5 * 1024 * 1024;
 
 function load(): Exports | null {
   try {
@@ -36,11 +46,14 @@ function load(): Exports | null {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     // Synchronous, as `tokenize` is: the module is far under the main thread's size limit.
-    return new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports as unknown as Exports;
+    compiled = new WebAssembly.Module(bytes);
+    return instantiate(compiled);
   } catch {
     return null;
   }
 }
+
+const instantiate = (module: WebAssembly.Module) => new WebAssembly.Instance(module).exports as unknown as Exports;
 
 /** Whether `tokenize` uses WebAssembly for a long enough text; compiles the module the first time. */
 export function wasmAvailable(): boolean {
@@ -52,6 +65,14 @@ export function wasmAvailable(): boolean {
 export function tokenize(text: string): Tokens {
   const len = text.length;
   if (len < WASM_MIN_LENGTH || !wasmAvailable()) return tokenizeTs(text);
+  if (len >= OWN_INSTANCE_LENGTH && compiled) {
+    try {
+      return tokenizeWasm(instantiate(compiled), text);
+    } catch {
+      // Out of memory for another instance or for its text: the TypeScript lexer needs neither.
+      return tokenizeTs(text);
+    }
+  }
   return tokenizeWasm(wasm as Exports, text);
 }
 
