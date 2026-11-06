@@ -617,6 +617,68 @@ describe('Animation, which animations are told apart', () => {
     assert.deepEqual(relation(ids.ours), relation(ids.chrome));
   });
 
+  test('cssId of pseudo-elements our DOM has no node for follows their rules, as in Chrome', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes q1 { to { opacity: .5 } }' +
+        ' .qd::backdrop { animation: q1 5s } .qd2::backdrop { animation: q1 5s }' +
+        ' .qdt::backdrop { transition: opacity 5s; opacity: 1 } .qdt.on::backdrop { opacity: .5 }' +
+        ' .qs { overflow: auto; height: 20px; scroll-marker-group: after } .qs > div { height: 30px }' +
+        ' .qm > div::scroll-marker { content: "o"; animation: q1 5s } .qm2 > div::scroll-marker { content: "o"; animation: q1 5s }' +
+        ' .qg::scroll-marker-group { animation: q1 5s }' +
+        ' .qb::scroll-button(*) { content: "b"; animation: q1 5s } .qb2::scroll-button(down) { content: "b"; animation: q1 5s }' +
+        ' .qbr { direction: rtl } .qbr::scroll-button(left) { content: "b"; animation: q1 5s }' +
+        ' .qbv { writing-mode: vertical-rl } .qbv::scroll-button(left) { content: "b"; animation: q1 5s }' +
+        ' .qbl::scroll-button(inline-end) { content: "b"; animation: q1 5s }' +
+        ' .qc { columns: 2; overflow: auto; height: 20px } .qc::column { animation: q1 5s }';
+      document.head.append(style);
+    });
+    const scroller = (cls: string) =>
+      `const e = add('qs ${cls}'); e.textContent = ''; e.append(document.createElement('div'), document.createElement('div'))`;
+    const steps: [string, string, number][] = [
+      ['backdrop a', `add('qd', 'dialog').showModal()`, 1],
+      ['backdrop a again', `add('qd', 'dialog').showModal()`, 1],
+      ['backdrop a, inline style', `const d = add('qd', 'dialog'); d.style.color = 'red'; d.showModal()`, 1],
+      ['backdrop b, same declarations', `add('qd2', 'dialog').showModal()`, 1],
+      [
+        'backdrop transition in',
+        `const d = add('qdt', 'dialog'); d.id = 'qdt'; d.showModal(); d.getBoundingClientRect(); getComputedStyle(d, '::backdrop').opacity; d.classList.add('on')`,
+        1,
+      ],
+      ['backdrop transition out', `document.getElementById('qdt').classList.remove('on')`, 1],
+      ['scroll-marker a', scroller('qm'), 2],
+      ['scroll-marker b', scroller('qm2'), 2],
+      ['scroll-marker-group', scroller('qg'), 1],
+      ['scroll-button(*)', scroller('qb'), 4],
+      ['scroll-button(down)', scroller('qb2'), 1],
+      ['scroll-button(left), right to left', scroller('qbr'), 1],
+      ['scroll-button(left), vertical', scroller('qbv'), 1],
+      ['scroll-button(inline-end)', scroller('qbl'), 1],
+      ['column', `const e = add('qc'); e.textContent = 'a '.repeat(200)`, 1],
+      // No rule: a pseudo-element whose rules we missed would share this one's id.
+      ['inline, no rule', `add('').style.animation = 'q1 5s'`, 1],
+    ];
+    const labels: string[] = [];
+    const ids: { chrome: (string | undefined)[]; ours: (string | undefined)[] } = { chrome: [], ours: [] };
+    for (const [label, code, count] of steps) {
+      const got = await run(code, count);
+      for (const side of ['chrome', 'ours'] as const) {
+        const own = got[side].filter(a => !a.name.startsWith('fence')).slice(0, count);
+        if (side === 'chrome') labels.push(...own.map((_, i) => `${label} ${i}`));
+        ids[side].push(...own.map(a => a.cssId));
+      }
+      // Closes the dialogs: one modal at a time shows a backdrop.
+      await t.page.evaluate(() => document.querySelectorAll<HTMLDialogElement>('dialog[open]:not(#qdt)').forEach(d => d.close()));
+    }
+    const relation = (list: (string | undefined)[]) =>
+      list.map(
+        (id, i) =>
+          `${labels[i]}: ${list.flatMap((other, j) => (id !== undefined && other === id ? [labels[j]] : [])).join(', ')}`
+      );
+    assert.deepEqual(relation(ids.ours), relation(ids.chrome));
+  });
+
   test('animations of a same-origin iframe match Chrome', async () => {
     const got = await run(
       `const f = document.body.appendChild(document.createElement('iframe'));

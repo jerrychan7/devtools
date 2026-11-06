@@ -27,7 +27,7 @@ import { stopWarming, warmUp } from './sheets/text/warm';
 import { ROOT } from './sheets/parse/css-outline';
 import { outline } from './sheets/parse/css-outline-wasm';
 import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/watch/cssom-watch';
-import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
+import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, normalizePseudo, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
 const OBSERVED: MutationObserverInit = {
@@ -130,7 +130,7 @@ export function registerCss(ctx: Context) {
     // Like Chrome's element->style(), there even without a style attribute.
     const inline = (el as Partial<ElementCSSInlineStyle>).style;
     if (!pseudo && inline) styles.push({ rule: null, declares: declares(inline) });
-    for (const { rule } of cascade.matchedRules(el, pseudo).reverse()) {
+    for (const { rule } of cascade.matchedRules(el, pseudo && normalizePseudo(pseudo)).reverse()) {
       if (rule.origin === 'user-agent' || !rule.styleSheetId || !rule.style.range) continue;
       const sheet = sheets.get(rule.styleSheetId);
       if (!sheet.ownerNode) continue;

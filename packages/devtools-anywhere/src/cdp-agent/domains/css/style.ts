@@ -11,16 +11,88 @@ export type ComputedStyleResponse = Protocol.CSS.GetComputedStyleForNodeResponse
 
 export const INLINE_PREFIX = 'inline:';
 
-/** A pseudo-element at the end of a selector: `a::before`, legacy `a:after`, `::marker`. */
+/**
+ * A pseudo-element at the end of a selector: `a::before`, legacy `a:after`, `::marker`,
+ * `::view-transition-group(name)`, `::scroll-button(*)`.
+ */
 export const PSEUDO_SUFFIX =
-  /(?:::(before|after|marker|first-line|first-letter|placeholder|selection|backdrop|file-selector-button|cue|(?:part|slotted|highlight|view-transition[\w-]*)\([^)]*\))|:(before|after|first-line|first-letter))$/i;
+  /(?:::(before|after|marker|first-line|first-letter|placeholder|selection|backdrop|file-selector-button|cue|view-transition|scroll-marker-group|scroll-marker|column|details-content|checkmark|picker-icon|target-text|search-text|spelling-error|grammar-error|interest-hint|(?:part|slotted|highlight|cue|picker|scroll-button|view-transition-[\w-]+)\([^)]*\))|:(before|after|first-line|first-letter))$/i;
 
-/** Splits `a.b::before` into the host selector `a.b` and the pseudo-element `before`. */
+/**
+ * Splits `a.b::before` into the host selector `a.b` and the pseudo-element `before`. The
+ * pseudo-element's name is lowercased, its argument (a view transition's name) kept as written.
+ */
 export function splitPseudoElement(selector: string): { host: string; pseudo: string | null } {
   const m = PSEUDO_SUFFIX.exec(selector);
   if (!m) return { host: selector, pseudo: null };
   const host = selector.slice(0, m.index).trim();
-  return { host: host && !/[\s>+~]$/.test(host) ? host : `${host}*`, pseudo: (m[1] || m[2] || '').toLowerCase() };
+  return { host: host && !/[\s>+~]$/.test(host) ? host : `${host}*`, pseudo: normalizePseudo(m[1] || m[2] || '') };
+}
+
+/** `View-Transition-Group( a )` → `view-transition-group(a)`: the name lowercased, the argument trimmed. */
+export function normalizePseudo(pseudo: string): string {
+  const open = pseudo.indexOf('(');
+  if (open < 0) return pseudo.toLowerCase();
+  return `${pseudo.slice(0, open).trim().toLowerCase()}(${pseudo.slice(open + 1, pseudo.lastIndexOf(')')).trim()})`;
+}
+
+/**
+ * Whether a selector's pseudo-element (as split by {@link splitPseudoElement}) matches the
+ * pseudo-element `actual` (normalized the same way, as an effect names it). The argument of
+ * `::view-transition-*()` matches by name, `*` matching any, and by the classes after it (`*.a`,
+ * `.a`, `n.a.b`), which `classesOf` gives for a view transition name; `::scroll-button(*)` matches
+ * any button, a physical direction (`up`) the logical one it is for the element (`logical`), as an
+ * effect names its button logically (`block-start`). Other arguments match when equal.
+ */
+export function pseudoMatches(
+  selector: string,
+  actual: string,
+  classesOf: (name: string) => string[],
+  logical: (side: string) => string
+): boolean {
+  if (selector === actual) return true;
+  const sel = /^([\w-]+)\((.*)\)$/.exec(selector);
+  const act = /^([\w-]+)\((.*)\)$/.exec(actual);
+  if (!sel || !act || sel[1] !== act[1]) return false;
+  const [, name, arg = ''] = sel;
+  const target = act[2] ?? '';
+  if (name?.startsWith('view-transition-')) {
+    const m = /^(\*|[^.\s*]+)?((?:\.[^.\s]+)*)$/.exec(arg.replace(/\s+/g, ''));
+    if (!m) return false;
+    if (m[1] && m[1] !== '*' && m[1] !== target) return false;
+    // A class alone (`.a`) is the shorthand of `*.a`; nothing at all matches nothing.
+    if (!m[1] && !m[2]) return false;
+    const wanted = (m[2] ?? '').split('.').filter(Boolean);
+    if (!wanted.length) return true;
+    const classes = classesOf(target);
+    return wanted.every(c => classes.includes(c));
+  }
+  const wanted = arg.toLowerCase();
+  if (wanted === '*' || wanted === target.toLowerCase()) return true;
+  return name === 'scroll-button' && logical(wanted) === target.toLowerCase();
+}
+
+/**
+ * The logical side (`block-start`, …) a physical one (`up`, `down`, `left`, `right`) is for an
+ * element of `writingMode` and `direction`; other sides as they are.
+ */
+export function logicalSide(side: string, writingMode: string, direction: string): string {
+  const physical = ['up', 'right', 'down', 'left'];
+  const at = physical.indexOf(side);
+  if (at < 0) return side;
+  // The physical sides of block-start, inline-end, block-end and inline-start, in that order.
+  const vertical = writingMode.startsWith('vertical') || writingMode.startsWith('sideways');
+  const rtl = direction === 'rtl';
+  let order: string[];
+  if (!vertical) order = rtl ? ['up', 'left', 'down', 'right'] : ['up', 'right', 'down', 'left'];
+  else {
+    const blockStart = writingMode.endsWith('-lr') ? 'left' : 'right';
+    const blockEnd = blockStart === 'left' ? 'right' : 'left';
+    // sideways-lr runs its lines bottom to top.
+    const up = writingMode === 'sideways-lr' ? !rtl : rtl;
+    order = [blockStart, up ? 'up' : 'down', blockEnd, up ? 'down' : 'up'];
+  }
+  return ['block-start', 'inline-end', 'block-end', 'inline-start'][order.indexOf(side)] ?? side;
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context, MatchingStyle } from '../../core/context';
-import { type Inspectable, type PseudoType } from '../../core/nodes/nodes';
+import { type Inspectable, isPseudoType } from '../../core/nodes/nodes';
 import { isElement, isNode, realmOf, styleOf } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
@@ -155,8 +155,11 @@ function effectiveStyle(property: string, styles: MatchingStyle[]): MatchingStyl
  * or not: a declaration inline (or in a user agent or constructed sheet) counts for nothing, so
  * one rule gives one id on any element, the same declarations in another rule another, and a
  * transition into a hover state another than the one out of it, its property's value coming from
- * another rule. Without the CSS domain, or for a pseudo-element it cannot match, the pseudo-element
- * and the computed longhands are hashed instead, which tells fewer animations apart.
+ * another rule. A pseudo-element's are the rules for it, whichever it is, though our DOM has nodes
+ * for ::before, ::after and ::marker only: those of ::backdrop, ::scroll-button(…) or
+ * ::view-transition-group(…), whose argument matches by name, `*` and view-transition-class, as in
+ * Chrome. Without the CSS domain the pseudo-element and the computed longhands are hashed instead,
+ * which tells fewer animations apart.
  */
 const cssIds = new WeakMap<Animation, string>();
 /** Taken when first described and kept, as in Chrome, where it does not change with the element. */
@@ -176,7 +179,7 @@ function cssIdOf(
       ? CSS_ID_ANIMATION
       : [...CSS_ID_TRANSITION, (animation as CSSTransition).transitionProperty];
   let parts: string[] | undefined;
-  if (ctx.matchingStyles && (pseudo === null || isPseudoType(pseudo))) {
+  if (ctx.matchingStyles) {
     try {
       const styles = ctx.matchingStyles(target, pseudo);
       parts = [type, animation.id];
@@ -205,9 +208,6 @@ function cssIdOf(
 
 /** `0.3` → `"30%"`: Blink's number formatting, which drops the float noise of `0.3 * 100`. */
 const percent = (offset: number) => `${Number((offset * 100).toPrecision(6))}%`;
-
-const PSEUDO_TYPES: readonly string[] = ['marker', 'before', 'after'] satisfies PseudoType[];
-const isPseudoType = (type: string): type is PseudoType => PSEUDO_TYPES.includes(type);
 
 /**
  * Who an effect animates: its element, or the pseudo-element of it the effect names. Of the other

@@ -1,5 +1,5 @@
 import type { FrameRegistry } from './frames/frames';
-import type { NodeRegistry, PseudoType } from './nodes/nodes';
+import type { NodeRegistry } from './nodes/nodes';
 import type { ObjectRegistry } from './objects';
 import type { ProbeView } from './probe-view';
 import type { CdpSession } from './session';
@@ -33,9 +33,11 @@ export interface Context {
   /**
    * The styles matching an element or its pseudo-element, highest priority first: its inline
    * style (not a pseudo-element's), then its rules, those of user agent and constructed sheets left
-   * out, like Chrome's `InspectorCSSAgent::MatchingStyles`. Set by the CSS domain, enabled or not.
+   * out, like Chrome's `InspectorCSSAgent::MatchingStyles`. `pseudo` is any pseudo-element as an
+   * effect names it, without its colons (`backdrop`, `view-transition-group(a)`), not only those our
+   * DOM has nodes for. Set by the CSS domain, enabled or not.
    */
-  matchingStyles?: (el: Element, pseudo: PseudoType | null) => MatchingStyle[];
+  matchingStyles?: (el: Element, pseudo: string | null) => MatchingStyle[];
 }
 
 /** The top frame's id; its execution context is EXECUTION_CONTEXT_ID (core/frames/frames.ts). @internal */

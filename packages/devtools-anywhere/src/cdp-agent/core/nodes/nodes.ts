@@ -65,6 +65,7 @@ export const truncateNodeValue = (value: string) =>
 export type PseudoType = 'marker' | 'before' | 'after';
 /** Pseudo-elements shown in the DOM tree, in Chrome's order. */
 export const PSEUDO_TYPES: PseudoType[] = ['marker', 'before', 'after'];
+export const isPseudoType = (type: string): type is PseudoType => (PSEUDO_TYPES as string[]).includes(type);
 
 /** A generated pseudo-element of `host`. Not a DOM node, but the client treats it as one. */
 export class PseudoElement {
