@@ -1,4 +1,4 @@
-import { isCssom, realmOf } from '../../../core/realm';
+import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { nativeAdopted, quietly } from '../../../core/nodes/adopted';
 import { parentOf } from '../../../core/style/container-query';
 import { ownEdit } from '../sheets/watch/cssom-watch';
@@ -62,17 +62,40 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
   if (!accessors || !first) return none();
   const realm = realmOf(first);
   const name = (k: number, i: number) => `--devtools-anywhere-ns-${k}-${i}`;
+  const compound = (el: Element) => `*|${CSS.escape(el.localName)}`;
   /**
-   * A compound selector for the element: its id, else its classes, so that adopting the probe
-   * recalculates the style of few elements. `*|` for any namespace (the compound would otherwise
-   * be of the default one). Not in :where(): Chrome does not recalculate the elements a rule of
-   * an adopted sheet matches through :where() alone.
+   * A selector for the element, so that adopting the probe recalculates the style of few
+   * elements: its id; else, in the probe's own tree, its path from the root of the tree by
+   * :nth-child(), with its classes (a name alone, or a class many share, has many recalculated:
+   * 10000 elements, `*|div` costs 18.5 + 15.8 ms, the path 4.7 + 4.4 ms); else (an element
+   * slotted from outside, which a path in ::slotted() cannot reach) its name and classes. `*|`
+   * for any namespace (the compound would otherwise be of the default one). Not in :where():
+   * Chrome does not recalculate the elements a rule of an adopted sheet matches through :where()
+   * alone.
    */
-  const subject = (el: Element) =>
-    `*|${CSS.escape(el.localName)}${el.id ? `#${CSS.escape(el.id)}` : Array.from(el.classList, c => `.${CSS.escape(c)}`).join('')}`;
+  const subject = (el: Element) => {
+    if (el.id) return `${compound(el)}#${CSS.escape(el.id)}`;
+    const classes = Array.from(el.classList, c => `.${CSS.escape(c)}`).join('');
+    if (el.getRootNode() !== tree) return `${compound(el)}${classes}`;
+    // Anchored at the root of the tree: the root element, or the shadow root's host.
+    const path: string[] = [];
+    for (let e: Element | null = el, own = classes; e; e = e.parentElement, own = '') {
+      if (!e.parentElement && !isShadowRoot(tree)) {
+        path.push(`${compound(e)}${own}:root`);
+        break;
+      }
+      let n = 1;
+      for (let s = e.previousElementSibling; s; s = s.previousElementSibling) n++;
+      path.push(`${compound(e)}${own}:nth-child(${n})`);
+    }
+    if (isShadowRoot(tree)) path.push(':host');
+    return path.reverse().join('>');
+  };
   /** The values of the properties on `targets`, by sheet, by target, by rule; null on failure. */
   const probe = (targets: Element[], reset: Element[]): boolean[][][] | null => {
-    const subjects = [...new Set(targets.map(subject))];
+    // All the targets in one :is() for each rule: it forgives what is invalid in it (a path in
+    // ::slotted()), and one rule per target has every element recalculated match them all.
+    const subjects = [...new Set(targets.map(subject))].join(',');
     const probes: CSSStyleSheet[] = [];
     try {
       for (const [k, { namespaces, rules: made }] of sheets.entries()) {
@@ -83,9 +106,7 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
           .map(own => `${own}{${zero}}\n::slotted(${own}){${zero}}`)
           .join('\n');
         // One rule each: an invalid selector drops its rule only.
-        const rules = [...new Set(made.flatMap((rule, i) => subjects.map(own => rule(`${name(k, i)}:1`, own))))].join(
-          '\n'
-        );
+        const rules = [...new Set(made.map((rule, i) => rule(`${name(k, i)}:1`, subjects)))].join('\n');
         const sheet = new realm.CSSStyleSheet();
         ownEdit(() => sheet.replaceSync(`${namespaces}\n${resets}\n${rules}`));
         probes.push(sheet);

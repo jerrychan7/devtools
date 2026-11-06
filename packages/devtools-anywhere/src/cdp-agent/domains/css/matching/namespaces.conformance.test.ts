@@ -199,3 +199,39 @@ h|div > h|slot::slotted(h|p) { bottom: 1px }
   }
   await same(`${at} .n10 > p`);
 });
+
+test('the root element and body, by a path from the root', async () => {
+  await addStyle(
+    t,
+    `${NS}h|html:not(svg|*) { --n12: 1 }\n:root > h|body { --n13: 1 }\nh|html > h|body:not(.n14) { --n15: 1 }`,
+    ''
+  );
+  await same('html');
+  await same('body');
+});
+
+test('elements of a shadow tree whose sheet declares a default namespace', async () => {
+  const at = await addStyle(t, '', '<div class="n16"></div>');
+  await t.page.evaluate(at => {
+    const host = document.querySelector(`${at} .n16`) as HTMLElement;
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `<style>@namespace url(http://www.w3.org/1999/xhtml);
+div span { top: 1px }
+:is(div) > span { left: 1px }
+*|span:not(*) { right: 1px }
+</style><div><span>x</span></div>`;
+  }, at);
+  const shadow = async (side: Side) => {
+    const host = await nodeId(side, `${at} .n16`);
+    const { node } = await side.send('DOM.describeNode', { nodeId: host, depth: -1, pierce: true });
+    const backendNodeId = node.shadowRoots?.[0]?.children?.[1]?.children?.[0]?.backendNodeId;
+    assert.ok(backendNodeId);
+    const { nodeIds } = await side.send('DOM.pushNodesByBackendIdsToFrontend', { backendNodeIds: [backendNodeId] });
+    return (await side.send('CSS.getMatchedStylesForNode', { nodeId: nodeIds[0] ?? 0 })).matchedCSSRules
+      ?.filter(m => m.rule.origin === 'regular')
+      .map(m => rule(m.rule));
+  };
+  const chrome = await shadow(t.chrome);
+  assert.equal(chrome?.length, 2);
+  assert.deepEqual(await shadow(t.ours), chrome);
+});
