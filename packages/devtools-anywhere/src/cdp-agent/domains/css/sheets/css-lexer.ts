@@ -1,12 +1,24 @@
 /**
  * A CSS tokenizer after CSS Syntax Level 3 §4 (https://drafts.csswg.org/css-syntax-3/#tokenization),
  * cut down to what finding the edges of rules and declarations needs: token kinds and offsets, no
- * values. Offsets are UTF-16 code units in the original text; the preprocessing of §3.3 (CR LF, CR
- * and FF as newlines, NUL) is applied while scanning, not to a copy. Comments, which the
- * specification drops, are kept as tokens so a caller can find disabled declarations in them.
+ * values. Offsets are UTF-16 code units in the original text; the newlines of §3.3 (CR LF, CR and
+ * FF) are handled while scanning, not in a copy.
  *
  * Tokens are contiguous: token `i` covers `starts[i]` to `starts[i + 1]`, and `starts` ends with
  * the text's length.
+ *
+ * Where this differs from the specification:
+ * - Comments, which §4.3.2 consumes and drops, are kept as tokens, so a caller can find disabled
+ *   declarations in them.
+ * - Numbers, percentages and dimensions are one kind, `Num`, and no token carries a value.
+ * - NUL is not replaced by U+FFFD (§3.3): it is a delim token here, where the specification makes
+ *   it the start of an ident. Style sheets do not hold NUL in practice.
+ * - The result is the same as the specification's for everything else, but some checks are
+ *   arranged to read each code unit about once rather than to mirror the algorithm step by step:
+ *   a consumer leaves the code unit it stopped at in `nx` for the next token instead of having it
+ *   read again; the "starts a number" (§4.3.10), CDC and "starts an ident sequence" (§4.3.9)
+ *   checks for `-` are folded into one look at the next two code units; and an ident or number
+ *   starts from the code unit the main loop has already read. Each place says so where it does it.
  */
 
 /** Token kinds. Numbers and percentages are folded into `Num`, as are dimensions. */
@@ -113,6 +125,11 @@ export function tokenize(text: string): Tokens {
   // when it sees it called on a string. It is NaN past the end, so no predicate matches there.
   const len = text.length;
   let p = 0;
+  /**
+   * The code unit at `p` when the consumer that stopped there has read it already, else -1: the
+   * main loop and `identLike` take it from here rather than read it again.
+   */
+  let nx = -1;
   // §4.3.8 – §4.3.10
   const validEscape = (q: number) => text.charCodeAt(q) === 92 && !isNewline(text.charCodeAt(q + 1));
   const identStart = (q: number) => {
@@ -135,14 +152,18 @@ export function tokenize(text: string): Tokens {
     if (text.charCodeAt(p) === 13 && text.charCodeAt(p + 1) === 10) p += 2;
     else if (isWs(text.charCodeAt(p))) p++;
   };
-  /** §4.3.12 */
+  /** §4.3.12, leaving the code unit it stopped at in `nx`. */
   const name = () => {
     for (;;) {
-      if (isName(text.charCodeAt(p))) p++;
-      else if (validEscape(p)) {
+      const c = text.charCodeAt(p);
+      if (isName(c)) p++;
+      else if (c === 92 && !isNewline(text.charCodeAt(p + 1))) {
         p++;
         escape();
-      } else return;
+      } else {
+        nx = c;
+        return;
+      }
     }
   };
   /** §4.3.14 */
@@ -191,13 +212,19 @@ export function tokenize(text: string): Tokens {
       } else p++;
     }
   };
-  /** §4.3.4, with `p` at the start of the name. */
-  const identLike = (): TokKind => {
-    const s = p;
+  /** §4.3.4, for the token from `s`, with `p` past what of its name the caller has checked. */
+  const identLike = (s: number): TokKind => {
     name();
-    if (text.charCodeAt(p) !== 40) return Tok.Ident;
+    if (nx !== 40) return Tok.Ident;
+    nx = -1;
     p++;
-    if (p - s !== 4 || text.slice(s, s + 3).toLowerCase() !== 'url') return Tok.Func;
+    // `url(`, in any case, compared code unit by code unit: no string is made for each function.
+    const url3 =
+      p - s === 4 &&
+      (text.charCodeAt(s) | 32) === 117 &&
+      (text.charCodeAt(s + 1) | 32) === 114 &&
+      (text.charCodeAt(s + 2) | 32) === 108;
+    if (!url3) return Tok.Func;
     while (isWs(text.charCodeAt(p)) && isWs(text.charCodeAt(p + 1))) p++;
     const q = isWs(text.charCodeAt(p)) ? p + 1 : p;
     if (text.charCodeAt(q) === 34 || text.charCodeAt(q) === 39) return Tok.Func;
@@ -222,18 +249,31 @@ export function tokenize(text: string): Tokens {
       }
     }
   };
-  /** §4.3.3, with `p` at the start of the number. */
-  const numeric = () => {
-    if (text.charCodeAt(p) === 43 || text.charCodeAt(p) === 45) p++;
-    while (isDigit(text.charCodeAt(p))) p++;
-    if (text.charCodeAt(p) === 46 && isDigit(text.charCodeAt(p + 1))) for (p++; isDigit(text.charCodeAt(p));) p++;
-    const e = text.charCodeAt(p);
-    if (e === 69 || e === 101) {
-      const s = text.charCodeAt(p + 1) === 43 || text.charCodeAt(p + 1) === 45 ? 2 : 1;
-      if (isDigit(text.charCodeAt(p + s))) for (p += s; isDigit(text.charCodeAt(p));) p++;
+  /** §4.3.3, with `p` at the start of the number and `c` the code unit there. */
+  const numeric = (c: number) => {
+    if (c === 43 || c === 45) c = text.charCodeAt(++p);
+    while (isDigit(c)) c = text.charCodeAt(++p);
+    if (c === 46 && isDigit(text.charCodeAt(p + 1))) {
+      p += 2;
+      c = text.charCodeAt(p);
+      while (isDigit(c)) c = text.charCodeAt(++p);
     }
-    if (identStart(p)) name();
-    else if (text.charCodeAt(p) === 37) p++;
+    if (c === 69 || c === 101) {
+      const d = text.charCodeAt(p + 1);
+      const s = d === 43 || d === 45 ? 2 : 1;
+      if (isDigit(text.charCodeAt(p + s))) {
+        p += s;
+        c = text.charCodeAt(p);
+        while (isDigit(c)) c = text.charCodeAt(++p);
+      }
+    }
+    if (c === 45) {
+      const d = text.charCodeAt(p + 1);
+      if (isNameStart(d) || d === 45 || (d === 92 && !isNewline(text.charCodeAt(p + 2)))) name();
+      else nx = c;
+    } else if (isNameStart(c) || (c === 92 && !isNewline(text.charCodeAt(p + 1)))) name();
+    else if (c === 37) p++;
+    else nx = c;
   };
   // Every token is at least one code unit long, so `len` tokens is the most there can be.
   const kinds = new Uint8Array(len);
@@ -241,11 +281,17 @@ export function tokenize(text: string): Tokens {
   let n = 0;
   while (p < len) {
     const s = p;
-    const c = text.charCodeAt(p);
+    // The code unit the last consumer stopped at, if it read it, rather than reading it again.
+    const c = nx >= 0 ? nx : text.charCodeAt(p);
+    nx = -1;
     let k: TokKind;
     switch (c < 128 ? charClass[c] : C.NameStart) {
       case C.Ws:
-        while (isWs(text.charCodeAt(++p)));
+        {
+          let w = text.charCodeAt(++p);
+          while (isWs(w)) w = text.charCodeAt(++p);
+          nx = w;
+        }
         k = Tok.Ws;
         break;
       case C.Quote:
@@ -253,37 +299,70 @@ export function tokenize(text: string): Tokens {
         k = string(c);
         break;
       case C.Digit:
-        numeric();
+        // Unlike §4.3.3, which reads the first code unit again, it starts from `c`.
+        numeric(c);
         k = Tok.Num;
         break;
       case C.NameStart:
-        k = identLike();
+        // `c` is a name code point already read: the name goes on after it, not from it again.
+        p++;
+        k = identLike(s);
         break;
       case C.Plus:
       case C.Dot:
         if (numberStart(p)) {
-          numeric();
+          numeric(c);
           k = Tok.Num;
         } else {
           p++;
           k = Tok.Delim;
         }
         break;
-      case C.Minus:
-        if (numberStart(p)) {
-          numeric();
-          k = Tok.Num;
-        } else if (text.charCodeAt(p + 1) === 45 && text.charCodeAt(p + 2) === 62) {
-          p += 3;
-          k = Tok.Cdc;
-        } else if (identStart(p)) k = identLike();
-        else {
+      case C.Minus: {
+        // §4.1 tries, in order, "starts a number" (§4.3.10), CDC and "starts an ident sequence"
+        // (§4.3.9), each reading the code units after `-` again; one look at them here decides the
+        // same, and the ident or number goes on past what was checked.
+        const d = text.charCodeAt(p + 1);
+        if (isDigit(d)) {
           p++;
+          numeric(d);
+          k = Tok.Num;
+        } else if (d === 46) {
+          const e = text.charCodeAt(p + 2);
+          if (isDigit(e)) {
+            p++;
+            numeric(d);
+            k = Tok.Num;
+          } else {
+            p++;
+            nx = d;
+            k = Tok.Delim;
+          }
+        } else if (d === 45) {
+          const e = text.charCodeAt(p + 2);
+          if (e === 62) {
+            p += 3;
+            k = Tok.Cdc;
+          } else {
+            // `--` starts an ident whatever follows; both are name code points.
+            p += 2;
+            k = identLike(s);
+          }
+        } else if (isNameStart(d)) {
+          p += 2;
+          k = identLike(s);
+        } else if (d === 92 && !isNewline(text.charCodeAt(p + 2))) {
+          p++;
+          k = identLike(s);
+        } else {
+          p++;
+          nx = d;
           k = Tok.Delim;
         }
         break;
+      }
       case C.Backslash:
-        if (validEscape(p)) k = identLike();
+        if (validEscape(p)) k = identLike(s);
         else {
           p++;
           k = Tok.Delim;
