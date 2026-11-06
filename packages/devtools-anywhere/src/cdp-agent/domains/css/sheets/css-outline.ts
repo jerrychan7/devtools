@@ -265,10 +265,11 @@ export class CssOutline {
   }
 
   /**
-   * Copies the last top-level rule `r` of `from`, with what is in it, to the end of this outline,
-   * moved by `delta`, and returns its copy, which has no next sibling. Nothing links to it: the
-   * caller refers to it in place of the rule it replaces, whose records are left where they are,
-   * unreachable (and counted in `dead` by the caller).
+   * Copies top-level rule `r` of `from` and the top-level rules after it, with what is in them, to
+   * the end of this outline, moved by `delta`, and returns the copy of `r`: the copies link to each
+   * other as siblings, the last to none. Nothing links to them: the caller refers to them in place
+   * of the rules they replace, whose records are left where they are, unreachable (and counted in
+   * `dead` by the caller).
    */
   graft(from: CssOutline, r: number, delta: number): number {
     // In pre-order, the last top-level rule and those in it are the last records, from `r` on; and
@@ -291,8 +292,7 @@ export class CssOutline {
     this.ruleCount += rules;
     this.declCount += decls;
     const copy = r + base;
-    this.set(copy, R_NEXT, -1);
-    this.shift(copy, delta);
+    for (let c = copy; c >= 0; c = this.next(c)) this.shift(c, delta);
     return copy;
   }
 }

@@ -1,6 +1,6 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer-wasm';
-import { ownEdit, recordPageChanges } from './cssom-watch';
+import { type CssomChange, ownEdit, recordPageChanges } from './cssom-watch';
 import { type CssOutline, ROOT, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
@@ -37,6 +37,112 @@ interface Recorded {
   source?: SheetSource | null;
   /** The `unseen` count when recorded: changes the page made since may have gone unseen. */
   seen: number;
+  /** The text is the one serialized from the CSSOM (`SheetTexts.serialize`), unchanged since. */
+  serialized?: boolean;
+  /** Changes the page made through the CSSOM since, where they are known, not yet applied. */
+  pending?: Pending;
+}
+
+/**
+ * The page's changes to a serialized sheet, kept until its source is asked for (a page may change
+ * a sheet many times in a frame): the top-level rules inserted and deleted, in order, and those
+ * whose text changed, each once.
+ */
+interface Pending {
+  moves: { kind: 'insert' | 'delete'; index: number }[];
+  changed: Set<CSSRule>;
+}
+
+/**
+ * How many changes (moves and rules changed) a sheet of `rules` top-level rules keeps pending:
+ * past that, its text is serialized anew. Applying them costs a pass over the sheet's text and
+ * outline, and the text of each rule changed; finding where they are, the square of the moves.
+ */
+const pendingLimit = (rules: number) => Math.min(1024, Math.max(32, rules >> 2));
+
+/** A run of top-level rules: `n` of the source's from `from` on, or with `from` -1, `n` new ones. */
+type Run = [from: number, n: number];
+
+/**
+ * Splits `runs` so that one starts at rule `index`, and returns its place (`runs.length` past the
+ * last rule), or -1 when the index is past the end.
+ */
+function runAt(runs: Run[], index: number): number {
+  let at = 0;
+  for (let p = 0; p < runs.length; p++) {
+    const [from, n] = runs[p] as Run;
+    if (index === at) return p;
+    if (index < at + n) {
+      const k = index - at;
+      runs.splice(p, 1, [from, k], [from < 0 ? from : from + k, n - k]);
+      return p + 1;
+    }
+    at += n;
+  }
+  return index === at ? runs.length : -1;
+}
+
+const isLead = (rule: CSSRule) => {
+  const tag = tagOf(rule);
+  return tag === 'CSSImportRule' || tag === 'CSSNamespaceRule';
+};
+
+/**
+ * The serialized `source` with the page's `pending` changes applied, its rules now `rules`, as
+ * serializing them anew would give it, with only the rules changed outlined and paired; null when
+ * that cannot be told (the changes do not lead to `rules`, or change @import or @namespace rules).
+ *
+ * The moves are replayed on runs of the source's top-level rules, which tell for each rule of
+ * `rules` the one of the source it was, if any; between those kept as they were, the source's
+ * rules are replaced by the others (`replaceTops`).
+ */
+function applied(source: SheetSource, pending: Pending, rules: CSSRule[]): SheetSource | null {
+  const top = source.top;
+  const runs: Run[] = top.length ? [[0, top.length]] : [];
+  for (const { kind, index } of pending.moves) {
+    const p = runAt(runs, index);
+    if (p < 0) return null;
+    if (kind === 'insert') runs.splice(p, 0, [-1, 1]);
+    else {
+      const run = runs[p];
+      if (!run) return null;
+      if (run[0] >= 0) run[0]++;
+      if (--run[1] === 0) runs.splice(p, 1);
+    }
+  }
+  const { text, outline: o } = source;
+  const edits: TopEdit[] = [];
+  // Past the last rule kept: in the source, and in `rules`.
+  let from = 0;
+  let j = 0;
+  const keep = (k: number, at: number): boolean => {
+    if (k > from || at > j) {
+      for (let i = from; i < k; i++) if (isLead((top[i] as [CSSRule, number])[0])) return false;
+      const added = rules.slice(j, at);
+      if (added.some(isLead)) return false;
+      const start = from < top.length ? o.start((top[from] as [CSSRule, number])[1]) : text.length;
+      const end = k < top.length ? o.start((top[k] as [CSSRule, number])[1]) : text.length;
+      const insert = added.map(r => `${r.cssText}\n`).join('');
+      edits.push({ from, count: k - from, start, end, insert, rules: added });
+    }
+    from = k + 1;
+    j = at + 1;
+    return true;
+  };
+  let at = 0;
+  for (const [first, n] of runs) {
+    if (first < 0) {
+      at += n;
+      continue;
+    }
+    for (let k = first; k < first + n; k++, at++) {
+      const rule = rules[at];
+      if (!rule || rule !== (top[k] as [CSSRule, number])[0]) return null;
+      if (!pending.changed.has(rule) && !keep(k, at)) return null;
+    }
+  }
+  if (at !== rules.length || !keep(top.length, rules.length)) return null;
+  return edits.length ? replaceTops(source, edits) : source;
 }
 
 /**
@@ -104,12 +210,31 @@ export class SheetTexts {
   }
 
   /**
+   * The page changed the sheet through the CSSOM, at `change` if known. A text serialized from the
+   * CSSOM and paired is changed there alone when next asked for (`source`), as serializing it anew
+   * would; any other is no longer known, as Chrome serializes a sheet changed so.
+   */
+  pageChanged(sheet: CSSStyleSheet, change?: CssomChange): void {
+    const rec = this.recorded.get(sheet);
+    if (!change || !rec?.serialized || !rec.source || rec.seen !== this.unseenTimes || this.stale.has(sheet))
+      return this.invalidate(sheet);
+    const pending = (rec.pending ??= { moves: [], changed: new Set() });
+    if (change.kind === 'rule') pending.changed.add(change.rule);
+    else pending.moves.push({ kind: change.kind, index: change.index });
+    if (pending.moves.length + pending.changed.size > pendingLimit(rec.source.top.length))
+      return this.invalidate(sheet);
+    this.changed(sheet);
+  }
+
+  /**
    * Replaces `[start, end)` of the sheet's text by `insert`, its CSSOM changed the same way; the
    * rules are paired again around the change only, when they can be.
    */
   splice(sheet: CSSStyleSheet, start: number, end: number, insert: string): void {
     const rec = this.recorded.get(sheet);
     if (!rec || this.stale.has(sheet)) return;
+    // The page's changes not applied yet: the source is not that of the CSSOM any more.
+    if (rec.pending) return this.invalidate(sheet);
     const next = rec.source && respliced(rec.source, start, end, insert);
     if (next) {
       this.recorded.set(sheet, { text: next.text, unchecked: false, source: next, seen: this.unseenTimes });
@@ -123,6 +248,8 @@ export class SheetTexts {
 
   /** The page changed the sheet through the CSSOM: its text is no longer known. */
   invalidate(sheet: CSSStyleSheet): void {
+    const rec = this.recorded.get(sheet);
+    if (rec) delete rec.pending;
     this.stale.add(sheet);
     this.changed(sheet);
   }
@@ -151,6 +278,16 @@ export class SheetTexts {
     }
     // A constructed sheet whose text went unseen (made before anyone watched) is serialized too.
     if (!rec) return !owner && !sheet.ownerRule && !sheet.href ? this.serialize(sheet, rulesOf(sheet)) : null;
+    if (rec.pending) {
+      const { pending, source } = rec;
+      delete rec.pending;
+      const rules = rulesOf(sheet);
+      const next = rec.seen === this.unseenTimes && source ? applied(source, pending, rules) : null;
+      if (!next) return this.serialize(sheet, rules);
+      rec.text = next.text;
+      rec.source = next;
+      return next;
+    }
     if (rec.seen !== this.unseenTimes) {
       rec.seen = this.unseenTimes;
       rec.unchecked = true;
@@ -183,7 +320,7 @@ export class SheetTexts {
     const source = pair(text, rules);
     if (!source) return null;
     this.stale.delete(sheet);
-    this.recorded.set(sheet, { text, unchecked: false, source, seen: this.unseenTimes });
+    this.recorded.set(sheet, { text, unchecked: false, source, seen: this.unseenTimes, serialized: true });
     return source;
   }
 }
@@ -191,7 +328,9 @@ export class SheetTexts {
 /** The texts of the page's sheets, for every session. */
 export const sheetTexts = new SheetTexts();
 // Each change the page makes is recorded once, whatever the number of sessions.
-recordPageChanges((sheet, text) => (text === undefined ? sheetTexts.invalidate(sheet) : sheetTexts.set(sheet, text)));
+recordPageChanges((sheet, text, change) =>
+  text === undefined ? sheetTexts.pageChanged(sheet, change) : sheetTexts.set(sheet, text)
+);
 
 /** The at-rule name each kind of CSSOM rule is written with; a kind not listed pairs with none. */
 const AT_NAMES: Record<string, string> = {
@@ -346,51 +485,125 @@ function pairList(
 
 /**
  * The source after `[start, end)` of its text was replaced by `insert`, the CSSOM changed the
- * same way: only the top-level rule around the change is outlined and paired again, the others
- * moved. null when the change is not inside one rule or does not leave it one rule.
- *
- * The outline's tables are not rebuilt: the new rule's records are added at their end (`graft`),
- * those of the rule it replaces left where they are, unreferenced, and those of the rules after it
- * moved by the change's length, as their objects were before the outline was made of tables. Edits
- * so stay as cheap as the rule edited (and the moves), at the cost of the space the old records
- * take: once they are as many as the live ones, null is returned, for the text to be outlined and
- * paired anew, which leaves none. Records are not compacted in place, as the nodes in `nodes`,
- * indices, would all have to be renumbered. The outline's sibling links from `ROOT` keep the
- * replaced rule: `top` is what tells the top-level rules from then on.
- *
- * The old source is changed in place, and gives up its `outline`, `top` and `nodes` to the new
- * one: callers replace it right away and must not use it again (SheetTexts.splice does).
+ * same way: only the top-level rule around the change is outlined and paired again
+ * (`replaceTops`). null when the change is not inside one rule or does not leave it one rule.
  */
 function respliced(source: SheetSource, start: number, end: number, insert: string): SheetSource | null {
   const o = source.outline;
-  if (o.dead * 2 > o.ruleCount) return null;
   const k = source.top.findIndex(([, n]) => o.start(n) <= start && end <= o.end(n));
   const old = source.top[k];
   if (!old) return null;
   const [rule, node] = old;
-  const delta = insert.length - (end - start);
-  const text = source.text.slice(0, start) + insert + source.text.slice(end);
-  const slice = text.slice(o.start(node), o.end(node) + delta);
-  const alone = outline(slice);
-  const fresh = alone.firstChild(ROOT);
-  if (fresh < 0 || alone.next(fresh) >= 0 || alone.start(fresh) !== 0 || alone.end(fresh) !== slice.length) return null;
-  const next: SheetSource = {
-    text,
-    lines: lineStarts(text),
-    outline: o,
-    nodes: source.nodes,
-    top: source.top,
-    namespaces: source.namespaces,
-  };
-  const copy = o.graft(alone, fresh, o.start(node));
-  if (!pairList(next, copy, [rule], TOP)) return null;
-  o.dead += o.size(node);
-  for (let i = k + 1; i < source.top.length; i++) {
-    const after = source.top[i];
-    if (after) o.shift(after[1], delta);
+  const from = o.start(node);
+  const to = o.end(node);
+  const slice = source.text.slice(from, start) + insert + source.text.slice(end, to);
+  return replaceTops(source, [{ from: k, count: 1, start: from, end: to, insert: slice, rules: [rule] }]);
+}
+
+/**
+ * Top-level rules `[from, from + count)` of a source, whose text is `[start, end)` (with what is
+ * between them and around them there), to be replaced by `insert`, whose top-level rules are the
+ * CSSOM's `rules`. `start` and `end` are between top-level rules, out of comments.
+ */
+export interface TopEdit {
+  from: number;
+  count: number;
+  start: number;
+  end: number;
+  insert: string;
+  rules: CSSRule[];
+}
+
+/** What a text's last top-level rule may leave after it: white space and comments only. */
+const CLEAN_TAIL = /^(?:[ \t\n\r\f]|\/\*[\s\S]*?\*\/)*$/;
+
+/**
+ * The source after `edits` (in the order of the text, not overlapping) replaced runs of its
+ * top-level rules: only the text of each edit is outlined and paired, the rules after it moved.
+ * null when an edit's text is not as many whole top-level rules as its CSSOM rules, ended where it
+ * ends, or does not pair with them.
+ *
+ * The outline's tables are not rebuilt: the new rules' records are added at their end (`graft`),
+ * those of the rules they replace left where they are, unreferenced, and those of the rules after
+ * them moved by the change's length, as their objects were before the outline was made of tables.
+ * Edits so stay as cheap as the rules edited (and the moves), at the cost of the space the old
+ * records take: once they are as many as the live ones, null is returned, for the text to be
+ * outlined and paired anew, which leaves none. Records are not compacted in place, as the nodes in
+ * `nodes`, indices, would all have to be renumbered. The outline's sibling links from `ROOT` keep
+ * the replaced rules: `top` is what tells the top-level rules from then on.
+ *
+ * The old source is changed in place, and gives up its `outline` and `nodes` to the new one, even
+ * when null is returned: callers replace it right away and must not use it again.
+ */
+export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource | null {
+  const o = source.outline;
+  const top = source.top;
+  if (o.dead * 2 > o.ruleCount) return null;
+  const parts: string[] = [];
+  let at = 0;
+  let next = 0;
+  for (const e of edits) {
+    const last = e.from + e.count;
+    if (e.from < next || last > top.length || e.start < at || e.end < e.start) return null;
+    const before = top[e.from - 1];
+    const after = top[last];
+    if ((before && o.end(before[1]) > e.start) || (after ? o.start(after[1]) < e.end : e.end > source.text.length))
+      return null;
+    parts.push(source.text.slice(at, e.start), e.insert);
+    at = e.end;
+    next = last;
   }
-  source.top[k] = [rule, copy];
-  return next;
+  parts.push(source.text.slice(at));
+  const text = parts.join('');
+  const result: SheetSource = { ...source, text, lines: lineStarts(text), top: [] };
+  // Outlined and paired first, the source moved only once they all are.
+  const added: [CSSRule, number][][] = [];
+  let delta = 0;
+  for (const e of edits) {
+    const alone = outline(e.insert);
+    const tops: number[] = [];
+    for (let r = alone.firstChild(ROOT); r >= 0; r = alone.next(r)) tops.push(r);
+    if (tops.length !== e.rules.length) return null;
+    const lastTop = tops[tops.length - 1];
+    if (lastTop !== undefined) {
+      const end = alone.end(lastTop);
+      const ended = alone.blockStart(lastTop) >= 0 ? alone.closed(lastTop) : e.insert[end - 1] === ';';
+      if (!ended || !CLEAN_TAIL.test(e.insert.slice(end))) return null;
+    } else if (!CLEAN_TAIL.test(e.insert)) return null;
+    const first = tops[0];
+    if (first !== undefined && !pairList(result, o.graft(alone, first, e.start + delta), e.rules, TOP)) return null;
+    added.push(e.rules.map(r => [r, result.nodes.get(r) as number]));
+    delta += e.insert.length - (e.end - e.start);
+  }
+  delta = 0;
+  let k = 0;
+  const keep = (until: number) => {
+    for (; k < until; k++) {
+      const kept = top[k] as [CSSRule, number];
+      if (delta) o.shift(kept[1], delta);
+      result.top.push(kept);
+    }
+  };
+  edits.forEach((e, i) => {
+    keep(e.from);
+    for (; k < e.from + e.count; k++) {
+      const [rule, node] = top[k] as [CSSRule, number];
+      o.dead += o.size(node);
+      forget(result.nodes, rule);
+    }
+    result.top.push(...(added[i] ?? []));
+    delta += e.insert.length - (e.end - e.start);
+  });
+  keep(top.length);
+  return result;
+}
+
+/** Drops `rule`, gone from its sheet, and the rules in it from `nodes`. */
+function forget(nodes: Map<CSSRule, number>, rule: CSSRule): void {
+  if (rule.parentStyleSheet) return;
+  nodes.delete(rule);
+  const children = childRules(rule);
+  for (let i = 0; i < children.length; i++) forget(nodes, children[i] as CSSRule);
 }
 
 /** Whether `node` of `o` is where `rule`, of the CSSOM type `tag` (`tagOf`), was written. */
