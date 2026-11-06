@@ -225,3 +225,26 @@ test('CSS.disable stops warming up', async () => {
   await idle();
   assert.equal(await checks('.lz6'), 0);
 });
+
+test('without requestIdleCallback: warmed up from timers', async () => {
+  await addStyle('lz7', '.lz7 { color: red }');
+  const saved = await t.page.evaluateHandle(() => {
+    const w = window as unknown as { requestIdleCallback?: unknown };
+    const ric = w.requestIdleCallback;
+    delete w.requestIdleCallback;
+    return ric;
+  });
+  await t.ours.clear();
+  await t.ours.send('CSS.enable');
+  try {
+    assert.equal(await checks('.lz7'), 0);
+    const start = Date.now();
+    while ((await checks('.lz7')) === 0 && Date.now() - start < 3000) await new Promise(r => setTimeout(r, 50));
+    assert.equal(await checks('.lz7'), 1);
+  } finally {
+    await t.ours.send('CSS.disable');
+    await t.page.evaluate(ric => {
+      (window as unknown as { requestIdleCallback: unknown }).requestIdleCallback = ric;
+    }, saved);
+  }
+});
