@@ -95,6 +95,25 @@ test('a sheet changed before CSS.enable: its text is not taken for the rules', a
   await t.ours.send('CSS.disable');
 });
 
+test('a value changed before CSS.enable, the rules as many: its text is not taken either', async () => {
+  await t.page.evaluate(() => {
+    const s = document.createElement('style');
+    s.textContent = '.pv1 { color: red }\n.pv2 { top: 1px }';
+    document.head.appendChild(s);
+    const r = s.sheet?.cssRules[1];
+    if (r instanceof CSSStyleRule) r.style.top = '2px';
+  });
+  await t.ours.clear();
+  await t.ours.send('CSS.enable');
+  let text = '';
+  for (const { header } of await t.ours.events('CSS.styleSheetAdded')) {
+    const r = await t.ours.send('CSS.getStyleSheetText', { styleSheetId: header.styleSheetId });
+    if (r.text.includes('.pv1')) text = r.text;
+  }
+  assert.ok(text.includes('top: 2px') && !text.includes('top: 1px'), text);
+  await t.ours.send('CSS.disable');
+});
+
 test('replaceSync, adopt and replaceSync in one task: added, then changed, as in Chrome', async () => {
   for (const side of [t.ours, t.chrome]) {
     await side.send('DOM.enable');

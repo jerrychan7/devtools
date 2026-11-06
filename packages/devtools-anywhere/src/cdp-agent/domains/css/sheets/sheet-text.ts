@@ -37,12 +37,21 @@ interface Recorded {
   seen: number;
 }
 
-/** The rules as serialized, but @import (which replaceSync() leaves out). */
-function snapshot(rules: CSSRule[]): string {
-  return rules
-    .filter(r => !isCssom(r, 'CSSImportRule'))
-    .map(r => r.cssText)
-    .join('\n');
+/**
+ * Whether `rules` serialize as `parsed`, the rules of their text parsed alone, but @import (which
+ * replaceSync() leaves out). Rule by rule, so that the first difference ends it, the number of
+ * rules first.
+ */
+function sameRules(parsed: CSSRuleList, rules: CSSRule[]): boolean {
+  let imports = 0;
+  for (const rule of rules) if (tagOf(rule) === 'CSSImportRule') imports++;
+  if (rules.length - imports !== parsed.length) return false;
+  for (let i = 0, j = 0; i < rules.length; i++) {
+    const rule = rules[i] as CSSRule;
+    if (imports && tagOf(rule) === 'CSSImportRule') continue;
+    if (rule.cssText !== (parsed[j++] as CSSRule).cssText) return false;
+  }
+  return true;
 }
 
 /**
@@ -152,7 +161,7 @@ export class SheetTexts {
       const alone = new CSSStyleSheet();
       const text = rec.text;
       ownEdit(() => alone.replaceSync(text));
-      if (snapshot(Array.from(alone.cssRules)) !== snapshot(rules)) {
+      if (!sameRules(alone.cssRules, rules)) {
         this.invalidate(sheet);
         return this.serialize(sheet, rules);
       }
