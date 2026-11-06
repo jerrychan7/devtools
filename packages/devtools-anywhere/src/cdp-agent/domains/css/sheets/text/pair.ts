@@ -96,7 +96,7 @@ export function pair(text: string, rules: CSSRule[]): SheetSource | null {
   for (let i = 0; i < lead; i++) {
     const rule = rules[i] as CSSRule;
     const tag = tagOf(rule);
-    while (node >= 0 && !matches(text, o, node, rule, tag, TOP, '')) node = o.next(node);
+    while (node >= 0 && !matches(source, node, rule, tag, TOP)) node = o.next(node);
     if (node < 0) return null;
     (used ??= new Set()).add(node);
     source.nodes.set(rule, node);
@@ -152,7 +152,7 @@ export function pairList(
     const tag = tagOf(rule);
     for (; ; node = o.next(node)) {
       if (node < 0) return false;
-      if (skip?.has(node) || !matches(source.text, o, node, rule, tag, wrap, source.namespaces)) continue;
+      if (skip?.has(node) || !matches(source, node, rule, tag, wrap)) continue;
       source.nodes.set(rule, node);
       if (top) {
         source.topRules.push(rule);
@@ -168,23 +168,48 @@ export function pairList(
   return true;
 }
 
+/** A node's prelude loosened and, parsed alone, the kind and loosened selector of its rule. */
+interface Seen {
+  loose: string;
+  parsed?: [string, string] | null;
+}
+/** Per source, what `matches` worked out of its nodes, which the rules compared with share. */
+const SEEN = new WeakMap<SheetSource, Map<number, Seen>>();
+let lastWritten: string | undefined;
+let lastLoosened = '';
+
+/** `prelude` parsed alone, where `wrap` puts it: its rule's kind and loosened selector or key. */
+function parse(prelude: string, wrap: Wrap, namespaces: string): [string, string] | null {
+  const sheet = new CSSStyleSheet();
+  try {
+    // Our own sheet: not reported as the page's change.
+    ownCall(sheet, 'replaceSync', namespaces + wrap(prelude));
+  } catch {
+    return null;
+  }
+  // The innermost rule: the wrapping ones are around it.
+  let first: CSSRule | undefined = Array.from(sheet.cssRules).find(r => !isCssom(r, 'CSSNamespaceRule'));
+  for (let inner = first && childRules(first)[0]; inner; inner = childRules(inner)[0]) first = inner;
+  if (!first) return null;
+  const parsed: unknown = isCssom(first, 'CSSStyleRule') ? first.selectorText : Reflect.get(first, 'keyText');
+  return typeof parsed === 'string' ? [tagOf(first), loose(parsed)] : null;
+}
+
 /** Whether `node` of `o` is where `rule`, of the CSSOM type `tag` (`tagOf`), was written. */
-function matches(
-  text: string,
-  o: CssOutline,
-  node: number,
-  rule: CSSRule,
-  tag: string,
-  wrap: Wrap,
-  namespaces: string
-): boolean {
+function matches(source: SheetSource, node: number, rule: CSSRule, tag: string, wrap: Wrap): boolean {
+  const { text, outline: o, namespaces } = source;
   const kind = o.kind(node);
   if (tag === 'CSSNestedDeclarations') {
-    // Some declaration of the run is one the CSSOM kept.
+    // Some declaration of the run is a valid one the CSSOM kept: a run of invalid ones only was
+    // dropped, though a later run sets the same property.
     const style = ownStyle(rule as CSSNestedDeclarations) as CSSStyleDeclaration | undefined;
     if (kind !== 'nested' || !style) return false;
-    for (let d = o.firstDecl(node), e = d + o.declCountOf(node); d < e; d++)
-      if (!o.commented(d) && style.getPropertyValue(text.slice(o.declStart(d), o.nameEnd(d))) !== '') return true;
+    for (let d = o.firstDecl(node), e = d + o.declCountOf(node); d < e; d++) {
+      if (o.commented(d)) continue;
+      const name = text.slice(o.declStart(d), o.nameEnd(d));
+      if (style.getPropertyValue(name) === '') continue;
+      if (name.startsWith('--') || CSS.supports(name, text.slice(o.valueStart(d), o.valueEnd(d)))) return true;
+    }
     return false;
   }
   if (tag === 'CSSStyleRule' || tag === 'CSSKeyframeRule') {
@@ -194,23 +219,18 @@ function matches(
     if (typeof written !== 'string') return false;
     // As written most often; else without what the CSSOM drops or adds.
     if (prelude === written) return true;
-    const loosened = loose(written);
-    if (loose(prelude) === loosened) return true;
+    if (written !== lastWritten) lastLoosened = loose((lastWritten = written));
+    const loosened = lastLoosened;
+    let seen = SEEN.get(source);
+    if (!seen) SEEN.set(source, (seen = new Map()));
+    let seenNode = seen.get(node);
+    if (!seenNode) seen.set(node, (seenNode = { loose: loose(prelude) }));
+    if (seenNode.loose === loosened) return true;
     // Serialized otherwise (escapes, `from` for 0%): as the browser serializes the text alone,
     // after the sheet's @namespace rules (`svg|\61` is `svg|a` only where `svg` is declared).
-    const sheet = new CSSStyleSheet();
-    try {
-      // Our own sheet: not reported as the page's change.
-      ownCall(sheet, 'replaceSync', namespaces + wrap(prelude));
-    } catch {
-      return false;
-    }
-    // The innermost rule: the wrapping ones are around it.
-    let first: CSSRule | undefined = Array.from(sheet.cssRules).find(r => !isCssom(r, 'CSSNamespaceRule'));
-    for (let inner = first && childRules(first)[0]; inner; inner = childRules(inner)[0]) first = inner;
-    if (!first || tagOf(first) !== tag) return false;
-    const parsed = first && (isCssom(first, 'CSSStyleRule') ? first.selectorText : Reflect.get(first, 'keyText'));
-    return typeof parsed === 'string' && loose(parsed) === loosened;
+    // Once a node: a rule the text lacks is compared with each node after it.
+    if (seenNode.parsed === undefined) seenNode.parsed = parse(prelude, wrap, namespaces);
+    return seenNode.parsed !== null && seenNode.parsed[0] === tag && seenNode.parsed[1] === loosened;
   }
   if (kind !== 'at') return false;
   const name = AT_NAMES[tag];

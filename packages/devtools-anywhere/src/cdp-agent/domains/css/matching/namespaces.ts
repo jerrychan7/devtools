@@ -79,19 +79,27 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
     if (el.getRootNode() !== tree) return id || `${compound(el)}${classes}`;
     // Not an id another of them has too: it would pick out both.
     if (id && els.every(e => e === el || e.id !== el.id)) return id;
-    // Anchored at the root of the tree: the root element, or the shadow root's host.
-    const path: string[] = [];
-    for (let e: Element | null = el, own = classes; e; e = e.parentElement, own = '') {
-      if (!e.parentElement && !isShadowRoot(tree)) {
-        path.push(`${compound(e)}${own}:root`);
-        break;
-      }
+    return pathOf(el, classes);
+  };
+  /**
+   * Its path, anchored at the root of the tree: the root element, or the shadow root's host. That
+   * of an ancestor (with no classes) is the start of its descendants': each is made once.
+   */
+  const paths = new Map<Element, string>();
+  const pathOf = (e: Element, own: string): string => {
+    const known = own ? undefined : paths.get(e);
+    if (known !== undefined) return known;
+    const parent = e.parentElement;
+    let path: string;
+    if (!parent && !isShadowRoot(tree)) path = `${compound(e)}${own}:root`;
+    else {
       let n = 1;
       for (let s = e.previousElementSibling; s; s = s.previousElementSibling) n++;
-      path.push(`${compound(e)}${own}:nth-child(${n})`);
+      const step = `${compound(e)}${own}:nth-child(${n})`;
+      path = parent ? `${pathOf(parent, '')}>${step}` : `:host>${step}`;
     }
-    if (isShadowRoot(tree)) path.push(':host');
-    return path.reverse().join('>');
+    if (!own) paths.set(e, path);
+    return path;
   };
   /** The values of the properties on `els`, by sheet, by element, by rule; null on failure. */
   const probe = (): boolean[][][] | null => {
@@ -111,14 +119,20 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
     return quietly(() => {
       const before: unknown = accessors.get.call(tree);
       const adopted = Array.isArray(before) ? before.filter(s => isCssom(s, 'CSSStyleSheet')) : [];
-      accessors.set.call(tree, [...adopted, ...probes]);
+      // Throws for sheets of another realm than the tree's (a shadow root in a document without
+      // a window, as a <template>'s): nothing then matches.
       try {
-        const styles = els.map(el => realm.getComputedStyle(el));
-        return sheets.map(({ rules }, k) =>
-          styles.map((style, j) => rules.map((_, i) => style.getPropertyValue(name(k, i)).trim() === `${j}`))
-        );
-      } finally {
-        accessors.set.call(tree, adopted);
+        accessors.set.call(tree, [...adopted, ...probes]);
+        try {
+          const styles = els.map(el => realm.getComputedStyle(el));
+          return sheets.map(({ rules }, k) =>
+            styles.map((style, j) => rules.map((_, i) => style.getPropertyValue(name(k, i)).trim() === `${j}`))
+          );
+        } finally {
+          accessors.set.call(tree, adopted);
+        }
+      } catch {
+        return null;
       }
     });
   };

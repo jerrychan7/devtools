@@ -112,6 +112,18 @@ const SPACES: [string, string][] = [
   ['[x="a>b"]', '[x="a>b"]'],
 ];
 
+/** Written as the CSSOM writes otherwise without escapes => Chrome's selectorText. */
+const CSSOM_WRITES: [string, string][] = [
+  ['.a:before', '.a::before'],
+  ['.a:AFTER', '.a::after'],
+  ['p:first-line', 'p::first-line'],
+  ['p:first-letter', 'p::first-letter'],
+  ['[type=file]', '[type="file"]'],
+  ['[a=b i]', '[a="b" i]'],
+  ['[a=b I]', '[a="b" i]'],
+  ['[title=":before"]:before', '[title=":before"]::before'],
+];
+
 /** Selectors that differ, and must not pair (Chrome serializes each pair differently). */
 const DIFFERENT: [string, string][] = [
   ['.a b', '.ab'],
@@ -127,6 +139,8 @@ const DIFFERENT: [string, string][] = [
   ['&.x', '& .x'],
   ['.\\31 0', '.\\310'],
   [':nth-child(2n+1 of .a .b)', ':nth-child(2n+1 of .a.b)'],
+  ['[title=":before"]', '[title="::before"]'],
+  ['.a\\:before', '.a::before'],
 ];
 
 test("a selector with escapes is loosened as Chrome's selectorText is", () => {
@@ -135,6 +149,10 @@ test("a selector with escapes is loosened as Chrome's selectorText is", () => {
 
 test("whitespace: a selector is loosened as Chrome's selectorText is", () => {
   for (const [written, chrome] of SPACES) assert.equal(loose(written), loose(chrome), written);
+});
+
+test("legacy pseudo-elements and unquoted attribute values: loosened as Chrome's selectorText is", () => {
+  for (const [written, chrome] of CSSOM_WRITES) assert.equal(loose(written), loose(chrome), written);
 });
 
 test('selectors that differ are loosened apart', () => {
@@ -147,7 +165,7 @@ test("Chrome's selectorText is written again as it is: escapes kept, spaces wher
 
 // Compared only, escapes end with NUL, which is no CSS: idempotent written out.
 test('reescape is idempotent', () => {
-  for (const [written] of [...ESCAPES, ...SPACES, ...DIFFERENT])
+  for (const [written] of [...ESCAPES, ...SPACES, ...CSSOM_WRITES, ...DIFFERENT])
     assert.equal(reescape(reescape(written)), reescape(written), written);
 });
 

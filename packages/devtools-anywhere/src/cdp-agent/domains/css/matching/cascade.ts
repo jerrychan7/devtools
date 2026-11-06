@@ -230,7 +230,10 @@ export class Cascade {
     const known = byTree.get(el)?.get(c.sheet)?.get(key(c, s));
     if (known !== undefined) return known;
     const els = [el];
-    if (kind === 'own') for (let p = el.parentElement; p && !byTree.has(p); p = p.parentElement) els.push(p);
+    // Its ancestors too, as they are asked about next, but a few at a time: the probe has a rule
+    // for each selector and element, as long as the element is deep.
+    if (kind === 'own')
+      for (let p = el.parentElement; p && !byTree.has(p) && els.length < 16; p = p.parentElement) els.push(p);
     const bySheet = new Map<CSSStyleSheet, { keys: string[]; rules: ((d: string, own: string) => string)[] }>();
     for (const candidate of group) {
       for (const selector of candidate.selectors) {
@@ -314,7 +317,10 @@ export class Cascade {
                 (!!slot?.matches(s.host) && el.matches(s.slotted))
               );
             }
-            if (s.pseudo !== pseudo && (!s.pseudo || !pseudo || !pseudoMatches(s.pseudo, pseudo, el, this.viewTransitions)))
+            if (
+              s.pseudo !== pseudo &&
+              (!s.pseudo || !pseudo || !pseudoMatches(s.pseudo, pseudo, el, this.viewTransitions))
+            )
               return false;
             if (s.pseudoClasses && pseudo && !pseudoClassesMatch(s.pseudoClasses, el, pseudo, this.viewTransitions))
               return false;
@@ -407,4 +413,3 @@ export class Cascade {
     return inherited;
   }
 }
-

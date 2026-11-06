@@ -11,8 +11,9 @@ export const WARM_BUDGET = 8;
  */
 const LONG_IDLE = 40;
 /**
- * How many slices a sheet longer than the budget may wait for a long idle period: past that it is
- * let go, left to its first use, so that a page never idle that long is not woken up for nothing.
+ * How many slices a sheet longer than a slice's budget may wait for a slice long enough (a long
+ * idle period, for one longer than WARM_BUDGET): past that it is let go, left to its first use, so
+ * that a page never idle that long is not woken up for nothing.
  */
 export const MAX_WAITS = 20;
 /** Without requestIdleCallback: the delay between slices, in ms. */
@@ -71,7 +72,7 @@ function coldest(sheet: CSSStyleSheet, warmers: Set<Warmer>): [number, Warmer | 
 /**
  * Warms sheets in order until the budget is spent. One estimated longer than the budget is
  * warmed alone, in a long idle period; until then it waits at the end of the queue, the others
- * going first, and after MAX_WAITS slices it is let go.
+ * going first, and after MAX_WAITS slices it is let go, as is one that never fits the slices given.
  */
 function slice(deadline: Deadline): void {
   scheduled = null;
@@ -90,7 +91,8 @@ function slice(deadline: Deadline): void {
         const fits = elapsed + cost <= budget;
         const alone = first && cost > WARM_BUDGET && deadline.timeRemaining() >= LONG_IDLE;
         if (!fits && !alone) {
-          if (cost > WARM_BUDGET && ++waiting.waits >= MAX_WAITS) continue;
+          // Longer than this slice could take even alone: waiting for a longer one.
+          if (cost > budget && ++waiting.waits >= MAX_WAITS) continue;
           queue.set(sheet, waiting);
           if (elapsed >= budget) break;
           continue;

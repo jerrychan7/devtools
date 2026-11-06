@@ -251,3 +251,40 @@ test('what an element inherits is not taken for a match: an id twice, an @scope 
   }, at);
   await same(`${at} .n22 > b`);
 });
+
+test('a deep element and its ancestors, probed a few at a time', async () => {
+  const depth = 40;
+  const at = await addStyle(
+    t,
+    `${NS}h|div h|div { top: 1px }\nh|div > h|b { left: 1px }\nh|div.n23 h|div { right: 1px }`,
+    `<div class="n23">${'<div>'.repeat(depth)}<b>x</b>${'</div>'.repeat(depth)}</div>`
+  );
+  await same(`${at} b`);
+  for (const n of [1, 10, 20, 39]) await same(`${at} .n23${' > div'.repeat(n)}`);
+});
+
+test('a shadow tree in a <template>: no window, nothing to probe with, no error', async () => {
+  const at = await addStyle(t, '', '<div class="n24"></div>');
+  await t.page.evaluate(at => {
+    const host = document.querySelector(`${at} .n24`) as HTMLElement;
+    host.setHTMLUnsafe(
+      '<template><div><template shadowrootmode="open"><style>@namespace h url(http://www.w3.org/1999/xhtml);' +
+        'h|p { top: 1px }</style><p>x</p></template></div></template>'
+    );
+  }, at);
+  type N = { backendNodeId: number; children?: N[]; shadowRoots?: N[]; templateContent?: N };
+  const host = await nodeId(t.ours, `${at} .n24`);
+  const { node } = await t.ours.send('DOM.describeNode', { nodeId: host, depth: -1, pierce: true });
+  // Like Chrome, a template's content is sent without its children: they are asked for apart.
+  const content = (node as N).children?.[0]?.templateContent;
+  assert.ok(content);
+  const inner = await t.ours.send('DOM.describeNode', {
+    backendNodeId: content.backendNodeId,
+    depth: -1,
+    pierce: true,
+  });
+  const p = (inner.node as N).children?.[0]?.shadowRoots?.[0]?.children?.[1];
+  assert.ok(p);
+  const { nodeIds } = await t.ours.send('DOM.pushNodesByBackendIdsToFrontend', { backendNodeIds: [p.backendNodeId] });
+  await t.ours.send('CSS.getMatchedStylesForNode', { nodeId: nodeIds[0] ?? 0 });
+});

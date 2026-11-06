@@ -533,6 +533,11 @@ function parse(text: string, inBlock: boolean, into?: CssOutline): CssOutline {
     i++;
     while (trivia(kind(i))) i++;
     const from = i;
+    // §5.5.6 step 7: a `{}` block in a value makes no declaration, but for a custom property's
+    // value that is the block alone. Any other's is given up at its `{`, not past the block: a
+    // rule like `a:hover {}` is parsed again from its start, and scanning on to the end of the
+    // parent's block would make a block of such rules quadratic.
+    const custom = text.startsWith('--', start);
     let braces = 0;
     let other = 0;
     let last = -1;
@@ -541,6 +546,7 @@ function parse(text: string, inBlock: boolean, into?: CssOutline): CssOutline {
       const k = kind(i);
       if (k === Tok.Eof || k === Tok.Semi || k === Tok.RBrace) break;
       if (!trivia(k)) {
+        if (k === Tok.LBrace && !custom) return false;
         prev = last;
         last = i;
         if (k === Tok.LBrace) braces++;
@@ -548,9 +554,7 @@ function parse(text: string, inBlock: boolean, into?: CssOutline): CssOutline {
       }
       value();
     }
-    // §5.5.6 step 7: a `{}` block in a value makes no declaration, but for a custom property's
-    // value that is the block alone.
-    if (braces && (!text.startsWith('--', start) || other)) return false;
+    if (braces && other) return false;
     const important =
       prev >= 0 &&
       kind(prev) === Tok.Delim &&

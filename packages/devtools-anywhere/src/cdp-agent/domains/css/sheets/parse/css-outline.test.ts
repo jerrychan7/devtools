@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import type { CssDecl, CssRule, outlineTree as Outline } from './css-outline.ts';
+import type * as Outline from './css-outline.ts';
+import type { CssDecl, CssRule } from './css-outline.ts';
 import { lineStarts, offsetAt, positionAt } from '../text/text-lines.ts';
 
 // Bundled: the sources import each other without extensions, which Node does not resolve.
 const bundled = await build({
   stdin: {
-    contents: "export { outlineTree as outline } from './css-outline.ts';",
+    contents: "export { outlineTree as outline, outline as outlineRaw, ruleObject, topRules } from './css-outline.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },
@@ -18,9 +19,17 @@ const bundled = await build({
   platform: 'neutral',
   write: false,
 });
-const { outline }: { outline: typeof Outline } = await import(
-  `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
-);
+const {
+  outline,
+  outlineRaw,
+  ruleObject,
+  topRules,
+}: {
+  outline: typeof Outline.outlineTree;
+  outlineRaw: typeof Outline.outline;
+  ruleObject: typeof Outline.ruleObject;
+  topRules: typeof Outline.topRules;
+} = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`);
 
 type Shape = string | [string, ...Shape[]];
 
@@ -185,6 +194,81 @@ test('recovery: unclosed blocks run to the end, stray `}` start a prelude', () =
 test('recovery: preludes that look like custom properties make no rule', () => {
   assert.deepEqual(parse('--x: {a} b{}'), [['b']]);
   assert.deepEqual(parse('--x {a} b{}'), [['--x'], ['b']]);
+});
+
+test('a block of rules that start like declarations (`a:hover {}`) takes linear time', () => {
+  const block = (n: number) => `@layer base { ${'a:hover { b: c } '.repeat(n)}d: e }`;
+  assert.deepEqual(parse(block(3)), [
+    ['@layer base', ['a:hover', 'b=c'], ['a:hover', 'b=c'], ['a:hover', 'b=c'], ['nested', 'd=e']],
+  ]);
+  const time = (n: number) => {
+    const text = block(n);
+    let best = Infinity;
+    for (let k = 0; k < 3; k++) {
+      const t0 = performance.now();
+      outlineRaw(text);
+      best = Math.min(best, performance.now() - t0);
+    }
+    return best;
+  };
+  time(1000);
+  // Eight times the rules: about eight times as long, where scanning each to the end of the block
+  // took sixty-four.
+  const small = time(2000);
+  assert.ok(time(16000) < 24 * Math.max(small, 1), 'quadratic');
+});
+
+test('graft: the copies read as the rules outlined in place, moved', () => {
+  const head = 'x{a:b} y { c: d }\n';
+  const tail = 'p{} q{/* r: s */ t{u:v} w:x; y{}} @media m{z{}} @import "i";';
+  const whole = head + tail;
+  const expected = outlineRaw(whole);
+  const at = topRules(expected);
+  // From each of the tail's rules on: one without declarations, one with nested rules and a
+  // commented declaration, and the last alone.
+  for (const [k, delta, from] of [
+    [0, head.length, outlineRaw(tail)],
+    [1, head.length, outlineRaw(tail)],
+    [3, head.length, outlineRaw(tail)],
+    // Moved back: from a text with more before the tail.
+    [1, -7, outlineRaw(`${' '.repeat(head.length + 7)}${tail}`)],
+  ] as const) {
+    const o = outlineRaw(head);
+    const rules = o.ruleCount;
+    const r = topRules(from)[k];
+    assert.ok(r !== undefined);
+    const copy = o.graft(from, r, delta);
+    assert.ok(copy >= rules);
+    assert.equal(o.dead, 0);
+    const copies: number[] = [];
+    for (let c = copy; c >= 0; c = o.next(c)) copies.push(c);
+    const kept = at.slice(at.length - copies.length);
+    assert.equal(copies.length, topRules(from).length - k);
+    assert.deepEqual(
+      copies.map(c => ruleObject(whole, o, c)),
+      kept.map(c => ruleObject(whole, expected, c))
+    );
+    assert.deepEqual(
+      copies.map(c => o.size(c)),
+      kept.map(c => expected.size(c))
+    );
+    // The rules before are as they were.
+    assert.deepEqual(
+      topRules(o).map(c => ruleObject(whole, o, c)),
+      at.slice(0, 2).map(c => ruleObject(whole, expected, c))
+    );
+  }
+});
+
+test('shift moves a rule, its declarations, commented ones too, and the rules in it', () => {
+  const text = 'a{b:c; /* d: e */ f{g:h} i:j}';
+  const o = outlineRaw(`   ${text}`);
+  const [r] = topRules(o);
+  assert.ok(r !== undefined);
+  o.shift(r, -3);
+  const expected = outlineRaw(text);
+  assert.deepEqual(ruleObject(text, o, r), ruleObject(text, expected, topRules(expected)[0] ?? -1));
+  assert.equal(o.size(r), 3);
 });
 
 test('CDO and CDC are skipped at the top level only', () => {

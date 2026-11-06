@@ -19,7 +19,7 @@ import { documentOf, isDocument, isElement, isNode, isShadowRoot } from '../real
  *   drops the list;
  * - the frame tree changing drops it: a new same-origin iframe's document may already hold shadow
  *   roots;
- * - `attachShadow` on a connected host adds the new root (and its subtree) without walking again.
+ * - `attachShadow` on a connected host drops it, and tells the {@link onStale} listeners.
  *
  * Closed declarative shadow roots are not found: they are neither on `host.shadowRoot` nor
  * recorded by the probe, which only sees `attachShadow`; the page itself has no way to reach them.
@@ -99,23 +99,19 @@ export class ShadowRootTracker {
           this.#stale();
         }),
         this.#onShadowRoot(root => {
-          const cache = this.#cache;
           // A detached host: inserting it drops the list. A document no frame has (yet): its frame
           // being found drops the list, through the frames.onChange listener above. FrameRegistry
           // finds it in sync(), run by its own observer when an iframe is inserted (touchesFrames)
           // and by its capturing load listener (#onLoad) when one loads another document;
           // #syncChildren then emits attached or navigated. Both only run while someone listens
           // to onChange, which this tracker does while acquired.
-          if (!cache || !root.host.isConnected || isOwn(root.host)) return;
+          if (!root.host.isConnected || isOwn(root.host)) return;
           const doc = documentOf(root.host);
           if (!Array.from(this.#frames).some(f => f.document === doc)) return;
-          // The probe reports a root as attachShadow returns it, so no list holds it yet.
-          const added = [root];
-          this.#watch(root);
-          this.#visit(root, added);
-          // In tree order, like a walk: before the first root whose host comes after this one.
-          const at = cache.findIndex(r => this.#precedes(root.host, r.host));
-          cache.splice(at < 0 ? cache.length : at, 0, ...added);
+          // Dropped, not spliced in: a page attaching thousands of roots in one task (custom
+          // elements upgraded) walks again once, at the next roots(); and the listeners are told,
+          // to look into the new tree (a <style> put in it right after).
+          this.#stale();
         }),
       ];
       this.#cache = null;
@@ -187,30 +183,6 @@ export class ShadowRootTracker {
     }
     // A host moved elsewhere is also in an added list, which dropped the list above.
     if (removed && this.#cache) this.#cache = this.#cache.filter(root => root.host.isConnected);
-  }
-
-  /**
-   * Whether `a` comes before `b` in the order {@link roots} walks them: frame by frame, each
-   * document in shadow-including tree order, a shadow tree right after its host.
-   */
-  #precedes(a: Node, b: Node): boolean {
-    const chain = (node: Node) => {
-      const list: Node[] = [];
-      for (let n: Node | null = node; n; n = isShadowRoot(n) ? n.host : n.parentNode) list.unshift(n);
-      return list;
-    };
-    const [ca, cb] = [chain(a), chain(b)];
-    if (ca[0] !== cb[0]) {
-      const docs = Array.from(this.#frames, f => f.document);
-      return docs.indexOf(documentOf(a)) < docs.indexOf(documentOf(b));
-    }
-    let i = 0;
-    while (i < ca.length && i < cb.length && ca[i] === cb[i]) i++;
-    const [x, y] = [ca[i], cb[i]];
-    // An ancestor comes first; a host's shadow root before its children.
-    if (!x || !y) return !x;
-    if (isShadowRoot(x) || isShadowRoot(y)) return isShadowRoot(x);
-    return !!(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
 
   /**
