@@ -118,7 +118,8 @@ function sync(): boolean {
         seenLists,
         mediaRewrites,
         () => list.mediaText,
-        t => (list.mediaText = t)
+        // Ours, not a change of the page's to report.
+        t => ownEdit(() => (list.mediaText = t))
       ) || changed;
   };
   const visitRules = (rules: CSSRuleList) => {

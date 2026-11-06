@@ -70,6 +70,10 @@ const ROUNDS: string[][] = [
     'sheet.deleteRule(1)',
     "sheet.cssRules[2].style.setProperty('z-index', '3')",
   ],
+  // A rule's media list.
+  ["[...sheet.cssRules].find(r => r.media).media.mediaText = 'all'"],
+  ["[...sheet.cssRules].find(r => r.media).media.appendMedium('print')"],
+  ["[...sheet.cssRules].find(r => r.media).media = 'screen, print'"],
 ];
 
 test('a sheet the page changes round after round: its text and the matched rules as in Chrome', async () => {

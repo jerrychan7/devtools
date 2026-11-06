@@ -39,18 +39,26 @@ setUpAndTearDown(
 /**
  * What is reported for each step run in the page on a sheet of `css`, as text: `rule N` (the
  * top-level rule at N), `insert N`, `delete N`, `text` (a new text) or `none` (no place told);
- * nothing for a step reported nothing.
+ * nothing for a step reported nothing. With `inStyle`, the sheet is a <style>'s.
  */
-async function reports(css: string, steps: string[]): Promise<string[][]> {
+async function reports(css: string, steps: string[], inStyle = false): Promise<string[][]> {
   return page.evaluate(
-    (css, steps) => {
+    (css, steps, inStyle) => {
       const w = (
         globalThis as unknown as {
-          __cssomWatch: { recordPageChanges: typeof recordPageChanges; watchCssom: typeof watchCssom };
+          __cssomWatch: {
+            recordPageChanges: typeof recordPageChanges;
+            watchCssom: typeof watchCssom;
+          };
         }
       ).__cssomWatch;
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(css);
+      let sheet = new CSSStyleSheet();
+      if (inStyle) {
+        const style = document.createElement('style');
+        style.textContent = css;
+        document.head.append(style);
+        sheet = style.sheet as CSSStyleSheet;
+      } else sheet.replaceSync(css);
       let seen: string[] = [];
       w.recordPageChanges((s: CSSStyleSheet, text: string | undefined, change: CssomChange | undefined) => {
         if (s !== sheet) return;
@@ -80,7 +88,8 @@ async function reports(css: string, steps: string[]): Promise<string[][]> {
       return out;
     },
     css,
-    steps
+    steps,
+    inStyle
   );
 }
 
@@ -137,4 +146,69 @@ test('a new text, and a rule out of the sheet: no place', async () => {
     ]),
     [['text'], ['delete 0'], []]
   );
+});
+
+// In a <style>, which may have @import (replaceSync() leaves it out).
+test("a rule's media list changed: the top-level rule it is in", async () => {
+  assert.deepEqual(
+    await reports(
+      '@import url(x.css) print; .a{} @media screen{.m{}} @supports (top:0){@media print{.n{}}}',
+      [
+        // Forwarded to the list's `mediaText`, through the rule's getter: first, the list not seen before.
+        "sheet.cssRules[2].media = 'screen'",
+        "sheet.cssRules[2].media.mediaText = 'print'",
+        "sheet.cssRules[2].media.appendMedium('tv')",
+        "sheet.cssRules[2].media.deleteMedium('print')",
+        "sheet.cssRules[3].cssRules[0].media.appendMedium('screen')",
+        "sheet.cssRules[0].media.mediaText = 'screen'",
+        "sheet.cssRules[0].media.appendMedium('tv')",
+        "sheet.cssRules[2].media.deleteMedium('nope')",
+        // The sheet's own list, which belongs to no rule.
+        "sheet.media.appendMedium('print')",
+      ],
+      true
+    ),
+    [['rule 2'], ['rule 2'], ['rule 2'], ['rule 2'], ['rule 3'], ['rule 0'], ['rule 0'], [], []]
+  );
+});
+
+test('the hooked getters: as the native ones while watching, the native ones after', async () => {
+  const seen = await page.evaluate(() => {
+    const w = (globalThis as unknown as { __cssomWatch: { watchCssom: typeof watchCssom } }).__cssomWatch;
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync('.a{top:1px} @media print{}');
+    const media = Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media');
+    const shown = () => {
+      const m = Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.get;
+      const [a, b] = Array.from(sheet.cssRules) as [CSSStyleRule, CSSMediaRule];
+      let threw = '';
+      try {
+        m?.call(a);
+      } catch (e) {
+        threw = (e as Error).constructor.name;
+      }
+      return [
+        m?.name,
+        m?.length,
+        Function.prototype.toString.call(m).includes('[native code]'),
+        b.media === b.media,
+        threw,
+      ];
+    };
+    const stop = w.watchCssom(
+      () => {},
+      () => [window]
+    );
+    const watching = [...shown(), Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.get !== media?.get];
+    stop();
+    const after = [
+      Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.get === media?.get,
+      Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.set === media?.set,
+    ];
+    return { watching, after };
+  });
+  assert.deepEqual(seen, {
+    watching: ['get media', 0, true, true, 'TypeError', true],
+    after: [true, true],
+  });
 });

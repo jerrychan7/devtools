@@ -2,13 +2,20 @@ import { isCssom, realmOf } from '../../../core/realm';
 
 /**
  * Notices the page changing style sheets through the CSSOM: the methods that add and remove
- * rules, replace() and replaceSync(), setProperty() and removeProperty(), and the setters of rules
- * and their styles (`rule.style.color = …`, `cssText`, `selectorText`, `keyText`), hooked on the
- * prototypes of each realm while someone watches (like adopted.ts). The hooks are proxies of the
- * native functions: their name, length and that they cannot be constructed stay the same, and
- * `toString()` keeps the native form (without the name). A media list's text (`media.mediaText`)
- * goes unseen: a MediaList does not tell its rule. The CSS domain's own changes are made through
- * `ownEdit`, and not reported.
+ * rules, replace() and replaceSync(), setProperty() and removeProperty(), the setters of rules
+ * and their styles (`cssText`, `selectorText`, `keyText`), and those of a rule's media list
+ * (`mediaText`, appendMedium(), deleteMedium()), hooked on the prototypes of each realm while
+ * someone watches (like adopted.ts). The hooks are proxies of the native functions: their name,
+ * length and that they cannot be constructed stay the same, and `toString()` keeps the native
+ * form (without the name). The CSS domain's own changes are made through `ownEdit`, and not
+ * reported.
+ *
+ * A MediaList does not tell its rule: the `media` getters of rules note it (`rule.media` is the
+ * same list each time), so a list taken before anyone watched goes unseen, as does the sheet's
+ * own (`sheet.media`), which changes no rule.
+ *
+ * A style's properties by name (`rule.style.color = …`) go unseen: in Chrome they are data
+ * properties of each CSSStyleDeclaration itself, no accessors of its prototype.
  */
 /**
  * Where in its sheet a change of the page is, for a text serialized from the CSSOM to be changed
@@ -24,10 +31,12 @@ export type CssomChange =
 /** `by`: the CSS domain session that made the change, for one of its own edits. */
 type Listener = (sheet: CSSStyleSheet, text?: string, by?: object) => void;
 type After = (self: unknown, args: unknown[], result: unknown) => void;
+/** What of a property is hooked: a method, or an accessor's getter or setter. */
+type Part = 'value' | 'get' | 'set';
 
 const listeners = new Set<Listener>();
-/** The descriptors replaced, by prototype and name, with the function hooked in each. */
-const natives = new Map<object, Map<string, { descriptor: PropertyDescriptor; hook: unknown }>>();
+/** The functions replaced, by prototype and `part:name`, with the one hooked for each. */
+const natives = new Map<object, Map<string, { part: Part; name: string; native: unknown; hook: unknown }>>();
 let own = 0;
 
 type Recorder = (sheet: CSSStyleSheet, text?: string, change?: CssomChange) => void;
@@ -80,27 +89,31 @@ function inRule(rule: unknown): CssomChange | undefined {
 /** An index argument as Web IDL's `unsigned long` takes it. */
 const index = (value: unknown, otherwise: number) => (value === undefined ? otherwise : Number(value) >>> 0);
 
-/** Hooks a method, or with `setter`, an accessor's setter, calling `after` past the native one. */
-function hook(proto: object, name: string, after: After, setter = false) {
+/**
+ * Hooks a method, or with `part`, an accessor's setter or getter, calling `after` past the native
+ * one, while some session watches and, but with `always`, outside the CSS domain's own code.
+ */
+function hook(proto: object, name: string, after: After, part: Part = 'value', always = false) {
   let hooked = natives.get(proto);
-  if (hooked?.has(name)) return;
+  const key = `${part}:${name}`;
+  if (hooked?.has(key)) return;
   const descriptor = Object.getOwnPropertyDescriptor(proto, name);
-  const native: unknown = setter ? descriptor?.set : descriptor?.value;
+  const native: unknown = descriptor?.[part];
   if (!descriptor || typeof native !== 'function') return;
   const proxy = new Proxy(native, {
     apply(f, self, args) {
       const result: unknown = Reflect.apply(f, self, args);
-      if (listeners.size && !own) after(self, args, result);
+      if (listeners.size && (always || !own)) after(self, args, result);
       return result;
     },
   });
   if (!hooked) natives.set(proto, (hooked = new Map()));
-  hooked.set(name, { descriptor, hook: proxy });
-  const next: PropertyDescriptor = { ...descriptor };
-  if (setter) next.set = proxy as (value: unknown) => void;
-  else next.value = proxy;
-  Object.defineProperty(proto, name, next);
+  hooked.set(key, { part, name, native, hook: proxy });
+  Object.defineProperty(proto, name, { ...descriptor, [part]: proxy });
 }
+
+/** The rule each media list belongs to, noted when read (`rule.media`). */
+const mediaOwners = new WeakMap<object, CSSRule>();
 
 function install(realm: Window & typeof globalThis) {
   const changed: After = self => notify(sheetOf(self), undefined, inRule(self));
@@ -154,7 +167,7 @@ function install(realm: Window & typeof globalThis) {
   }
   for (const proto of styles)
     for (const name of Object.getOwnPropertyNames(proto))
-      if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, styleChanged, true);
+      if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, styleChanged, 'set');
   for (const proto of [
     realm.CSSStyleRule.prototype,
     realm.CSSKeyframeRule?.prototype,
@@ -163,7 +176,30 @@ function install(realm: Window & typeof globalThis) {
   ])
     if (proto)
       for (const name of Object.getOwnPropertyNames(proto))
-        if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, changed, true);
+        if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, changed, 'set');
+  // A rule's media list, noted to tell its changes.
+  for (const name of Object.getOwnPropertyNames(realm)) {
+    if (!/^CSS\w*(Rule|Declarations)$/.test(name)) continue;
+    const proto: unknown = (Reflect.get(realm, name) as { prototype?: unknown } | undefined)?.prototype;
+    if (typeof proto !== 'object' || proto === null) continue;
+    hook(
+      proto,
+      'media',
+      (self, _args, list) => {
+        if (typeof list === 'object' && list !== null) mediaOwners.set(list, self as CSSRule);
+      },
+      'get',
+      true
+    );
+  }
+  if (realm.MediaList) {
+    const listChanged: After = self => {
+      const rule = typeof self === 'object' && self !== null ? mediaOwners.get(self) : undefined;
+      if (rule) notify(sheetOf(rule), undefined, inRule(rule));
+    };
+    hook(realm.MediaList.prototype, 'mediaText', listChanged, 'set');
+    for (const name of ['appendMedium', 'deleteMedium']) hook(realm.MediaList.prototype, name, listChanged);
+  }
   hook(sheetProto, 'replaceSync', (self, args) => notify(sheetOf(self), String(args[0])));
   hook(sheetProto, 'replace', (self, args, result) => {
     const sheet = sheetOf(self);
@@ -180,11 +216,11 @@ function install(realm: Window & typeof globalThis) {
 function uninstall() {
   // A hook the page replaced since is kept (it does nothing without listeners).
   for (const [proto, hooked] of natives)
-    for (const [name, { descriptor, hook }] of hooked) {
+    for (const [key, { part, name, native, hook }] of hooked) {
       const now = Object.getOwnPropertyDescriptor(proto, name);
-      if ((descriptor.set ? now?.set : now?.value) !== hook) continue;
-      Object.defineProperty(proto, name, descriptor);
-      hooked.delete(name);
+      if (!now || now[part] !== hook) continue;
+      Object.defineProperty(proto, name, { ...now, [part]: native });
+      hooked.delete(key);
     }
 }
 
