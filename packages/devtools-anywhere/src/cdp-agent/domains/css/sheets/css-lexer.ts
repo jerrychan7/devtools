@@ -53,6 +53,45 @@ const isNameStart = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 const isName = (c: number) => isNameStart(c) || isDigit(c) || c === 45;
 const isNonPrintable = (c: number) => c <= 8 || c === 11 || (c >= 14 && c <= 31) || c === 127;
 
+/** Character classes of ASCII code points, for dispatching on a token's first character. */
+const C = {
+  Other: 0,
+  Ws: 1,
+  Quote: 2,
+  Digit: 3,
+  NameStart: 4,
+  Plus: 5,
+  Dot: 6,
+  Minus: 7,
+  Backslash: 8,
+  Slash: 9,
+  At: 10,
+  Hash: 11,
+  Lt: 12,
+} as const;
+const charClass = new Uint8Array(128);
+for (let c = 0; c < 128; c++)
+  charClass[c] = isWs(c)
+    ? C.Ws
+    : c === 34 || c === 39
+      ? C.Quote
+      : isDigit(c)
+        ? C.Digit
+        : isNameStart(c)
+          ? C.NameStart
+          : ((
+              {
+                43: C.Plus,
+                46: C.Dot,
+                45: C.Minus,
+                92: C.Backslash,
+                47: C.Slash,
+                64: C.At,
+                35: C.Hash,
+                60: C.Lt,
+              } as Record<number, number>
+            )[c] ?? C.Other);
+
 /** Tokenizes `text`. */
 export function tokenize(text: string): Tokens {
   const len = text.length;
@@ -198,38 +237,88 @@ export function tokenize(text: string): Tokens {
     const s = p;
     const c = at(p);
     let k: TokKind;
-    if (c === 47 && at(p + 1) === 42) {
-      const e = text.indexOf('*/', p + 2);
-      p = e < 0 ? len : e + 2;
-      k = Tok.Comment;
-    } else if (isWs(c)) {
-      while (isWs(at(p))) p++;
-      k = Tok.Ws;
-    } else if (c === 34 || c === 39) {
-      p++;
-      k = string(c);
-    } else if (numberStart(p)) {
-      numeric();
-      k = Tok.Num;
-    } else if (c === 45 && at(p + 1) === 45 && at(p + 2) === 62) {
-      p += 3;
-      k = Tok.Cdc;
-    } else if (identStart(p)) {
-      k = identLike();
-    } else if (c === 64 && identStart(p + 1)) {
-      p++;
-      name();
-      k = Tok.At;
-    } else if (c === 35 && (isName(at(p + 1)) || validEscape(p + 1))) {
-      p++;
-      name();
-      k = Tok.Hash;
-    } else if (c === 60 && text.startsWith('!--', p + 1)) {
-      p += 4;
-      k = Tok.Cdo;
-    } else {
-      p++;
-      k = single[c] ?? Tok.Delim;
+    switch (c < 128 ? charClass[c] : C.NameStart) {
+      case C.Ws:
+        while (isWs(at(++p)));
+        k = Tok.Ws;
+        break;
+      case C.Quote:
+        p++;
+        k = string(c);
+        break;
+      case C.Digit:
+        numeric();
+        k = Tok.Num;
+        break;
+      case C.NameStart:
+        k = identLike();
+        break;
+      case C.Plus:
+      case C.Dot:
+        if (numberStart(p)) {
+          numeric();
+          k = Tok.Num;
+        } else {
+          p++;
+          k = Tok.Delim;
+        }
+        break;
+      case C.Minus:
+        if (numberStart(p)) {
+          numeric();
+          k = Tok.Num;
+        } else if (at(p + 1) === 45 && at(p + 2) === 62) {
+          p += 3;
+          k = Tok.Cdc;
+        } else if (identStart(p)) k = identLike();
+        else {
+          p++;
+          k = Tok.Delim;
+        }
+        break;
+      case C.Backslash:
+        if (validEscape(p)) k = identLike();
+        else {
+          p++;
+          k = Tok.Delim;
+        }
+        break;
+      case C.Slash:
+        if (at(p + 1) === 42) {
+          const e = text.indexOf('*/', p + 2);
+          p = e < 0 ? len : e + 2;
+          k = Tok.Comment;
+        } else {
+          p++;
+          k = Tok.Delim;
+        }
+        break;
+      case C.At:
+        p++;
+        if (identStart(p)) {
+          name();
+          k = Tok.At;
+        } else k = Tok.Delim;
+        break;
+      case C.Hash:
+        p++;
+        if (isName(at(p)) || validEscape(p)) {
+          name();
+          k = Tok.Hash;
+        } else k = Tok.Delim;
+        break;
+      case C.Lt:
+        if (text.startsWith('!--', p + 1)) {
+          p += 4;
+          k = Tok.Cdo;
+        } else {
+          p++;
+          k = Tok.Delim;
+        }
+        break;
+      default:
+        p++;
+        k = single[c] ?? Tok.Delim;
     }
     kinds.push(k);
     starts.push(s);
