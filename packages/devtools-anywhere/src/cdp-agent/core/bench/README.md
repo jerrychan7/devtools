@@ -55,4 +55,89 @@ It stops at the first difference and prints the text and where the results part.
 
 ## Reference results
 
-See the table at the end, filled in step by step.
+Apple M2, 16 GB, macOS 26, Node 24.21.0, `node --expose-gc lexer.bench.ts --rev 76f3026 --rev 66f4dcf --rev 6c48668 --rev 181329e --rev 42c0468 --material acorn.js --material anywhere_app` at aff93c5, on a machine shared with other work. One step per revision:
+
+| Revision | Step |
+| --- | --- |
+| 76f3026 | Before any optimisation: a Token object per token |
+| 66f4dcf | Tokens in typed arrays, one per field |
+| 6c48668 | `charCodeAt(i) \| 0` instead of a bounds check |
+| 181329e | A table for the classes of ASCII code units |
+| 42c0468 | A debugger mode instead of a token callback; `startsWith('debugger')` |
+| aff93c5 | The code unit read ahead kept for the main loop: each code unit read about once |
+
+Each commit's message has the same entry points measured against the commit before it, which tells a step's own gain better than this table: six lexers in one process take turns, and steps of a few percent move within the spread.
+
+### acorn.js: 246,615 code units (acorn 8.19.0 dist/acorn.js from node_modules)
+
+| Entry | Lexer | median ms | min ms | reads/unit | MB alloc | MB kept |
+| --- | --- | --: | --: | --: | --: | --: |
+| tokenize | 76f3026 | 2.23 | 2.03 | 1.53 | 5.01 | 3.68 |
+| | 66f4dcf | 1.97 | 1.90 | 1.53 | 2.28 | 0.72 |
+| | 6c48668 | 1.85 | 1.73 | 1.53 | 2.28 | 0.72 |
+| | 181329e | 1.78 | 1.68 | 1.53 | 2.28 | 0.72 |
+| | 42c0468 | 1.75 | 1.69 | 1.53 | 2.27 | 0.70 |
+| | aff93c5 | 1.63 | 1.56 | 1.00 | 2.28 | 0.73 |
+| debuggerStatementSites | 76f3026 | 1.92 | 1.84 | 1.53 | 3.84 | 0.01 |
+| | 66f4dcf | 1.96 | 1.90 | 1.53 | 0.44 | 0.06 |
+| | 6c48668 | 1.79 | 1.72 | 1.53 | 0.44 | 0.02 |
+| | 181329e | 1.66 | 1.61 | 1.53 | 0.51 | 0.05 |
+| | 42c0468 | 1.74 | 1.68 | 1.53 | 0.49 | 0.06 |
+| | aff93c5 | 1.55 | 1.48 | 1.00 | 0.48 | 0.06 |
+| topLevelLexicalNames | 76f3026 | 2.40 | 2.20 | 1.53 | 4.93 | 0.05 |
+| | 66f4dcf | 2.07 | 1.92 | 1.53 | 2.30 | 0.05 |
+| | 6c48668 | 1.93 | 1.78 | 1.53 | 2.29 | 0.06 |
+| | 181329e | 1.87 | 1.73 | 1.53 | 2.29 | 0.05 |
+| | 42c0468 | 1.86 | 1.72 | 1.53 | 2.29 | 0.05 |
+| | aff93c5 | 1.74 | 1.61 | 1.00 | 2.29 | 0.06 |
+| returnOutsideFunction | 76f3026 | 3.09 | 2.86 | 1.66 | 5.61 | 0.07 |
+| | 66f4dcf | 2.97 | 2.80 | 1.66 | 2.88 | 0.07 |
+| | 6c48668 | 2.79 | 2.64 | 1.66 | 2.88 | 0.07 |
+| | 181329e | 2.72 | 2.58 | 1.66 | 2.90 | 0.07 |
+| | 42c0468 | 2.71 | 2.58 | 1.66 | 2.88 | 0.07 |
+| | aff93c5 | 2.62 | 2.47 | 1.14 | 2.90 | 0.06 |
+| repl | 76f3026 | 2.40 | 2.32 | 1.53 | 5.24 | 0.08 |
+| | 66f4dcf | 2.07 | 2.04 | 1.53 | 2.25 | 0.06 |
+| | 6c48668 | 1.90 | 1.86 | 1.53 | 2.32 | 0.06 |
+| | 181329e | 1.87 | 1.83 | 1.53 | 2.32 | 0.06 |
+| | 42c0468 | 1.86 | 1.82 | 1.53 | 2.32 | 0.06 |
+| | aff93c5 | 1.74 | 1.71 | 1.00 | 2.33 | 0.07 |
+| read-only floor | | 0.362 | 0.362 | 1.00 | | |
+
+### anywhere_app: 7,356,685 code units (anywhere_app-BWStrK_m.js, SHA-256 4d6737bd…78e57b)
+
+| Entry | Lexer | median ms | min ms | reads/unit | MB alloc | MB kept |
+| --- | --- | --: | --: | --: | --: | --: |
+| tokenize | 76f3026 | 195.4 | 166.2 | 1.56 | 152.36 | 151.66 |
+| | 66f4dcf | 87.5 | 81.2 | 1.56 | 73.40 | 28.34 |
+| | 6c48668 | 80.8 | 78.9 | 1.56 | 73.41 | 28.34 |
+| | 181329e | 75.9 | 73.5 | 1.56 | 73.39 | 28.34 |
+| | 42c0468 | 76.7 | 71.4 | 1.56 | 73.39 | 28.34 |
+| | aff93c5 | 73.8 | 72.0 | 1.00 | 73.40 | 28.34 |
+| debuggerStatementSites | 76f3026 | 79.5 | 74.3 | 1.56 | 14.17 | 0.00 |
+| | 66f4dcf | 76.9 | 73.9 | 1.56 | 12.18 | 0.00 |
+| | 6c48668 | 70.5 | 68.0 | 1.56 | 12.19 | 0.00 |
+| | 181329e | 66.0 | 63.9 | 1.56 | 12.20 | 0.00 |
+| | 42c0468 | 66.1 | 64.2 | 1.56 | 11.73 | 0.00 |
+| | aff93c5 | 65.1 | 61.6 | 1.00 | 11.75 | 0.00 |
+| topLevelLexicalNames | 76f3026 | 167.1 | 160.2 | 1.56 | 152.60 | 0.02 |
+| | 66f4dcf | 86.1 | 85.3 | 1.56 | 74.13 | 0.02 |
+| | 6c48668 | 76.9 | 75.7 | 1.56 | 74.09 | 0.04 |
+| | 181329e | 73.9 | 72.8 | 1.56 | 74.08 | 0.04 |
+| | 42c0468 | 78.3 | 77.1 | 1.56 | 74.13 | 0.02 |
+| | aff93c5 | 75.6 | 74.5 | 1.00 | 74.15 | 0.02 |
+| returnOutsideFunction | 76f3026 | 173.0 | 167.6 | 1.62 | 156.57 | 0.00 |
+| | 66f4dcf | 97.8 | 97.0 | 1.62 | 78.07 | 0.00 |
+| | 6c48668 | 93.2 | 91.8 | 1.62 | 78.09 | 0.00 |
+| | 181329e | 89.8 | 88.9 | 1.62 | 78.17 | 0.00 |
+| | 42c0468 | 89.9 | 88.9 | 1.62 | 78.10 | 0.00 |
+| | aff93c5 | 87.1 | 85.5 | 1.07 | 78.16 | 0.00 |
+| repl | 76f3026 | 192.1 | 172.3 | 1.57 | 153.49 | 0.33 |
+| | 66f4dcf | 103.2 | 96.9 | 1.57 | 74.98 | 0.31 |
+| | 6c48668 | 93.9 | 89.0 | 1.57 | 74.93 | 0.32 |
+| | 181329e | 91.1 | 83.8 | 1.57 | 74.94 | 0.31 |
+| | 42c0468 | 97.5 | 89.5 | 1.57 | 74.97 | 0.31 |
+| | aff93c5 | 93.8 | 86.0 | 1.01 | 75.01 | 0.31 |
+| read-only floor | | 11.0 | 10.2 | 1.00 | | |
+
+`node lexer-compare.bench.ts --rev 76f3026` at aff93c5: every entry point gives the same results on 1,448,944 texts.
