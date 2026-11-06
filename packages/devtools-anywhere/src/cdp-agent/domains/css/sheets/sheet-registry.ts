@@ -8,7 +8,9 @@ import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
 import { ownStyle } from './watch/cssom-watch';
-import { type SheetSource, namespaceText, offsetsOf, sheetTexts, selectorSpans, styleSpan } from './text/sheet-text';
+import { type SheetSource, namespaceText } from './text/pair';
+import { offsetsOf, selectorSpans, styleSpan } from './text/ranges';
+import { sheetTexts } from './text/sheet-text';
 import { textEnd } from './text/text-lines';
 
 /** Chrome's error for a range that is not that of what an edit changes. */

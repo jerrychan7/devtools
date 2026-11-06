@@ -22,7 +22,7 @@ import {
   assertOrdered,
   isConstructed,
 } from './sheets/sheet-registry';
-import { offsetsOf } from './sheets/text/sheet-text';
+import { offsetsOf } from './sheets/text/ranges';
 import { ROOT } from './sheets/parse/css-outline';
 import { outline } from './sheets/parse/css-outline-wasm';
 import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/watch/cssom-watch';
