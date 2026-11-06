@@ -48,6 +48,24 @@ const checks = (marker: string) =>
     marker
   );
 
+/** Idle callbacks waiting. */
+const idleWaiting = () => t.page.evaluate(() => (window as unknown as { __idle: Map<number, unknown> }).__idle.size);
+
+/** Runs the idle callbacks waiting, each given a long idle period, until none is left; how many ran. */
+const idle = () =>
+  t.page.evaluate(() => {
+    const w = window as unknown as { __idle: Map<number, IdleRequestCallback> };
+    let ran = 0;
+    while (w.__idle.size && ran < 1000) {
+      const [id, cb] = w.__idle.entries().next().value as [number, IdleRequestCallback];
+      w.__idle.delete(id);
+      const end = performance.now() + 50;
+      cb({ didTimeout: false, timeRemaining: () => Math.max(0, end - performance.now()) });
+      ran++;
+    }
+    return ran;
+  });
+
 /** Adds a <style> with `text` and `id`, then lets `change` change its sheet. */
 const addStyle = (id: string, text: string, change = '') =>
   t.page.evaluate(
@@ -170,4 +188,40 @@ test('a <style> changed before CSS.enable: added with its text, changed once che
   } finally {
     for (const side of [t.ours, t.chrome]) await side.send('CSS.disable');
   }
+});
+
+test('warming up while idle checks each text once; their first use checks none again', async () => {
+  await addStyle('lz4', '.lz4 { color: red }');
+  await addStyle('lz5', '.lz5 { color: red }\n.lz5b { top: 1px }', 'sheet.deleteRule(1);');
+  await t.ours.clear();
+  await t.ours.send('CSS.enable');
+  try {
+    assert.deepEqual([await checks('.lz4'), await checks('.lz5')], [0, 0]);
+    assert.ok((await idleWaiting()) > 0);
+    assert.ok((await idle()) >= 1);
+    assert.deepEqual([await checks('.lz4'), await checks('.lz5')], [1, 1]);
+    // The stale text found while warming up is announced as at a first use.
+    const id5 = await idOfStyle('lz5');
+    assert.deepEqual(
+      (await t.ours.events('CSS.styleSheetChanged')).map(e => e.styleSheetId),
+      [id5]
+    );
+    await t.ours.send('CSS.getStyleSheetText', { styleSheetId: await idOfStyle('lz4') });
+    assert.equal((await t.ours.send('CSS.getStyleSheetText', { styleSheetId: id5 })).text, '.lz5 { color: red; }\n');
+    assert.deepEqual([await checks('.lz4'), await checks('.lz5')], [1, 1]);
+    assert.equal(await idleWaiting(), 0);
+  } finally {
+    await t.ours.send('CSS.disable');
+  }
+});
+
+test('CSS.disable stops warming up', async () => {
+  await addStyle('lz6', '.lz6 { color: red }');
+  await t.ours.clear();
+  await t.ours.send('CSS.enable');
+  assert.ok((await idleWaiting()) > 0);
+  await t.ours.send('CSS.disable');
+  assert.equal(await idleWaiting(), 0);
+  await idle();
+  assert.equal(await checks('.lz6'), 0);
 });

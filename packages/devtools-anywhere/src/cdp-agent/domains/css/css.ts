@@ -23,6 +23,7 @@ import {
   isConstructed,
 } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/text/ranges';
+import { stopWarming, warmUp } from './sheets/text/warm';
 import { ROOT } from './sheets/parse/css-outline';
 import { outline } from './sheets/parse/css-outline-wasm';
 import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/watch/cssom-watch';
@@ -179,6 +180,11 @@ export function registerCss(ctx: Context) {
   let stopAdopted: (() => void) | null = null;
   let stopCssom: (() => void) | null = null;
   let stopRevised: (() => void) | null = null;
+  /** Checks and pairs the texts of this session's sheets while the page is idle (warm.ts). */
+  const warmer = {
+    warm: (sheet: CSSStyleSheet) => void (known.has(sheet) && sheets.sourceOf(sheet)),
+    cold: (sheet: CSSStyleSheet) => (known.has(sheet) ? sheets.texts.coldLength(sheet) : 0),
+  };
 
   function header(sheet: CSSStyleSheet) {
     const h = sheets.header(sheet);
@@ -197,7 +203,12 @@ export function registerCss(ctx: Context) {
   function reportSheets() {
     const scoped = sheets.scoped();
     const current = new Set(scoped.map(s => s.sheet));
-    for (const sheet of current) if (!known.has(sheet)) session.emit('CSS.styleSheetAdded', { header: header(sheet) });
+    const added: CSSStyleSheet[] = [];
+    for (const sheet of current)
+      if (!known.has(sheet)) {
+        session.emit('CSS.styleSheetAdded', { header: header(sheet) });
+        added.push(sheet);
+      }
     for (const sheet of known)
       if (!current.has(sheet)) {
         session.emit('CSS.styleSheetRemoved', { styleSheetId: sheets.idOf(sheet) });
@@ -207,6 +218,8 @@ export function registerCss(ctx: Context) {
     for (const sheet of changedUnseen)
       if (current.has(sheet)) session.emit('CSS.styleSheetChanged', { styleSheetId: sheets.idOf(sheet) });
     changedUnseen.clear();
+    // Their texts were taken for their headers unchecked: checked and paired while idle.
+    if (added.length) warmUp(warmer, added);
     // Every session's observer reports the same change: the shared companions are rebuilt once.
     if (forced.isActive) forced.schedule();
     else forced.reattach();
@@ -601,6 +614,7 @@ export function registerCss(ctx: Context) {
       stopCssom = null;
       stopRevised?.();
       stopRevised = null;
+      stopWarming(warmer);
       updates.stop();
     },
 

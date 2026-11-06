@@ -258,6 +258,18 @@ export class SheetTexts {
     return rec.source ? rec.source : { text: rec.text };
   }
 
+  /**
+   * Whether `source` has work to do for the sheet (checking or pairing its recorded text): the
+   * length of that text then, 0 otherwise. What warming up (warm.ts) looks at.
+   */
+  coldLength(sheet: CSSStyleSheet): number {
+    if (this.stale.has(sheet)) return 0;
+    const rec = this.recordOf(sheet);
+    if (!rec || rec.pending) return 0;
+    const seen = rec.seen === this.unseenTimes;
+    return seen && rec.source !== undefined ? 0 : rec.text.length;
+  }
+
   /** Listeners told of a sheet whose header text turned out not to be its text (`revise`). */
   private revised = new Set<(sheet: CSSStyleSheet) => void>();
 
