@@ -15,6 +15,8 @@ export { Tok, type TokKind, type Tokens } from './css-lexer';
 const IN = 0x20000;
 /** Code units of 0 the module expects after the text. */
 const PAD = 4;
+/** Code units `copyIn` encodes as bytes at a time (16 KB: a few microseconds of encodeInto). */
+const CHUNK = 0x4000;
 /** Texts shorter than this go to the TypeScript lexer: about where the two take as long (bench/README.md). */
 export const WASM_MIN_LENGTH = 64;
 
@@ -81,17 +83,33 @@ export function copyIn(w: Exports, text: string, wide = false): Layout {
   const have = w.m.buffer.byteLength;
   if (need > have) w.m.grow(Math.ceil((need - have) / 0x10000));
   const buf = w.m.buffer;
+  const u16 = new Uint16Array(buf, IN, len + PAD);
+  // The code units before `from` are in place as UTF-16.
+  let from = 0;
   if (!wide) {
     const u8 = new Uint8Array(buf, IN, len + PAD);
     encoder ??= new TextEncoder();
-    const { read, written } = encoder.encodeInto(text, u8.subarray(0, len));
-    if (read === len && written === len) {
+    // In chunks, so that a code unit past ASCII stops the bytes after one chunk at most, not after
+    // encoding the whole text in vain.
+    let at = 0;
+    for (; at < len; at += CHUNK) {
+      const end = Math.min(at + CHUNK, len);
+      const { read, written } = encoder.encodeInto(
+        at === 0 && end === len ? text : text.slice(at, end),
+        u8.subarray(at, end)
+      );
+      if (read !== end - at || written !== end - at) break;
+    }
+    if (at >= len) {
       u8.fill(0, len);
       return { len, narrow: true, kindsAt, startsAt };
     }
+    // The chunks before are ASCII: widened in place, from the last code unit (whose two bytes lie
+    // at or past its byte) down, so that no byte is overwritten before it is read.
+    for (let i = at - 1; i >= 0; i--) u16[i] = u8[i] as number;
+    from = at;
   }
-  const u16 = new Uint16Array(buf, IN, len + PAD);
-  for (let i = 0; i < len; i++) u16[i] = text.charCodeAt(i);
+  for (let i = from; i < len; i++) u16[i] = text.charCodeAt(i);
   u16.fill(0, len);
   return { len, narrow: false, kindsAt, startsAt };
 }

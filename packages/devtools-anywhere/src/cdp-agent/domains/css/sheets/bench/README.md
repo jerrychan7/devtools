@@ -92,7 +92,7 @@ node lexer-compare.bench.ts --rev cb7f711~1 --wasm
 
 The rows `--wasm` adds, each on any text whatever its length:
 
-- **wasm**: all of it, as `tokenize` does: the text copied in, lexed, and the tokens copied out. An all-ASCII text is copied in with `TextEncoder.encodeInto`, one byte per code unit; any other is copied as UTF-16 code unit by code unit, after `encodeInto` has found it is not ASCII.
+- **wasm**: all of it, as `tokenize` does: the text copied in, lexed, and the tokens copied out. An all-ASCII text is copied in with `TextEncoder.encodeInto`, one byte per code unit; any other is copied as UTF-16 code unit by code unit. `encodeInto` takes 16 K code units at a time, so that a text past ASCII stops it after one such chunk, the chunks before widened to UTF-16 in place.
 - **wasm utf16**: the same, with the text copied in as UTF-16 even when it is ASCII.
 - **wasm copy in**, **wasm lex**, **wasm lex utf16**, **wasm copy out**: each stage alone.
 
@@ -111,9 +111,9 @@ Same machine, `node --expose-gc lexer.bench.ts --wasm --runs 2` at the commit th
 | | copy in / lex / lex utf16 / copy out | 0.001 / 0.069 / 0.071 / 0.005 |
 | | read-only floor | 0.088 |
 | mixed | TypeScript | 0.570 |
-| | wasm | 0.443 |
+| | wasm | 0.345 |
 | | wasm utf16 | 0.320 |
-| | copy in / lex / lex utf16 / copy out | 0.280 / 0.136 / 0.136 / 0.008 |
+| | copy in / lex / lex utf16 / copy out | 0.194 / 0.136 / 0.137 / 0.008 |
 | | read-only floor | 0.168 |
 | all.css | TypeScript | 0.692 |
 | | wasm | 0.219 |
@@ -121,4 +121,4 @@ Same machine, `node --expose-gc lexer.bench.ts --wasm --runs 2` at the commit th
 | | copy in / lex / lex utf16 / copy out | 0.003 / 0.207 / 0.210 / 0.009 |
 | | read-only floor | 0.150 |
 
-`mixed` is not ASCII, so its copy in is the failed `encodeInto` and the UTF-16 copy. The result keeps 5.0 bytes per token, as the TypeScript lexer's does, and one call allocates nothing else on the JavaScript heap. `node lexer-compare.bench.ts --rev cb7f711~1 --wasm`: same tokens on 3,048,580 texts, both ways of copying in.
+`mixed` is not ASCII, so its copy in is the UTF-16 copy, after `encodeInto` stopped in the first chunk; its rows are those of the commit that encodes in chunks (0.443 and 0.280 before, when `encodeInto` went through the whole text in vain). The result keeps 5.0 bytes per token, as the TypeScript lexer's does, and one call allocates nothing else on the JavaScript heap. `node lexer-compare.bench.ts --rev cb7f711~1 --wasm`: same tokens on 3,048,580 texts, both ways of copying in.

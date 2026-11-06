@@ -47,7 +47,11 @@ test('the same tokens as the TypeScript lexer, copied in as bytes or as UTF-16',
   const mod = await load();
   const w = mod.wasmExports();
   assert.ok(w);
-  for (const text of [...texts, long, long.replace(/é/g, 'e'), 'x'.repeat(200000)]) {
+  // ASCII in chunks of 0x4000 code units: past ASCII in a later chunk, at the very end, and a
+  // surrogate pair split across two chunks, after ASCII chunks to widen in place.
+  const ascii = 'a { b: c } .d-1 '.repeat(0x1000);
+  const chunked = [`${ascii}é${ascii}`, `${ascii}\u{1f600}`, `${ascii.slice(0, 0x4000 * 2 - 1)}\u{1f600}${ascii}`];
+  for (const text of [...texts, long, long.replace(/é/g, 'e'), 'x'.repeat(200000), ...chunked]) {
     const expected = tokenizeTs(text);
     for (const wide of [false, true]) {
       const at = mod.copyIn(w, text, wide);
