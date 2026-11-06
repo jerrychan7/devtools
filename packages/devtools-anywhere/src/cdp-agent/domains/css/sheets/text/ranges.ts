@@ -107,8 +107,12 @@ export function sourceStyle(
     const comment = o.commented(d);
     const dStart = o.declStart(d);
     // Like Chrome, a comment is a disabled declaration only of a property it knows: the rule's
-    // style has an attribute for each (`margin-top`, …).
-    if (comment && !text.startsWith('--', dStart) && !(text.slice(dStart, o.nameEnd(d)).toLowerCase() in decl))
+    // style has a string attribute for each (`margin-top`, …), not `length` or `item`.
+    if (
+      comment &&
+      !text.startsWith('--', dStart) &&
+      typeof Reflect.get(decl, text.slice(dStart, o.nameEnd(d)).toLowerCase()) !== 'string'
+    )
       continue;
     const [start, span] = declSpan(text, o, d);
     const semicolon = o.semicolon(d);

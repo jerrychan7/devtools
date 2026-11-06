@@ -64,6 +64,8 @@ const copies = new WeakMap<CSSStyleSheet, CSSStyleSheet>();
 const failed = new WeakMap<CSSStyleSheet, number>();
 /** Fetches in progress, whichever session started them. */
 const loading = new Map<CSSStyleSheet, Promise<void>>();
+/** The listeners told of each copy being loaded, each once, whichever session's fetch it was. */
+const waiting = new Map<CSSStyleSheet, Set<(sheet: CSSStyleSheet) => void>>();
 const nextRuleId = new WeakMap<CSSStyleSheet, number>();
 
 export class SheetRegistry {
@@ -238,10 +240,10 @@ export class SheetRegistry {
       const href = sheet.href;
       const unseen = this.texts.unseenCount;
       if (!href || this.texts.has(sheet) || copies.get(sheet) || failed.get(sheet) === unseen) continue;
-      // Another session's fetch: this one is told of the copy too.
-      const pending = loading.get(sheet);
-      if (pending) {
-        void pending.then(() => copies.get(sheet) && onLoaded(sheet));
+      // A fetch under way (this session's or another's): this one is told of the copy too, once.
+      const listeners = waiting.get(sheet);
+      if (listeners) {
+        listeners.add(onLoaded);
         continue;
       }
       let readable = true;
@@ -250,6 +252,10 @@ export class SheetRegistry {
       } catch {
         readable = false;
       }
+      const told = new Set([onLoaded]);
+      waiting.set(sheet, told);
+      // The text recorded meanwhile (an edit, the page's change) is newer than the file's.
+      const generation = this.texts.generation(sheet);
       const load = this.fetch(href, readable ? { cache: 'force-cache' } : { credentials: 'omit' })
         .then(res => (res.ok ? res.text() : Promise.reject(new Error(res.statusText))))
         .then(text => {
@@ -258,13 +264,16 @@ export class SheetRegistry {
             copy.replaceSync(text);
             copies.set(sheet, copy);
           }
-          this.texts.set(sheet, text, true);
+          if (!this.texts.has(sheet) && this.texts.generation(sheet) === generation) this.texts.set(sheet, text, true);
           // A readable sheet's rules were there already: only a copy brings new ones.
-          if (!readable) onLoaded(sheet);
+          if (!readable) for (const listener of told) listener(sheet);
         })
         // Tried again only after a time unwatched: a readable sheet keeps its serialized text.
         .catch(() => void failed.set(sheet, unseen))
-        .finally(() => loading.delete(sheet));
+        .finally(() => {
+          loading.delete(sheet);
+          waiting.delete(sheet);
+        });
       loading.set(sheet, load);
     }
     return Promise.all(loading.values()).then(() => {});

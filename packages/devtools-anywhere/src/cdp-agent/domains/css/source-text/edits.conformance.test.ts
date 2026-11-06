@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
-import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
+import type { Env, EventName, EventParams, Side, TestPage } from '../../../../../test-support/conformance.ts';
 import { addStyle, matched, nodeId, rule, style } from '../../../../../test-support/css-source.ts';
 
 let env: Env | undefined;
@@ -48,6 +48,14 @@ async function each<T>(fn: (side: Side, t: TestPage) => Promise<T>): Promise<[T,
   const [a, b] = sides;
   assert.ok(a && b);
   return [await fn(a.side, a.t), await fn(b.side, b.t)];
+}
+
+/** The events of `method` since the last clear, once there is one (polled: they come over CDP). */
+async function arrived<E extends EventName>(side: Side, method: E): Promise<EventParams<E>[]> {
+  for (let deadline = Date.now() + 5000; ; await new Promise(r => setTimeout(r, 20))) {
+    const events = await side.events(method);
+    if (events.length || Date.now() > deadline) return events;
+  }
 }
 
 const text = (side: Side, styleSheetId: string) =>
@@ -94,6 +102,31 @@ test('setStyleTexts replaces the range only, keeps textContent, sends no styleSh
   assert.deepEqual(ours, chrome);
   assert.equal(ours.after.changed, 0);
   assert.equal(ours.after.textContent, CSS);
+});
+
+test('setStyleTexts is all or none: an edit failing takes back those before it', async () => {
+  const [ours, chrome] = await each(async (side, t) => {
+    const before = strip(await state(side, t));
+    const { sheet, rules } = await rawRules(side);
+    const raw = rules.find(r => r.style.cssText?.includes('left'));
+    const selector = raw?.selectorList.selectors[0]?.range;
+    assert.ok(raw?.style.range && selector);
+    const error = await side
+      .send('CSS.setStyleTexts', {
+        edits: [
+          { styleSheetId: sheet, range: raw.style.range, text: ' left: 4px ' },
+          // A selector's range: no style's.
+          { styleSheetId: sheet, range: selector, text: 'color: green' },
+        ],
+      })
+      .then(
+        () => 'ok',
+        (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+      );
+    return { error, unchanged: JSON.stringify(strip(await state(side, t))) === JSON.stringify(before) };
+  });
+  assert.deepEqual(ours, chrome);
+  assert.equal(ours.unchanged, true);
 });
 
 /** The raw rules of the edited sheet matching #e1. */
@@ -206,8 +239,7 @@ test('changes through the CSSOM: styleSheetChanged, same id; replaceSync gives t
       const r = s.sheet.cssRules[0];
       if (r instanceof CSSStyleRule) r.style.setProperty('margin', '3px');
     });
-    await new Promise(r => setTimeout(r, 100));
-    const changed = (await side.events('CSS.styleSheetChanged')).map(e => e.styleSheetId === sheet);
+    const changed = (await arrived(side, 'CSS.styleSheetChanged')).map(e => e.styleSheetId === sheet);
     // A constructed sheet's text is the one replaceSync gets.
     await side.clear();
     await t.page.evaluate(() => {
@@ -215,21 +247,19 @@ test('changes through the CSSOM: styleSheetChanged, same id; replaceSync gives t
       c.replaceSync('.x { color: red }');
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, c];
     });
-    await new Promise(r => setTimeout(r, 100));
-    const added = (await side.events('CSS.styleSheetAdded')).map(e => e.header.styleSheetId);
+    const added = (await arrived(side, 'CSS.styleSheetAdded')).map(e => e.header.styleSheetId);
     const id = added[added.length - 1];
     assert.ok(id);
     await side.clear();
     await t.page.evaluate(() => document.adoptedStyleSheets.at(-1)?.replaceSync('/*c*/ .ctor { color: teal }'));
-    await new Promise(r => setTimeout(r, 100));
-    const replaced = (await side.events('CSS.styleSheetChanged')).map(e => e.styleSheetId === id);
+    const replaced = (await arrived(side, 'CSS.styleSheetChanged')).map(e => e.styleSheetId === id);
     // Setting a <style>'s text makes another sheet, with another id.
     await side.clear();
     await t.page.evaluate(() => {
       const s = document.getElementById('edited');
       if (s) s.textContent = '.t1 { color: olive }';
     });
-    await new Promise(r => setTimeout(r, 100));
+    await arrived(side, 'CSS.styleSheetAdded');
     const removed = (await side.events('CSS.styleSheetRemoved')).map(e => e.styleSheetId === sheet);
     const readded = (await side.events('CSS.styleSheetAdded')).map(e => e.header.styleSheetId !== sheet);
     const gone = await text(side, sheet).then(

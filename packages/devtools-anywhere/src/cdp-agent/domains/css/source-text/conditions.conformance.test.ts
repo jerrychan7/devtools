@@ -89,6 +89,32 @@ test('the @keyframes of an animation: its name, keys and styles where they are w
   assert.deepEqual(ours, chrome);
 });
 
+test('the @keyframes of an animation: those in a media that does not apply or a disabled sheet are passed over', async () => {
+  const [ours, chrome] = await each(async (side, t) => {
+    await t.page.evaluate(() => {
+      const add = (css: string) => {
+        const s = document.createElement('style');
+        s.className = 'kf-extra';
+        s.textContent = css;
+        document.head.appendChild(s);
+        return s;
+      };
+      add('@media print { @keyframes kf { from { opacity: 0.2 } } }');
+      add('@keyframes kf { from { opacity: 0.3 } }');
+      const disabled = add('@keyframes kf { from { opacity: 0.4 } }').sheet;
+      if (disabled) disabled.disabled = true;
+      // Chrome looks in the rules of the last style update: one made now.
+      void getComputedStyle(document.body).opacity;
+    });
+    try {
+      return keyframes((await raw(side)).cssKeyframesRules).map(k => k.keyframes.map(f => f.style));
+    } finally {
+      await t.page.evaluate(() => document.querySelectorAll('.kf-extra').forEach(s => s.remove()));
+    }
+  });
+  assert.deepEqual(ours, chrome);
+});
+
 test('setKeyframeKey writes the key as given', async () => {
   const [ours, chrome] = await each(async side => {
     const res = await raw(side);
@@ -103,6 +129,24 @@ test('setKeyframeKey writes the key as given', async () => {
       kf: keyframes((await raw(side)).cssKeyframesRules),
     };
   });
+  assert.deepEqual(ours, chrome);
+});
+
+// Before the loop below: Chrome reports no range for an @supports once it has been edited.
+test('setSupportsText with a condition that leaves the rule unparsable fails and keeps the rule', async () => {
+  const [ours, chrome] = await each(async side => {
+    const res = await raw(side);
+    const at = res.matchedCSSRules?.map(m => m.rule.supports?.[0]).find(x => x?.range);
+    assert.ok(at?.range && at.styleSheetId);
+    const failed = await side
+      .send('CSS.setSupportsText', { styleSheetId: at.styleSheetId, range: at.range, text: '(a) {} .x' })
+      .then(
+        () => false,
+        () => true
+      );
+    return { failed, after: await after(side) };
+  });
+  assert.equal(ours.failed, true);
   assert.deepEqual(ours, chrome);
 });
 

@@ -75,6 +75,17 @@ test('nesting', () =>
 test('nested declarations', () =>
   same(`.n3 { color: red; & .x { color: blue; } opacity: .5;  margin: 1px }`, '<p class="n3">x</p>', '.n3'));
 
+// Chrome lists the invalid run as a rule of its own (`color: 1px!!;`) though the CSSOM has no
+// CSSNestedDeclarations for it, which we cannot pair a rule with: only the valid run is ours.
+test(
+  'nested declarations: a run of invalid ones the CSSOM dropped, then a valid run of the same property',
+  { todo: 'Chrome reports the dropped run as a rule the CSSOM lacks' },
+  () => same(`.n4 { b {} color: 1px!!; c {} color: red }`, '<p class="n4">x</p>', '.n4')
+);
+
+test('comments named after members of a style that are no properties: `length`, `item`', () =>
+  same(`.m1 { /* length: 1 */ /* item: x */ /* constructor: y */ color: red }`, '<p class="m1">x</p>', '.m1'));
+
 test('error recovery: a block left open', () =>
   same(`.e1 { color: red }\n.e1 {{ broken }\n.e1 { top: 1px }`, '<p class="e1">x</p>', '.e1'));
 
