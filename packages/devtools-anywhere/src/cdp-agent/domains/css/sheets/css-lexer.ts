@@ -40,9 +40,9 @@ export const Tok = {
 export type TokKind = (typeof Tok)[keyof typeof Tok];
 
 export interface Tokens {
-  kinds: TokKind[];
+  kinds: Uint8Array & { readonly [i: number]: TokKind };
   /** One more than `kinds`: the last entry is the end of the text. */
-  starts: number[];
+  starts: Uint32Array;
 }
 
 const isNewline = (c: number) => c === 10 || c === 13 || c === 12;
@@ -231,8 +231,10 @@ export function tokenize(text: string): Tokens {
     if (identStart(p)) name();
     else if (at(p) === 37) p++;
   };
-  const kinds: TokKind[] = [];
-  const starts: number[] = [];
+  // Every token is at least one code unit long, so `len` tokens is the most there can be.
+  const kinds = new Uint8Array(len);
+  const starts = new Uint32Array(len + 1);
+  let n = 0;
   while (p < len) {
     const s = p;
     const c = at(p);
@@ -320,9 +322,9 @@ export function tokenize(text: string): Tokens {
         p++;
         k = single[c] as TokKind; // c < 128: higher code points start names
     }
-    kinds.push(k);
-    starts.push(s);
+    kinds[n] = k;
+    starts[n++] = s;
   }
-  starts.push(len);
-  return { kinds, starts };
+  starts[n] = len;
+  return { kinds: kinds.slice(0, n) as Tokens['kinds'], starts: starts.slice(0, n + 1) };
 }

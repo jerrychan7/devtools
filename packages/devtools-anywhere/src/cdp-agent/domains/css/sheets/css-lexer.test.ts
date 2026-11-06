@@ -9,7 +9,7 @@ function toks(text: string): string[] {
   const { kinds, starts } = tokenize(text);
   assert.equal(starts.length, kinds.length + 1);
   assert.equal(starts[starts.length - 1], text.length);
-  return kinds.map((k, i) => `${names[k]}:${text.slice(starts[i], starts[i + 1])}`);
+  return Array.from(kinds, (k, i) => `${names[k as TokKind]}:${text.slice(starts[i], starts[i + 1])}`);
 }
 
 test('comments, including one the text ends in', () => {
