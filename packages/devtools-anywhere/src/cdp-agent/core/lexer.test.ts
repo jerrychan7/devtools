@@ -8,6 +8,7 @@ import * as acorn from 'acorn';
 import {
   debuggerStatementSites,
   debuggerStatements,
+  Kind,
   lastExpressionStatement,
   returnOutsideFunction,
   topLevelLexicalNames,
@@ -18,10 +19,13 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 test('regex vs division', () => {
-  const kinds = (s: string) =>
-    tokenize(s)
-      .filter(t => t.kind === 'regex')
-      .map(t => s.slice(t.start, t.end));
+  const kinds = (s: string) => {
+    const tokens = tokenize(s);
+    const regexes: string[] = [];
+    for (let i = 0; i < tokens.length; i++)
+      if (tokens.kinds[i] === Kind.Regex) regexes.push(s.slice(tokens.starts[i], tokens.ends[i]));
+    return regexes;
+  };
   assert.deepEqual(kinds('a = (b) / 2 / c'), []);
   assert.deepEqual(kinds('a = x[0] / 2 / c'), []);
   assert.deepEqual(kinds('if (x) /re/.test(y)'), ['/re/']);
@@ -40,6 +44,21 @@ test('regex vs division', () => {
   assert.deepEqual(kinds('for (const a of /re/g.exec(s)) {}'), ['/re/g']);
   assert.deepEqual(kinds('`a${ `b${ /c/ }` }d` / 2'), ['/c/']);
   assert.deepEqual(kinds('x = `${a}` / 2'), []);
+});
+
+test('token arrays grow past their first guess and keep every field', () => {
+  // A token per code unit: three times what the arrays are first sized for.
+  const source = 'a;'.repeat(50_000) + '\n`x${1}y`';
+  const tokens = tokenize(source);
+  assert.equal(tokens.length, 100_003);
+  assert.equal(tokens.kinds.length, tokens.length);
+  assert.deepEqual([tokens.kinds[99_999], tokens.starts[99_999], tokens.ends[99_999]], [Kind.Punct, 99_999, 100_000]);
+  const last = tokens.length - 1;
+  assert.deepEqual(
+    [tokens.kinds[last], tokens.starts[last], tokens.ends[last], tokens.depths[last], tokens.newlines[last]],
+    [Kind.Template, 100_006, 100_009, 1, 0]
+  );
+  assert.equal(tokens.newlines[100_000], 1);
 });
 
 test('top-level lexical names', () => {

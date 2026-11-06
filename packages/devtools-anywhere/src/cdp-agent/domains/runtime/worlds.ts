@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Frame, FrameRegistry } from '../../core/frames/frames';
 import { isNode, realmOf } from '../../core/realm';
-import { tokenize } from '../../core/lexer';
+import { Kind, tokenize } from '../../core/lexer';
 import { CdpError, type CdpSession } from '../../core/session';
 
 /**
@@ -73,34 +73,32 @@ function rewriteTypeof(code: string): string {
   if (!code.includes('typeof')) return code;
   const tokens = tokenize(code);
   const text = (k: number) => {
-    const token = tokens[k];
-    return token ? code.slice(token.start, token.end) : '';
+    const start = tokens.starts[k];
+    return start === undefined ? '' : code.slice(start, tokens.ends[k]);
   };
   let out = '';
   let at = 0;
   for (let i = 0; i < tokens.length; i++) {
-    const op = tokens[i];
-    if (!op || op.kind !== 'word' || text(i) !== 'typeof') continue;
+    if (tokens.kinds[i] !== Kind.Word || text(i) !== 'typeof') continue;
     // The name, in as many parentheses as there are: `typeof (name)`.
     let open = 0;
     while (text(i + 1 + open) === '(') open++;
-    const name = tokens[i + 1 + open];
     const word = text(i + 1 + open);
-    if (!name || name.kind !== 'word' || !IDENTIFIER.test(word) || NOT_NAMES.has(word)) continue;
+    if (tokens.kinds[i + 1 + open] !== Kind.Word || !IDENTIFIER.test(word) || NOT_NAMES.has(word)) continue;
     let close = 0;
     while (close < open && text(i + 2 + open + close) === ')') close++;
     if (close !== open) continue;
     // A member, a call, an optional chain, a tagged template or a postfix update right after it:
     // `typeof` applies to more than the name. `++` on the next line starts another statement.
     const end = i + 2 + open + close;
-    const next = tokens[end];
-    const after = next ? code.slice(next.start, next.start + 3) : '';
+    const next = tokens.starts[end];
+    const after = next === undefined ? '' : code.slice(next, next + 3);
     if (/^(\.|\[|\(|\?\.(?!\d)|`)/.test(after)) continue;
-    if (/^(\+\+|--)/.test(after) && !next?.newline) continue;
-    const last = tokens[end - 1];
-    if (!last) continue;
-    out += `${code.slice(at, op.start)}${TYPEOF}(() => ${word})`;
-    at = last.end;
+    if (/^(\+\+|--)/.test(after) && tokens.newlines[end] !== 1) continue;
+    const last = tokens.ends[end - 1];
+    if (last === undefined) continue;
+    out += `${code.slice(at, tokens.starts[i])}${TYPEOF}(() => ${word})`;
+    at = last;
     i = end - 1;
   }
   return out + code.slice(at);

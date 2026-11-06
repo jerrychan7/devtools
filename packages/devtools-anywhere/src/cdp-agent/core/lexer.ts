@@ -48,26 +48,39 @@ export const Open = {
 } as const;
 export type Open = (typeof Open)[keyof typeof Open];
 
-export type TokenKind = 'word' | 'punct' | 'string' | 'template' | 'regex';
+/** What a token is. */
+export const Kind = {
+  Word: 0,
+  Punct: 1,
+  String: 2,
+  Template: 3,
+  Regex: 4,
+} as const;
+export type Kind = (typeof Kind)[keyof typeof Kind];
 
-export interface Token {
-  kind: TokenKind;
-  start: number;
+/**
+ * The tokens of a source, one array per field (token `i` is element `i` of each). A bundle has
+ * millions of tokens: typed arrays keep them in about 15 bytes each, where objects took 80.
+ */
+export interface Tokens {
+  length: number;
+  kinds: Uint8Array;
+  starts: Int32Array;
   /** Exclusive. */
-  end: number;
+  ends: Int32Array;
   /** Open brackets around the token; an opener and its closer share their depth. */
-  depth: number;
-  /** The innermost open bracket around the token. */
-  parent: Open;
-  /** A line terminator comes between the previous token and this one. */
-  newline: boolean;
+  depths: Int32Array;
+  /** The innermost open bracket around the token (an `Open`). */
+  parents: Uint8Array;
+  /** 1 when a line terminator comes between the previous token and this one. */
+  newlines: Uint8Array;
 }
 
 export interface LexOptions {
   /** Module code: no HTML-like comments. */
   module?: boolean;
   /** The tokens of the source, already lexed with the same options: reused instead of lexing again. */
-  tokens?: Token[];
+  tokens?: Tokens;
 }
 
 interface OpenToken {
@@ -76,8 +89,11 @@ interface OpenToken {
   pos: number;
 }
 
+/** Takes each token as it is lexed, instead of the token list. */
+type Sink = (kind: Kind, start: number, end: number, parent: Open, newline: boolean) => void;
+
 /** Tokenizes `source`. Never throws: on a syntax error it recovers and goes on. */
-export function tokenize(source: string, options: LexOptions = {}): Token[] {
+export function tokenize(source: string, options: LexOptions = {}): Tokens {
   return options.tokens ?? new Lexer(source, options.module === true).run();
 }
 
@@ -93,15 +109,55 @@ class Lexer {
   private readonly stack: OpenToken[] = [];
   private depth = 0;
   private newline = false;
-  private readonly tokens: Token[] = [];
-  /** Takes each token instead of the token list. */
-  private readonly sink: ((token: Token) => void) | undefined;
+  /** Tokens kept so far; stays 0 with a sink. */
+  private count = 0;
+  private kinds: Uint8Array;
+  private starts: Int32Array;
+  private ends: Int32Array;
+  private depths: Int32Array;
+  private parents: Uint8Array;
+  private newlines: Uint8Array;
+  private readonly sink: Sink | undefined;
 
-  constructor(source: string, module: boolean, sink?: (token: Token) => void) {
+  constructor(source: string, module: boolean, sink?: Sink) {
     this.src = source;
     this.module = module;
     this.end = source.length;
     this.sink = sink;
+    // A token every 4 to 5 code units in minified code: most sources never grow the arrays.
+    const capacity = sink ? 0 : Math.ceil(source.length / 3) + 16;
+    this.kinds = new Uint8Array(capacity);
+    this.starts = new Int32Array(capacity);
+    this.ends = new Int32Array(capacity);
+    this.depths = new Int32Array(capacity);
+    this.parents = new Uint8Array(capacity);
+    this.newlines = new Uint8Array(capacity);
+  }
+
+  private grow() {
+    const n = this.kinds.length * 2;
+    this.kinds = resized(this.kinds, n);
+    this.starts = resized(this.starts, n);
+    this.ends = resized(this.ends, n);
+    this.depths = resized(this.depths, n);
+    this.parents = resized(this.parents, n);
+    this.newlines = resized(this.newlines, n);
+  }
+
+  /** The tokens kept, in arrays of their length: copied when the spare room is worth freeing. */
+  private result(): Tokens {
+    const n = this.count;
+    const copy = this.kinds.length - n > n >> 3;
+    const cut = <T extends Uint8Array | Int32Array>(a: T): T => (copy ? a.slice(0, n) : a.subarray(0, n)) as T;
+    return {
+      length: n,
+      kinds: cut(this.kinds),
+      starts: cut(this.starts),
+      ends: cut(this.ends),
+      depths: cut(this.depths),
+      parents: cut(this.parents),
+      newlines: cut(this.newlines),
+    };
   }
 
   /** The code unit at `i`, 0 outside the source (lexer.c pads its buffer the same way). */
@@ -118,22 +174,24 @@ class Lexer {
     this.stack[this.depth++] = { token, pos };
   }
 
-  private emit(kind: TokenKind, start: number, end: number, depth: number) {
-    const token: Token = {
-      kind,
-      start,
-      end,
-      depth,
-      parent: depth > 0 ? this.top(depth - 1).token : Open.None,
-      newline: this.newline,
-    };
-    if (this.sink) this.sink(token);
-    else this.tokens.push(token);
+  private emit(kind: Kind, start: number, end: number, depth: number) {
+    const parent = depth > 0 ? this.top(depth - 1).token : Open.None;
+    if (this.sink) this.sink(kind, start, end, parent, this.newline);
+    else {
+      const i = this.count++;
+      if (i === this.kinds.length) this.grow();
+      this.kinds[i] = kind;
+      this.starts[i] = start;
+      this.ends[i] = end;
+      this.depths[i] = depth;
+      this.parents[i] = parent;
+      this.newlines[i] = this.newline ? 1 : 0;
+    }
     this.newline = false;
   }
 
   /** lexer.c `parse` (main loop only). */
-  run(): Token[] {
+  run(): Tokens {
     if (this.c(0) === 35 /* # */ && this.c(1) === 33 /* ! */) {
       this.pos = 2;
       this.lineComment();
@@ -146,13 +204,13 @@ class Lexer {
       }
       this.consumeToken(ch);
     }
-    return this.tokens;
+    return this.result();
   }
 
   /** lexer.c `consumeToken`, without the import / export and TypeScript cases. */
   private consumeToken(ch: number) {
     const start = this.pos;
-    let kind: TokenKind = 'punct';
+    let kind: Kind = Kind.Punct;
     let depth = this.depth;
     switch (ch) {
       case 99 /* c */:
@@ -164,7 +222,7 @@ class Lexer {
           (isBrOrWs(this.c(this.pos + 5)) || this.c(this.pos + 5) === 123) /* { */
         )
           this.classDepth = this.depth;
-        kind = 'word';
+        kind = Kind.Word;
         this.skipTokenRun();
         break;
       case 40 /* ( */:
@@ -188,7 +246,7 @@ class Lexer {
         if (this.depth === 0) break;
         depth = --this.depth;
         if (this.top(this.depth).token === Open.TemplateBrace) {
-          this.emit('template', start, start + 1, depth);
+          this.emit(Kind.Template, start, start + 1, depth);
           this.templateString(start);
           this.lastTokenPos = this.pos;
           return;
@@ -196,7 +254,7 @@ class Lexer {
         break;
       case 39 /* ' */:
       case 34 /* " */:
-        kind = 'string';
+        kind = Kind.String;
         this.stringLiteral(ch);
         break;
       case 47 /* / */: {
@@ -211,7 +269,7 @@ class Lexer {
           return;
         }
         if (this.lastTokenEndsExpression()) {
-          kind = 'regex';
+          kind = Kind.Regex;
           this.regularExpression();
           while (isTokenRunChar(this.c(this.pos + 1))) this.pos++;
           this.lastSlashWasDivision = false;
@@ -221,7 +279,7 @@ class Lexer {
         break;
       }
       case 96 /* ` */:
-        this.emit('template', start, start + 1, depth);
+        this.emit(Kind.Template, start, start + 1, depth);
         this.push(Open.Template, this.lastTokenPos);
         this.templateString(start);
         this.lastTokenPos = this.pos;
@@ -237,7 +295,7 @@ class Lexer {
           !this.module &&
           this.c(this.pos + 1) === 45 &&
           this.c(this.pos + 2) === 62 &&
-          (this.newline || this.tokens.length === 0)
+          (this.newline || this.count === 0)
         ) {
           this.lineComment();
           return;
@@ -245,7 +303,7 @@ class Lexer {
         break;
       default:
         if (!isTokenRunChar(ch)) break;
-        kind = 'word';
+        kind = Kind.Word;
         this.skipTokenRun();
     }
     this.emit(kind, start, this.pos + 1, depth);
@@ -324,8 +382,8 @@ class Lexer {
   }
 
   private extendTemplate(start: number) {
-    const token = this.tokens[this.tokens.length - 1];
-    if (token?.start === start) token.end = Math.min(this.pos + 1, this.end);
+    const last = this.count - 1;
+    if (last >= 0 && this.starts[last] === start) this.ends[last] = Math.min(this.pos + 1, this.end);
   }
 
   /** lexer.c `blockComment`. */
@@ -531,6 +589,13 @@ class Lexer {
   }
 }
 
+/** `array` copied into a new array of `length` elements. */
+function resized<T extends Uint8Array | Int32Array>(array: T, length: number): T {
+  const copy = new (array.constructor as new (length: number) => T)(length);
+  copy.set(array);
+  return copy;
+}
+
 /** lexer.c `isBr`, plus U+2028 / U+2029. */
 function isBr(c: number): boolean {
   return c === 10 || c === 13 || c === 0x2028 || c === 0x2029;
@@ -669,70 +734,77 @@ const CONTINUING_WORDS = new Set([
   'class',
 ]);
 
-/** The token's text, with the `\\uXXXX` / `\\u{…}` escapes of a word decoded. */
-function text(source: string, token: Token | undefined): string {
-  if (token === undefined) return '';
-  const raw = source.slice(token.start, token.end);
-  if (token.kind !== 'word' || !raw.includes('\\')) return raw;
-  return raw.replace(/\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))/g, (escape, braced, plain) => {
-    const code = Number.parseInt(typeof braced === 'string' ? braced : String(plain), 16);
-    return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
-  });
+/** The kind of token `i`, -1 when there is none. */
+function kindAt(tokens: Tokens, i: number): number {
+  return tokens.kinds[i] ?? -1;
 }
 
-function isPunct(source: string, token: Token | undefined, value: string): boolean {
-  return token?.kind === 'punct' && source.charCodeAt(token.start) === value.charCodeAt(0);
+/** Token `i`'s text, with the `\\uXXXX` / `\\u{…}` escapes of a word decoded; '' when there is none. */
+function text(source: string, tokens: Tokens, i: number): string {
+  const kind = tokens.kinds[i];
+  if (kind === undefined) return '';
+  const raw = source.slice(tokens.starts[i], tokens.ends[i]);
+  return kind !== Kind.Word || !raw.includes('\\') ? raw : unescapeWord(raw);
+}
+
+/** Token `i` is the punctuator that starts with `value`'s first character. */
+function isPunct(source: string, tokens: Tokens, i: number, value: string): boolean {
+  return tokens.kinds[i] === Kind.Punct && source.charCodeAt(tokens.starts[i] ?? 0) === value.charCodeAt(0);
+}
+
+/** The first character of token `i`. */
+function charAt(source: string, tokens: Tokens, i: number): string | undefined {
+  return source[tokens.starts[i] ?? -1];
 }
 
 /** The token before `i` can end a statement (so a line break there may insert a semicolon). */
-function canEndStatement(source: string, tokens: Token[], i: number): boolean {
-  const prev = tokens[i - 1];
-  if (prev === undefined) return true;
-  if (prev.kind === 'word') return !CONTINUING_WORDS.has(text(source, prev));
-  if (prev.kind !== 'punct') return true;
-  const ch = source[prev.start];
+function canEndStatement(source: string, tokens: Tokens, i: number): boolean {
+  const prev = kindAt(tokens, i - 1);
+  if (prev === -1) return true;
+  if (prev === Kind.Word) return !CONTINUING_WORDS.has(text(source, tokens, i - 1));
+  if (prev !== Kind.Punct) return true;
+  const ch = charAt(source, tokens, i - 1);
   if (ch === ')' || ch === ']' || ch === '}') return true;
   // Postfix `++` / `--`.
-  return (ch === '+' || ch === '-') && isPunct(source, tokens[i - 2], ch);
+  return (ch === '+' || ch === '-') && isPunct(source, tokens, i - 2, ch);
 }
 
 /** Token `i` can continue the expression before it across a line break. */
-function continuesExpression(source: string, tokens: Token[], i: number): boolean {
-  const token = tokens[i];
-  if (token === undefined) return false;
-  if (token.kind === 'word') {
-    const word = text(source, token);
+function continuesExpression(source: string, tokens: Tokens, i: number): boolean {
+  const kind = kindAt(tokens, i);
+  if (kind === -1) return false;
+  if (kind === Kind.Word) {
+    const word = text(source, tokens, i);
     return word === 'in' || word === 'instanceof';
   }
-  if (token.kind === 'template') return source[token.start] === '`';
-  if (token.kind !== 'punct') return false;
-  const ch = source[token.start];
-  if (ch === '+' || ch === '-') return source[token.start + 1] !== ch;
+  const start = tokens.starts[i] ?? 0;
+  if (kind === Kind.Template) return source[start] === '`';
+  if (kind !== Kind.Punct) return false;
+  const ch = source[start];
+  if (ch === '+' || ch === '-') return source[start + 1] !== ch;
   // A closer ends a bracket opened earlier on: the expression goes on.
   return ch !== '!' && ch !== '~' && ch !== ';' && ch !== '{';
 }
 
 /** Token `i` begins a statement at its depth. */
-function statementStart(source: string, tokens: Token[], i: number): boolean {
-  const prev = tokens[i - 1];
-  const token = tokens[i];
-  if (prev === undefined || token === undefined) return true;
-  if (isPunct(source, prev, ';') || isPunct(source, prev, '}')) return true;
+function statementStart(source: string, tokens: Tokens, i: number): boolean {
+  if (kindAt(tokens, i - 1) === -1 || kindAt(tokens, i) === -1) return true;
+  if (isPunct(source, tokens, i - 1, ';') || isPunct(source, tokens, i - 1, '}')) return true;
   // `export\nconst a`, `export default\nclass A {}`: part of an export declaration.
-  if (prev.kind === 'word' && !isPunct(source, tokens[i - 2], '.')) {
-    const word = text(source, prev);
-    if (word === 'export' || (word === 'default' && text(source, tokens[i - 2]) === 'export')) return false;
+  if (kindAt(tokens, i - 1) === Kind.Word && !isPunct(source, tokens, i - 2, '.')) {
+    const word = text(source, tokens, i - 1);
+    if (word === 'export' || (word === 'default' && text(source, tokens, i - 2) === 'export')) return false;
   }
-  return token.newline && canEndStatement(source, tokens, i);
+  return tokens.newlines[i] === 1 && canEndStatement(source, tokens, i);
 }
 
 /** Acorn's `isLet`: `let` at statement start followed by `[`, `{` or an identifier declares. */
-function isLetDeclaration(source: string, tokens: Token[], i: number): boolean {
-  const next = tokens[i + 1];
-  if (next === undefined) return false;
-  if (isPunct(source, next, '[') || isPunct(source, next, '{')) return true;
-  if (next.kind !== 'word') return false;
-  const word = text(source, next);
+function isLetDeclaration(source: string, tokens: Tokens, i: number): boolean {
+  const next = i + 1;
+  if (kindAt(tokens, next) === -1) return false;
+  if (isPunct(source, tokens, next, '[') || isPunct(source, tokens, next, '{')) return true;
+  if (kindAt(tokens, next) !== Kind.Word) return false;
+  const word = text(source, tokens, next);
   if (/^[0-9]/.test(word)) return false;
   return word !== 'in' && word !== 'instanceof';
 }
@@ -759,33 +831,33 @@ export interface LexicalDeclaration {
 /** The top-level `let`, `const` and `class` declarations, in source order. Best effort on invalid code. */
 export function topLevelLexicalDeclarations(source: string, options: LexOptions = {}): LexicalDeclaration[] {
   const tokens = tokenize(source, options);
+  const { depths, kinds } = tokens;
   const declarations: LexicalDeclaration[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === undefined || token.depth !== 0 || token.kind !== 'word') continue;
-    const kind = text(source, token);
+    if (depths[i] !== 0 || kinds[i] !== Kind.Word) continue;
+    const kind = text(source, tokens, i);
     if (kind !== 'let' && kind !== 'const' && kind !== 'class') continue;
     if (!statementStart(source, tokens, i)) continue;
+    const start = tokens.starts[i] ?? 0;
     const names: string[] = [];
     const bare: string[] = [];
     let last = i;
     if (kind === 'class') {
-      const name = tokens[i + 1];
-      if (name?.kind !== 'word' || text(source, name) === 'extends') continue;
-      names.push(text(source, name));
+      if (kindAt(tokens, i + 1) !== Kind.Word || text(source, tokens, i + 1) === 'extends') continue;
+      names.push(text(source, tokens, i + 1));
       // The class body: the first brace at depth 0, to its closer.
       let j = i + 2;
-      while (j < tokens.length && !(tokens[j]?.depth === 0 && isPunct(source, tokens[j], '{'))) j++;
+      while (j < tokens.length && !(depths[j] === 0 && isPunct(source, tokens, j, '{'))) j++;
       j++;
-      while (j < tokens.length && !(tokens[j]?.depth === 0 && isPunct(source, tokens[j], '}'))) j++;
+      while (j < tokens.length && !(depths[j] === 0 && isPunct(source, tokens, j, '}'))) j++;
       last = Math.min(j, tokens.length - 1);
     } else {
       if (kind === 'let' && !isLetDeclaration(source, tokens, i)) continue;
       const after = readDeclarations(source, tokens, i + 1, names, bare);
-      last = isPunct(source, tokens[after], ';') ? after : after - 1;
+      last = isPunct(source, tokens, after, ';') ? after : after - 1;
       i = last;
     }
-    declarations.push({ kind, names, bare, start: token.start, end: tokens[last]?.end ?? source.length });
+    declarations.push({ kind, names, bare, start, end: tokens.ends[last] ?? source.length });
   }
   return declarations;
 }
@@ -822,24 +894,22 @@ export function lastExpressionStatement(source: string, options: LexOptions = {}
   const tokens = tokenize(source, options);
   let start = -1;
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token?.depth !== 0) continue;
-    const prev = tokens[i - 1];
+    if (tokens.depths[i] !== 0) continue;
     if (
       i === 0 ||
-      isPunct(source, prev, ';') ||
-      (token.newline && canEndStatement(source, tokens, i) && !continuesExpression(source, tokens, i))
+      isPunct(source, tokens, i - 1, ';') ||
+      (tokens.newlines[i] === 1 && canEndStatement(source, tokens, i) && !continuesExpression(source, tokens, i))
     )
       start = i;
   }
-  const first = tokens[start];
-  if (first === undefined || isPunct(source, first, ';') || isPunct(source, first, '{')) return undefined;
-  if (first.kind === 'word') {
-    const word = text(source, first);
+  const first = kindAt(tokens, start);
+  if (first === -1 || isPunct(source, tokens, start, ';') || isPunct(source, tokens, start, '{')) return undefined;
+  if (first === Kind.Word) {
+    const word = text(source, tokens, start);
     // `let` as an identifier, `async` as one, labels: left to a statement, like a declaration.
-    if (STATEMENT_WORDS.has(word) || isPunct(source, tokens[start + 1], ':')) return undefined;
+    if (STATEMENT_WORDS.has(word) || isPunct(source, tokens, start + 1, ':')) return undefined;
   }
-  return first.start;
+  return tokens.starts[start];
 }
 
 /** Words before `(…) {` where the braces are a statement's block, not a function body. */
@@ -853,39 +923,36 @@ const CONTROL_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 
  */
 export function returnOutsideFunction(source: string, options: LexOptions = {}): boolean {
   const tokens = tokenize(source, options);
+  const { depths, kinds } = tokens;
   /** Per depth, what the bracket open at that depth is. */
   const open: ('function' | 'arrow' | 'other')[] = [];
   /** Per depth, the index of the `(` open there. */
   const paren: number[] = [];
-  const word = (i: number) => {
-    const token = tokens[i];
-    return token?.kind === 'word' ? text(source, token) : '';
-  };
+  const word = (i: number) => (kinds[i] === Kind.Word ? text(source, tokens, i) : '');
   const inside = (depth: number, arrows: boolean) =>
     open.slice(0, depth).some(kind => kind === 'function' || (arrows && kind === 'arrow'));
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === undefined) continue;
-    if (token.kind === 'template') {
-      open[token.depth] = 'other';
-      open[token.depth + 1] = 'other';
+    const kind = kinds[i];
+    const depth = depths[i] ?? 0;
+    if (kind === Kind.Template) {
+      open[depth] = 'other';
+      open[depth + 1] = 'other';
       continue;
     }
-    if (token.kind === 'punct') {
-      const ch = source[token.start];
+    if (kind === Kind.Punct) {
+      const ch = charAt(source, tokens, i);
       if (ch === '(') {
-        open[token.depth] = 'other';
-        paren[token.depth] = i;
-      } else if (ch === '[') open[token.depth] = 'other';
+        open[depth] = 'other';
+        paren[depth] = i;
+      } else if (ch === '[') open[depth] = 'other';
       else if (ch === '{') {
-        const prev = tokens[i - 1];
-        let kind: 'function' | 'arrow' | 'other' = 'other';
-        if (isPunct(source, prev, '>') && source[(prev?.start ?? 0) - 1] === '=') kind = 'arrow';
-        else if (isPunct(source, prev, ')') && prev !== undefined) {
-          const before = (paren[prev.depth] ?? 0) - 1;
-          if (!CONTROL_WORDS.has(word(before))) kind = 'function';
+        let opened: 'function' | 'arrow' | 'other' = 'other';
+        if (isPunct(source, tokens, i - 1, '>') && source[(tokens.starts[i - 1] ?? 0) - 1] === '=') opened = 'arrow';
+        else if (isPunct(source, tokens, i - 1, ')')) {
+          const before = (paren[depths[i - 1] ?? 0] ?? 0) - 1;
+          if (!CONTROL_WORDS.has(word(before))) opened = 'function';
         }
-        open[token.depth] = kind;
+        open[depth] = opened;
       }
       continue;
     }
@@ -893,24 +960,18 @@ export function returnOutsideFunction(source: string, options: LexOptions = {}):
     // A property name: `x.return`, `x?.return`, `{ return: 1 }`, a method `return() {}` (its body
     // is a function body like any `(…) {`).
     // Directly in a class body, any word is part of a member's name or modifiers.
-    if (token.parent === Open.ClassBrace) continue;
-    if (isPunct(source, tokens[i - 1], '.') || isPunct(source, tokens[i + 1], ':')) continue;
-    if (value === 'return' && !inside(token.depth, true)) {
+    if (tokens.parents[i] === Open.ClassBrace) continue;
+    if (isPunct(source, tokens, i - 1, '.') || isPunct(source, tokens, i + 1, ':')) continue;
+    if (value === 'return' && !inside(depth, true)) {
       // `return(…) {` is a method named return; only scanned for that word, not every call.
-      if (isPunct(source, tokens[i + 1], '(')) {
+      if (isPunct(source, tokens, i + 1, '(')) {
         let close = i + 2;
-        while (close < tokens.length && !(tokens[close]?.depth === token.depth && isPunct(source, tokens[close], ')')))
-          close++;
-        if (isPunct(source, tokens[close + 1], '{')) continue;
+        while (close < tokens.length && !(depths[close] === depth && isPunct(source, tokens, close, ')'))) close++;
+        if (isPunct(source, tokens, close + 1, '{')) continue;
       }
       return true;
     }
-    if (
-      value === 'new' &&
-      isPunct(source, tokens[i + 1], '.') &&
-      word(i + 2) === 'target' &&
-      !inside(token.depth, false)
-    )
+    if (value === 'new' && isPunct(source, tokens, i + 1, '.') && word(i + 2) === 'target' && !inside(depth, false))
       return true;
   }
   return false;
@@ -921,8 +982,7 @@ export function topLevelVarNames(source: string, options: LexOptions = {}): stri
   const tokens = tokenize(source, options);
   const names: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token?.depth !== 0 || token.kind !== 'word' || text(source, token) !== 'var') continue;
+    if (tokens.depths[i] !== 0 || tokens.kinds[i] !== Kind.Word || text(source, tokens, i) !== 'var') continue;
     if (statementStart(source, tokens, i)) i = readDeclarations(source, tokens, i + 1, names) - 1;
   }
   return names;
@@ -932,13 +992,13 @@ export function topLevelVarNames(source: string, options: LexOptions = {}): stri
  * Reads `a = 1, [b, c] = d, …` from `i`; returns the index after the declaration. `bare` gets the
  * plain names without an initializer.
  */
-function readDeclarations(source: string, tokens: Token[], i: number, names: string[], bare: string[] = []): number {
+function readDeclarations(source: string, tokens: Tokens, i: number, names: string[], bare: string[] = []): number {
   for (;;) {
-    const target = tokens[i];
+    const target = i;
     i = readBindingTarget(source, tokens, i, names);
-    if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, 0);
-    else if (target?.kind === 'word') bare.push(text(source, target));
-    if (isPunct(source, tokens[i], ',') && tokens[i]?.depth === 0) {
+    if (isPunct(source, tokens, i, '=')) i = skipExpression(source, tokens, i + 1, 0);
+    else if (kindAt(tokens, target) === Kind.Word) bare.push(text(source, tokens, target));
+    if (isPunct(source, tokens, i, ',') && tokens.depths[i] === 0) {
       i++;
       continue;
     }
@@ -947,57 +1007,57 @@ function readDeclarations(source: string, tokens: Token[], i: number, names: str
 }
 
 /** An identifier or a destructuring pattern; returns the index after it. */
-function readBindingTarget(source: string, tokens: Token[], i: number, names: string[]): number {
-  const token = tokens[i];
-  if (token === undefined) return i;
-  if (token.kind === 'word') {
+function readBindingTarget(source: string, tokens: Tokens, i: number, names: string[]): number {
+  const kind = kindAt(tokens, i);
+  if (kind === -1) return i;
+  if (kind === Kind.Word) {
     // Only an identifier binds (not `0` in `let[0] = 1`, sloppy code where `let` is a name).
-    const name = text(source, token);
+    const name = text(source, tokens, i);
     if (IDENTIFIER.test(name) && !RESERVED.has(name)) names.push(name);
     return i + 1;
   }
-  if (isPunct(source, token, '[')) return readArrayPattern(source, tokens, i, names);
-  if (isPunct(source, token, '{')) return readObjectPattern(source, tokens, i, names);
+  if (isPunct(source, tokens, i, '[')) return readArrayPattern(source, tokens, i, names);
+  if (isPunct(source, tokens, i, '{')) return readObjectPattern(source, tokens, i, names);
   return i;
 }
 
-function isCloser(source: string, token: Token | undefined, depth: number): boolean {
-  if (token === undefined || token.kind !== 'punct' || token.depth !== depth) return false;
-  const ch = source[token.start];
+function isCloser(source: string, tokens: Tokens, i: number, depth: number): boolean {
+  if (tokens.kinds[i] !== Kind.Punct || tokens.depths[i] !== depth) return false;
+  const ch = charAt(source, tokens, i);
   return ch === ']' || ch === '}' || ch === ')';
 }
 
 /** Skips `...` written as three `.` tokens. */
-function skipSpread(source: string, tokens: Token[], i: number): number {
-  if (isPunct(source, tokens[i], '.') && isPunct(source, tokens[i + 1], '.') && isPunct(source, tokens[i + 2], '.'))
+function skipSpread(source: string, tokens: Tokens, i: number): number {
+  if (isPunct(source, tokens, i, '.') && isPunct(source, tokens, i + 1, '.') && isPunct(source, tokens, i + 2, '.'))
     return i + 3;
   return i;
 }
 
-function readArrayPattern(source: string, tokens: Token[], open: number, names: string[]): number {
-  const depth = tokens[open]?.depth ?? 0;
+function readArrayPattern(source: string, tokens: Tokens, open: number, names: string[]): number {
+  const depth = tokens.depths[open] ?? 0;
   let i = open + 1;
-  while (i < tokens.length && !isCloser(source, tokens[i], depth)) {
-    if (isPunct(source, tokens[i], ',')) {
+  while (i < tokens.length && !isCloser(source, tokens, i, depth)) {
+    if (isPunct(source, tokens, i, ',')) {
       i++;
       continue;
     }
     // A token nothing reads (a `;` in `let [a;`) ends the pattern, which is invalid code.
     const from = i;
     i = readBindingTarget(source, tokens, skipSpread(source, tokens, i), names);
-    if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
-    if (!isPunct(source, tokens[i], ',') && !isCloser(source, tokens[i], depth))
+    if (isPunct(source, tokens, i, '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
+    if (!isPunct(source, tokens, i, ',') && !isCloser(source, tokens, i, depth))
       i = skipExpression(source, tokens, i, depth + 1);
     if (i === from) return i;
   }
   return i + 1;
 }
 
-function readObjectPattern(source: string, tokens: Token[], open: number, names: string[]): number {
-  const depth = tokens[open]?.depth ?? 0;
+function readObjectPattern(source: string, tokens: Tokens, open: number, names: string[]): number {
+  const depth = tokens.depths[open] ?? 0;
   let i = open + 1;
-  while (i < tokens.length && !isCloser(source, tokens[i], depth)) {
-    if (isPunct(source, tokens[i], ',')) {
+  while (i < tokens.length && !isCloser(source, tokens, i, depth)) {
+    if (isPunct(source, tokens, i, ',')) {
       i++;
       continue;
     }
@@ -1006,19 +1066,18 @@ function readObjectPattern(source: string, tokens: Token[], open: number, names:
     const spread = skipSpread(source, tokens, i);
     if (spread !== i) {
       i = readBindingTarget(source, tokens, spread, names);
-    } else if (isPunct(source, tokens[i], '[')) {
+    } else if (isPunct(source, tokens, i, '[')) {
       // Computed key: `[k]: target`.
       i = skipExpression(source, tokens, i + 1, depth + 2) + 1;
-      if (isPunct(source, tokens[i], ':')) i = readBindingTarget(source, tokens, i + 1, names);
-    } else if (isPunct(source, tokens[i + 1], ':')) {
+      if (isPunct(source, tokens, i, ':')) i = readBindingTarget(source, tokens, i + 1, names);
+    } else if (isPunct(source, tokens, i + 1, ':')) {
       i = readBindingTarget(source, tokens, i + 2, names);
     } else {
-      const key = tokens[i];
-      if (key?.kind === 'word') names.push(text(source, key));
+      if (kindAt(tokens, i) === Kind.Word) names.push(text(source, tokens, i));
       i++;
     }
-    if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
-    if (!isPunct(source, tokens[i], ',') && !isCloser(source, tokens[i], depth))
+    if (isPunct(source, tokens, i, '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
+    if (!isPunct(source, tokens, i, ',') && !isCloser(source, tokens, i, depth))
       i = skipExpression(source, tokens, i, depth + 1);
     if (i === from) return i;
   }
@@ -1029,17 +1088,17 @@ function readObjectPattern(source: string, tokens: Token[], open: number, names:
  * Skips an expression at `depth`: stops at a `,` at that depth, the enclosing closer, a `;`, or (at depth 0) a
  * line break where a semicolon would be inserted.
  */
-function skipExpression(source: string, tokens: Token[], i: number, depth: number): number {
+function skipExpression(source: string, tokens: Tokens, i: number, depth: number): number {
   const first = i;
   for (; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === undefined || token.depth < depth) return i;
-    if (token.depth > depth) continue;
-    if (isPunct(source, token, ',') || isPunct(source, token, ';')) return i;
+    const at = tokens.depths[i] ?? 0;
+    if (at < depth) return i;
+    if (at > depth) continue;
+    if (isPunct(source, tokens, i, ',') || isPunct(source, tokens, i, ';')) return i;
     if (
       depth === 0 &&
       i > first &&
-      token.newline &&
+      tokens.newlines[i] === 1 &&
       canEndStatement(source, tokens, i) &&
       !continuesExpression(source, tokens, i)
     )
@@ -1063,29 +1122,48 @@ export function debuggerStatementSites(
 ): { start: number; semicolon: boolean }[] {
   const sites: { start: number; semicolon: boolean }[] = [];
   // Streamed: a whole bundle's tokens are not kept, only the previous one and a candidate.
-  let prev: Token | undefined;
-  let candidate: Token | undefined;
-  const decide = (keyword: Token, next: Token | undefined) => {
-    if (isPunct(source, next, ':')) return;
-    if (isPunct(source, next, '(') && next?.newline === false) return;
-    sites.push({ start: keyword.start, semicolon: isPunct(source, next, ';') });
+  const punct = (kind: number, start: number, value: number) =>
+    kind === Kind.Punct && source.charCodeAt(start) === value;
+  let prevKind = -1;
+  let prevStart = 0;
+  /** The start of a `debugger` keyword whose next token is still to come (-1 for none). */
+  let candidate = -1;
+  const decide = (keyword: number, kind: number, start: number, newline: boolean) => {
+    if (punct(kind, start, 58 /* : */)) return;
+    if (punct(kind, start, 40 /* ( */) && !newline) return;
+    sites.push({ start: keyword, semicolon: punct(kind, start, 59 /* ; */) });
   };
-  const take = (token: Token) => {
-    if (candidate) decide(candidate, token);
-    candidate = undefined;
+  const take: Sink = (kind, start, end, parent, newline) => {
+    if (candidate !== -1) decide(candidate, kind, start, newline);
+    candidate = -1;
     if (
-      token.kind === 'word' &&
-      token.parent !== Open.ClassBrace &&
+      kind === Kind.Word &&
+      parent !== Open.ClassBrace &&
       // Cheap check first: most words are shorter (an escaped `debugger` is longer).
-      token.end - token.start >= 8 &&
-      text(source, token) === 'debugger' &&
-      !isPunct(source, prev, '.') &&
-      source[token.start - 1] !== '#'
+      end - start >= 8 &&
+      word(source, start, end) === 'debugger' &&
+      !punct(prevKind, prevStart, 46 /* . */) &&
+      source[start - 1] !== '#'
     )
-      candidate = token;
-    prev = token;
+      candidate = start;
+    prevKind = kind;
+    prevStart = start;
   };
   new Lexer(source, options.module === true, take).run();
-  if (candidate) decide(candidate, undefined);
+  if (candidate !== -1) decide(candidate, -1, 0, false);
   return sites;
+}
+
+/** A word's text from `start` to `end`, escapes decoded. */
+function word(source: string, start: number, end: number): string {
+  const raw = source.slice(start, end);
+  return raw.includes('\\') ? unescapeWord(raw) : raw;
+}
+
+/** `raw` with its `\\uXXXX` / `\\u{…}` escapes decoded. */
+function unescapeWord(raw: string): string {
+  return raw.replace(/\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))/g, (escape, braced, plain) => {
+    const code = Number.parseInt(typeof braced === 'string' ? braced : String(plain), 16);
+    return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
+  });
 }
