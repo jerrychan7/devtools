@@ -63,18 +63,24 @@ function time(fs: Entry[], text: string): Time[] {
   });
 }
 
-/** Heap growth over one call before any collection (most of three), and what its result keeps. */
+/** The JS heap and the typed arrays' buffers, which live outside it. */
+const used = () => {
+  const { heapUsed, arrayBuffers } = process.memoryUsage();
+  return heapUsed + arrayBuffers;
+};
+
+/** Memory growth over one call before any collection (most of three), and what its result keeps. */
 function memory(f: Entry, text: string): { alloc: string; kept: string } {
   if (!gc) return { alloc: '', kept: '' };
   let alloc = 0;
   let kept = 0;
   for (let i = 0; i < 3; i++) {
     gc();
-    const h0 = process.memoryUsage().heapUsed;
+    const h0 = used();
     let result: unknown = f(text, false);
-    alloc = Math.max(alloc, process.memoryUsage().heapUsed - h0);
+    alloc = Math.max(alloc, used() - h0);
     gc();
-    kept = process.memoryUsage().heapUsed - h0;
+    kept = used() - h0;
     if (result === Symbol.iterator) console.log(result);
     result = undefined;
   }
