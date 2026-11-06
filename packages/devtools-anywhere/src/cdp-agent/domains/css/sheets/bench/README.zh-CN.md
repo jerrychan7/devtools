@@ -82,3 +82,48 @@ node lexer-compare.bench.ts --rev cb7f711~1
 | | 只读下限 | 0.154 | | | |
 
 在 79284fb 上运行 `node lexer-compare.bench.ts --rev cb7f711~1`：304 万 8580 段文本的词元全部相同。
+
+## WebAssembly 词法器
+
+`../css-lexer-wasm.ts` 对 64 个码元及以上的文本用 WebAssembly 模块（由 `../wasm-gen/lexer.ts` 生成）跑同一个词法器；更短的文本，或页面 CSP 不允许编译 WebAssembly 时，用 TypeScript 词法器。`--wasm` 测量并核对它：
+
+```sh
+# 加上 WebAssembly 词法器及其各阶段的行
+node --expose-gc lexer.bench.ts --wasm
+
+# 与某个版本对拍词元，文本分别按字节和按 UTF-16 复制进去
+node lexer-compare.bench.ts --rev cb7f711~1 --wasm
+```
+
+`--wasm` 加的行（不论文本长短都走 WebAssembly）：
+
+- **wasm**：完整流程，与 `tokenize` 相同：复制文本进去、词法分析、把词元复制出来。全 ASCII 的文本用 `TextEncoder.encodeInto` 每码元一个字节复制；其他文本在 `encodeInto` 发现不是 ASCII 后逐码元按 UTF-16 复制。
+- **wasm utf16**：同上，但 ASCII 文本也按 UTF-16 复制。
+- **wasm copy in**、**wasm lex**、**wasm lex utf16**、**wasm copy out**：各阶段单独计时。
+
+同一台机器，加入时的提交上 `node --expose-gc lexer.bench.ts --wasm --runs 2` 的第二轮：
+
+| 材料 | 词法器 | 中位数 ms |
+| --- | --- | --: |
+| generated | TypeScript | 14.0 |
+| | wasm | 3.8 |
+| | wasm utf16 | 8.5 |
+| | 复制进 / 词法 / 词法 utf16 / 复制出 | 0.065 / 3.4 / 3.5 / 0.173 |
+| | 只读下限 | 4.8 |
+| common | TypeScript | 0.296 |
+| | wasm | 0.077 |
+| | wasm utf16 | 0.164 |
+| | 复制进 / 词法 / 词法 utf16 / 复制出 | 0.001 / 0.069 / 0.071 / 0.005 |
+| | 只读下限 | 0.088 |
+| mixed | TypeScript | 0.570 |
+| | wasm | 0.443 |
+| | wasm utf16 | 0.320 |
+| | 复制进 / 词法 / 词法 utf16 / 复制出 | 0.280 / 0.136 / 0.136 / 0.008 |
+| | 只读下限 | 0.168 |
+| all.css | TypeScript | 0.692 |
+| | wasm | 0.219 |
+| | wasm utf16 | 0.370 |
+| | 复制进 / 词法 / 词法 utf16 / 复制出 | 0.003 / 0.207 / 0.210 / 0.009 |
+| | 只读下限 | 0.150 |
+
+`mixed` 不是 ASCII，复制进的时间包括失败的 `encodeInto` 和 UTF-16 复制。结果每个词元占 5.0 字节，与 TypeScript 词法器相同，一次调用在 JavaScript 堆上不再分配别的。`node lexer-compare.bench.ts --rev cb7f711~1 --wasm`：304 万 8580 段文本词元相同，两种复制方式都是。

@@ -3,10 +3,14 @@
  * gives: on each material, on every UTF-16 code unit after a set of prefixes, and on random
  * fragments built from the cases tokenizing gets wrong most easily. See README.md.
  *
- *   node lexer-compare.bench.ts --rev <git revision> [--seed <n>]... [--fragments <n>]
+ *   node lexer-compare.bench.ts --rev <git revision> [--wasm] [--seed <n>]... [--fragments <n>]
+ *
+ * With `--wasm`, the lexer checked is the WebAssembly one (css-lexer-wasm.ts) instead of the
+ * working tree's TypeScript one, on every text whatever its length, once with ASCII texts copied
+ * in as bytes and once with every text copied in as UTF-16.
  */
 import { parseArgs } from 'node:util';
-import { loadLexer, type Tokens } from './load-lexer.ts';
+import { loadLexer, loadWasmLexers, type Lexer, type Tokens } from './load-lexer.ts';
 import { materials } from './materials.ts';
 
 const { values } = parseArgs({
@@ -14,26 +18,32 @@ const { values } = parseArgs({
     rev: { type: 'string' },
     seed: { type: 'string', multiple: true, default: ['1', '987654321'] },
     fragments: { type: 'string', default: '1000000' },
+    wasm: { type: 'boolean', default: false },
   },
 });
 if (!values.rev) throw new Error('--rev <git revision> is required');
 const base = await loadLexer(values.rev);
-const work = await loadLexer();
+const works: Lexer[] = values.wasm
+  ? (await loadWasmLexers()).filter(l => l.label === 'wasm' || l.label === 'wasm utf16')
+  : [await loadLexer()];
 
 let checked = 0;
 function same(text: string): void {
+  for (const work of works) sameAs(work, text);
+  checked++;
+}
+function sameAs(work: Lexer, text: string): void {
   const a: Tokens = base.tokenize(text);
   const b: Tokens = work.tokenize(text);
   const fail = (what: string) => {
     throw new Error(
-      `${what} differ from ${base.label} for ${JSON.stringify(text.length > 200 ? text.slice(0, 200) + '…' : text)}`
+      `${what} of ${work.label} differ from ${base.label} for ${JSON.stringify(text.length > 200 ? text.slice(0, 200) + '…' : text)}`
     );
   };
   if (a.kinds.length !== b.kinds.length || a.starts.length !== b.starts.length) fail('token counts');
   for (let i = 0; i < a.kinds.length; i++) if (a.kinds[i] !== b.kinds[i]) fail(`kinds at token ${i}`);
   for (let i = 0; i < a.starts.length; i++) if (a.starts[i] !== b.starts[i]) fail(`starts at token ${i}`);
   if (b.starts.length !== b.kinds.length + 1 || b.starts[b.kinds.length] !== text.length) fail('the end');
-  checked++;
 }
 
 for (const m of await materials()) same(m.text);
@@ -97,4 +107,6 @@ for (const seedArg of values.seed) {
     same(t);
   }
 }
-console.log(`same tokens as ${base.label} on ${checked} texts (seeds ${values.seed.join(', ')})`);
+console.log(
+  `${works.map(w => w.label).join(' and ')}: same tokens as ${base.label} on ${checked} texts (seeds ${values.seed.join(', ')})`
+);

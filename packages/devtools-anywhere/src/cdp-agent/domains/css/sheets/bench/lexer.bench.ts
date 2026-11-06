@@ -2,23 +2,32 @@
  * Times the CSS lexer on each material, counts the code units it reads, and measures the memory of
  * its result. See README.md.
  *
- *   node --expose-gc lexer.bench.ts [--rev <git revision>]... [--runs <n>]
+ *   node --expose-gc lexer.bench.ts [--rev <git revision>]... [--wasm] [--runs <n>]
  *
  * Each `--rev` adds a row for the lexer at that revision; the working tree's and a read-only floor
- * are always measured. Without `--expose-gc` the memory columns are left out.
+ * are always measured. `--wasm` adds rows for the WebAssembly lexer and each of its stages
+ * (load-lexer.ts, `loadWasmLexers`). Without `--expose-gc` the memory columns are left out.
  */
 import { parseArgs } from 'node:util';
-import { loadLexer, readOnly, type Lexer } from './load-lexer.ts';
+import { loadLexer, loadWasmLexers, readOnly, type Lexer } from './load-lexer.ts';
 import { materials } from './materials.ts';
 
 const { values } = parseArgs({
-  options: { rev: { type: 'string', multiple: true, default: [] }, runs: { type: 'string', default: '1' } },
+  options: {
+    rev: { type: 'string', multiple: true, default: [] },
+    runs: { type: 'string', default: '1' },
+    wasm: { type: 'boolean', default: false },
+  },
 });
 const runs = Number(values.runs);
 const gc = (globalThis as { gc?: () => void }).gc;
 
 const mats = await materials();
-const lexers: Lexer[] = [await loadLexer(), ...(await Promise.all(values.rev.map(rev => loadLexer(rev))))];
+const lexers: Lexer[] = [
+  await loadLexer(),
+  ...(await Promise.all(values.rev.map(rev => loadLexer(rev)))),
+  ...(values.wasm ? await loadWasmLexers() : []),
+];
 const counting = [
   await loadLexer(undefined, true),
   ...(await Promise.all(values.rev.map(rev => loadLexer(rev, true)))),
@@ -88,7 +97,7 @@ for (let run = 1; run <= runs; run++) {
         counter.tokenize(m.text);
         reads = ((counter.reads() - before) / m.text.length).toFixed(2);
       }
-      const [kept, peak] = lexer === readOnly ? [NaN, NaN] : memory(lexer, m.text, tokens);
+      const [kept, peak] = lexer === readOnly || tokens === 0 ? [NaN, NaN] : memory(lexer, m.text, tokens);
       console.log(
         `  ${lexer.label.padEnd(16)} ${String(tokens).padStart(7)}   ${ms(median).padStart(9)}  ${ms(min).padStart(7)}   ${reads.padStart(10)}   ${(Number.isNaN(kept) ? '' : kept.toFixed(2)).padStart(12)}   ${(Number.isNaN(peak) ? '' : peak.toFixed(2)).padStart(12)}`
       );
