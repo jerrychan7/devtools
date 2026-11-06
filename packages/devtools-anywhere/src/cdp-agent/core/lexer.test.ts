@@ -161,6 +161,11 @@ test('return outside functions', () => {
     'return (x)',
     'o = { a: 1 }; return (o)',
     'a = `${() => 1}`; return',
+    // Escaped words spell the keyword.
+    '\\u0072eturn 1',
+    're\\u{74}urn',
+    'x = new.\\u0074arget',
+    'f(function () {}, () => {}); [{ a: `${1}` }]; return',
   ])
     assert.equal(returnOutsideFunction(source), true, source);
   for (const source of [
@@ -172,6 +177,8 @@ test('return outside functions', () => {
     'x.return; y = { return: 1 }',
     'o = { return() { return 1 } }; x?.return; class C { return() {} static return = 1 }',
     'o = { get return() { return 1 }, async return() {} }',
+    'returned; return\\u0061; \\u0072eturns; newer.target',
+    'f(() => { [x, { y: `${() => { return }}` }] })',
   ])
     assert.equal(returnOutsideFunction(source), false, source);
 });

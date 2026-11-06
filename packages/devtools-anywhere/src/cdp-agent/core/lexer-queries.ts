@@ -80,6 +80,24 @@ function text(source: string, tokens: Tokens, i: number): string {
   return kind !== Kind.Word || !raw.includes('\\') ? raw : unescapeWord(raw);
 }
 
+/**
+ * Token `i` is the word `value` (its escapes decoded), without slicing it out of the source unless
+ * it holds an escape: the hot queries ask this of every word.
+ */
+function isWord(source: string, tokens: Tokens, i: number, value: string): boolean {
+  if (tokens.kinds[i] !== Kind.Word) return false;
+  const start = tokens.starts[i] ?? 0;
+  const end = tokens.ends[i] ?? 0;
+  const length = end - start;
+  if (length === value.length) return source.startsWith(value, start);
+  // Only an escape (`\u0072`, 6 code units for 1) makes a word longer than what it spells.
+  // The raw word spells `value` up to its first escape: read only that far.
+  if (length < value.length) return false;
+  let at = start;
+  for (let k = 0; at < end && k < value.length && source.charCodeAt(at) === value.charCodeAt(k); k++) at++;
+  return source.charCodeAt(at) === 92 && at < end && text(source, tokens, i) === value;
+}
+
 /** Token `i` is the punctuator that starts with `value`'s first character. */
 function isPunct(source: string, tokens: Tokens, i: number, value: string): boolean {
   return tokens.kinds[i] === Kind.Punct && source.charCodeAt(tokens.starts[i] ?? 0) === value.charCodeAt(0);
@@ -168,8 +186,14 @@ export function topLevelLexicalDeclarations(source: string, options: LexOptions 
   const declarations: LexicalDeclaration[] = [];
   for (let i = 0; i < tokens.length; i++) {
     if (depths[i] !== 0 || kinds[i] !== Kind.Word) continue;
-    const kind = text(source, tokens, i);
-    if (kind !== 'let' && kind !== 'const' && kind !== 'class') continue;
+    const kind = isWord(source, tokens, i, 'let')
+      ? 'let'
+      : isWord(source, tokens, i, 'const')
+        ? 'const'
+        : isWord(source, tokens, i, 'class')
+          ? 'class'
+          : undefined;
+    if (kind === undefined) continue;
     if (!statementStart(source, tokens, i)) continue;
     const start = tokens.starts[i] ?? 0;
     const names: string[] = [];
@@ -190,7 +214,13 @@ export function topLevelLexicalDeclarations(source: string, options: LexOptions 
       last = isPunct(source, tokens, after, ';') ? after : after - 1;
       i = last;
     }
-    declarations.push({ kind, names, bare, start, end: tokens.ends[last] ?? source.length });
+    declarations.push({
+      kind,
+      names,
+      bare,
+      start,
+      end: tokens.ends[last] ?? source.length,
+    });
   }
   return declarations;
 }
@@ -257,27 +287,36 @@ const CONTROL_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 
 export function returnOutsideFunction(source: string, options: LexOptions = {}): boolean {
   const tokens = tokenize(source, options);
   const { depths, kinds } = tokens;
-  /** Per depth, what the bracket open at that depth is. */
-  const open: ('function' | 'arrow' | 'other')[] = [];
   /** Per depth, the index of the `(` open there. */
   const paren: number[] = [];
+  /**
+   * Per depth d, how many of the brackets open at the depths below d are function bodies, and how
+   * many are function or arrow bodies: set with the bracket at d - 1, so that `inside` is O(1) instead of
+   * a walk down the stack. The brackets below a token are opened before the one around it, so the
+   * counts at its depth are those of the brackets that hold it.
+   */
+  const functions: number[] = [0];
+  const bodies: number[] = [0];
+  const set = (depth: number, kind: 'function' | 'arrow' | 'other') => {
+    functions[depth + 1] = (functions[depth] ?? 0) + (kind === 'function' ? 1 : 0);
+    bodies[depth + 1] = (bodies[depth] ?? 0) + (kind === 'other' ? 0 : 1);
+  };
   const word = (i: number) => (kinds[i] === Kind.Word ? text(source, tokens, i) : '');
-  const inside = (depth: number, arrows: boolean) =>
-    open.slice(0, depth).some(kind => kind === 'function' || (arrows && kind === 'arrow'));
+  const inside = (depth: number, arrows: boolean) => ((arrows ? bodies[depth] : functions[depth]) ?? 0) > 0;
   for (let i = 0; i < tokens.length; i++) {
     const kind = kinds[i];
     const depth = depths[i] ?? 0;
     if (kind === Kind.Template) {
-      open[depth] = 'other';
-      open[depth + 1] = 'other';
+      set(depth, 'other');
+      set(depth + 1, 'other');
       continue;
     }
     if (kind === Kind.Punct) {
       const ch = charAt(source, tokens, i);
       if (ch === '(') {
-        open[depth] = 'other';
+        set(depth, 'other');
         paren[depth] = i;
-      } else if (ch === '[') open[depth] = 'other';
+      } else if (ch === '[') set(depth, 'other');
       else if (ch === '{') {
         let opened: 'function' | 'arrow' | 'other' = 'other';
         if (isPunct(source, tokens, i - 1, '>') && source[(tokens.starts[i - 1] ?? 0) - 1] === '=') opened = 'arrow';
@@ -285,17 +324,16 @@ export function returnOutsideFunction(source: string, options: LexOptions = {}):
           const before = (paren[depths[i - 1] ?? 0] ?? 0) - 1;
           if (!CONTROL_WORDS.has(word(before))) opened = 'function';
         }
-        open[depth] = opened;
+        set(depth, opened);
       }
       continue;
     }
-    const value = word(i);
     // A property name: `x.return`, `x?.return`, `{ return: 1 }`, a method `return() {}` (its body
     // is a function body like any `(…) {`).
     // Directly in a class body, any word is part of a member's name or modifiers.
     if (tokens.parents[i] === Open.ClassBrace) continue;
     if (isPunct(source, tokens, i - 1, '.') || isPunct(source, tokens, i + 1, ':')) continue;
-    if (value === 'return' && !inside(depth, true)) {
+    if (isWord(source, tokens, i, 'return') && !inside(depth, true)) {
       // `return(…) {` is a method named return; only scanned for that word, not every call.
       if (isPunct(source, tokens, i + 1, '(')) {
         let close = i + 2;
@@ -304,7 +342,12 @@ export function returnOutsideFunction(source: string, options: LexOptions = {}):
       }
       return true;
     }
-    if (value === 'new' && isPunct(source, tokens, i + 1, '.') && word(i + 2) === 'target' && !inside(depth, false))
+    if (
+      isWord(source, tokens, i, 'new') &&
+      isPunct(source, tokens, i + 1, '.') &&
+      isWord(source, tokens, i + 2, 'target') &&
+      !inside(depth, false)
+    )
       return true;
   }
   return false;
@@ -315,7 +358,7 @@ export function topLevelVarNames(source: string, options: LexOptions = {}): stri
   const tokens = tokenize(source, options);
   const names: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens.depths[i] !== 0 || tokens.kinds[i] !== Kind.Word || text(source, tokens, i) !== 'var') continue;
+    if (tokens.depths[i] !== 0 || !isWord(source, tokens, i, 'var')) continue;
     if (statementStart(source, tokens, i)) i = readDeclarations(source, tokens, i + 1, names) - 1;
   }
   return names;
