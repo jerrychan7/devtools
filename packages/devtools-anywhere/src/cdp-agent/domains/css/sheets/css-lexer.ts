@@ -50,7 +50,10 @@ const isWs = (c: number) => c === 32 || c === 9 || isNewline(c);
 const isDigit = (c: number) => c >= 48 && c <= 57;
 const isHex = (c: number) => isDigit(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102);
 const isNameStart = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c >= 128;
-const isName = (c: number) => isNameStart(c) || isDigit(c) || c === 45;
+/** Name code points (§4.2) of ASCII; every code point from 128 is one. */
+const nameChar = new Uint8Array(128);
+for (let c = 0; c < 128; c++) nameChar[c] = +(isNameStart(c) || isDigit(c) || c === 45);
+const isName = (c: number) => (c < 128 ? nameChar[c] === 1 : c >= 128);
 const isNonPrintable = (c: number) => c <= 8 || c === 11 || (c >= 14 && c <= 31) || c === 127;
 
 /** Character classes of ASCII code points, for dispatching on a token's first character. */
@@ -106,35 +109,36 @@ single[125] = Tok.RBrace;
 
 /** Tokenizes `text`. */
 export function tokenize(text: string): Tokens {
+  // `text.charCodeAt` is written out at every call, not wrapped: V8 inlines the built-in only
+  // when it sees it called on a string. It is NaN past the end, so no predicate matches there.
   const len = text.length;
-  const at = (p: number) => text.charCodeAt(p); // NaN past the end: no predicate matches
   let p = 0;
   // §4.3.8 – §4.3.10
-  const validEscape = (q: number) => at(q) === 92 && !isNewline(at(q + 1));
+  const validEscape = (q: number) => text.charCodeAt(q) === 92 && !isNewline(text.charCodeAt(q + 1));
   const identStart = (q: number) => {
-    const c = at(q);
-    if (c === 45) return isNameStart(at(q + 1)) || at(q + 1) === 45 || validEscape(q + 1);
+    const c = text.charCodeAt(q);
+    if (c === 45) return isNameStart(text.charCodeAt(q + 1)) || text.charCodeAt(q + 1) === 45 || validEscape(q + 1);
     return isNameStart(c) || validEscape(q);
   };
   const numberStart = (q: number) => {
-    let c = at(q);
-    if (c === 43 || c === 45) c = at(++q);
-    return isDigit(c) || (c === 46 && isDigit(at(q + 1)));
+    let c = text.charCodeAt(q);
+    if (c === 43 || c === 45) c = text.charCodeAt(++q);
+    return isDigit(c) || (c === 46 && isDigit(text.charCodeAt(q + 1)));
   };
   /** §4.3.7, with `p` just past the backslash. */
   const escape = () => {
-    if (!isHex(at(p))) {
+    if (!isHex(text.charCodeAt(p))) {
       if (p < len) p++;
       return;
     }
-    for (let n = 0; n < 6 && isHex(at(p)); n++) p++;
-    if (at(p) === 13 && at(p + 1) === 10) p += 2;
-    else if (isWs(at(p))) p++;
+    for (let n = 0; n < 6 && isHex(text.charCodeAt(p)); n++) p++;
+    if (text.charCodeAt(p) === 13 && text.charCodeAt(p + 1) === 10) p += 2;
+    else if (isWs(text.charCodeAt(p))) p++;
   };
   /** §4.3.12 */
   const name = () => {
     for (;;) {
-      if (isName(at(p))) p++;
+      if (isName(text.charCodeAt(p))) p++;
       else if (validEscape(p)) {
         p++;
         escape();
@@ -144,7 +148,7 @@ export function tokenize(text: string): Tokens {
   /** §4.3.14 */
   const badUrl = () => {
     while (p < len) {
-      if (at(p) === 41) {
+      if (text.charCodeAt(p) === 41) {
         p++;
         return;
       }
@@ -157,16 +161,16 @@ export function tokenize(text: string): Tokens {
   /** §4.3.6, with `p` just past `url(` and its leading whitespace. */
   const url = (): TokKind => {
     for (;;) {
-      const c = at(p);
+      const c = text.charCodeAt(p);
       if (p >= len) return Tok.Url;
       if (c === 41) {
         p++;
         return Tok.Url;
       }
       if (isWs(c)) {
-        while (isWs(at(p))) p++;
+        while (isWs(text.charCodeAt(p))) p++;
         if (p >= len) return Tok.Url;
-        if (at(p) === 41) {
+        if (text.charCodeAt(p) === 41) {
           p++;
           return Tok.Url;
         }
@@ -191,19 +195,19 @@ export function tokenize(text: string): Tokens {
   const identLike = (): TokKind => {
     const s = p;
     name();
-    if (at(p) !== 40) return Tok.Ident;
+    if (text.charCodeAt(p) !== 40) return Tok.Ident;
     p++;
     if (p - s !== 4 || text.slice(s, s + 3).toLowerCase() !== 'url') return Tok.Func;
-    while (isWs(at(p)) && isWs(at(p + 1))) p++;
-    const q = isWs(at(p)) ? p + 1 : p;
-    if (at(q) === 34 || at(q) === 39) return Tok.Func;
-    while (isWs(at(p))) p++;
+    while (isWs(text.charCodeAt(p)) && isWs(text.charCodeAt(p + 1))) p++;
+    const q = isWs(text.charCodeAt(p)) ? p + 1 : p;
+    if (text.charCodeAt(q) === 34 || text.charCodeAt(q) === 39) return Tok.Func;
+    while (isWs(text.charCodeAt(p))) p++;
     return url();
   };
   /** §4.3.5, with `p` just past the opening quote. */
   const string = (quote: number): TokKind => {
     for (;;) {
-      const c = at(p);
+      const c = text.charCodeAt(p);
       if (p >= len) return Tok.Str;
       if (c === quote) {
         p++;
@@ -212,24 +216,24 @@ export function tokenize(text: string): Tokens {
       if (isNewline(c)) return Tok.BadStr;
       p++;
       if (c === 92 && p < len) {
-        if (at(p) === 13 && at(p + 1) === 10) p += 2;
-        else if (isNewline(at(p))) p++;
+        if (text.charCodeAt(p) === 13 && text.charCodeAt(p + 1) === 10) p += 2;
+        else if (isNewline(text.charCodeAt(p))) p++;
         else escape();
       }
     }
   };
   /** §4.3.3, with `p` at the start of the number. */
   const numeric = () => {
-    if (at(p) === 43 || at(p) === 45) p++;
-    while (isDigit(at(p))) p++;
-    if (at(p) === 46 && isDigit(at(p + 1))) for (p++; isDigit(at(p));) p++;
-    const e = at(p);
+    if (text.charCodeAt(p) === 43 || text.charCodeAt(p) === 45) p++;
+    while (isDigit(text.charCodeAt(p))) p++;
+    if (text.charCodeAt(p) === 46 && isDigit(text.charCodeAt(p + 1))) for (p++; isDigit(text.charCodeAt(p));) p++;
+    const e = text.charCodeAt(p);
     if (e === 69 || e === 101) {
-      const s = at(p + 1) === 43 || at(p + 1) === 45 ? 2 : 1;
-      if (isDigit(at(p + s))) for (p += s; isDigit(at(p));) p++;
+      const s = text.charCodeAt(p + 1) === 43 || text.charCodeAt(p + 1) === 45 ? 2 : 1;
+      if (isDigit(text.charCodeAt(p + s))) for (p += s; isDigit(text.charCodeAt(p));) p++;
     }
     if (identStart(p)) name();
-    else if (at(p) === 37) p++;
+    else if (text.charCodeAt(p) === 37) p++;
   };
   // Every token is at least one code unit long, so `len` tokens is the most there can be.
   const kinds = new Uint8Array(len);
@@ -237,11 +241,11 @@ export function tokenize(text: string): Tokens {
   let n = 0;
   while (p < len) {
     const s = p;
-    const c = at(p);
+    const c = text.charCodeAt(p);
     let k: TokKind;
     switch (c < 128 ? charClass[c] : C.NameStart) {
       case C.Ws:
-        while (isWs(at(++p)));
+        while (isWs(text.charCodeAt(++p)));
         k = Tok.Ws;
         break;
       case C.Quote:
@@ -269,7 +273,7 @@ export function tokenize(text: string): Tokens {
         if (numberStart(p)) {
           numeric();
           k = Tok.Num;
-        } else if (at(p + 1) === 45 && at(p + 2) === 62) {
+        } else if (text.charCodeAt(p + 1) === 45 && text.charCodeAt(p + 2) === 62) {
           p += 3;
           k = Tok.Cdc;
         } else if (identStart(p)) k = identLike();
@@ -286,7 +290,7 @@ export function tokenize(text: string): Tokens {
         }
         break;
       case C.Slash:
-        if (at(p + 1) === 42) {
+        if (text.charCodeAt(p + 1) === 42) {
           const e = text.indexOf('*/', p + 2);
           p = e < 0 ? len : e + 2;
           k = Tok.Comment;
@@ -304,7 +308,7 @@ export function tokenize(text: string): Tokens {
         break;
       case C.Hash:
         p++;
-        if (isName(at(p)) || validEscape(p)) {
+        if (isName(text.charCodeAt(p)) || validEscape(p)) {
           name();
           k = Tok.Hash;
         } else k = Tok.Delim;
