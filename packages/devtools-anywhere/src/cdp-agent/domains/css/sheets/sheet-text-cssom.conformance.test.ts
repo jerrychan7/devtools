@@ -102,10 +102,12 @@ async function run(css: string, rounds: string[][], authored = false): Promise<O
       const out = { inPlace: [] as boolean[], got: [] as string[], want: [] as string[] };
       try {
         if (authored) void sheet.replace(css);
-        return Promise.resolve().then(() => {
+        return Promise.resolve().then(async () => {
           let before = texts.source(sheet, rulesOf);
           for (const steps of rounds) {
             for (const step of steps) new Function('sheet', step)(sheet);
+            // The page ran: what it wrote by name is seen (cssom-watch.ts, `settle`).
+            await Promise.resolve();
             const after = texts.source(sheet, rulesOf);
             out.inPlace.push(!!before && !!after && after.outline === before.outline);
             out.got.push(shown(after));
@@ -262,5 +264,52 @@ test('a rule changed once out of its sheet, and a new text: in place, then seria
       ["sheet.replaceSync('.q { top: 1px }  .r{}')", "sheet.cssRules[1].style.setProperty('top', '1px')"],
     ],
     [true, false]
+  );
+});
+
+test('properties written by name: in a rule, nested, in @media, a keyframe, @page, @font-face', async () => {
+  const css = [
+    CSS,
+    '@page :first { margin: 1px; }',
+    '@font-face { font-family: f; src: local(x); }',
+    '.f { color: red; & .g { top: 1px; } top: 2px; }',
+  ].join('\n');
+  await check(
+    [
+      ["sheet.cssRules[0].style.color = 'green'"],
+      ["sheet.cssRules[6].style.marginTop = '3px'"],
+      ["sheet.cssRules[2].cssRules[0].style.color = 'red'"],
+      ["sheet.cssRules[1].cssRules[1].style.top = '5px'"],
+      ["sheet.cssRules[3].cssRules[1].style.top = '8px'"],
+      ["sheet.cssRules[7].style.marginLeft = '4px'"],
+      ["sheet.cssRules[8].style.fontStyle = 'italic'"],
+      // The declarations after a nested rule.
+      ["sheet.cssRules[9].cssRules[1].style.left = '1px'"],
+      // Read, and written the same: unchanged.
+      ['void sheet.cssRules[0].style.color', "sheet.cssRules[4].style.padding = '1px 2px'"],
+    ],
+    [true, true, true, true, true, true, true, true, true],
+    css
+  );
+});
+
+test('properties written by name and through setProperty() in one round, a style kept for later', async () => {
+  await check(
+    [
+      [
+        "sheet.cssRules[0].style.color = 'green'",
+        "sheet.cssRules[6].style.setProperty('left', '1px')",
+        "sheet.cssRules[6].style.marginTop = '2px'",
+        "sheet.insertRule('.x { top: 1px; }', 1)",
+        "sheet.cssRules[1].style.left = '3px'",
+        "sheet.cssRules[2].cssRules[0].style.marginLeft = '9px'",
+        'sheet.deleteRule(0)',
+      ],
+      // Kept now, written in the rounds after (a rule and a keyframe).
+      ['globalThis.kept = sheet.cssRules[2].style; globalThis.keptKey = sheet.cssRules[3].cssRules[0].style'],
+      ["globalThis.kept.marginRight = '7px'", "globalThis.keptKey.top = '1px'"],
+      ["globalThis.kept.marginRight = '8px'"],
+    ],
+    [true, true, true, true]
   );
 });

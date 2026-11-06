@@ -3,6 +3,7 @@ import { isCssom, isHtml } from '../../../core/realm';
 import { type PseudoType, hasPseudoElement } from '../../../core/nodes/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../../../core/style/selectors';
 import { splitPseudoElement } from '../style';
+import { ownStyle } from '../sheets/cssom-watch';
 
 /**
  * Chromium's default style sheet for HTML (html.css, see README.md here), next to the bundle in
@@ -122,11 +123,11 @@ function parse(text: string): UaRule[] {
   const visit = (list: CSSRuleList, parent: string | null) => {
     for (const rule of Array.from(list)) {
       if (isCssom(rule, 'CSSStyleRule')) {
-        add(rule.selectorText, rule.style);
+        add(rule.selectorText, ownStyle(rule));
         // Only @supports and @media nested in it, whose declarations are its own.
         visit(rule.cssRules, rule.selectorText);
       } else if (isCssom(rule, 'CSSNestedDeclarations')) {
-        if (parent !== null) add(parent, rule.style);
+        if (parent !== null) add(parent, ownStyle(rule));
       } else if (isCssom(rule, 'CSSSupportsRule')) {
         if (CSS.supports(rule.conditionText)) visit(rule.cssRules, parent);
       } else if (isCssom(rule, 'CSSMediaRule')) {

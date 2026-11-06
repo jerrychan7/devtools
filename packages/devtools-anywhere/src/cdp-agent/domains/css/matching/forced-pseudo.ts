@@ -2,6 +2,7 @@ import { quietly } from '../../../core/nodes/adopted';
 import { frames } from '../../../core/frames/frames';
 import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../../core/nodes/nodes';
+import { ownStyle } from '../sheets/cssom-watch';
 
 /** A document or shadow root: what style sheets apply to. */
 export type TreeScope = Document | ShadowRoot;
@@ -482,13 +483,14 @@ class SharedForcedPseudoClasses {
           const declarations = !(started || all)
             ? ''
             : visitedOnly
-              ? Array.from(rule.style)
+              ? Array.from(ownStyle(rule))
                   .filter(p => VISITED.test(p))
                   .map(
-                    p => `${p}: ${rule.style.getPropertyValue(p)} ${rule.style.getPropertyPriority(p) && '!important'};`
+                    p =>
+                      `${p}: ${ownStyle(rule).getPropertyValue(p)} ${ownStyle(rule).getPropertyPriority(p) && '!important'};`
                   )
                   .join(' ')
-              : rule.style.cssText;
+              : ownStyle(rule).cssText;
           const [nested] = walk(this.rulesOf(rule), layer, conditions, live);
           if (declarations || nested) {
             const text = `${rewritten} { ${declarations}${nested ? `\n${nested}` : ''} }\n`;
@@ -496,9 +498,10 @@ class SharedForcedPseudoClasses {
             own += text;
           }
         } else if (isCssom(rule, 'CSSNestedDeclarations')) {
-          if ((started || all) && rule.style.cssText) {
-            out += `${rule.style.cssText}\n`;
-            own += `${rule.style.cssText}\n`;
+          const text = ownStyle(rule).cssText;
+          if ((started || all) && text) {
+            out += `${text}\n`;
+            own += `${text}\n`;
           }
         } else if (isCssom(rule, 'CSSLayerBlockRule')) {
           const record = all ? enter(rule, layer, rule.name, conditions, live) : null;

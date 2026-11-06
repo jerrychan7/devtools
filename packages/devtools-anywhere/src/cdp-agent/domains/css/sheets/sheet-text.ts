@@ -1,6 +1,6 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer-wasm';
-import { type CssomChange, ownEdit, recordPageChanges } from './cssom-watch';
+import { type CssomChange, ownEdit, ownStyle, recordPageChanges, settle } from './cssom-watch';
 import { type CssOutline, ROOT, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
@@ -196,6 +196,7 @@ export class SheetTexts {
    * have changed it meanwhile.
    */
   generation(sheet: CSSStyleSheet): number {
+    settle();
     return Math.max(this.generations.get(sheet) ?? 0, this.unseenAt);
   }
 
@@ -231,6 +232,7 @@ export class SheetTexts {
    * rules are paired again around the change only, when they can be.
    */
   splice(sheet: CSSStyleSheet, start: number, end: number, insert: string): void {
+    settle();
     const rec = this.recorded.get(sheet);
     if (!rec || this.stale.has(sheet)) return;
     // The page's changes not applied yet: the source is not that of the CSSOM any more.
@@ -249,6 +251,7 @@ export class SheetTexts {
    * cannot be done, the sheet left as it was: the caller replaces all its rules and records the text.
    */
   retext(sheet: CSSStyleSheet, text: string, rulesOf: (sheet: CSSStyleSheet) => CSSRule[]): boolean {
+    settle();
     if (this.stale.has(sheet)) return false;
     const source = this.source(sheet, rulesOf);
     if (!source || this.stale.has(sheet)) return false;
@@ -289,6 +292,8 @@ export class SheetTexts {
    * each rule's text, @import ones included, followed by a line break.
    */
   source(sheet: CSSStyleSheet, rulesOf: (sheet: CSSStyleSheet) => CSSRule[]): SheetSource | null {
+    // The page's writes of styles' properties by name, seen now.
+    settle();
     if (this.stale.has(sheet)) return this.serialize(sheet, rulesOf(sheet));
     let rec = this.recorded.get(sheet);
     const owner = sheet.ownerNode;
@@ -914,7 +919,7 @@ function matches(
   const kind = o.kind(node);
   if (tag === 'CSSNestedDeclarations') {
     // Some declaration of the run is one the CSSOM kept.
-    const style = (rule as CSSNestedDeclarations).style as CSSStyleDeclaration | undefined;
+    const style = ownStyle(rule as CSSNestedDeclarations) as CSSStyleDeclaration | undefined;
     if (kind !== 'nested' || !style) return false;
     for (let d = o.firstDecl(node), e = d + o.declCountOf(node); d < e; d++)
       if (!o.commented(d) && style.getPropertyValue(text.slice(o.declStart(d), o.nameEnd(d))) !== '') return true;

@@ -9,6 +9,7 @@ import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scop
 import type { SheetRegistry, Styled } from '../sheets/sheet-registry';
 import { rangeOf, selectorSpans, selectorText, sourceStyle } from '../sheets/sheet-text';
 import { type CSSStyle, buildStyle } from '../style';
+import { ownStyle } from '../sheets/cssom-watch';
 
 /** Rules of the page's sheets in the shape the CSS domain reports them in. */
 export class RuleView {
@@ -23,11 +24,11 @@ export class RuleView {
   ruleStyle(sheet: CSSStyleSheet, rule: Styled): CSSStyle {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
-    if (source && node !== undefined) return sourceStyle(this.sheets.idOf(sheet), rule.style, source, node);
+    if (source && node !== undefined) return sourceStyle(this.sheets.idOf(sheet), ownStyle(rule), source, node);
     if (isCssom(rule, 'CSSKeyframeRule'))
-      return buildStyle(this.sheets.idOf(sheet), rule.style, 0, rule.keyText.length + 3);
+      return buildStyle(this.sheets.idOf(sheet), ownStyle(rule), 0, rule.keyText.length + 3);
     const line = this.sheets.ruleId(sheet, rule);
-    return buildStyle(this.sheets.idOf(sheet), rule.style, line, selectorLabel(rule).length + 3);
+    return buildStyle(this.sheets.idOf(sheet), ownStyle(rule), line, selectorLabel(rule).length + 3);
   }
 
   selectorList(sheet: CSSStyleSheet, rule: StyleRule): Protocol.CSS.SelectorList {
@@ -148,8 +149,8 @@ export class RuleView {
             keyText: this.keyText(sheet, k),
             style:
               source && node !== undefined
-                ? sourceStyle(styleSheetId, k.style, source, node)
-                : buildStyle(styleSheetId, k.style, 0, k.keyText.length + 3),
+                ? sourceStyle(styleSheetId, ownStyle(k), source, node)
+                : buildStyle(styleSheetId, ownStyle(k), 0, k.keyText.length + 3),
           };
         }),
     };

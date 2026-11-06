@@ -7,13 +7,13 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import { build } from 'esbuild';
 import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
-import type { CssomChange, recordPageChanges, watchCssom } from './cssom-watch.ts';
+import type { CssomChange, ownStyle, recordPageChanges, settle, watchCssom } from './cssom-watch.ts';
 import type { Env } from '../../../../../test-support/conformance.ts';
 
 // Bundled for the page: the sources import each other without extensions.
 const bundled = await build({
   stdin: {
-    contents: "export { watchCssom, recordPageChanges, ownEdit } from './cssom-watch.ts';",
+    contents: "export { watchCssom, recordPageChanges, ownEdit, ownStyle, settle } from './cssom-watch.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },
@@ -39,16 +39,19 @@ setUpAndTearDown(
 /**
  * What is reported for each step run in the page on a sheet of `css`, as text: `rule N` (the
  * top-level rule at N), `insert N`, `delete N`, `text` (a new text) or `none` (no place told);
- * nothing for a step reported nothing. With `inStyle`, the sheet is a <style>'s.
+ * nothing for a step reported nothing. The styles' writes by name are seen past each step
+ * (`settle`), once the page ran (a microtask later). With `inStyle`, the sheet is a <style>'s.
  */
 async function reports(css: string, steps: string[], inStyle = false): Promise<string[][]> {
   return page.evaluate(
-    (css, steps, inStyle) => {
+    async (css, steps, inStyle) => {
       const w = (
         globalThis as unknown as {
           __cssomWatch: {
             recordPageChanges: typeof recordPageChanges;
             watchCssom: typeof watchCssom;
+            ownStyle: typeof ownStyle;
+            settle: typeof settle;
           };
         }
       ).__cssomWatch;
@@ -76,10 +79,12 @@ async function reports(css: string, steps: string[], inStyle = false): Promise<s
         for (const step of steps) {
           seen = [];
           try {
-            new Function('sheet', step)(sheet);
+            new Function('sheet', 'ownStyle', step)(sheet, w.ownStyle);
           } catch {
             // A call the browser refused: reported or not, as it is.
           }
+          await Promise.resolve();
+          w.settle();
           out.push(seen);
         }
       } finally {
@@ -172,25 +177,65 @@ test("a rule's media list changed: the top-level rule it is in", async () => {
   );
 });
 
+test("a style's properties written by name: its top-level rule, once the page ran", async () => {
+  assert.deepEqual(
+    await reports(
+      '.a{top:1px} @media screen{.m{left:1px}} .n{.inner{color:red}} @keyframes k{from{top:0}} @page{margin:1px} @font-face{font-family:f}',
+      [
+        "sheet.cssRules[0].style.color = 'red'",
+        "sheet.cssRules[1].cssRules[0].style.marginTop = '1px'",
+        "sheet.cssRules[2].cssRules[0].style.color = 'blue'",
+        "sheet.cssRules[3].cssRules[0].style.top = '2px'",
+        "sheet.cssRules[4].style.marginLeft = '2px'",
+        "sheet.cssRules[5].style.fontStyle = 'italic'",
+        // Read, or written the same: nothing changed.
+        'sheet.cssRules[0].style.color',
+        "sheet.cssRules[0].style.color = 'red'",
+        // Kept, then written later.
+        'globalThis.kept = sheet.cssRules[2].style',
+        "globalThis.kept.left = '3px'",
+        // Written by name, and through setProperty() (told at once): told once.
+        "sheet.cssRules[0].style.left = '1px'; sheet.cssRules[0].style.setProperty('right', '1px')",
+      ]
+    ),
+    [['rule 0'], ['rule 1'], ['rule 2'], ['rule 3'], ['rule 4'], ['rule 5'], [], [], [], ['rule 2'], ['rule 0']]
+  );
+});
+
+test("the CSS domain's own reading of a style: not taken by the page", async () => {
+  assert.deepEqual(
+    await reports('.a{top:1px} .b{}', [
+      'globalThis.ours = ownStyle(sheet.cssRules[0])',
+      "globalThis.ours.color = 'red'",
+      "sheet.cssRules[1].media; sheet.cssRules[1].style.color = 'red'",
+    ]),
+    [[], [], ['rule 1']]
+  );
+});
+
 test('the hooked getters: as the native ones while watching, the native ones after', async () => {
   const seen = await page.evaluate(() => {
     const w = (globalThis as unknown as { __cssomWatch: { watchCssom: typeof watchCssom } }).__cssomWatch;
     const sheet = new CSSStyleSheet();
     sheet.replaceSync('.a{top:1px} @media print{}');
+    const style = Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'style');
     const media = Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media');
     const shown = () => {
+      const s = Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'style')?.get;
       const m = Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.get;
       const [a, b] = Array.from(sheet.cssRules) as [CSSStyleRule, CSSMediaRule];
       let threw = '';
       try {
-        m?.call(a);
+        s?.call(b);
       } catch (e) {
         threw = (e as Error).constructor.name;
       }
       return [
+        s?.name,
+        s?.length,
+        Function.prototype.toString.call(s).includes('[native code]'),
         m?.name,
-        m?.length,
-        Function.prototype.toString.call(m).includes('[native code]'),
+        a.style === a.style,
         b.media === b.media,
         threw,
       ];
@@ -199,16 +244,25 @@ test('the hooked getters: as the native ones while watching, the native ones aft
       () => {},
       () => [window]
     );
-    const watching = [...shown(), Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.get !== media?.get];
+    const watching = [...shown(), Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'style')?.get !== style?.get];
     stop();
     const after = [
+      Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'style')?.get === style?.get,
       Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.get === media?.get,
       Object.getOwnPropertyDescriptor(CSSMediaRule.prototype, 'media')?.set === media?.set,
     ];
     return { watching, after };
   });
   assert.deepEqual(seen, {
-    watching: ['get media', 0, true, true, 'TypeError', true],
-    after: [true, true],
+    watching: ['get style', 0, true, 'get media', true, true, 'TypeError', true],
+    after: [true, true, true],
   });
+});
+
+test('past the limit of styles taken: their sheet, as changed everywhere', async () => {
+  const css = Array.from({ length: 1100 }, (_, i) => `.r${i} { top: 0px; }`).join(' ');
+  assert.deepEqual(await reports(css, ['for (const r of sheet.cssRules) r.style.top', 'sheet.cssRules[0].style.top']), [
+    ['none'],
+    [],
+  ]);
 });

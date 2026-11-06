@@ -14,8 +14,12 @@ import { isCssom, realmOf } from '../../../core/realm';
  * same list each time), so a list taken before anyone watched goes unseen, as does the sheet's
  * own (`sheet.media`), which changes no rule.
  *
- * A style's properties by name (`rule.style.color = …`) go unseen: in Chrome they are data
- * properties of each CSSStyleDeclaration itself, no accessors of its prototype.
+ * A style's properties by name (`rule.style.color = …`, `marginTop`) cannot be hooked: in Chrome
+ * they are data properties of each CSSStyleDeclaration itself (some 750), no accessors of its
+ * prototype, and a proxy of the style fails the native methods' checks. They are seen afterwards
+ * instead (`settle`): a page writes them through `rule.style`, whose getter notes the rule with
+ * its style's text then, before the write; before the sheet's text is used, the rules noted are
+ * compared with their text, and those changed reported as changes of their top-level rule.
  */
 /**
  * Where in its sheet a change of the page is, for a text serialized from the CSSOM to be changed
@@ -50,7 +54,13 @@ export function recordPageChanges(fn: Recorder): void {
 }
 
 function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
-  if (!sheet || own || !listeners.size) return;
+  if (!own) report(sheet, text, change);
+}
+
+/** Records and tells a change of the page, even from within the CSS domain's code (`settle`). */
+function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
+  if (!sheet || !listeners.size) return;
+  if (change?.kind === 'rule' && suspects.size) reported.add(change.rule);
   try {
     record(sheet, text, change);
   } catch {
@@ -110,6 +120,89 @@ function hook(proto: object, name: string, after: After, part: Part = 'value', a
   if (!hooked) natives.set(proto, (hooked = new Map()));
   hooked.set(key, { part, name, native, hook: proxy });
   Object.defineProperty(proto, name, { ...descriptor, [part]: proxy });
+}
+
+/**
+ * The rules whose style the page took (`rule.style`), with the style and its text when taken or
+ * last compared (`settle`), oldest first. Those compared are kept, the newest `KEPT`, for a style
+ * the page keeps to write later; the others are compared once.
+ */
+const suspects = new Map<CSSRule, { style: CSSStyleDeclaration; text: string }>();
+/** Top-level rules reported changed since the last `settle`: their whole text is serialized anew. */
+const reported = new Set<CSSRule>();
+/** How many rules were taken since the last `settle`. */
+let taken = 0;
+/** Nothing taken nor run since the last `settle`: the page has not run since (a microtask). */
+let settled = false;
+const KEPT = 256;
+/**
+ * How many rules taken between two `settle`s are compared: past that, the sheets they are in are
+ * taken as changed everywhere (their texts serialized anew), rather than reading every style taken.
+ */
+const SUSPECTS_LIMIT = 1024;
+
+/** The sheets of `rules` changed where it is not told: their texts are serialized anew. */
+const lost = (rules: Iterable<CSSRule>) => {
+  const seen = new Set<CSSStyleSheet>();
+  for (const rule of rules) {
+    const sheet = sheetOf(rule);
+    if (sheet && !seen.has(sheet)) report(sheet);
+    if (sheet) seen.add(sheet);
+  }
+};
+
+/** The page took `rule`'s style: its text now is what it was before any write through it. */
+function taking(rule: unknown, style: unknown) {
+  if (typeof rule !== 'object' || rule === null || suspects.has(rule as CSSRule)) return;
+  if (!isCssom(style, 'CSSStyleDeclaration')) return;
+  suspects.set(rule as CSSRule, { style, text: style.cssText });
+  settled = false;
+  if (++taken <= SUSPECTS_LIMIT) return;
+  const rules = [...suspects.keys()];
+  suspects.clear();
+  reported.clear();
+  taken = 0;
+  lost(rules);
+}
+
+/**
+ * Reports the rules whose style the page wrote by name since it took it (or since this was
+ * last called): before the CSS domain uses a sheet's text, each rule taken is compared with its
+ * text then. The page writing through a style it took before anyone watched goes unseen.
+ */
+export function settle(): void {
+  if (!suspects.size || settled) return;
+  settled = true;
+  taken = 0;
+  queueMicrotask(() => (settled = false));
+  const changed: CSSRule[] = [];
+  for (const [rule, entry] of suspects) {
+    const top = topRuleOf(rule);
+    if (!top) {
+      suspects.delete(rule);
+      continue;
+    }
+    const text = entry.style.cssText;
+    if (text === entry.text) continue;
+    entry.text = text;
+    if (!reported.has(top)) changed.push(top);
+  }
+  for (const rule of suspects.keys()) {
+    if (suspects.size <= KEPT) break;
+    suspects.delete(rule);
+  }
+  for (const top of new Set(changed)) report(sheetOf(top), undefined, { kind: 'rule', rule: top });
+  reported.clear();
+}
+
+/** A rule's style, read by the CSS domain: not taken by the page. */
+export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclaration {
+  own++;
+  try {
+    return rule.style;
+  } finally {
+    own--;
+  }
 }
 
 /** The rule each media list belongs to, noted when read (`rule.media`). */
@@ -177,11 +270,15 @@ function install(realm: Window & typeof globalThis) {
     if (proto)
       for (const name of Object.getOwnPropertyNames(proto))
         if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, changed, 'set');
-  // A rule's media list, noted to tell its changes.
+  // A style the page takes, to write its properties by name, and a rule's media list. Reading
+  // `rule.style` costs more while watching (Chrome 157, 100k reads of one rule: 8.3 ms against
+  // 1.6; of 1000 rules, each taken once, 9.3 ms), and stays at 6.2 ms once the native getter is
+  // put back: V8 no longer inlines a getter defined again from script, even the same one.
   for (const name of Object.getOwnPropertyNames(realm)) {
     if (!/^CSS\w*(Rule|Declarations)$/.test(name)) continue;
     const proto: unknown = (Reflect.get(realm, name) as { prototype?: unknown } | undefined)?.prototype;
     if (typeof proto !== 'object' || proto === null) continue;
+    hook(proto, 'style', (self, _args, style) => taking(self, style), 'get');
     hook(
       proto,
       'media',
@@ -222,6 +319,9 @@ function uninstall() {
       Object.defineProperty(proto, name, { ...now, [part]: native });
       hooked.delete(key);
     }
+  suspects.clear();
+  reported.clear();
+  taken = 0;
 }
 
 /** Calls `listener` with each sheet the page changes, and the text it replaces one with. */

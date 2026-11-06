@@ -3,7 +3,7 @@ import { frames } from '../../core/frames/frames';
 import { closestOwn, isOwn } from '../../core/nodes/nodes';
 import { isCssom, isElement, isHtml, isNode } from '../../core/realm';
 import { isCompanion, pageRulesRewritten } from '../css/matching/forced-pseudo';
-import { ownEdit } from '../css/sheets/cssom-watch';
+import { ownEdit, ownStyle } from '../css/sheets/cssom-watch';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
 export type Rewrite = (text: string) => string;
@@ -130,7 +130,7 @@ function sync(): boolean {
         continue;
       }
       if (isCssom(rule, 'CSSMediaRule')) media(rule.media);
-      const style: unknown = 'style' in rule ? rule.style : null;
+      const style: unknown = 'style' in rule ? ownStyle(rule as CSSRule & { style: CSSStyleDeclaration }) : null;
       // Only blocks using env() are read again on every change (with the rewrite gone, those rewritten).
       if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || style.cssText.includes('env('))) {
         // Ours, not a change of the page's to report.

@@ -7,6 +7,7 @@ import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
+import { ownStyle } from './cssom-watch';
 import { type SheetSource, namespaceText, offsetsOf, sheetTexts, selectorSpans, styleSpan } from './sheet-text';
 
 /** Chrome's error for a range that is not that of what an edit changes. */
@@ -386,7 +387,7 @@ export class SheetRegistry {
     for (const { rule } of this.entries(sheet)) {
       const id = this.ruleId(sheet, rule);
       while (lines.length < id) lines.push('');
-      lines[id] = `${selectorLabel(rule)} { ${buildStyle('', rule.style, 0, 0).cssText} }`;
+      lines[id] = `${selectorLabel(rule)} { ${buildStyle('', ownStyle(rule), 0, 0).cssText} }`;
     }
     return lines.join('\n');
   }

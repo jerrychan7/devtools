@@ -74,6 +74,20 @@ const ROUNDS: string[][] = [
   ["[...sheet.cssRules].find(r => r.media).media.mediaText = 'all'"],
   ["[...sheet.cssRules].find(r => r.media).media.appendMedium('print')"],
   ["[...sheet.cssRules].find(r => r.media).media = 'screen, print'"],
+  // Properties written by name: in a rule, in @media, a nested rule, a keyframe.
+  ["[...sheet.cssRules].find(r => r.selectorText === '.c1').style.color = 'purple'"],
+  [
+    "[...sheet.cssRules].find(r => r.media).cssRules[0].style.marginTop = '3px'",
+    "[...sheet.cssRules].find(r => r.name === 'k').cssRules[0].style.top = '2px'",
+  ],
+  [
+    "[...sheet.cssRules].find(r => r.selectorText === '.c2' && r.cssRules.length).cssRules[0].style.color = 'teal'",
+    "[...sheet.cssRules].find(r => r.selectorText === '.c1').style.setProperty('order', '9')",
+  ],
+  // A style kept, written in the rounds after.
+  ["globalThis.kept = [...sheet.cssRules].find(r => r.selectorText === '.c2' && r.cssRules.length).style"],
+  ["globalThis.kept.paddingLeft = '5px'"],
+  ["globalThis.kept.paddingLeft = '6px'"],
 ];
 
 test('a sheet the page changes round after round: its text and the matched rules as in Chrome', async () => {

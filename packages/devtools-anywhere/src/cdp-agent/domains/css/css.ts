@@ -24,7 +24,7 @@ import {
 } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
 import { ROOT, outline } from './sheets/css-outline';
-import { editedBy, ownEdit, watchCssom, watchRealms, watching } from './sheets/cssom-watch';
+import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */
@@ -132,7 +132,7 @@ export function registerCss(ctx: Context) {
       if (rule.origin === 'user-agent' || !rule.styleSheetId || !rule.style.range) continue;
       const sheet = sheets.get(rule.styleSheetId);
       if (!sheet.ownerNode) continue;
-      const decl = sheets.findRule(sheet, rule.style.range, 'style').style;
+      const decl = ownStyle(sheets.findRule(sheet, rule.style.range, 'style'));
       // Nested declarations, which have no selectors of their own, are not style rules.
       const own = rule.selectorList.selectors.length ? `${rule.styleSheetId}\n${rule.selectorList.text}` : null;
       styles.push({ rule: own, declares: declares(decl) });
@@ -310,16 +310,17 @@ export function registerCss(ctx: Context) {
     const sheet = sheets.get(edit.styleSheetId);
     assertEditable(sheet);
     const rule = sheets.findRule(sheet, edit.range, 'style');
-    const old = rule.style.cssText;
-    const oldSource = sources.get(rule.style);
+    const style = ownStyle(rule);
+    const old = style.cssText;
+    const oldSource = sources.get(style);
     editSheet(
       sheet,
       splice(sheet, edit.range, edit.text),
-      () => setStyleText(rule.style, edit.text, () => (rule.style.cssText = edit.text)),
+      () => setStyleText(style, edit.text, () => (style.cssText = edit.text)),
       () => {
-        rule.style.cssText = old;
-        if (oldSource) sources.set(rule.style, oldSource);
-        else sources.delete(rule.style);
+        style.cssText = old;
+        if (oldSource) sources.set(style, oldSource);
+        else sources.delete(style);
       },
       edit.range
     );
