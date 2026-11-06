@@ -9,6 +9,7 @@ import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, sel
 import { type StyleOrigin, buildStyle } from '../style';
 import { ownStyle } from './watch/cssom-watch';
 import { type SheetSource, namespaceText, offsetsOf, sheetTexts, selectorSpans, styleSpan } from './text/sheet-text';
+import { textEnd } from './text/text-lines';
 
 /** Chrome's error for a range that is not that of what an edit changes. */
 export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing source range";
@@ -402,8 +403,9 @@ export class SheetRegistry {
   }
 
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
-    const text = this.text(sheet);
-    const lines = text.split('\n');
+    const source = this.sourceOf(sheet);
+    const text = source?.text ?? this.serialized(sheet);
+    const end = textEnd(text, source?.lines);
     // Like Chrome, a <style> starts at the start of its text, not where it is in the document's
     // source (which would need the document fetched again).
     const isInspector = this.isInspector(sheet);
@@ -432,8 +434,8 @@ export class SheetRegistry {
       startLine: 0,
       startColumn: 0,
       length: text.length,
-      endLine: lines.length - 1,
-      endColumn: lines.at(-1)?.length ?? 0,
+      endLine: end.line,
+      endColumn: end.column,
     };
   }
 }

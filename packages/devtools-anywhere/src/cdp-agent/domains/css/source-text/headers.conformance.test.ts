@@ -62,6 +62,24 @@ test('a <style> a script adds: its text, from 0:0, a BOM in it kept', async () =
   assert.deepEqual(ours, chrome);
 });
 
+test('where a sheet ends: only LF ends a line, CR and CR LF at the end, and an empty text', async () => {
+  const texts = ['', '.e { color: red }', '.e {}\n', '.e {}\r', '.e {}\r\n.f {}\r\n', '\n\n.e {}\r.f {}', '\r'];
+  const [ours, chrome] = await added(
+    () =>
+      t.page.evaluate(texts => {
+        for (const text of texts) {
+          const s = document.createElement('style');
+          s.textContent = text;
+          document.head.appendChild(s);
+        }
+      }, texts),
+    texts.length
+  );
+  // Chrome reports them in no set order.
+  const byText = (a: { text: string }, b: { text: string }) => a.text.localeCompare(b.text);
+  assert.deepEqual(ours.sort(byText), chrome.sort(byText));
+});
+
 test('constructed and adopted sheets: the text replaceSync got', async () => {
   const [ours, chrome] = await added(() =>
     t.page.evaluate(() => {

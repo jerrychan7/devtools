@@ -16,6 +16,20 @@ export interface TextPosition {
   column: number;
 }
 
+/**
+ * The line and column at the end of `text`, from its `lineStarts` if known: without them, counted
+ * without splitting the text.
+ */
+export function textEnd(text: string, starts?: readonly number[]): TextPosition {
+  if (starts) {
+    const line = starts.length - 1;
+    return { line, column: text.length - (starts[line] ?? 0) };
+  }
+  let line = 0;
+  for (let p = text.indexOf('\n'); p >= 0; p = text.indexOf('\n', p + 1)) line++;
+  return { line, column: text.length - (text.lastIndexOf('\n') + 1) };
+}
+
 /** The line and column of `offset`, from `lineStarts`. */
 export function positionAt(starts: readonly number[], offset: number): TextPosition {
   let lo = 0;
