@@ -62,6 +62,8 @@ export class SheetTexts {
   /** The tick of the last time watching started with none watching before. */
   private unseenAt = 0;
   private unseenTimes = 0;
+  /** <style> elements added or given a new text while watched, with the `unseen` count then. */
+  private addedWatched = new WeakMap<Node, number>();
 
   /** How many times watching started with none watching before. */
   get unseenCount(): number {
@@ -162,6 +164,18 @@ export class SheetTexts {
   }
 
   /**
+   * A <style> was added to a tree, or its text changed, while some session watched: as a watching
+   * session's MutationObserver tells, which sees only what happens while it observes, and is let
+   * go (its records with it) when that session stops watching. Either gives the element a new
+   * sheet (or none, out of a document), as does each later change of its text or connection: every
+   * sheet it has from then on is made from its text while watched, and while the `unseen` count is
+   * the same, watched since. Its text is taken without the check.
+   */
+  watchedStyle(style: Node): void {
+    this.addedWatched.set(style, this.unseenTimes);
+  }
+
+  /**
    * Watching starts again after none watched: changes the page made meanwhile were not seen, so
    * each text is checked against its sheet again before it is used.
    */
@@ -182,7 +196,8 @@ export class SheetTexts {
     let rec = this.recorded.get(sheet);
     const owner = sheet.ownerNode;
     if (!rec && isHtml(owner, 'style') && owner.sheet === sheet) {
-      this.set(sheet, owner.textContent, true);
+      // Made while watched, every change the page made to it seen: no check.
+      this.set(sheet, owner.textContent, this.addedWatched.get(owner) !== this.unseenTimes);
       rec = this.recorded.get(sheet);
     }
     // A constructed sheet whose text went unseen (made before anyone watched) is serialized too.

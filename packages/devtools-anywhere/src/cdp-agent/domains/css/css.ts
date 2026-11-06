@@ -537,6 +537,14 @@ export function registerCss(ctx: Context) {
               n => ownsSheet(n) || (isElement(n) && !isOwn(n) && !!nodes.shadowRootOf(n))
             )
         );
+        // A <style> added, or its text changed, now: its sheet is made while watched, its text taken
+        // without the check (sheet-text.ts). Not for a changed attribute (the sheet stays), nor
+        // for those in the shadow tree of a host added (no record tells of them): checked.
+        for (const r of records) {
+          const style = r.type === 'characterData' ? r.target.parentNode : r.target;
+          if (r.type !== 'attributes' && isHtml(style, 'style') && !isOwn(style)) sheets.texts.watchedStyle(style);
+          for (const n of Array.from(r.addedNodes)) if (isHtml(n, 'style') && !isOwn(n)) sheets.texts.watchedStyle(n);
+        }
         quietly(() => forced.removed(records.flatMap(r => Array.from(r.removedNodes))));
         if (touchesSheets) syncSheets();
       });
