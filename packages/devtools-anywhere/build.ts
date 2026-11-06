@@ -1,6 +1,7 @@
 // Bundles the package with esbuild. Type declarations are emitted separately by tsc.
 // `--watch` rebuilds on every change (`pnpm dev`).
 import { context, type BuildOptions } from 'esbuild';
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { ACCESSIBILITY_SCRIPT, BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
 
@@ -11,13 +12,24 @@ if (!watch) for (const dir of ['dist', 'dist-test']) rmSync(dir, { recursive: tr
 /** An entry point's name, for the file it is built to. */
 const entry = (file: string) => file.replace(/\.js$/, '');
 
+/**
+ * The Service Worker's `debugger` rewrite, as a hash of the code that finds the sites: a record of
+ * sites another build wrote is ignored (src/debugger-rewrite/cache.ts).
+ */
+const rewriteBuild = createHash('sha256')
+  .update(
+    ['src/cdp-agent/core/lexer.ts', 'src/debugger-rewrite/rewrite.ts'].map(f => readFileSync(f, 'utf8')).join('\0')
+  )
+  .digest('hex')
+  .slice(0, 16);
+
 const common: BuildOptions = { bundle: true, target: 'es2020', sourcemap: true, logLevel: 'info' };
 
 const builds: BuildOptions[] = [
   // No ESM build: the package's runtime is the two scripts, and its index only types.
   {
     ...common,
-    define: { DEVTOOLS_ANYWHERE_TEST: 'false' },
+    define: { DEVTOOLS_ANYWHERE_TEST: 'false', DEVTOOLS_ANYWHERE_REWRITE_BUILD: JSON.stringify(rewriteBuild) },
     entryPoints: {
       [entry(BUNDLE_SCRIPT)]: 'src/iife.ts',
       [entry(PROBE_SCRIPT)]: 'src/probe.ts',

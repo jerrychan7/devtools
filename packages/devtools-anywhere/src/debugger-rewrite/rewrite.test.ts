@@ -21,7 +21,7 @@ const bundled = await build({
 const modules = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 )) as typeof Modules & typeof CacheModule;
-const { RewriteCache, hashBytes, planOf, rewriteDebugger } = modules;
+const { RewriteCache, hashBytes, hashText, planOf, rewriteDebugger } = modules;
 type RecordStore = CacheModule.RecordStore;
 type RewriteCache = CacheModule.RewriteCache;
 
@@ -81,13 +81,13 @@ test('responses without validators are cached by their content', async () => {
       store.record = record;
     },
   };
-  const cache = new RewriteCache(store);
+  const cache = new RewriteCache({ store });
   await rewrite(script('debugger'), cache);
-  assert.match(store.record ?? '', /a\.js/);
+  assert.match(store.record ?? '', new RegExp(await hashText(URL_A)));
   // no-store: remembered, in memory only.
   await rewrite(script('debugger', { 'cache-control': 'private, no-store' }), cache, 'https://example.test/b.js');
   assert.equal(cache.size, 2);
-  assert.doesNotMatch(store.record ?? '', /b\.js/);
+  assert.doesNotMatch(store.record ?? '', new RegExp(await hashText('https://example.test/b.js')));
 });
 
 test('only full 200 responses are remembered; failures pass through untouched', async () => {

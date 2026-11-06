@@ -14,13 +14,19 @@
 // no script text), written after the response went out and read once when the worker starts:
 // a put of the record or a match is about 1 ms, where 300 separate entries would cost 30 ms for
 // a `keys()`. Scripts served with `Cache-Control: no-store` stay in memory only, so nothing about
-// them is written to disk.
+// them is written to disk. The record holds the SHA-256 of each URL, not the URL, so that a token
+// in a query string is not written to disk; entries read back are found by hashing the URL looked
+// up, while a lookup in memory stays by URL.
+//
+// The record carries the build that made it: a worker of another build (maybe another lexer)
+// ignores it. The new worker also deletes the cache when it activates, but the old one may still
+// be writing (its `waitUntil`) and put a record back afterwards.
 import { REWRITE_CACHE } from '../shell-messages';
 
 /** Scripts remembered, by URL; the least recently used goes first. */
 export const MAX_ENTRIES = 256;
-/** Bumped when what the record holds, or how the lexer finds the sites, changes. */
-const VERSION = 1;
+/** Bumped when what the record holds changes; the build is added to it. */
+const FORMAT = 2;
 
 /** The `debugger` sites of a script: byte offset × 2, plus 1 when the call goes before a `;`. */
 export type Plan = readonly number[];
@@ -31,6 +37,8 @@ interface Entry {
   plan: Plan;
   /** Written to the persistent record (not for `no-store` responses). */
   persist: boolean;
+  /** SHA-256 of the URL: what the record holds instead of it. */
+  urlHash: string;
 }
 
 /** Where the record goes: the Cache API in the worker, anything in tests. */
@@ -62,47 +70,78 @@ export async function hashBytes(bytes: Uint8Array<ArrayBuffer>): Promise<string>
   return hex;
 }
 
+/** SHA-256 of `text` in UTF-8, in hex. */
+export const hashText = (text: string): Promise<string> => hashBytes(new TextEncoder().encode(text));
+
+export interface RewriteCacheOptions {
+  /** Where the record goes; none to keep entries in memory only. */
+  store?: RecordStore | undefined;
+  /** The build: a record another build made is ignored. */
+  build?: string | undefined;
+  max?: number | undefined;
+}
+
 export class RewriteCache {
+  /** Entries by URL, the least recently used first. */
   private readonly entries = new Map<string, Entry>();
+  /** Entries read back from the record, by URL hash, until a lookup of their URL claims them. */
+  private readonly restored = new Map<string, Entry>();
   private loaded: Promise<void> | undefined;
   /** Writes of the record, one after the other. */
   private saving: Promise<void> = Promise.resolve();
   private dirty = false;
   private readonly store: RecordStore | undefined;
+  private readonly version: string;
   private readonly max: number;
 
-  constructor(store?: RecordStore, max = MAX_ENTRIES) {
+  constructor({ store, build = 'dev', max = MAX_ENTRIES }: RewriteCacheOptions = {}) {
     this.store = store;
+    this.version = `${FORMAT}:${build}`;
     this.max = max;
   }
 
-  /** Reads the record once; a missing, unreadable or older one is an empty cache. */
+  /** Reads the record once; a missing, unreadable or other build's one is an empty cache. */
   private load(): Promise<void> {
     return (this.loaded ??= (async () => {
       try {
         const text = await this.store?.load();
         if (!text) return;
         const record = JSON.parse(text) as { version?: unknown; entries?: unknown };
-        if (record.version !== VERSION || !Array.isArray(record.entries)) return;
+        if (record.version !== this.version || !Array.isArray(record.entries)) return;
         for (const item of record.entries as unknown[]) {
           if (!Array.isArray(item)) continue;
-          const [url, hash, charset, plan] = item as unknown[];
-          if (typeof url !== 'string' || typeof hash !== 'string' || typeof charset !== 'string') continue;
+          const [urlHash, hash, charset, plan] = item as unknown[];
+          if (typeof urlHash !== 'string' || typeof hash !== 'string' || typeof charset !== 'string') continue;
           if (!Array.isArray(plan) || !plan.every(n => Number.isInteger(n) && n >= 0)) continue;
-          // Entries put while the record loaded are newer.
-          if (!this.entries.has(url)) this.entries.set(url, { hash, charset, plan: plan as number[], persist: true });
+          this.restored.set(urlHash, { hash, charset, plan: plan as number[], persist: true, urlHash });
         }
-        this.trim();
+        // Entries put while the record loaded are newer.
+        for (const entry of this.entries.values()) this.restored.delete(entry.urlHash);
+        if (this.trim()) void this.save();
       } catch {
         // No Cache API, or a broken record: start empty.
       }
     })());
   }
 
+  /** The entry of `url`, claiming the one read back from the record. */
+  private async entry(url: string): Promise<Entry | undefined> {
+    let entry = this.entries.get(url);
+    if (!entry && this.restored.size > 0) {
+      const urlHash = await hashText(url);
+      entry = this.restored.get(urlHash);
+      if (entry) {
+        this.restored.delete(urlHash);
+        this.entries.set(url, entry);
+      }
+    }
+    return entry;
+  }
+
   /** The plan for `url` when its script had this hash in this charset, else undefined. */
   async get(url: string, hash: string, charset: string): Promise<Plan | undefined> {
     await this.load();
-    const entry = this.entries.get(url);
+    const entry = await this.entry(url);
     if (!entry || entry.hash !== hash || entry.charset !== charset) return undefined;
     // Most recently used last.
     this.entries.delete(url);
@@ -116,29 +155,36 @@ export class RewriteCache {
    */
   async set(url: string, hash: string, charset: string, plan: Plan, persist: boolean): Promise<void> {
     await this.load();
-    const old = this.entries.get(url);
+    const old = await this.entry(url);
+    const urlHash = old?.urlHash ?? (await hashText(url));
     this.entries.delete(url);
-    this.entries.set(url, { hash, charset, plan, persist });
-    this.trim();
-    if (persist || old?.persist) await this.save();
+    this.entries.set(url, { hash, charset, plan, persist, urlHash });
+    const evicted = this.trim();
+    if (persist || old?.persist || evicted) await this.save();
   }
 
   /** Forgets everything, in memory and in the record. */
   async clear(): Promise<void> {
     await this.load();
     this.entries.clear();
+    this.restored.clear();
     await this.save();
   }
 
   get size(): number {
-    return this.entries.size;
+    return this.entries.size + this.restored.size;
   }
 
-  private trim() {
-    for (const url of this.entries.keys()) {
-      if (this.entries.size <= this.max) break;
-      this.entries.delete(url);
-    }
+  /** Drops the least recently used entries past `max`, unclaimed ones first; true if a persisted one went. */
+  private trim(): boolean {
+    let persisted = false;
+    for (const map of [this.restored, this.entries])
+      for (const [key, entry] of map) {
+        if (this.size <= this.max) return persisted;
+        map.delete(key);
+        persisted ||= entry.persist;
+      }
+    return persisted;
   }
 
   /** Writes the record; writes asked for while one is under way make one more after it. */
@@ -148,12 +194,14 @@ export class RewriteCache {
     if (this.dirty) return this.saving;
     this.dirty = true;
     this.saving = this.saving.then(async () => {
+      // Lets the other writes asked for in this turn join this one.
+      await new Promise(resolve => setTimeout(resolve, 0));
       this.dirty = false;
-      const entries = [...this.entries]
-        .filter(([, entry]) => entry.persist)
-        .map(([url, { hash, charset, plan }]) => [url, hash, charset, plan]);
+      const entries = [...this.restored.values(), ...this.entries.values()]
+        .filter(entry => entry.persist)
+        .map(({ urlHash, hash, charset, plan }) => [urlHash, hash, charset, plan]);
       try {
-        await store.save(JSON.stringify({ version: VERSION, entries }));
+        await store.save(JSON.stringify({ version: this.version, entries }));
       } catch {
         // Storage full or gone: the entries stay in memory.
       }

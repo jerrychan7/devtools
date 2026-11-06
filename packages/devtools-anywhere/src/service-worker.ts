@@ -41,6 +41,8 @@
 
 // Type-checked with the WebWorker library (tsconfig.service-worker.json), separately from the DOM code.
 declare const self: ServiceWorkerGlobalScope;
+/** Hash of the lexer and the rewrite (build.ts), which the rewrite cache's record is tied to. */
+declare const DEVTOOLS_ANYWHERE_REWRITE_BUILD: string;
 // The lexer alone (through the rewrite): the agent's entry points would bring DOM code into the worker.
 import { RewriteCache, cacheStore } from './debugger-rewrite/cache';
 import { rewriteDebugger } from './debugger-rewrite/rewrite';
@@ -69,7 +71,7 @@ const shellKey = (id: string) =>
 const probed = new Map<string, Set<string>>();
 
 /** Where the `debugger` statements of the scripts served before are. */
-const rewrites = new RewriteCache(cacheStore(self.location.href));
+const rewrites = new RewriteCache({ store: cacheStore(self.location.href), build: DEVTOOLS_ANYWHERE_REWRITE_BUILD });
 
 /** Client ids of shell documents that made the handshake (loaded lazily from the cache). */
 let shells: Promise<Set<string>> | undefined;
