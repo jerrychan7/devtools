@@ -35,6 +35,8 @@
 
 价值有限的：性能监视器（`Performance.getMetrics`，只有 DOM 节点数和 Chrome 的 `performance.memory`）；事件监听器的源码位置（只能在添加时记录调用栈，影响性能）。不做：问题面板里的低对比度，Chrome 自己已经去掉了 `Audits.checkContrast` 和低文本对比度问题。
 
+优先级最低：带命名空间前缀的选择器（如 `svg|a`、`[xlink|href]`）的静态匹配。现在样式表声明了 `@namespace` 时，带前缀的选择器要把一张探针表临时采用进文档，用 `getComputedStyle` 读出是否匹配，每次都会引起样式重算，并有一笔和文档规模成正比的固定开销（约每 1 万个元素 2.3ms，采用和移除各一次）。做法：把选择器拆成复合选择器，去掉前缀后用 `matches()` 判断，再比对元素的 `namespaceURI`，组合器自己处理，`[ns|attr]` 用 `getAttributeNS`；前缀出现在 `:is()`、`:not()`、`:has()` 参数里或带伪元素时，仍然走探针。难点是默认命名空间的边界（`*`、类型选择器、`:is()` 内部），要逐项和 Chrome 对照。只有带前缀的选择器多、探针成为热点的页面才值得做。
+
 ## 没有效果的命令
 
 已定：页面做不到的命令返回服务器错误（-32000），信息是「Not supported in the page: <原因>」（`cdp-agent/domains/stubs.ts`）：Autofill 的地址、后台服务记录、需要 worker 本身的 Service Worker 命令（调试、启动、停止 worker，`skipWaiting`，投递推送消息和同步事件）、页面加载时强制更新（关闭时返回成功）、自动深色模式、开启焦点模拟（关闭时返回成功）、重置双指缩放、绕过 Service Worker、跟踪兴趣组和共享存储、远程目标地址、安全隔离状态（COOP、COEP、CSP 是响应头）、浏览器的功能开关、网络限速（设了延迟、吞吐量或丢包就算；都不设或只设离线时返回成功），以及启用只有浏览器才有事件的域：`Autofill`、`Database`（WebSQL）、`HeapProfiler`、`Preload`、`Profiler`。前端不记录服务器错误，这些命令失败时它的各个模型照常启动；Frames 视图不显示隔离状态一节，跳出跟踪视图显示为未启用，与之前编造的回答效果相同。读取类命令同样返回失败而不编造数据，`CSS.getEnvironmentVariables` 则读取页面解析出的 env() 值。只能做一部分的，按核心效果判断：核心效果做不到就算做不到（如焦点模拟保不住 `:focus` 样式），否则算还没做（如 UA 覆盖改不了文档自身的请求，但 JS 和之后的请求能读到）。能在页面里做但还没做的命令仍返回成功，列在上面的表里；页面以后能给出事件的域（`Accessibility`、`Log`；`Animation`、`Audits`、`ServiceWorker` 已实现）启用时也返回成功；`Inspector.enable` 管的是连接本身，也返回成功。
