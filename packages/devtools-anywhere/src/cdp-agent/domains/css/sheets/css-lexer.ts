@@ -92,6 +92,18 @@ for (let c = 0; c < 128; c++)
               } as Record<number, number>
             )[c] ?? C.Other);
 
+/** The kinds of single-character tokens by code point, `Delim` for the rest of ASCII. */
+const single = new Uint8Array(128).fill(Tok.Delim);
+single[40] = Tok.LParen;
+single[41] = Tok.RParen;
+single[44] = Tok.Comma;
+single[58] = Tok.Colon;
+single[59] = Tok.Semi;
+single[91] = Tok.LBracket;
+single[93] = Tok.RBracket;
+single[123] = Tok.LBrace;
+single[125] = Tok.RBrace;
+
 /** Tokenizes `text`. */
 export function tokenize(text: string): Tokens {
   const len = text.length;
@@ -219,18 +231,6 @@ export function tokenize(text: string): Tokens {
     if (identStart(p)) name();
     else if (at(p) === 37) p++;
   };
-  const single: Record<number, TokKind> = {
-    40: Tok.LParen,
-    41: Tok.RParen,
-    44: Tok.Comma,
-    58: Tok.Colon,
-    59: Tok.Semi,
-    91: Tok.LBracket,
-    93: Tok.RBracket,
-    123: Tok.LBrace,
-    125: Tok.RBrace,
-  };
-
   const kinds: TokKind[] = [];
   const starts: number[] = [];
   while (p < len) {
@@ -318,7 +318,7 @@ export function tokenize(text: string): Tokens {
         break;
       default:
         p++;
-        k = single[c] ?? Tok.Delim;
+        k = single[c] as TokKind; // c < 128: higher code points start names
     }
     kinds.push(k);
     starts.push(s);
