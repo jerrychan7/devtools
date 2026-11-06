@@ -46,7 +46,7 @@ node lexer-compare.bench.ts --rev HEAD~1
 `tokenize`（每个 token 的种类、起点、终点、深度、所在括号和换行标记）、`debuggerStatementSites`、`debuggerStatements`、`topLevelLexicalNames`、`topLevelLexicalDeclarations`、`topLevelVarNames`、`lastExpressionStatement`、`returnOutsideFunction` 和 `repl`（复用 token 的各查询），在脚本和模块两种模式下，都与 `--rev` 的结果逐条相等。覆盖：
 
 - 每份材料；
-- 真实代码：仓库根目录有 `es-module-lexer.ignore/` 时它的测试样例、acorn 的 `dist/`、puppeteer-core 的 `lib/esm`（至多 400 个文件），以及 `lexer.ts` 自身；
+- 真实代码：仓库根目录有 `es-module-lexer.ignore/` 时它的测试样例、acorn 的 `dist/`、puppeteer-core 的 `lib/esm`，合计至多 400 个文件（测试样例至多 40 个，与 acorn 合计至多 80 个，其余为 puppeteer-core），以及 `lexer.ts` 自身；
 - `lexer.test.ts` 里的每个字符串字面量（用 `--rev` 的词法器找出）；
 - 每个 UTF-16 码元，分别跟在 16 个前缀（`a /`、`x = /`、`)`、`` `${ ``、`/*`、`<!-`、`\n--`、`class `、`debugger`、`\u{` 等）之后、`x` 之前（`tokenize`、`debuggerStatementSites` 和 `topLevelLexicalNames`，脚本模式）；
 - 每个种子 200,000 个随机片段（`--seed`，默认 1 和 987654321；`--fragments` 改数量），每个至多 40 段：带转义和续行的字符串、模板和 `${`、处在各种位置（是否为除号）的正则和 `/`、行注释和块注释、`<!--` 和 `-->`、`#!`、行终止符（CR、LF、CR LF、U+2028、U+2029）、Unicode 空白、各种括号、词法器和查询关心的关键字（含转义写法的 `debugger`）、名称、数字、非 ASCII、代理项和随机码元。
@@ -55,7 +55,7 @@ node lexer-compare.bench.ts --rev HEAD~1
 
 每份文本还会让工作区和自己核对：`debuggerStatementSites` 的结果必须等于按同样规则从工作区自己的 `tokenize` 推导出的结果，流式的 debugger 模式和 token 列表不能分叉。
 
-与旧版本有一处已知差异，不算作不同。直到 42c0468（以及 aff93c5），debugger 模式不保存 token，于是把脚本里任何位置的 `-->` 都当成 HTML 注释（`x-->0; debugger` 里的 `debugger` 被漏掉）；修复后，`-->` 只在 `tokenize` 也认作注释的地方才是注释：源码开头，或换行之后、前面只有空白和注释。与这类版本对拍时，含 `-->` 的脚本上 `debuggerStatementSites` 和 `debuggerStatements` 可以不同，前提是工作区的结果与它自己的 token 列表一致；脚本会报告这样的结果有多少。
+与旧版本有一处已知差异，不算作不同。直到 42c0468（以及 aff93c5），debugger 模式不保存 token，于是把脚本里任何位置的 `-->` 都当成 HTML 注释（`x-->0; debugger` 里的 `debugger` 被漏掉）；修复后，`-->` 只在 `tokenize` 也认作注释的地方才是注释：源码开头，或换行之后、前面只有空白和注释。与这类版本（在 `x-->0;debugger` 里找不到 `debugger` 的版本）对拍时，含 `-->` 的脚本上 `debuggerStatementSites` 和 `debuggerStatements` 可以不同，前提是工作区的结果与它自己的 token 列表一致；与修复之后的版本对拍时，任何不同都算数。脚本会报告这样的结果有多少。
 
 ## 参考结果
 
@@ -156,7 +156,7 @@ Apple M2，16 GB，macOS 26，Node 24.21.0，在 aff93c5 运行 `node --expose-g
 | 5cefe1a | 关键字原地比较（不再每个词 `slice` 一次）；`returnOutsideFunction` 按深度记函数体个数 |
 | e9dfe07 | token 数组先按每 8 个码元一个 token 分配，按已读部分的密度增长 |
 
-关键字这一步在 acorn.js 上看得出（`returnOutsideFunction` 2.47 到 2.21 ms）；在 anywhere_app 上被查询所依赖的 `tokenize` 盖住了。数组这一步体现在 `tokenize` 的内存上：按 token 位置回放得到的峰值（数组加它的副本，或者增长时新旧两份数组）在 anywhere_app 上从 65.1 MB 降到 44.9 MB，结果保留的从 28.3 MB 升到 31.1 MB（与 token 数相差不到 1/8 的数组不再复制）。它在 acorn.js 上的 reads/unit 从 1.14 升到 1.24：不短于关键字的词现在用 `charCodeAt` 读到与关键字不同的位置为止，原来的 `slice` 读取不计数。其他入口的 token 随调用结束就死，它们的 MB alloc 一列随回收器提升了多少而变，参考意义不大。
+关键字这一步在 acorn.js 上看得出（`returnOutsideFunction` 2.47 到 2.21 ms），读取次数也是：`returnOutsideFunction` 在 acorn.js 上的 reads/unit 在 5cefe1a 从 1.14 升到 1.24，因为不短于关键字的词现在用 `charCodeAt` 读到与关键字不同的位置为止，原来的 `slice` 读取不计数。在 anywhere_app 上这一步被查询所依赖的 `tokenize` 盖住了。数组这一步体现在 `tokenize` 的内存上：按 token 位置回放得到的峰值（数组加它的副本，或者增长时新旧两份数组）在 anywhere_app 上从 65.1 MB 降到 44.9 MB，结果保留的从 28.3 MB 升到 31.1 MB（与 token 数相差不到 1/8 的数组不再复制）。其他入口的 token 随调用结束就死，它们的 MB alloc 一列随回收器提升了多少而变，参考意义不大。
 
 #### acorn.js: 246,615 code units (acorn 8.19.0 dist/acorn.js from node_modules)
 
