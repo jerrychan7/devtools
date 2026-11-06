@@ -78,6 +78,15 @@ export function planOf(bytes: Uint8Array, charset: string): Plan {
   return plan;
 }
 
+/** Each site of `plan` is the ASCII `debugger` in `bytes`. */
+function fits(bytes: Uint8Array, plan: Plan): boolean {
+  for (const site of plan) {
+    const at = Math.floor(site / 2);
+    for (let i = 0; i < 8; i++) if (bytes[at + i] !== 'debugger'.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
 /** Writes the calls of `plan` over the `debugger` keywords, in place. */
 function apply(bytes: Uint8Array, plan: Plan) {
   for (const site of plan) {
@@ -124,6 +133,8 @@ export async function rewriteDebugger(
   if (cache && url && response.status === 200) {
     const hash = await hashBytes(bytes);
     plan = await cache.get(url, hash, charset);
+    // A plan that does not point at \`debugger\` keywords (a broken record) is a miss, and replaced.
+    if (plan && !fits(bytes, plan)) plan = undefined;
     if (!plan) {
       plan = planOf(bytes, charset);
       const persist = !/(?:^|,)\s*no-store\b/i.test(response.headers.get('cache-control') || '');

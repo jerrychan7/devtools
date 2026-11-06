@@ -62,6 +62,18 @@ test('a script served again is not lexed again: its plan comes from the cache', 
   assert.equal(await rewrite(script(source), cache), 'f(); _$dbg();; g()', 'a hit applies the stored plan');
 });
 
+test('a stored plan that does not point at debugger keywords is a miss, and is corrected', async () => {
+  const cache = new RewriteCache();
+  const source = 'f(); debugger; g()';
+  const bytes = new TextEncoder().encode(source);
+  const hash = await hashBytes(bytes);
+  for (const wrong of [[0], [5 * 2, 15 * 2], [17 * 2]]) {
+    await cache.set(URL_A, hash, 'utf-8', wrong, true);
+    assert.equal(await rewrite(script(source), cache), 'f(); _$dbg() ; g()', String(wrong));
+    assert.deepEqual(await cache.get(URL_A, hash, 'utf-8'), planOf(bytes, 'utf-8'), 'the entry is fixed');
+  }
+});
+
 test('a changed script at the same URL misses and replaces the plan', async () => {
   const cache = new RewriteCache();
   assert.equal(await rewrite(script('debugger'), cache), '_$dbg();');
