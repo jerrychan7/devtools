@@ -284,6 +284,7 @@ export function viewProbe(probe: Probe): ProbeView {
     shadowRoots: probe.shadowRoots,
     onShadowRoot: listener => probe.onShadowRoot(listener),
     onAnimation: listener => probe.onAnimation(listener),
+    animation: probe.animation,
     listeners: probe.listeners,
     ownUrls: probe.ownUrls,
     fetch: probe.fetch,

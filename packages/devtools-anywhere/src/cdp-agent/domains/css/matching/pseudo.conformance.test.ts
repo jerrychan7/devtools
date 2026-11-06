@@ -144,4 +144,50 @@ describe('pseudo-elements', () => {
     const [[o], [c]] = await waitForBoth(t, 'DOM.pseudoElementAdded');
     assert.deepEqual(diffSubset(o, c), []);
   });
+  test('the startViewTransition hook leaves the options and errors as the page passed them', async () => {
+    assert.ok(env);
+    const v = await openPage(env, ['Animation.animationStarted']);
+    for (const side of [v.ours, v.chrome]) await side.send('Animation.enable');
+    // A rule by class makes our cssId read the transition's classes, which hooks startViewTransition.
+    await v.page.evaluate(async () => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes hg { to { opacity: .5 } } .h { view-transition-name: h; view-transition-class: c }' +
+        ' ::view-transition-group(.c) { animation: hg 5s }';
+      document.head.append(style);
+      document.body.append(Object.assign(document.createElement('div'), { className: 'h', textContent: 'h' }));
+      await document.startViewTransition(() => {}).ready;
+    });
+    await waitForBoth(v, 'Animation.animationStarted');
+    await v.page.evaluate(() => document.getAnimations().forEach(a => a.finish()));
+    // Called on what is no document, it throws the page's own error, as a fresh realm's does.
+    const illegal = (w: Window & typeof globalThis) => {
+      try {
+        w.Document.prototype.startViewTransition.call({});
+        return 'no error';
+      } catch (e) {
+        return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      }
+    };
+    assert.deepEqual(
+      await v.page.evaluate(`(${illegal.toString()})(window)`),
+      await v.page.evaluate(`(() => {
+        const frame = document.body.appendChild(document.createElement('iframe'));
+        const result = (${illegal.toString()})(frame.contentWindow);
+        frame.remove();
+        return result;
+      })()`)
+    );
+    // Options inherited from a prototype still reach the page's function: the types match.
+    const typed = await v.page.evaluate(async () => {
+      const transition = document.startViewTransition(Object.create({ types: ['t'], update() {} }));
+      await transition.ready;
+      const result = document.documentElement.matches(':active-view-transition-type(t)');
+      document.getAnimations().forEach(a => a.finish());
+      await transition.finished;
+      return result;
+    });
+    assert.equal(typed, true);
+    await v.page.close();
+  });
 });

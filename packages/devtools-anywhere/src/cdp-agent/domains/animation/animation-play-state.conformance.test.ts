@@ -1,7 +1,15 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openPage } from '../../../../test-support/conformance.ts';
-import { EVENTS, env, sleep, reports, onEachSide } from '../../../../test-support/animation-conformance.ts';
+import { PROBE_BUNDLE, openPage } from '../../../../test-support/conformance.ts';
+import {
+  EVENTS,
+  env,
+  sleep,
+  until,
+  fence,
+  reports,
+  onEachSide,
+} from '../../../../test-support/animation-conformance.ts';
 
 describe('Animation, play state changes', () => {
   /** Runs each step in the page, and takes what each side reported after it. */
@@ -10,7 +18,7 @@ describe('Animation, play state changes', () => {
       const out: Record<string, string[]> = {};
       for (const [name, code] of list) {
         await t.page.evaluate(code);
-        await sleep(250);
+        await fence(t, side);
         out[name] = (await reports(side)).map(r => r.split(' ').slice(0, 2).join(' '));
       }
       return out;
@@ -48,6 +56,7 @@ describe('Animation, play state changes', () => {
       await t.page.evaluate(() => {
         document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000);
       });
+      // Sleeps, not fences: Chrome reports the play's new start time a while after a fence's start.
       await sleep(300);
       await reports(side);
       const out: Record<string, string[]> = {};
@@ -191,13 +200,111 @@ describe('Animation, play state changes', () => {
       assert.deepEqual(result, { errors: [], logged: 0 });
       assert.equal(consoled.filter(text => text.startsWith('devtools-anywhere: internal error')).length, 4);
       // The domain's own listener still ran: both were announced.
-      await sleep(200);
-      assert.equal((await t.ours.events('Animation.animationCreated')).length, 2);
-      // A seek plays the animation through the hook: the listener's error does not fail it.
+      const created = await until(async () => {
+        const list = await t.ours.events('Animation.animationCreated');
+        return list.length >= 2 ? list : undefined;
+      }, 'both announcements');
+      assert.equal(created.length, 2);
+      // A seek plays the animation with the browser's own play(), past the hook: nothing to fail it.
       await t.ours.send('Animation.seekAnimations', { animations: ['1'], currentTime: 100 });
       assert.equal(await t.page.evaluate(() => document.getAnimations()[0]?.playState), 'running');
     } finally {
       await t.page.close();
+    }
+  });
+  test("the panel's pause, play, seek and rate pass the page's hooks of Animation.prototype by (ours)", async () => {
+    assert.ok(env);
+    const t = await openPage(env, [...EVENTS]);
+    try {
+      await t.ours.send('Animation.enable');
+      // Hooks the page adds after the probe, as an animation library or analytics would.
+      await t.page.evaluate(() => {
+        const calls: string[] = [];
+        Reflect.set(window, '__calls', calls);
+        const proto = Animation.prototype;
+        for (const name of ['play', 'pause'] as const) {
+          const f = proto[name];
+          proto[name] = function (this: Animation) {
+            calls.push(name);
+            return f.call(this);
+          };
+        }
+        for (const name of ['playbackRate', 'currentTime']) {
+          const own = Object.getOwnPropertyDescriptor(proto, name);
+          const set = own?.set;
+          if (!own || !set) continue;
+          Object.defineProperty(proto, name, {
+            ...own,
+            set(this: Animation, value: unknown) {
+              calls.push(name);
+              set.call(this, value);
+            },
+          });
+        }
+        const div = document.body.appendChild(document.createElement('div'));
+        div.animate({ opacity: [0, 1] }, 100000).id = 'hooked';
+      });
+      const id = (await until(async () => (await t.ours.events('Animation.animationStarted'))[0], 'the start'))
+        .animation.id;
+      await t.ours.send('Animation.setPaused', { animations: [id], paused: true });
+      await t.ours.send('Animation.seekAnimations', { animations: [id], currentTime: 500 });
+      // The rate is written once the pause is no longer pending.
+      await t.page.evaluate(async () => {
+        await document.getAnimations().find(x => x.id === 'hooked')?.ready;
+      });
+      await t.ours.send('Animation.setPlaybackRate', { playbackRate: 0.5 });
+      const paused = await t.page.evaluate(() => {
+        const a = document.getAnimations().find(x => x.id === 'hooked');
+        return [a?.playState, a?.currentTime, a?.playbackRate];
+      });
+      await t.ours.send('Animation.setPaused', { animations: [id], paused: false });
+      await t.ours.send('Animation.disable');
+      // The disable gives the rate back once the play is no longer pending.
+      const state = await t.page.evaluate(async () => {
+        const a = document.getAnimations().find(x => x.id === 'hooked');
+        await a?.ready;
+        await new Promise(r => requestAnimationFrame(r));
+        return { playState: a?.playState, rate: a?.playbackRate, calls: Reflect.get(window, '__calls') };
+      });
+      assert.deepEqual(paused, ['paused', 500, 0.5]);
+      assert.deepEqual(state, { playState: 'running', rate: 1, calls: [] });
+    } finally {
+      await t.page.close();
+    }
+  });
+
+  test('an error of a listener does not reach a console.error the page wrapped before the probe (ours)', async () => {
+    assert.ok(env);
+    const page = await env.browser.newPage();
+    try {
+      await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
+      // An error reporter's wrapper, in place before the probe is loaded.
+      await page.evaluate(() => {
+        const reported: unknown[] = [];
+        Reflect.set(window, '__reported', reported);
+        const error = console.error;
+        console.error = (...args: unknown[]) => {
+          reported.push(args[0]);
+          error.apply(console, args);
+        };
+      });
+      await page.addScriptTag({ path: PROBE_BUNDLE });
+      const reported = await page.evaluate(async () => {
+        const probe: unknown = Reflect.get(window, '__devtoolsAnywhereProbe__');
+        const onAnimation: unknown = probe && Reflect.get(probe, 'onAnimation');
+        if (typeof onAnimation !== 'function' || typeof probe !== 'object' || !probe) return 'no probe';
+        Reflect.apply(onAnimation, probe, [
+          () => {
+            throw new TypeError('listener');
+          },
+        ]);
+        document.body.appendChild(document.createElement('div')).animate({ opacity: [0, 1] }, 10000);
+        await new Promise(r => setTimeout(r, 50));
+        return Reflect.get(window, '__reported');
+      });
+      assert.deepEqual(reported, []);
+    } finally {
+      await page.close();
     }
   });
 });

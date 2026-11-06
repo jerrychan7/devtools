@@ -26,7 +26,7 @@ export { keep } from './network';
 const LIMIT = 10_000;
 const MAX_TOOL_OUTCOMES = 50;
 
-/** The page's `console.error` as the probe found it, unhooked: for devtools-anywhere's own errors. */
+/** The browser's own `console.error`, if the page had not wrapped it: for devtools-anywhere's own errors. */
 let ownError: (...args: unknown[]) => void = () => {};
 
 /** @internal */
@@ -34,8 +34,10 @@ export function installProbe(): Probe {
   const w = window;
   const existing: Probe | undefined = Reflect.get(w, PROBE_KEY);
   if (existing) return existing;
-  // Before the console is hooked: our own errors go to the browser's console only.
-  ownError = console.error.bind(console);
+  // Before the console is hooked: our own errors go to the browser's console only. One the page
+  // wrapped already (an error reporter's) would hand them to the page: they are dropped then.
+  const error = console.error;
+  if (/\{\s*\[native code\]\s*\}$/.test(Function.prototype.toString.call(error))) ownError = error.bind(console);
 
   const logs: ProbeLog[] = [];
   const requests: ProbeRequest[] = [];
@@ -47,6 +49,8 @@ export function installProbe(): Probe {
   const shadowRootListeners = new Set<(root: ShadowRoot) => void>();
   const animationListeners = new Set<(animation: Animation) => void>();
   const hooked = new WeakSet<Console>();
+  const animProto = w.Animation?.prototype;
+  const own = (name: string) => Object.getOwnPropertyDescriptor(animProto, name);
   const probe: Probe = {
     version: 1,
     hookNetwork(win, frame) {
@@ -92,6 +96,13 @@ export function installProbe(): Probe {
     onAnimation(listener) {
       animationListeners.add(listener);
       return () => void animationListeners.delete(listener);
+    },
+    // Before hookAnimations() below.
+    animation: animProto && {
+      play: animProto.play,
+      pause: animProto.pause,
+      rate: own('playbackRate'),
+      time: own('currentTime'),
     },
     listeners: new WeakMap(),
     ownUrls: new Set(),
@@ -287,16 +298,25 @@ function hookAnimations(listeners: Set<(animation: Animation) => void>, w: Windo
   // page's, and calls without `new`, or on another `this`, throw as before. `toString()` keeps the
   // native form but loses the name: "function () { [native code] }" for "function animate() {...}".
   proto.animate = new Proxy(animate, { apply: (f, self, args) => tell(Reflect.apply(f, self, args)) });
-  // And on play(), pause() and cancel(): ended ones are not looked at every frame, and
-  // getAnimations() may miss them; pausing one is reported too.
+  // And on whatever plays, pauses, ends or moves one: ended ones are not looked at every frame, and
+  // getAnimations() may miss them, while reverse(), a new rate or a new time runs one again;
+  // pausing one is reported too.
   const animProto = ctor.prototype;
-  for (const name of ['play', 'pause', 'cancel'] as const)
-    animProto[name] = new Proxy(animProto[name], {
-      apply: (f, self, args) => {
-        Reflect.apply(f, self, args);
+  const after = <F extends Function>(f: F) =>
+    new Proxy(f, {
+      apply: (target, self, args) => {
+        Reflect.apply(target, self, args);
         tell(self);
       },
     });
+  for (const name of ['play', 'pause', 'cancel', 'reverse', 'finish', 'updatePlaybackRate']) {
+    const f: unknown = Reflect.get(animProto, name);
+    if (typeof f === 'function') Reflect.set(animProto, name, after(f));
+  }
+  for (const name of ['currentTime', 'startTime', 'playbackRate']) {
+    const own = Object.getOwnPropertyDescriptor(animProto, name);
+    if (own?.set) Object.defineProperty(animProto, name, { ...own, set: after(own.set) });
+  }
   // Subclasses and `instanceof` work through it; `constructor` names it, so that
   // `animation.constructor === Animation` holds as before.
   const proxy = new Proxy(ctor, {

@@ -35,7 +35,7 @@ export function pseudoMatches(selector: string, actual: string, el: Element, cla
     if (!m[1] && !m[2]) return false;
     const wanted = Array.from((m[2] ?? '').matchAll(new RegExp(`\\.(${IDENT})`, 'g')), c => atName(c[1] ?? ''));
     if (!wanted.length) return true;
-    const own = classes.of(documentOf(el), vtName);
+    const own = classes.of(el, vtName);
     return wanted.every(c => own.includes(c));
   }
   const wanted = arg.trim().toLowerCase();
@@ -105,7 +105,9 @@ function canScroll(scroller: Element, side: string): boolean {
   // Scrolled from the right, scrollLeft runs from minus the overflow to 0.
   const fromRight =
     style.writingMode.endsWith('-rl') ||
-    (style.direction === 'rtl' && !style.writingMode.startsWith('vertical') && !style.writingMode.startsWith('sideways'));
+    (style.direction === 'rtl' &&
+      !style.writingMode.startsWith('vertical') &&
+      !style.writingMode.startsWith('sideways'));
   const width = scrollWidth - clientWidth;
   const [low, high] = fromRight ? [-width, 0] : [0, width];
   switch (physical) {
@@ -157,16 +159,21 @@ type Table = Map<string, string[]>;
  * shadow tree's sheet; `auto` and `match-element` names, which Chrome generates, are not found.
  */
 export class ViewTransitionClasses {
-  /** The table of each document's running transition. */
-  private readonly captured = new WeakMap<Document, Table>();
+  /** The table of the running transition of each scope: a document, or the element it is scoped to. */
+  private readonly captured = new WeakMap<Document | Element, Table>();
   /** Tables read from the current elements, for the current task. */
   private readonly scanned = new WeakMap<Document, Table>();
   private readonly hooked = new WeakSet<object>();
 
-  /** The classes of the view transition `name` of `doc`. */
-  of(doc: Document, name: string): string[] {
+  /**
+   * The classes of the view transition `name` of the pseudo-elements of `el`: those of the
+   * transition scoped to it, or for the root, of its document's.
+   */
+  of(el: Element, name: string): string[] {
+    const doc = documentOf(el);
     this.hook(doc);
-    return this.table(doc).get(name) ?? [];
+    const captured = this.captured.get(el) ?? (el === doc.documentElement ? this.captured.get(doc) : undefined);
+    return (captured ?? this.table(doc)).get(name) ?? [];
   }
 
   /** Whether the view transition `name` of `doc` has an old (or new) image, as its animations tell. */
@@ -179,8 +186,6 @@ export class ViewTransitionClasses {
   }
 
   private table(doc: Document): Table {
-    const captured = this.captured.get(doc);
-    if (captured) return captured;
     let scanned = this.scanned.get(doc);
     if (!scanned) {
       scanned = scan(doc);
@@ -206,7 +211,8 @@ export class ViewTransitionClasses {
       const start: unknown = (proto as { startViewTransition?: unknown }).startViewTransition;
       if (typeof start !== 'function') continue;
       const hooked = new Proxy(start, {
-        apply: (f, self: Document | Element, args: unknown[]) => this.start(f as (...a: unknown[]) => unknown, self, args),
+        apply: (f, self: Document | Element, args: unknown[]) =>
+          this.start(f as (...a: unknown[]) => unknown, self, args),
       });
       Object.defineProperty(proto, 'startViewTransition', {
         ...Object.getOwnPropertyDescriptor(proto, 'startViewTransition'),
@@ -215,18 +221,33 @@ export class ViewTransitionClasses {
     }
   }
 
-  /** Starts a transition with the page's `start` on `scope`, capturing its table for its document. */
+  /** Starts a transition with the page's `start` on `scope`, capturing its table for `scope`. */
   private start(start: (...args: unknown[]) => unknown, scope: Document | Element, args: unknown[]): unknown {
-    const doc = isElement(scope) ? documentOf(scope) : (scope as Document);
+    let old: Table;
+    try {
+      old = scan(scope);
+    } catch {
+      // Not a document or element (`call({})`): the page's function throws its own error.
+      return Reflect.apply(start, scope, args);
+    }
     const [arg] = args;
-    const update = typeof arg === 'function' ? arg : (arg as { update?: unknown } | null | undefined)?.update;
+    // The options are read once, in the order of the page's function (types, then update), own or
+    // inherited, and passed on as a new dictionary with the same members.
+    let options: { types?: unknown; update?: unknown } | undefined;
+    let update: unknown = arg;
+    if (typeof arg === 'object' && arg !== null) {
+      const { types } = arg as { types?: unknown };
+      update = (arg as { update?: unknown }).update;
+      options = types === undefined ? {} : { types };
+    }
     // Arguments the page's function rejects are passed on as they are.
-    if (update != null && typeof update !== 'function') return Reflect.apply(start, scope, args);
-    const old = scan(scope);
+    if (update != null && typeof update !== 'function')
+      return Reflect.apply(start, scope, [options ? { ...options, update } : arg, ...args.slice(1)]);
+    let table: Table | undefined;
     const capture = () => {
-      const table = new Map(old);
+      table = new Map(old);
       for (const [name, list] of scan(scope)) table.set(name, list);
-      this.captured.set(doc, table);
+      this.captured.set(scope, table);
     };
     const wrapped = async () => {
       try {
@@ -235,9 +256,12 @@ export class ViewTransitionClasses {
         capture();
       }
     };
-    const options = typeof arg === 'object' && arg !== null ? { ...arg, update: wrapped } : wrapped;
-    const transition = Reflect.apply(start, scope, [options, ...args.slice(1)]) as ViewTransition;
-    const done = () => this.captured.delete(doc);
+    const passed = options ? { ...options, update: wrapped } : wrapped;
+    const transition = Reflect.apply(start, scope, [passed, ...args.slice(1)]) as ViewTransition;
+    // Only this transition's table goes: a later one on the same scope may have set its own.
+    const done = () => {
+      if (table && this.captured.get(scope) === table) this.captured.delete(scope);
+    };
     transition.finished.then(done, done);
     return transition;
   }
