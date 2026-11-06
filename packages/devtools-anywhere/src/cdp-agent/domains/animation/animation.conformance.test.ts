@@ -679,6 +679,47 @@ describe('Animation, which animations are told apart', () => {
     assert.deepEqual(relation(ids.ours), relation(ids.chrome));
   });
 
+  test('cssId of view transition pseudo-elements follows their rules, by name, * and class, as in Chrome', async () => {
+    await t.page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent =
+        '@keyframes vg { to { opacity: .5 } } @keyframes vo { to { opacity: .5 } } @keyframes vn { to { opacity: .5 } }' +
+        ' @keyframes vr { to { opacity: .5 } }' +
+        ' .v1 { view-transition-name: n1 } .v2 { view-transition-name: n2; view-transition-class: c }' +
+        ' .v3 { view-transition-name: n3; view-transition-class: c d }' +
+        ' ::view-transition { animation: vr 5s } ::view-transition-group(*) { animation: vg 5s }' +
+        ' ::view-transition-old(.c) { animation: vo 5s }' +
+        ' ::view-transition-new(n1) { animation: vn 5s } :root::view-transition-new(n2) { animation: vn 5s }';
+      document.head.append(style);
+      for (const cls of ['v1', 'v2', 'v3'])
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: cls, textContent: cls }));
+    });
+    for (const side of [t.chrome, t.ours]) await side.clear();
+    await t.page.evaluate(async () => {
+      const transition = document.startViewTransition(() => {});
+      await transition.ready;
+    });
+    await fence(t, t.chrome, t.ours);
+    /**
+     * Which animations share an id, by their names: the pseudo-elements, which Chrome names as nodes
+     * and we do not, cannot tell them apart.
+     */
+    const groups = async (side: Side) => {
+      const byId = new Map<string, string[]>();
+      for (const { animation } of await side.events('Animation.animationStarted')) {
+        if (animation.name.startsWith('fence') || !animation.cssId) continue;
+        byId.set(animation.cssId, [...(byId.get(animation.cssId) ?? []), animation.name]);
+      }
+      return [...byId.values()].map(names => names.sort().join(', ')).sort();
+    };
+    const chrome = await groups(t.chrome);
+    // The four groups (root, n1, n2, n3) by `*`, the old images of class c, the new ones of n1 and n2.
+    assert.ok(chrome.includes('vg, vg, vg, vg'), chrome.join(' | '));
+    assert.ok(chrome.includes('vo, vo'), chrome.join(' | '));
+    assert.deepEqual(await groups(t.ours), chrome);
+    await t.page.evaluate(() => document.getAnimations().forEach(a => a.finish()));
+  });
+
   test('animations of a same-origin iframe match Chrome', async () => {
     const got = await run(
       `const f = document.body.appendChild(document.createElement('iframe'));
