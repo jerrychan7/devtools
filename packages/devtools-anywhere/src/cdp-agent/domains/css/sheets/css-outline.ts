@@ -400,6 +400,9 @@ let depth = 0;
  * reused by the next comment's: what is needed of it is to be read first.
  */
 function commented(text: string, start: number, end: number): CssOutline | null {
+  // No declaration without a colon: most comments need no parsing.
+  const colon = text.indexOf(':', start + 2);
+  if (colon < 0 || colon >= end) return null;
   const inner = text.slice(start + 2, text.endsWith('*/', end) && end - start >= 4 ? end - 2 : end);
   const o = (scratch[depth] ??= new CssOutline(4, 4));
   depth++;
