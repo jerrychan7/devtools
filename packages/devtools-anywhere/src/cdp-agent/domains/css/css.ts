@@ -23,7 +23,7 @@ import {
   isConstructed,
 } from './sheets/sheet-registry';
 import { offsetsOf } from './sheets/sheet-text';
-import { outline } from './sheets/css-outline';
+import { ROOT, outline } from './sheets/css-outline';
 import { editedBy, ownEdit, watchCssom, watchRealms, watching } from './sheets/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
@@ -395,8 +395,10 @@ export function registerCss(ctx: Context) {
     const source = sheets.sourceOf(sheet);
     const offsets = source && offsetsOf(source, range);
     if (source && !offsets) throw new CdpError(OUT_OF_BOUNDS);
-    for (const [r, node] of source?.nodes ?? [])
-      if (is(r) && node.preludeStart === offsets?.[0] && node.preludeEnd === offsets[1]) return r;
+    if (source && offsets)
+      for (const [r, node] of source.nodes)
+        if (is(r) && source.outline.preludeStart(node) === offsets[0] && source.outline.preludeEnd(node) === offsets[1])
+          return r;
     throw new CdpError(RANGE_MISMATCH);
   }
 
@@ -415,11 +417,14 @@ export function registerCss(ctx: Context) {
     const source = sheets.sourceOf(sheet);
     const node = source?.nodes.get(current);
     const parent = current.parentRule ?? current.parentStyleSheet;
-    if (!source || !node || !(isCssom(parent, 'CSSGroupingRule') || isCssom(parent, 'CSSStyleSheet')))
+    if (!source || node === undefined || !(isCssom(parent, 'CSSGroupingRule') || isCssom(parent, 'CSSStyleSheet')))
       throw new CdpError(RANGE_MISMATCH);
-    const before = source.text.slice(node.start, node.end);
+    const o = source.outline;
+    const before = source.text.slice(o.start(node), o.end(node));
     const after =
-      source.text.slice(node.start, node.preludeStart) + text + source.text.slice(node.preludeEnd, node.end);
+      source.text.slice(o.start(node), o.preludeStart(node)) +
+      text +
+      source.text.slice(o.preludeEnd(node), o.end(node));
     const swap = (ruleText: string) => {
       const i = Array.from(parent.cssRules).indexOf(current);
       parent.deleteRule(i);
@@ -632,9 +637,10 @@ export function registerCss(ctx: Context) {
       const replace = (text: string) => {
         if (isConstructed(sheet)) return sheet.replaceSync(text);
         while (sheet.cssRules.length) sheet.deleteRule(sheet.cssRules.length - 1);
-        for (const node of outline(text))
+        const o = outline(text);
+        for (let node = o.firstChild(ROOT); node >= 0; node = o.next(node))
           try {
-            sheet.insertRule(text.slice(node.start, node.end), sheet.cssRules.length);
+            sheet.insertRule(text.slice(o.start(node), o.end(node)), sheet.cssRules.length);
           } catch {
             // Dropped, as the parser drops it.
           }
@@ -807,14 +813,20 @@ export function registerCss(ctx: Context) {
         if (offset === undefined) throw new CdpError(OUT_OF_BOUNDS);
         const around = (r: CSSRule) => {
           const node = source.nodes.get(r);
-          return !!node && node.blockStart >= 0 && node.blockStart < offset && offset < node.blockEnd;
+          const o = source.outline;
+          return (
+            node !== undefined && o.blockStart(node) >= 0 && o.blockStart(node) < offset && offset < o.blockEnd(node)
+          );
         };
         for (let inner = Array.from(parent.cssRules).find(around); inner;) {
           if (!isCssom(inner, 'CSSGroupingRule') || isCssom(inner, 'CSSStyleRule')) break;
           parent = inner;
           inner = Array.from(parent.cssRules).find(around);
         }
-        at = Array.from(parent.cssRules).filter(r => (source.nodes.get(r)?.start ?? offset) < offset).length;
+        at = Array.from(parent.cssRules).filter(r => {
+          const node = source.nodes.get(r);
+          return (node === undefined ? offset : source.outline.start(node)) < offset;
+        }).length;
       } else if (onLine) {
         // Before the rule at `location`, or after it when the location is inside it (in the
         // serialized text, rules are one per line).

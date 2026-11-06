@@ -23,7 +23,7 @@ export class RuleView {
   ruleStyle(sheet: CSSStyleSheet, rule: Styled): CSSStyle {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
-    if (source && node) return sourceStyle(this.sheets.idOf(sheet), rule.style, source, node);
+    if (source && node !== undefined) return sourceStyle(this.sheets.idOf(sheet), rule.style, source, node);
     if (isCssom(rule, 'CSSKeyframeRule'))
       return buildStyle(this.sheets.idOf(sheet), rule.style, 0, rule.keyText.length + 3);
     const line = this.sheets.ruleId(sheet, rule);
@@ -36,7 +36,7 @@ export class RuleView {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
     const parts = splitTopLevel(rule.selectorText, ',').map(p => p.trim());
-    const spans = source && node ? selectorSpans(source.text, node) : [];
+    const spans = source && node !== undefined ? selectorSpans(source, node) : [];
     // As written, where they are.
     if (source && spans.length === parts.length)
       return {
@@ -78,8 +78,10 @@ export class RuleView {
       source: 'mediaRule',
       sourceURL: this.sheets.sourceURL(sheet),
       ...(source &&
-        node &&
-        !this.rangeless.has(rule) && { range: rangeOf(source, node.preludeStart, node.preludeEnd) }),
+        node !== undefined &&
+        !this.rangeless.has(rule) && {
+          range: rangeOf(source, source.outline.preludeStart(node), source.outline.preludeEnd(node)),
+        }),
       styleSheetId: this.sheets.idOf(sheet),
       mediaList: list,
     };
@@ -89,8 +91,8 @@ export class RuleView {
   private at(sheet: CSSStyleSheet, rule: CSSRule): { range?: Protocol.CSS.SourceRange } {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
-    return source && node && !this.rangeless.has(rule)
-      ? { range: rangeOf(source, node.preludeStart, node.preludeEnd) }
+    return source && node !== undefined && !this.rangeless.has(rule)
+      ? { range: rangeOf(source, source.outline.preludeStart(node), source.outline.preludeEnd(node)) }
       : {};
   }
 
@@ -145,7 +147,7 @@ export class RuleView {
             origin: this.sheets.origin(sheet),
             keyText: this.keyText(sheet, k),
             style:
-              source && node
+              source && node !== undefined
                 ? sourceStyle(styleSheetId, k.style, source, node)
                 : buildStyle(styleSheetId, k.style, 0, k.keyText.length + 3),
           };

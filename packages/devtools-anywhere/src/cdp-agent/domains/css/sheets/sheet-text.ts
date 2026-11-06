@@ -1,7 +1,7 @@
 import { isCssom, isHtml } from '../../../core/realm';
 import { Tok, tokenize } from './css-lexer-wasm';
 import { ownEdit, recordPageChanges } from './cssom-watch';
-import { type CssDecl, type CssRule, outline } from './css-outline';
+import { type CssOutline, ROOT, outline } from './css-outline';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
 import { type CSSStyle, type Written, styleOf } from '../style';
@@ -16,10 +16,12 @@ import { type CSSStyle, type Written, styleOf } from '../style';
 export interface SheetSource {
   text: string;
   lines: number[];
-  /** The outline node each CSSOM rule was written as. */
-  nodes: Map<CSSRule, CssRule>;
-  /** The top-level rules, each with its node. */
-  top: [CSSRule, CssRule][];
+  /** The text's outline: its rules are the nodes below. */
+  outline: CssOutline;
+  /** The outline node (rule index) each CSSOM rule was written as. */
+  nodes: Map<CSSRule, number>;
+  /** The top-level rules, each with its node, in the order of the text. */
+  top: [CSSRule, number][];
   /**
    * The sheet's @namespace rules as the CSSOM serializes them: a selector parsed alone is parsed
    * after them, so that its namespace prefixes are declared.
@@ -269,28 +271,28 @@ const loose = (s: string) =>
  * text where asked (as Chrome 156 does), so that the text has a style rule before them.
  */
 function pair(text: string, rules: CSSRule[]): SheetSource | null {
-  let top = outline(text);
+  const o = outline(text);
   const namespaces = namespaceText(rules);
-  const source: SheetSource = { text, lines: lineStarts(text), nodes: new Map(), top: [], namespaces };
+  const source: SheetSource = { text, lines: lineStarts(text), outline: o, nodes: new Map(), top: [], namespaces };
   let lead = rules.findIndex(r => !isCssom(r, 'CSSImportRule') && !isCssom(r, 'CSSNamespaceRule'));
   if (lead < 0) lead = rules.length;
   // Out of order only as a fallback for a text CSS.addRule put a rule in before the @namespace
   // rules of: any other text with rules before them has none in the CSSOM, and pairs in order.
-  const used = new Set<CssRule>();
-  let j = 0;
-  for (const rule of rules.slice(0, lead)) {
+  let used: Set<number> | undefined;
+  let node = o.firstChild(ROOT);
+  for (let i = 0; i < lead; i++) {
+    const rule = rules[i] as CSSRule;
     const tag = tagOf(rule);
-    while (top[j] && !matches(text, top[j] as CssRule, rule, tag, TOP, '')) j++;
-    const node = top[j++];
-    if (!node) return null;
-    used.add(node);
+    while (node >= 0 && !matches(text, o, node, rule, tag, TOP, '')) node = o.next(node);
+    if (node < 0) return null;
+    (used ??= new Set()).add(node);
     source.nodes.set(rule, node);
     source.top.push([rule, node]);
+    node = o.next(node);
   }
-  top = top.filter(n => !used.has(n));
-  if (!pairList(source, top, rules.slice(lead), TOP, true)) return null;
+  if (!pairList(source, o.firstChild(ROOT), lead ? rules.slice(lead) : rules, TOP, true, used)) return null;
   // In the order of the text, which SheetTexts.splice relies on.
-  source.top.sort((a, b) => a[1].start - b[1].start);
+  if (used) source.top.sort((a, b) => o.start(a[1]) - o.start(b[1]));
   return source;
 }
 
@@ -310,51 +312,36 @@ export function namespaceText(rules: CSSRule[]): string {
 type Wrap = (prelude: string) => string;
 const TOP: Wrap = p => `${p}{}`;
 
-/** Pairs `cssom` with `outlined` into `source.nodes` (and with `top`, its top-level pairs). */
+/**
+ * Pairs `cssom` with the outline's rules from `first` on (siblings, but those in `skip`) into
+ * `source.nodes` (and with `top`, its top-level pairs).
+ */
 function pairList(
   source: SheetSource,
-  outlined: CssRule[],
+  first: number,
   cssom: ArrayLike<CSSRule>,
   wrap: Wrap,
-  top = false
+  top = false,
+  skip?: Set<number>
 ): boolean {
-  let j = 0;
+  const o = source.outline;
+  let node = first;
   for (let i = 0; i < cssom.length; i++) {
     const rule = cssom[i] as CSSRule;
     const tag = tagOf(rule);
-    for (;;) {
-      const node = outlined[j++];
-      if (!node) return false;
-      if (!matches(source.text, node, rule, tag, wrap, source.namespaces)) continue;
+    for (; ; node = o.next(node)) {
+      if (node < 0) return false;
+      if (skip?.has(node) || !matches(source.text, o, node, rule, tag, wrap, source.namespaces)) continue;
       source.nodes.set(rule, node);
       if (top) source.top.push([rule, node]);
       const inner: Wrap =
         tag === 'CSSStyleRule' ? p => `:root{${p}{}}` : tag === 'CSSKeyframesRule' ? p => `@keyframes x{${p}{}}` : wrap;
-      if (!pairList(source, node.rules, childRules(rule), inner)) return false;
+      if (!pairList(source, o.firstChild(node), childRules(rule), inner)) return false;
+      node = o.next(node);
       break;
     }
   }
   return true;
-}
-
-/** Moves a node and those in it by `delta`. */
-function shift(node: CssRule, delta: number) {
-  node.start += delta;
-  node.end += delta;
-  node.preludeStart += delta;
-  node.preludeEnd += delta;
-  if (node.blockStart >= 0) {
-    node.blockStart += delta;
-    node.blockEnd += delta;
-  }
-  for (const d of node.decls) {
-    d.start += delta;
-    d.end += delta;
-    d.nameEnd += delta;
-    d.valueStart += delta;
-    d.valueEnd += delta;
-  }
-  for (const r of node.rules) shift(r, delta);
 }
 
 /**
@@ -362,50 +349,72 @@ function shift(node: CssRule, delta: number) {
  * same way: only the top-level rule around the change is outlined and paired again, the others
  * moved. null when the change is not inside one rule or does not leave it one rule.
  *
- * The old source is changed in place, and gives up its `top` and `nodes` to the new one: callers
- * replace it right away and must not use it again (SheetTexts.splice does).
+ * The outline's tables are not rebuilt: the new rule's records are added at their end (`graft`),
+ * those of the rule it replaces left where they are, unreferenced, and those of the rules after it
+ * moved by the change's length, as their objects were before the outline was made of tables. Edits
+ * so stay as cheap as the rule edited (and the moves), at the cost of the space the old records
+ * take: once they are as many as the live ones, null is returned, for the text to be outlined and
+ * paired anew, which leaves none. Records are not compacted in place, as the nodes in `nodes`,
+ * indices, would all have to be renumbered. The outline's sibling links from `ROOT` keep the
+ * replaced rule: `top` is what tells the top-level rules from then on.
+ *
+ * The old source is changed in place, and gives up its `outline`, `top` and `nodes` to the new
+ * one: callers replace it right away and must not use it again (SheetTexts.splice does).
  */
 function respliced(source: SheetSource, start: number, end: number, insert: string): SheetSource | null {
-  const k = source.top.findIndex(([, n]) => n.start <= start && end <= n.end);
+  const o = source.outline;
+  if (o.dead * 2 > o.ruleCount) return null;
+  const k = source.top.findIndex(([, n]) => o.start(n) <= start && end <= o.end(n));
   const old = source.top[k];
   if (!old) return null;
   const [rule, node] = old;
   const delta = insert.length - (end - start);
   const text = source.text.slice(0, start) + insert + source.text.slice(end);
-  const slice = text.slice(node.start, node.end + delta);
-  const [fresh, ...more] = outline(slice);
-  if (!fresh || more.length || fresh.start !== 0 || fresh.end !== slice.length) return null;
-  shift(fresh, node.start);
+  const slice = text.slice(o.start(node), o.end(node) + delta);
+  const alone = outline(slice);
+  const fresh = alone.firstChild(ROOT);
+  if (fresh < 0 || alone.next(fresh) >= 0 || alone.start(fresh) !== 0 || alone.end(fresh) !== slice.length) return null;
   const next: SheetSource = {
     text,
     lines: lineStarts(text),
+    outline: o,
     nodes: source.nodes,
     top: source.top,
     namespaces: source.namespaces,
   };
-  if (!pairList(next, [fresh], [rule], TOP)) return null;
+  const copy = o.graft(alone, fresh, o.start(node));
+  if (!pairList(next, copy, [rule], TOP)) return null;
+  o.dead += o.size(node);
   for (let i = k + 1; i < source.top.length; i++) {
     const after = source.top[i];
-    if (after) shift(after[1], delta);
+    if (after) o.shift(after[1], delta);
   }
-  source.top[k] = [rule, fresh];
+  source.top[k] = [rule, copy];
   return next;
 }
 
-/** Whether `node` is where `rule`, of the CSSOM type `tag` (`tagOf`), was written. */
-function matches(text: string, node: CssRule, rule: CSSRule, tag: string, wrap: Wrap, namespaces: string): boolean {
+/** Whether `node` of `o` is where `rule`, of the CSSOM type `tag` (`tagOf`), was written. */
+function matches(
+  text: string,
+  o: CssOutline,
+  node: number,
+  rule: CSSRule,
+  tag: string,
+  wrap: Wrap,
+  namespaces: string
+): boolean {
+  const kind = o.kind(node);
   if (tag === 'CSSNestedDeclarations') {
     // Some declaration of the run is one the CSSOM kept.
     const style = (rule as CSSNestedDeclarations).style as CSSStyleDeclaration | undefined;
-    return (
-      node.kind === 'nested' &&
-      !!style &&
-      node.decls.some(d => d.kind === 'decl' && style.getPropertyValue(text.slice(d.start, d.nameEnd)) !== '')
-    );
+    if (kind !== 'nested' || !style) return false;
+    for (let d = o.firstDecl(node), e = d + o.declCountOf(node); d < e; d++)
+      if (!o.commented(d) && style.getPropertyValue(text.slice(o.declStart(d), o.nameEnd(d))) !== '') return true;
+    return false;
   }
   if (tag === 'CSSStyleRule' || tag === 'CSSKeyframeRule') {
-    if (node.kind !== 'qualified') return false;
-    const prelude = text.slice(node.preludeStart, node.preludeEnd);
+    if (kind !== 'qualified') return false;
+    const prelude = text.slice(o.preludeStart(node), o.preludeEnd(node));
     const written: unknown = Reflect.get(rule, tag === 'CSSStyleRule' ? 'selectorText' : 'keyText');
     if (typeof written !== 'string') return false;
     // As written most often; else without what the CSSOM drops or adds.
@@ -426,9 +435,12 @@ function matches(text: string, node: CssRule, rule: CSSRule, tag: string, wrap: 
     const parsed = first && (isCssom(first, 'CSSStyleRule') ? first.selectorText : Reflect.get(first, 'keyText'));
     return typeof parsed === 'string' && loose(parsed) === loose(written);
   }
-  if (node.kind !== 'at') return false;
+  if (kind !== 'at') return false;
   const name = AT_NAMES[tag];
-  const written = node.name.toLowerCase().replace(/^-webkit-/, '');
+  const written = o
+    .name(text, node)
+    .toLowerCase()
+    .replace(/^-webkit-/, '');
   // The margin rules of @page are named after their box.
   if (tag === 'CSSMarginRule') return MARGINS.test(written);
   return written === name;
@@ -452,9 +464,10 @@ export function offsetsOf(source: SheetSource, range: Protocol.CSS.SourceRange):
  * The selectors of a prelude as Chrome gives their ranges: each from its first character to the
  * comma after it (white space and comments before it included), the last one to the `{`.
  */
-export function selectorSpans(text: string, node: CssRule): [number, number][] {
-  const from = node.preludeStart;
-  const prelude = text.slice(from, node.preludeEnd);
+export function selectorSpans(source: SheetSource, node: number): [number, number][] {
+  const { text, outline: o } = source;
+  const from = o.preludeStart(node);
+  const prelude = text.slice(from, o.preludeEnd(node));
   const { kinds, starts } = tokenize(prelude);
   const spans: [number, number][] = [];
   let start = -1;
@@ -470,7 +483,7 @@ export function selectorSpans(text: string, node: CssRule): [number, number][] {
   });
   // Like Chrome, with the comments ending it (to the `{`), without the white space, even that of
   // an escape (`.k\31 `).
-  let end = node.blockStart >= 0 ? node.blockStart : node.preludeEnd;
+  let end = o.blockStart(node) >= 0 ? o.blockStart(node) : o.preludeEnd(node);
   while (end > from && /[ \t\n\r\f]/.test(text[end - 1] ?? '')) end--;
   spans.push([from + Math.max(start, 0), end]);
   return spans.map(([s, e]) => [Math.min(s, e), e]);
@@ -489,31 +502,33 @@ export function selectorText(range: string): string {
  * Where the declarations of a rule are, as Chrome's style range: from past `{` to before `}`, or
  * to the first nested rule; for nested declarations, from the first to the last of them.
  */
-export function styleSpan(text: string, node: CssRule): [number, number] {
-  const last = node.decls[node.decls.length - 1];
-  if (node.kind === 'nested') {
-    if (!last || last.semicolon || last.kind === 'comment') return [node.start, node.end];
+export function styleSpan(source: SheetSource, node: number): [number, number] {
+  const { text, outline: o } = source;
+  const last = o.lastDecl(node);
+  if (o.kind(node) === 'nested') {
+    if (last < 0 || o.semicolon(last) || o.commented(last)) return [o.start(node), o.end(node)];
     // A last declaration without `;` runs to the `}`.
-    let end = node.end;
+    let end = o.end(node);
     while (end < text.length && /\s/.test(text[end] ?? '')) end++;
-    return [node.start, text[end] === '}' || end >= text.length ? end : node.end];
+    return [o.start(node), text[end] === '}' || end >= text.length ? end : o.end(node)];
   }
   // Like Chrome, after the `{` of a nested rule with no selector first in the block (`a {{`).
-  const first = node.rules[0];
+  const first = o.firstChild(node);
   const start =
-    first?.kind === 'qualified' && first.preludeStart === first.preludeEnd && !last
-      ? first.blockStart + 1
-      : node.blockStart + 1;
+    first >= 0 && o.kind(first) === 'qualified' && o.preludeStart(first) === o.preludeEnd(first) && last < 0
+      ? o.blockStart(first) + 1
+      : o.blockStart(node) + 1;
   // Declarations before nested rules end with the last of them.
-  const end = node.rules.length && last ? declSpan(text, last)[1] : node.closed ? node.blockEnd - 1 : node.blockEnd;
+  const end =
+    first >= 0 && last >= 0 ? declSpan(text, o, last)[1] : o.closed(node) ? o.blockEnd(node) - 1 : o.blockEnd(node);
   return [Math.min(start, end), Math.max(end, Math.min(start, text.length))];
 }
 
-/** Where a declaration is: one in a comment is the whole comment. */
-function declSpan(text: string, d: CssDecl): [number, number] {
-  if (d.kind === 'decl') return [d.start, d.end];
-  const close = text.indexOf('*/', d.end);
-  return [text.lastIndexOf('/*', d.start), close < 0 ? text.length : close + 2];
+/** Where declaration `d` is: one in a comment is the whole comment. */
+function declSpan(text: string, o: CssOutline, d: number): [number, number] {
+  if (!o.commented(d)) return [o.declStart(d), o.declEnd(d)];
+  const close = text.indexOf('*/', o.declEnd(d));
+  return [text.lastIndexOf('/*', o.declStart(d)), close < 0 ? text.length : close + 2];
 }
 
 /** The style of a rule as written in the text. */
@@ -521,33 +536,38 @@ export function sourceStyle(
   styleSheetId: string,
   decl: CSSStyleDeclaration,
   source: SheetSource,
-  node: CssRule
+  node: number
 ): CSSStyle {
-  const { text } = source;
-  const [from, to] = styleSpan(text, node);
-  const last = node.decls.length - 1;
-  // Like Chrome, a comment is a disabled declaration only of a property it knows: the rule's style
-  // has an attribute for each (`margin-top`, …).
-  const shown = node.decls.filter(
-    d => d.kind === 'decl' || text.startsWith('--', d.start) || text.slice(d.start, d.nameEnd).toLowerCase() in decl
-  );
-  const written = shown.map((d): Written => {
-    const [start, span] = declSpan(text, d);
+  const { text, outline: o } = source;
+  const [from, to] = styleSpan(source, node);
+  const last = o.lastDecl(node);
+  const written: Written[] = [];
+  for (let d = o.firstDecl(node); d <= last; d++) {
+    const comment = o.commented(d);
+    const dStart = o.declStart(d);
+    // Like Chrome, a comment is a disabled declaration only of a property it knows: the rule's
+    // style has an attribute for each (`margin-top`, …).
+    if (comment && !text.startsWith('--', dStart) && !(text.slice(dStart, o.nameEnd(d)).toLowerCase() in decl))
+      continue;
+    const [start, span] = declSpan(text, o, d);
+    const semicolon = o.semicolon(d);
+    const valueStart = o.valueStart(d);
+    const valueEnd = o.valueEnd(d);
     // The last declaration without `;` runs to the `}`.
-    const end = d.kind === 'decl' && !d.semicolon && d === node.decls[last] ? Math.max(span, to) : span;
+    const end = !comment && !semicolon && d === last ? Math.max(span, to) : span;
     // Like Chrome, the value with `!important` as written.
-    let until = d.semicolon ? d.end - 1 : d.end;
-    while (until > d.valueEnd && /\s/.test(text[until - 1] ?? '')) until--;
-    return {
-      name: text.slice(d.start, d.nameEnd),
-      value: text.slice(d.valueStart, d.valueEnd),
-      shown: text.slice(d.valueStart, d.important ? until : d.valueEnd),
+    let until = semicolon ? o.declEnd(d) - 1 : o.declEnd(d);
+    while (until > valueEnd && /\s/.test(text[until - 1] ?? '')) until--;
+    written.push({
+      name: text.slice(dStart, o.nameEnd(d)),
+      value: text.slice(valueStart, valueEnd),
+      shown: text.slice(valueStart, o.important(d) ? until : valueEnd),
       // Like Chrome, a commented-out declaration is not important.
-      important: d.important && d.kind === 'decl',
-      disabled: d.kind === 'comment',
+      important: o.important(d) && !comment,
+      disabled: comment,
       text: text.slice(start, end),
       range: rangeOf(source, start, end),
-    };
-  });
+    });
+  }
   return styleOf(styleSheetId, decl, written, text.slice(from, to), rangeOf(source, from, to));
 }

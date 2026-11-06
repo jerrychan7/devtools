@@ -10,12 +10,12 @@ import type { Env } from '../../../../../test-support/conformance.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import type { CssRule, outline as Outline } from './css-outline.ts';
+import type { CssRule, outlineTree as Outline } from './css-outline.ts';
 
 // Bundled: the sources import each other without extensions, which Node does not resolve.
 const bundled = await build({
   stdin: {
-    contents: "export { outline } from './css-outline.ts';",
+    contents: "export { outlineTree as outline } from './css-outline.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },

@@ -347,11 +347,12 @@ export class SheetRegistry {
         (at === 'style' && isCssom(rule, 'CSSKeyframeRule'));
       if (!styled) continue;
       // Selectors are only tokenized for a rule whose prelude starts there.
-      if (at === 'selector' && node.preludeStart !== offsets[0]) continue;
-      const spans = at === 'selector' ? selectorSpans(source.text, node) : [];
+      if (at === 'selector' && source.outline.preludeStart(node) !== offsets[0]) continue;
+      const spans = at === 'selector' ? selectorSpans(source, node) : [];
       const [start, end] =
-        at === 'style' ? styleSpan(source.text, node) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
-      if (start === offsets[0] && end === offsets[1] && (at === 'style' || node.kind === 'qualified')) return rule;
+        at === 'style' ? styleSpan(source, node) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
+      if (start === offsets[0] && end === offsets[1] && (at === 'style' || source.outline.kind(node) === 'qualified'))
+        return rule;
     }
     throw new CdpError(at === 'style' ? STYLE_MISMATCH : RANGE_MISMATCH);
   }
