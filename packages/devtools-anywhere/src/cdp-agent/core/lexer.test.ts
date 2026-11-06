@@ -77,6 +77,29 @@ test('token arrays grow past their first guess and keep every field', () => {
   assert.equal(tokens.newlines[100_000], 1);
 });
 
+test('token arrays grow again when the source gets denser than its start suggested', () => {
+  // A sparse start (long comments, a word and a `;` each) makes each guess from the density read
+  // so far low: the dense tail needs several grows, each keeping what came before.
+  const head = '/*' + ' '.repeat(40_000) + '*/ ' + 'longidentifier_'.repeat(2) + ';\n';
+  const source = head.repeat(10) + 'a,'.repeat(300_000) + 'z';
+  const tokens = tokenize(source);
+  const expected = 10 * 2 + 600_001;
+  assert.equal(tokens.length, expected);
+  for (const array of [tokens.kinds, tokens.starts, tokens.ends, tokens.depths, tokens.parents, tokens.newlines])
+    assert.equal(array.length, expected);
+  for (let i = 0; i < 10; i++) {
+    assert.equal(tokens.starts[2 * i], i * head.length + 40_005);
+    assert.equal(tokens.newlines[2 * i], i === 0 ? 0 : 1);
+  }
+  const at = head.length * 10;
+  assert.deepEqual([tokens.starts[20], tokens.ends[20], tokens.kinds[20]], [at, at + 1, Kind.Word]);
+  assert.deepEqual([tokens.starts[expected - 1], tokens.kinds[expected - 1]], [source.length - 1, Kind.Word]);
+  assert.equal(
+    tokens.starts.every((start, i) => i === 0 || start > (tokens.starts[i - 1] ?? 0)),
+    true
+  );
+});
+
 test('top-level lexical names', () => {
   assert.deepEqual(topLevelLexicalNames('let a = 1, b\nconst c = 2; class D {}'), ['a', 'b', 'c', 'D']);
   assert.deepEqual(topLevelLexicalNames('const { a, b: c, d = 1, [k]: e, ...f } = o, [g, , [h], i = 2, ...j] = p'), [

@@ -145,8 +145,9 @@ class Lexer {
     this.module = module;
     this.end = source.length;
     this.sites = sites;
-    // A token every 4 to 5 code units in minified code: most sources never grow the arrays.
-    const capacity = sites ? 0 : Math.ceil(source.length / 3) + 16;
+    // Sources range from a token every 2 code units to one every 50 or more (a token every 4 to 5
+    // in minified code): the arrays start small and grow to what the source read so far suggests.
+    const capacity = sites ? 0 : Math.ceil(source.length / FIRST_GUESS) + 16;
     this.kinds = new Uint8Array(capacity);
     this.starts = new Int32Array(capacity);
     this.ends = new Int32Array(capacity);
@@ -155,8 +156,16 @@ class Lexer {
     this.newlines = new Uint8Array(capacity);
   }
 
-  private grow() {
-    const n = this.kinds.length * 2;
+  /**
+   * Room for the tokens of the whole source at the density seen up to `at` (plus 1/16), and at
+   * least 1/8 more than now so that few grows are ever needed. Growing once from a small first
+   * guess to about the final count costs less memory than a large first guess that `result` then
+   * copies to free its spare room.
+   */
+  private grow(at: number) {
+    const have = this.kinds.length;
+    const expected = Math.ceil(((have / Math.max(at, 1)) * this.end * 17) / 16);
+    const n = Math.max(expected, have + (have >> 3)) + 16;
     this.kinds = resized(this.kinds, n);
     this.starts = resized(this.starts, n);
     this.ends = resized(this.ends, n);
@@ -203,7 +212,7 @@ class Lexer {
     if (this.sites) this.debuggerToken(kind, start, end, parent);
     else {
       const i = this.count++;
-      if (i === this.kinds.length) this.grow();
+      if (i === this.kinds.length) this.grow(end);
       this.kinds[i] = kind;
       this.starts[i] = start;
       this.ends[i] = end;
@@ -691,6 +700,9 @@ class Lexer {
 }
 
 /** `array` copied into a new array of `length` elements. */
+/** Code units per token the token arrays are first sized for. */
+const FIRST_GUESS = 8;
+
 function resized<T extends Uint8Array | Int32Array>(array: T, length: number): T {
   const copy = new (array.constructor as new (length: number) => T)(length);
   copy.set(array);
