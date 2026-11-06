@@ -215,12 +215,37 @@ const childRules = (rule: CSSRule): ArrayLike<CSSRule> => {
   return list && typeof list === 'object' && (list as CSSRuleList).length ? (list as CSSRuleList) : NO_RULES;
 };
 /**
+ * Strings, which `CSSOM_WRITES` leaves as they are; a legacy pseudo-element, written with one
+ * colon (not escaped, nor the second of two); an attribute selector's value written as an
+ * identifier, with its modifier.
+ */
+const CSSOM_WRITES =
+  /("(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*')|(?<![:\\]):(before|after|first-line|first-letter)(?![\w\\-])|\[\s*([-\w]+)\s*([~|^$*]?=)\s*(-?[_a-zA-Z][-\w]*)\s*(?:\s([iIsS]))?\s*\]/g;
+
+/**
+ * A selector as the CSSOM writes it back, where that is easily told: legacy pseudo-elements with
+ * two colons (`::before` for `:before`), attribute values quoted (`[type="file"]`).
+ */
+const asCssomWrites = (s: string) =>
+  !s.includes(':') && !s.includes('[')
+    ? s
+    : s.replace(CSSOM_WRITES, (all, str, pseudo, name, op, value, flag) =>
+        str !== undefined
+          ? all
+          : pseudo !== undefined
+            ? `::${(pseudo as string).toLowerCase()}`
+            : `[${name}${op}"${value}"${flag ? ` ${(flag as string).toLowerCase()}` : ''}]`
+      );
+
+/**
  * Without whitespace and comments, and the `&` each selector of a list may start with: the CSSOM
- * adds one to every relative selector (`a, img` in a style rule is `& a, & img`).
+ * adds one to every relative selector (`a, img` in a style rule is `& a, & img`). What the CSSOM
+ * writes otherwise and `asCssomWrites` tells is written as the CSSOM does, so that such a selector
+ * does not take a style sheet parsed alone to be told the same.
  */
 const loose = (s: string) =>
-  s
-    .replace(/\/\*[\s\S]*?(\*\/|$)|\s+/g, '')
+  asCssomWrites(s.replace(/\/\*[\s\S]*?(\*\/|$)/g, ''))
+    .replace(/\s+/g, '')
     .split(',')
     .map(p => p.replace(/^&/, ''))
     .join(',');

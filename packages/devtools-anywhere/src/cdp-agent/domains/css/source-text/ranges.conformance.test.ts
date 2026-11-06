@@ -96,6 +96,20 @@ test('escapes ending a selector, comments in values and not of properties, disab
     '.k1'
   ));
 
+test('selectors the CSSOM writes otherwise, at the top and nested, around dropped ones', () =>
+  same(
+    `.b1:before { top: 1px }
+.b1[data-x=y] , .b1:after { left: 1px }
+.b1:unknown-pseudo { right: 1px }
+.b1 { [data-x=y]:before { top: 2px } :bad-one { top: 3px } & .c:after { top: 4px } &[data-x=y] { top: 5px } }
+.b1\\
+{ bottom: 1px }
+.B1\\31 , .b1[data-x="y"] { margin: 0 }
+.b1[ data-x = Y i ]:first-letter, .b1[title=":before"]:AFTER { padding: 0 }`,
+    '<p class="b1" data-x="y">x</p>',
+    '.b1'
+  ));
+
 test('relative selector lists in nested rules', () =>
   same(
     `.p1 { a, img { color: red } }
