@@ -7,14 +7,14 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import { build } from 'esbuild';
 import { launch, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
-import type { CssomChange, ownStyle, recordPageChanges, settle, watchCssom } from './cssom-watch.ts';
+import type { CssomChange, ownCall, ownSet, ownStyle, recordPageChanges, settle, watchCssom } from './cssom-watch.ts';
 import type { Env } from '../../../../../../test-support/conformance.ts';
 
 // Bundled for the page: the sources import each other without extensions.
 const bundled = await build({
   stdin: {
     contents:
-      "export { watchCssom, recordPageChanges, ownEdit, ownStyle, settle, forgetSheet } from './cssom-watch.ts';",
+      "export { watchCssom, recordPageChanges, ownCall, ownEdit, ownSet, ownStyle, settle, forgetSheet } from './cssom-watch.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },
@@ -294,4 +294,140 @@ test('a sheet serialized anew: what was written is dropped, the styles taken sti
     ]),
     [[], ['rule 0'], [], [], ['rule 0']]
   );
+});
+
+test("the CSS domain's own changes: the native functions, past the hooks and the page's, in every realm", async () => {
+  const seen = await page.evaluate(() => {
+    const w = (
+      globalThis as unknown as {
+        __cssomWatch: {
+          recordPageChanges: typeof recordPageChanges;
+          watchCssom: typeof watchCssom;
+          ownCall: typeof ownCall;
+          ownSet: typeof ownSet;
+          ownStyle: typeof ownStyle;
+        };
+      }
+    ).__cssomWatch;
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const inner = frame.contentWindow as Window & typeof globalThis;
+    // A sheet of each realm, made before the page replaced the functions.
+    const sheets = [new CSSStyleSheet(), new inner.CSSStyleSheet()];
+    for (const sheet of sheets) sheet.replaceSync('.f{top:0} @media print{.m{}} @keyframes k{from{top:0}}');
+    let reported = 0;
+    w.recordPageChanges(() => reported++);
+    const stop = w.watchCssom(
+      () => {},
+      () => [window, inner]
+    );
+    // The page puts its own functions over the hooks: our changes do not call them.
+    let calls = 0;
+    for (const realm of [window, inner]) {
+      for (const [proto, name] of [
+        [realm.CSSStyleSheet.prototype, 'insertRule'],
+        [realm.CSSStyleSheet.prototype, 'deleteRule'],
+        [realm.CSSStyleSheet.prototype, 'replaceSync'],
+        [realm.CSSGroupingRule.prototype, 'insertRule'],
+      ] as unknown as [Record<string, unknown>, string][]) {
+        const f = proto[name] as (...args: unknown[]) => unknown;
+        proto[name] = function (this: unknown, ...args: unknown[]) {
+          calls++;
+          return Reflect.apply(f, this, args);
+        };
+      }
+      for (const [proto, name] of [
+        [realm.CSSStyleRule.prototype, 'selectorText'],
+        [realm.CSSStyleDeclaration.prototype, 'cssText'],
+        [realm.MediaList.prototype, 'mediaText'],
+        [realm.CSSKeyframeRule.prototype, 'keyText'],
+      ] as [object, string][]) {
+        const d = Object.getOwnPropertyDescriptor(proto, name) as PropertyDescriptor;
+        Object.defineProperty(proto, name, {
+          ...d,
+          set(this: unknown, v: unknown) {
+            calls++;
+            d.set?.call(this, v);
+          },
+        });
+      }
+      const style = Object.getOwnPropertyDescriptor(realm.CSSStyleRule.prototype, 'style') as PropertyDescriptor;
+      Object.defineProperty(realm.CSSStyleRule.prototype, 'style', {
+        ...style,
+        get(this: unknown) {
+          calls++;
+          return style.get?.call(this) as unknown;
+        },
+      });
+    }
+    const out: string[] = [];
+    try {
+      for (const sheet of sheets) {
+        for (let i = 0; i < 1000; i++) w.ownCall(sheet, 'insertRule', `.n${i}{}`, sheet.cssRules.length);
+        while (sheet.cssRules.length > 3) w.ownCall(sheet, 'deleteRule', sheet.cssRules.length - 1);
+        const [rule, media, keyframes] = Array.from(sheet.cssRules) as [CSSStyleRule, CSSMediaRule, CSSKeyframesRule];
+        w.ownSet(rule, 'selectorText', '.g');
+        w.ownSet(w.ownStyle(rule), 'cssText', 'left: 1px');
+        w.ownSet(keyframes.cssRules[0] as CSSKeyframeRule, 'keyText', '50%');
+        w.ownSet(media.media, 'mediaText', 'screen');
+        w.ownCall(media, 'insertRule', '.i{}', 0);
+        out.push(Array.from(sheet.cssRules, r => r.cssText).join(' '));
+        w.ownCall(sheet, 'replaceSync', '.r{}');
+        out.push(Array.from(sheet.cssRules, r => r.cssText).join(' '));
+      }
+      // The page's own call is still seen, through its function.
+      (sheets[1] as CSSStyleSheet).insertRule('.p{}');
+    } finally {
+      stop();
+      frame.remove();
+    }
+    return { out, calls, reported };
+  });
+  const text = '.g { left: 1px; } @media screen {\n  .i { }\n  .m { }\n} @keyframes k { \n  50% { top: 0px; }\n}';
+  assert.deepEqual(seen, { out: [text, '.r { }', text, '.r { }'], calls: 1, reported: 1 });
+});
+
+test("the CSS domain's own changes: done still when the page renames the interfaces", async () => {
+  const seen = await page.evaluate(() => {
+    const w = (
+      globalThis as unknown as {
+        __cssomWatch: { ownCall: typeof ownCall; ownSet: typeof ownSet; ownStyle: typeof ownStyle };
+      }
+    ).__cssomWatch;
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const inner = frame.contentWindow as Window & typeof globalThis;
+    const sheets = [new CSSStyleSheet(), new inner.CSSStyleSheet()];
+    // Each prototype named as another interface with the same members, whose functions refuse it.
+    const renamed: [object, string][] = [];
+    for (const realm of [window, inner])
+      for (const [proto, tag] of [
+        [realm.CSSStyleSheet.prototype, 'CSSGroupingRule'],
+        [realm.CSSMediaRule.prototype, 'CSSStyleSheet'],
+        [realm.CSSStyleRule.prototype, 'CSSPageRule'],
+        [realm.CSSStyleDeclaration.prototype, 'CSSStyleRule'],
+      ] as [object, string][]) {
+        renamed.push([proto, Object.getOwnPropertyDescriptor(proto, Symbol.toStringTag)?.value as string]);
+        Object.defineProperty(proto, Symbol.toStringTag, { value: tag, configurable: true });
+      }
+    const out: string[] = [];
+    try {
+      for (const sheet of sheets) {
+        w.ownCall(sheet, 'replaceSync', '.a{} @media print{}');
+        w.ownCall(sheet, 'insertRule', '.b{}', 0);
+        const [, rule, media] = Array.from(sheet.cssRules) as [CSSRule, CSSStyleRule, CSSMediaRule];
+        w.ownCall(media, 'insertRule', '.c{}', 0);
+        w.ownSet(w.ownStyle(rule), 'cssText', 'top: 1px');
+        w.ownCall(sheet, 'deleteRule', 0);
+        out.push(Array.from(sheet.cssRules, r => r.cssText).join(' '));
+      }
+    } finally {
+      for (const [proto, tag] of renamed)
+        Object.defineProperty(proto, Symbol.toStringTag, { value: tag, configurable: true });
+      frame.remove();
+    }
+    return out;
+  });
+  const text = '.a { top: 1px; } @media print {\n  .c { }\n}';
+  assert.deepEqual(seen, [text, text]);
 });
