@@ -3,7 +3,7 @@ import { isCssom, isHtml } from '../../../core/realm';
 import { type PseudoType, hasPseudoElement } from '../../../core/nodes/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../../../core/style/selectors';
 import { splitPseudoElement } from '../style';
-import { ownStyle } from '../sheets/cssom-watch';
+import { ownStyle } from '../sheets/watch/cssom-watch';
 
 /**
  * Chromium's default style sheet for HTML (html.css, see README.md here), next to the bundle in

@@ -2,8 +2,8 @@
 // wrapper the page installed meanwhile is kept, and enabling again does not wrap twice.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
-import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
+import type { Env, TestPage } from '../../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;

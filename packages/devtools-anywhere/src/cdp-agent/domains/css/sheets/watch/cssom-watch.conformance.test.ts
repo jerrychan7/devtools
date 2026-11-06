@@ -6,9 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import { build } from 'esbuild';
-import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
 import type { CssomChange, ownStyle, recordPageChanges, settle, watchCssom } from './cssom-watch.ts';
-import type { Env } from '../../../../../test-support/conformance.ts';
+import type { Env } from '../../../../../../test-support/conformance.ts';
 
 // Bundled for the page: the sources import each other without extensions.
 const bundled = await build({

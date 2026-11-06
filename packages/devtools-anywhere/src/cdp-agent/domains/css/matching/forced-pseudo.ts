@@ -2,7 +2,7 @@ import { quietly } from '../../../core/nodes/adopted';
 import { frames } from '../../../core/frames/frames';
 import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../../core/nodes/nodes';
-import { ownStyle } from '../sheets/cssom-watch';
+import { ownStyle } from '../sheets/watch/cssom-watch';
 
 /** A document or shadow root: what style sheets apply to. */
 export type TreeScope = Document | ShadowRoot;

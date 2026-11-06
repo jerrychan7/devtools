@@ -1,4 +1,4 @@
-import { isCssom, realmOf } from '../../../core/realm';
+import { isCssom, realmOf } from '../../../../core/realm';
 
 /**
  * Notices the page changing style sheets through the CSSOM: the methods that add and remove

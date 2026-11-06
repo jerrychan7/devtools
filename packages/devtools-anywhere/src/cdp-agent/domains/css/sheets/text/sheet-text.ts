@@ -1,11 +1,11 @@
-import { isCssom, isHtml } from '../../../core/realm';
-import { Tok, tokenize } from './css-lexer-wasm';
-import { type CssomChange, forgetSheet, ownEdit, ownStyle, recordPageChanges, settle } from './cssom-watch';
-import { type CssOutline, ROOT } from './css-outline';
-import { outline } from './css-outline-wasm';
+import { isCssom, isHtml } from '../../../../core/realm';
+import { Tok, tokenize } from '../parse/css-lexer-wasm';
+import { type CssomChange, forgetSheet, ownEdit, ownStyle, recordPageChanges, settle } from '../watch/cssom-watch';
+import { type CssOutline, ROOT } from '../parse/css-outline';
+import { outline } from '../parse/css-outline-wasm';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
-import { type CSSStyle, type Written, styleOf } from '../style';
+import { type CSSStyle, type Written, styleOf } from '../../style';
 
 /**
  * The text a style sheet was written in, as Chrome serves it: that of its <style>, of its file

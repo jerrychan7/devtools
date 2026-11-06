@@ -9,7 +9,7 @@ import { type Entry, type StyleRule, ancestorsOf, resolveSelector, sheetApplies 
 import type { SheetRegistry } from '../sheets/sheet-registry';
 import { hostMatcher } from './host';
 import { matchInNamespaces } from './namespaces';
-import { namespaceText } from '../sheets/sheet-text';
+import { namespaceText } from '../sheets/text/sheet-text';
 import type { UserAgentStyles } from '../user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
 

@@ -7,9 +7,9 @@ import type { TreeScope } from './forced-pseudo';
 import { shownMedia } from '../../emulation/rewrite';
 import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scopeText, selectorLabel } from './rules';
 import type { SheetRegistry, Styled } from '../sheets/sheet-registry';
-import { rangeOf, selectorSpans, selectorText, sourceStyle } from '../sheets/sheet-text';
+import { rangeOf, selectorSpans, selectorText, sourceStyle } from '../sheets/text/sheet-text';
 import { type CSSStyle, buildStyle } from '../style';
-import { ownStyle } from '../sheets/cssom-watch';
+import { ownStyle } from '../sheets/watch/cssom-watch';
 
 /** Rules of the page's sheets in the shape the CSS domain reports them in. */
 export class RuleView {

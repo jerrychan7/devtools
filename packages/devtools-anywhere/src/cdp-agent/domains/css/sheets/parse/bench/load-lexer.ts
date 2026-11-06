@@ -40,13 +40,35 @@ function instrument(source: string): string {
     );
 }
 
+/**
+ * The file at `rev`, under whichever of its names (followed through renames back from HEAD) it
+ * had there: a revision older than a move still has it under the old path.
+ */
+export function showAt(rev: string, file: string): string {
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const cwd = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: here, encoding: 'utf8' }).trim();
+  const git = (args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 24 });
+  const current = git(['ls-files', '--full-name', file]).trim();
+  const names = git(['log', '--follow', '--name-only', '--format=', 'HEAD', '--', current]).split('\n');
+  for (const name of new Set([current, ...names.filter(Boolean)])) {
+    try {
+      return execFileSync('git', ['show', `${rev}:${name}`], {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 1 << 24,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      // Not under this name at `rev`: try the next.
+    }
+  }
+  throw new Error(`${current} is not in ${rev} under any of its names`);
+}
+
 export async function loadLexer(rev?: string, countReads = false): Promise<Lexer> {
   let source: string;
   if (rev === undefined) source = readFileSync(lexerPath, 'utf8');
-  else {
-    const path = execFileSync('git', ['ls-files', '--full-name', lexerPath], { encoding: 'utf8' }).trim();
-    source = execFileSync('git', ['show', `${rev}:${path}`], { encoding: 'utf8', maxBuffer: 1 << 24 });
-  }
+  else source = showAt(rev, lexerPath);
   if (countReads) source = instrument(source);
   const label = rev ?? 'worktree';
   const file = `${cacheDir}lexer-${label.replace(/[^\w.-]/g, '_')}${countReads ? '-reads' : ''}.ts`;

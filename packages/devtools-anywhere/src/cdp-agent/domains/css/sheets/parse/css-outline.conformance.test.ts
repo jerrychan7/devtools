@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { Page } from 'puppeteer-core';
-import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
-import type { Env } from '../../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
+import type { Env } from '../../../../../../test-support/conformance.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -94,7 +94,7 @@ async function check(text: string, nested = true) {
 }
 
 test("Chrome's user agent style sheet", async () => {
-  const text = readFileSync(new URL('../user-agent/html.css', import.meta.url), 'utf8');
+  const text = readFileSync(new URL('../../user-agent/html.css', import.meta.url), 'utf8');
   assert.ok((await check(text, false)) > 250);
 });
 

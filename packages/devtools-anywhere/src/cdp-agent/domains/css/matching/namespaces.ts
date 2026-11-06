@@ -1,7 +1,7 @@
 import { isCssom, realmOf } from '../../../core/realm';
 import { nativeAdopted, quietly } from '../../../core/nodes/adopted';
 import { parentOf } from '../../../core/style/container-query';
-import { ownEdit } from '../sheets/cssom-watch';
+import { ownEdit } from '../sheets/watch/cssom-watch';
 import type { TreeScope } from './forced-pseudo';
 
 /**

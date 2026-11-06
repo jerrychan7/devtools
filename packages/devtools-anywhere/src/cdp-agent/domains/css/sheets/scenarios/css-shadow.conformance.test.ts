@@ -4,8 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
-import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
+import type { Env, Side, TestPage } from '../../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;

@@ -7,16 +7,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import { build } from 'esbuild';
-import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
-import type { Env } from '../../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
+import type { Env } from '../../../../../../test-support/conformance.ts';
 
 // Bundled for the page: the sources import each other without extensions.
 const bundled = await build({
   stdin: {
     contents: [
       "export { SheetTexts } from './sheet-text.ts';",
-      "export { watchCssom, recordPageChanges } from './cssom-watch.ts';",
-      "export { ruleObject } from './css-outline.ts';",
+      "export { watchCssom, recordPageChanges } from '../watch/cssom-watch.ts';",
+      "export { ruleObject } from '../parse/css-outline.ts';",
     ].join('\n'),
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',

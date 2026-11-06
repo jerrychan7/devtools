@@ -4,11 +4,11 @@
 // nodes, and the editing of its rules. The sandboxed node is reached through Runtime (its
 // context) and DOM.requestNode.
 import { test } from 'node:test';
-import { setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import { setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
-import type { Env } from '../../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../../test-support/oopif/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../../test-support/oopif/merged-sides.ts';
+import type { Env } from '../../../../../../../../tests/support/browser.ts';
+import { launchOopif } from '../../../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 let ours: MergedSide | undefined;

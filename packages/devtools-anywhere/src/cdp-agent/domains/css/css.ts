@@ -22,10 +22,10 @@ import {
   assertOrdered,
   isConstructed,
 } from './sheets/sheet-registry';
-import { offsetsOf } from './sheets/sheet-text';
-import { ROOT } from './sheets/css-outline';
-import { outline } from './sheets/css-outline-wasm';
-import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/cssom-watch';
+import { offsetsOf } from './sheets/text/sheet-text';
+import { ROOT } from './sheets/parse/css-outline';
+import { outline } from './sheets/parse/css-outline-wasm';
+import { editedBy, ownEdit, ownStyle, watchCssom, watchRealms, watching } from './sheets/watch/cssom-watch';
 import { type CSSStyle, type ComputedStyleResponse, INLINE_PREFIX, buildStyle, setStyleText, sources } from './style';
 
 /** What the CSS domain watches in the document and shadow roots for style sheet changes. */

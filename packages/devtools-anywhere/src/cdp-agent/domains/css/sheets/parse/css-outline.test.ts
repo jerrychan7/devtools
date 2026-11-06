@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import type { CssDecl, CssRule, outlineTree as Outline } from './css-outline.ts';
-import { lineStarts, offsetAt, positionAt } from './text-lines.ts';
+import { lineStarts, offsetAt, positionAt } from '../text/text-lines.ts';
 
 // Bundled: the sources import each other without extensions, which Node does not resolve.
 const bundled = await build({

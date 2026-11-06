@@ -7,8 +7,8 @@ import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
-import { ownStyle } from './cssom-watch';
-import { type SheetSource, namespaceText, offsetsOf, sheetTexts, selectorSpans, styleSpan } from './sheet-text';
+import { ownStyle } from './watch/cssom-watch';
+import { type SheetSource, namespaceText, offsetsOf, sheetTexts, selectorSpans, styleSpan } from './text/sheet-text';
 
 /** Chrome's error for a range that is not that of what an edit changes. */
 export const RANGE_MISMATCH = "NotFoundError Source range didn't match existing source range";
