@@ -114,8 +114,9 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 
 - **`<style>` 的位置**：原文从 0:0 起算，不是它在 HTML 里的位置。
 - **CSSOM 改动之后**：页面通过 CSSOM 改过样式表后（`replace()`、`replaceSync()` 除外），原文改为从 CSSOM 序列化，格式与 Chrome 首次见到已被改过的样式表时一致：每条规则（含 `@import`）的文本后跟一个换行。Chrome 对已知原文的样式表是把规则文本拼进原文，且会滞后。原文里找到的规则与 CSSOM 配不上时、DevTools 打开前就构造的样式表，也改为序列化。
-- **看不到的修改**：通过 `style.color = …` 这类属性赋值或改媒体列表文本所做的修改看不到（不发 `CSS.styleSheetChanged`；Styles 可能仍显示旧原文）。
-- **开销**：CSS 启用期间，元素行内样式的 `style.cssText = …` 写入约有 40% 额外开销，因为经过钩子；逐属性赋值（`el.style.left = …`）不受影响。
+- **按属性名赋值**：`rule.style.color = …` 这类赋值没有可挂的钩子（Chrome 里这些属性是每个 style 对象自有的数据属性），改为事后检测：页面通过 `rule.style` 取得过的规则，在下次使用原文之前与取得时的文本比对。因此修改要到下次使用原文时才被发现，`CSS.styleSheetChanged` 也随之延后。看不到的情况：CSS 启用之前就取得并保存的 style，之后通过它所做的修改；同时盯着的规则超过 2048 条时，相关样式表整表重新序列化并不再盯着这些规则，此后通过早先保存的 style 所做的修改。
+- **媒体列表**：`mediaText`、`appendMedium()`、`deleteMedium()` 的修改能看到。CSS 启用之前就取得的媒体列表，之后对它的修改看不到（不知道它属于哪条规则）。
+- **开销**：CSS 启用期间，元素行内样式的 `style.cssText = …` 写入约有 40% 额外开销，因为经过钩子；逐属性赋值（`el.style.left = …`）不受影响。页面读取规则的 `rule.style`、`rule.media` 也经过钩子：启用期间每次约慢 70～90 ns（Chrome 157，10 万次读取从 1.6 ms 变为 8～11 ms）。**关闭 CSS 之后也不会完全恢复**：原生 getter 已还原，但 V8 不再内联被重新定义过的属性，此后该页面里这类读取每次仍慢约 45 ns（约为原来的 4 倍，10 万次约 6.2 ms），直到页面重新加载。
 - **编辑 `@supports`、`@container`、`@scope` 的条件**：Chrome 保持原规则对象。这里整条替换该规则，因为 CSSOM 无法修改它们的条件：页面持有的该规则及其内部规则对象会脱离。
 - **重新获取**：`<link>` 和 `@import` 的文件会再取一次（能用 HTTP 缓存时走缓存）。
 - **多个客户端**：一个客户端编辑样式表（`CSS.setStyleSheetText`、`CSS.setStyleTexts`、`CSS.addRule` 等）后，Chrome 不通知其他客户端，它们保留旧原文。这里所有客户端（包括之后才启用 CSS 的）都看到最新原文及其 range，其他客户端收到 `CSS.styleSheetChanged`。其他客户端或页面改过该表后再撤销编辑，原文改为序列化文本。
