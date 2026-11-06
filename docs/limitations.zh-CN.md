@@ -56,7 +56,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 ### 断点、Profiler、内存、性能
 
 - **Chrome**：在断点和 `debugger;` 处暂停，分析 CPU 和内存，录制性能。
-- **devtools-anywhere**：不打包这些面板。`debugger;` 不会暂停；外壳模式下改为输出一条带堆栈的警告。[远程调试](usage.zh-CN.md#远程调试)时，断点仍要靠浏览器自带的调试器（`chrome://inspect`、Safari Web Inspector）：页面里运行的仍是同一个页面内 agent。
+- **devtools-anywhere**：不打包这些面板。`debugger;` 不会暂停；外壳模式下改为输出一条带堆栈的警告。（由 Service Worker 改写页面的同源脚本。它按脚本内容的哈希记住每个脚本里 `debugger` 语句的位置，存在 Cache API 的 `devtools-anywhere-service-worker-rewrites` 里，不含脚本文本：再次加载的脚本不必重新解析，改过的脚本下次加载就会按新内容改写，无需强制刷新。以 `Cache-Control: no-store` 返回的脚本只记在内存里。退出外壳模式、或新版本的 worker 激活时，这份缓存会被删除。）[远程调试](usage.zh-CN.md#远程调试)时，断点仍要靠浏览器自带的调试器（`chrome://inspect`、Safari Web Inspector）：页面里运行的仍是同一个页面内 agent。
 - **原因**：没有 JS API。
 
 <a id="network-timing"></a>

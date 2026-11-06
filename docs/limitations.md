@@ -56,7 +56,7 @@ Support, in the table below: "Supported" works as in Chrome; "Partly supported" 
 ### Breakpoints, Profiler, Memory, Performance
 
 - **Chrome**: pauses on breakpoints and `debugger;`, profiles CPU and memory, records performance.
-- **devtools-anywhere**: these panels are not included. `debugger;` does not pause; in shell mode it logs a warning with its stack. With [remote debugging](usage.md#remote-debugging), breakpoints still need the browser's own debugger (`chrome://inspect`, Safari Web Inspector): the page runs the same in-page agent.
+- **devtools-anywhere**: these panels are not included. `debugger;` does not pause; in shell mode it logs a warning with its stack. (The Service Worker rewrites it in the page's same-origin scripts. It remembers where each script's `debugger` statements are by the hash of the script's content, kept in the Cache API as `devtools-anywhere-service-worker-rewrites` without any script text, so a script loaded again is not parsed again, and an edited one is rewritten on its next load with no forced reload. Scripts served with `Cache-Control: no-store` are remembered in memory only. The cache is deleted when shell mode ends and when a new version of the worker activates.) With [remote debugging](usage.md#remote-debugging), breakpoints still need the browser's own debugger (`chrome://inspect`, Safari Web Inspector): the page runs the same in-page agent.
 - **Why**: no JS API.
 
 <a id="network-timing"></a>

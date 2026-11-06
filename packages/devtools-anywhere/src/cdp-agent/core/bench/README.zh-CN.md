@@ -145,3 +145,59 @@ Apple M2，16 GB，macOS 26，Node 24.21.0，在 aff93c5 运行 `node --expose-g
 | read-only floor | | 11.0 | 10.2 | 1.00 | | |
 
 在 aff93c5 运行 `node lexer-compare.bench.ts --rev 76f3026`：每个入口在 1,448,944 份文本上结果都相同。
+
+### aff93c5 之后
+
+同一台机器，在 e9dfe07 运行 `node --expose-gc lexer.bench.ts --rev 55110e2 --rev 5cefe1a --material acorn.js --material anywhere_app`，机器同样在做别的事（anywhere_app 的只读下限在几次运行间从 10 ms 变到 12～15 ms）：
+
+| 版本 | 这一步 |
+| --- | --- |
+| 55110e2 | 查询移到 `lexer-queries.ts`（与 aff93c5 相同，另含 `-->` 的修正） |
+| 5cefe1a | 关键字原地比较（不再每个词 `slice` 一次）；`returnOutsideFunction` 按深度记函数体个数 |
+| e9dfe07 | token 数组先按每 8 个码元一个 token 分配，按已读部分的密度增长 |
+
+关键字这一步在 acorn.js 上看得出（`returnOutsideFunction` 2.47 到 2.21 ms）；在 anywhere_app 上被查询所依赖的 `tokenize` 盖住了。数组这一步体现在 `tokenize` 的内存上：按 token 位置回放得到的峰值（数组加它的副本，或者增长时新旧两份数组）在 anywhere_app 上从 65.1 MB 降到 44.9 MB，结果保留的从 28.3 MB 升到 31.1 MB（与 token 数相差不到 1/8 的数组不再复制）。它在 acorn.js 上的 reads/unit 从 1.14 升到 1.24：不短于关键字的词现在用 `charCodeAt` 读到与关键字不同的位置为止，原来的 `slice` 读取不计数。其他入口的 token 随调用结束就死，它们的 MB alloc 一列随回收器提升了多少而变，参考意义不大。
+
+#### acorn.js: 246,615 code units (acorn 8.19.0 dist/acorn.js from node_modules)
+
+| Entry | Lexer | median ms | min ms | reads/unit | MB alloc | MB kept |
+| --- | --- | --: | --: | --: | --: | --: |
+| tokenize | 55110e2 | 1.66 | 1.56 | 1.00 | 2.28 | 0.73 |
+| | 5cefe1a | 1.67 | 1.56 | 1.00 | 2.28 | 0.74 |
+| | e9dfe07 | 1.69 | 1.59 | 1.00 | 1.55 | 0.76 |
+| debuggerStatementSites | 55110e2 | 1.57 | 1.46 | 1.00 | 0.48 | 0.06 |
+| | 5cefe1a | 1.69 | 1.57 | 1.00 | 0.48 | 0.06 |
+| | e9dfe07 | 1.69 | 1.57 | 1.00 | 0.49 | 0.05 |
+| topLevelLexicalNames | 55110e2 | 1.71 | 1.60 | 1.00 | 2.29 | 0.05 |
+| | 5cefe1a | 1.73 | 1.61 | 1.00 | 2.28 | 0.05 |
+| | e9dfe07 | 1.74 | 1.64 | 1.00 | 1.55 | 0.05 |
+| returnOutsideFunction | 55110e2 | 2.59 | 2.47 | 1.14 | 2.89 | 0.08 |
+| | 5cefe1a | 2.30 | 2.21 | 1.24 | 2.31 | 0.06 |
+| | e9dfe07 | 2.35 | 2.24 | 1.24 | 1.60 | 0.05 |
+| repl | 55110e2 | 1.75 | 1.71 | 1.00 | 2.27 | 0.06 |
+| | 5cefe1a | 1.75 | 1.70 | 1.00 | 2.33 | 0.06 |
+| | e9dfe07 | 1.78 | 1.74 | 1.00 | 1.55 | 0.05 |
+| read-only floor | | 0.290 | 0.290 | 1.00 | | |
+
+#### anywhere_app: 7,356,685 code units (anywhere_app-BWStrK_m.js, SHA-256 4d6737bd…78e57b)
+
+| Entry | Lexer | median ms | min ms | reads/unit | MB alloc | MB kept |
+| --- | --- | --: | --: | --: | --: | --: |
+| tokenize | 55110e2 | 69.9 | 64.9 | 1.00 | 73.41 | 28.34 |
+| | 5cefe1a | 70.1 | 65.7 | 1.00 | 73.40 | 28.34 |
+| | e9dfe07 | 72.3 | 67.4 | 1.00 | 53.19 | 31.07 |
+| debuggerStatementSites | 55110e2 | 63.0 | 61.5 | 1.00 | 11.72 | 0.00 |
+| | 5cefe1a | 62.8 | 62.2 | 1.00 | 11.70 | 0.00 |
+| | e9dfe07 | 63.5 | 61.9 | 1.00 | 11.71 | 0.00 |
+| topLevelLexicalNames | 55110e2 | 80.3 | 76.9 | 1.00 | 28.95 | 0.04 |
+| | 5cefe1a | 80.0 | 75.1 | 1.01 | 73.62 | 0.04 |
+| | e9dfe07 | 78.8 | 74.6 | 1.01 | 35.46 | 0.04 |
+| returnOutsideFunction | 55110e2 | 92.5 | 88.0 | 1.07 | 32.85 | 0.00 |
+| | 5cefe1a | 91.1 | 86.1 | 1.08 | 28.63 | 0.00 |
+| | e9dfe07 | 96.9 | 88.0 | 1.08 | 35.63 | 0.00 |
+| repl | 55110e2 | 90.6 | 87.8 | 1.01 | 29.77 | 0.31 |
+| | 5cefe1a | 87.2 | 81.8 | 1.02 | 29.04 | 0.30 |
+| | e9dfe07 | 89.7 | 84.6 | 1.02 | 35.98 | 0.30 |
+| read-only floor | | 14.9 | 12.0 | 1.00 | | |
+
+在 e9dfe07 运行 `node lexer-compare.bench.ts --rev 55110e2`：每个入口在 1,448,976 份文本上结果都相同。

@@ -145,3 +145,59 @@ Each commit's message has the same entry points measured against the commit befo
 | read-only floor | | 11.0 | 10.2 | 1.00 | | |
 
 `node lexer-compare.bench.ts --rev 76f3026` at aff93c5: every entry point gives the same results on 1,448,944 texts.
+
+### Since aff93c5
+
+Same machine, `node --expose-gc lexer.bench.ts --rev 55110e2 --rev 5cefe1a --material acorn.js --material anywhere_app` at e9dfe07, again on a machine shared with other work (the read-only floor of anywhere_app moved from 10 to 12-15 ms between runs):
+
+| Revision | Step |
+| --- | --- |
+| 55110e2 | The queries moved to `lexer-queries.ts` (as aff93c5, plus the `-->` fix) |
+| 5cefe1a | Keywords matched in place (no `slice` per word); `returnOutsideFunction` counts the function bodies per depth |
+| e9dfe07 | Token arrays first sized for a token every 8 code units, grown to the density read so far |
+
+The keyword step shows on acorn.js (`returnOutsideFunction` 2.47 to 2.21 ms); on anywhere_app the `tokenize` the queries run on hides it. The arrays step shows in `tokenize`'s memory: its peak (the arrays and their copy, or old and new arrays during a grow), replayed from the token positions, went from 65.1 to 44.9 MB on anywhere_app, and what the result keeps from 28.3 to 31.1 MB (arrays within 1/8 of the count are no longer copied). Its reads/unit on acorn.js rise from 1.14 to 1.24: a word at least as long as the keyword is now read with `charCodeAt` as far as it matches it, where `slice` read it uncounted. The MB alloc column of the other entry points, whose tokens die with the call, moves with what the collector promotes and says little.
+
+#### acorn.js: 246,615 code units (acorn 8.19.0 dist/acorn.js from node_modules)
+
+| Entry | Lexer | median ms | min ms | reads/unit | MB alloc | MB kept |
+| --- | --- | --: | --: | --: | --: | --: |
+| tokenize | 55110e2 | 1.66 | 1.56 | 1.00 | 2.28 | 0.73 |
+| | 5cefe1a | 1.67 | 1.56 | 1.00 | 2.28 | 0.74 |
+| | e9dfe07 | 1.69 | 1.59 | 1.00 | 1.55 | 0.76 |
+| debuggerStatementSites | 55110e2 | 1.57 | 1.46 | 1.00 | 0.48 | 0.06 |
+| | 5cefe1a | 1.69 | 1.57 | 1.00 | 0.48 | 0.06 |
+| | e9dfe07 | 1.69 | 1.57 | 1.00 | 0.49 | 0.05 |
+| topLevelLexicalNames | 55110e2 | 1.71 | 1.60 | 1.00 | 2.29 | 0.05 |
+| | 5cefe1a | 1.73 | 1.61 | 1.00 | 2.28 | 0.05 |
+| | e9dfe07 | 1.74 | 1.64 | 1.00 | 1.55 | 0.05 |
+| returnOutsideFunction | 55110e2 | 2.59 | 2.47 | 1.14 | 2.89 | 0.08 |
+| | 5cefe1a | 2.30 | 2.21 | 1.24 | 2.31 | 0.06 |
+| | e9dfe07 | 2.35 | 2.24 | 1.24 | 1.60 | 0.05 |
+| repl | 55110e2 | 1.75 | 1.71 | 1.00 | 2.27 | 0.06 |
+| | 5cefe1a | 1.75 | 1.70 | 1.00 | 2.33 | 0.06 |
+| | e9dfe07 | 1.78 | 1.74 | 1.00 | 1.55 | 0.05 |
+| read-only floor | | 0.290 | 0.290 | 1.00 | | |
+
+#### anywhere_app: 7,356,685 code units (anywhere_app-BWStrK_m.js, SHA-256 4d6737bd…78e57b)
+
+| Entry | Lexer | median ms | min ms | reads/unit | MB alloc | MB kept |
+| --- | --- | --: | --: | --: | --: | --: |
+| tokenize | 55110e2 | 69.9 | 64.9 | 1.00 | 73.41 | 28.34 |
+| | 5cefe1a | 70.1 | 65.7 | 1.00 | 73.40 | 28.34 |
+| | e9dfe07 | 72.3 | 67.4 | 1.00 | 53.19 | 31.07 |
+| debuggerStatementSites | 55110e2 | 63.0 | 61.5 | 1.00 | 11.72 | 0.00 |
+| | 5cefe1a | 62.8 | 62.2 | 1.00 | 11.70 | 0.00 |
+| | e9dfe07 | 63.5 | 61.9 | 1.00 | 11.71 | 0.00 |
+| topLevelLexicalNames | 55110e2 | 80.3 | 76.9 | 1.00 | 28.95 | 0.04 |
+| | 5cefe1a | 80.0 | 75.1 | 1.01 | 73.62 | 0.04 |
+| | e9dfe07 | 78.8 | 74.6 | 1.01 | 35.46 | 0.04 |
+| returnOutsideFunction | 55110e2 | 92.5 | 88.0 | 1.07 | 32.85 | 0.00 |
+| | 5cefe1a | 91.1 | 86.1 | 1.08 | 28.63 | 0.00 |
+| | e9dfe07 | 96.9 | 88.0 | 1.08 | 35.63 | 0.00 |
+| repl | 55110e2 | 90.6 | 87.8 | 1.01 | 29.77 | 0.31 |
+| | 5cefe1a | 87.2 | 81.8 | 1.02 | 29.04 | 0.30 |
+| | e9dfe07 | 89.7 | 84.6 | 1.02 | 35.98 | 0.30 |
+| read-only floor | | 14.9 | 12.0 | 1.00 | | |
+
+`node lexer-compare.bench.ts --rev 55110e2` at e9dfe07: every entry point gives the same results on 1,448,976 texts.
