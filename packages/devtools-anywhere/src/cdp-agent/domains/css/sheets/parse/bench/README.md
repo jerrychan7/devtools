@@ -149,3 +149,28 @@ Same machine, Node 24.21.0 and Chrome 157, `node --expose-gc outline-wasm.bench.
 | all.css | 0.586 | 0.347 | 0.6 | 0.4 | 1.04 | 0.08 | 7.2 |
 
 Same outline on 500,004 texts. **wasm B/unit** is the memory a new instance grows to for the text, past the lexer's tables, per code unit: the tables mostly fit in what is set aside for token starts (7 bytes per code unit for the lexer alone), and take up to 14 when every code unit is a token. The module is 9,190 bytes, 3,651 more than the lexer alone.
+
+## Editing declarations in a large sheet
+
+`splice.bench.ts` times `../../text/splice.ts`'s `respliced`, which CSS.setStyleTexts uses, in headless Chrome: a sheet of `--rules` style rules (20,000 by default), flat, in one `@media`, and in `@layer` and `@media`, is paired once; then `--warmup` declarations spread over it (20) are edited unmeasured and `--edits` more (200) measured, one after another, in the CSSOM and then in the source, whose text is checked after each edit. `--rev` adds splice.ts at a revision, bundled with the working tree's other modules.
+
+```sh
+node splice.bench.ts --rev <revision> [--rules 20000] [--edits 200] [--warmup 20]
+```
+
+It reports the total time of the measured edits, with each edit where `respliced` returns null paired anew, as SheetTexts then does; that total per edit; how many returned null; and the median and 90th percentile of one `respliced` call. An edit changes the source and cannot be repeated, so the total is the figure to compare: Chrome's timer has 0.1 ms steps here.
+
+The rules after an edit are still moved one by one: in a flat sheet, or in a group, an edit costs time in proportion to the rules after it, though they are not outlined or paired again. When the rule edited has rules in it, the pairs left on its old records are looked for among all the sheet's pairs, as many as its rules.
+
+It covers one case: a large sheet of small rules, edited at places spread over it. A long rule edited again and again, or edits in nested style rules, are not measured.
+
+Apple M2, macOS, Node 24.21.0, Chrome 157.0.8103.39 headless; 200 edits after 20 unmeasured. `e03a858` is the commit before `respliced` went down into group rules; the right columns are splice.ts with the drill-down ("perf(devtools-anywhere): re-outline only the innermost rule edited") and its fixes ("fix(devtools-anywhere): drop stale pairs and dead declarations in edits"), as in the commit that added this section:
+
+| Rules | Sheet | e03a858 total ms | returned null | drill-down total ms | returned null |
+| --: | --- | --: | --: | --: | --: |
+| 20,000 | flat | 70.4 | 0 | 60.7 | 0 |
+| 20,000 | `@media` | 1538.4 | 67 | 29.5 | 0 |
+| 20,000 | `@layer` `@media` | 1561.4 | 67 | 34.3 | 0 |
+| 2,000 | flat | 9.6 | 0 | 8.0 | 0 |
+| 2,000 | `@media` | 160.4 | 67 | 4.9 | 0 |
+| 2,000 | `@layer` `@media` | 154.3 | 67 | 7.0 | 0 |

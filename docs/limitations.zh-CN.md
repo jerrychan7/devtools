@@ -120,6 +120,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 - **媒体列表**：`mediaText`、`appendMedium()`、`deleteMedium()` 的修改能看到。CSS 启用之前就取得的媒体列表，之后对它的修改看不到（不知道它属于哪条规则）。
 - **开销**：CSS 启用期间，元素行内样式的 `style.cssText = …` 写入约有 40% 额外开销，因为经过钩子；逐属性赋值（`el.style.left = …`）不受影响。页面读取规则的 `rule.style`、`rule.media` 也经过钩子：启用期间每次约慢 70～90 ns（Chrome 157，10 万次读取从 1.6 ms 变为 8～11 ms）。**关闭 CSS 之后也不会完全恢复**：原生 getter 已还原，但 V8 不再内联被重新定义过的属性，此后该页面里这类读取每次仍慢约 45 ns（约为原来的 4 倍，10 万次约 6.2 ms），直到页面重新加载。
 - **编辑 `@supports`、`@container`、`@scope` 的条件**：Chrome 保持原规则对象。这里整条替换该规则，因为 CSSOM 无法修改它们的条件：页面持有的该规则及其内部规则对象会脱离。
+- **整体替换原文**（`CSS.setStyleSheetText`）：Chrome 先清空样式表的全部规则再重新解析，页面持有的每个规则对象都会脱离（`parentStyleSheet` 变为 `null`），文本未变的也一样。这里只删除并插入文本有变化的顶层规则，其余规则以原对象留在表中：大样式表里编辑代价低，页面的引用也仍然有效。
 - **重新获取**：`<link>` 和 `@import` 的文件会再取一次（能用 HTTP 缓存时走缓存）。
 - **多个客户端**：一个客户端编辑样式表（`CSS.setStyleSheetText`、`CSS.setStyleTexts`、`CSS.addRule` 等）后，Chrome 不通知其他客户端，它们保留旧原文。这里所有客户端（包括之后才启用 CSS 的）都看到最新原文及其 range，其他客户端收到 `CSS.styleSheetChanged`。其他客户端或页面改过该表后再撤销编辑，原文改为序列化文本。
 - **编辑时的命名空间前缀**：`CSS.setRuleSelector` 和 `CSS.addRule` 接受带本表 `@namespace` 所声明前缀的选择器（如 `h|p`）。Chrome 会拒绝，因为它是在一张没有命名空间的空表里校验文本的。

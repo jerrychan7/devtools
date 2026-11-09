@@ -208,3 +208,73 @@ test('many comments before what has no rule: in linear time', async () => {
   assert.equal(r?.got, r?.want);
   assert.equal(r?.kept, 1);
 });
+
+test('rules whose text is the same keep their objects, which Chrome detaches all', async () => {
+  // A deliberate difference (splice.ts `retexted`): Chrome's CSS.setStyleSheetText clears all the
+  // rules and parses the text anew, so every old CSSRule loses its sheet (parentStyleSheet null),
+  // even those whose text is the same; retext() deletes and inserts only the rules whose text
+  // changed, and keeps the others, as the same objects in the sheet.
+  const css = '.a { top: 1px }\n.b { top: 2px }\n';
+  const text = '.a { top: 1px }\n.b { top: 3px }\n';
+  const chrome = await page.browser().newPage();
+  try {
+    const cdp = await chrome.createCDPSession();
+    const added = new Promise<string>(resolve =>
+      cdp.on('CSS.styleSheetAdded', e => {
+        // The page's only sheet (a <style> a script added is not `isInline`).
+        if (e.header.origin === 'regular') resolve(e.header.styleSheetId);
+      })
+    );
+    await chrome.evaluate(css => {
+      const s = document.createElement('style');
+      s.textContent = css;
+      document.head.appendChild(s);
+      (globalThis as unknown as { old: CSSRule[] }).old = Array.from((s.sheet as CSSStyleSheet).cssRules);
+    }, css);
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    await cdp.send('CSS.setStyleSheetText', { styleSheetId: await added, text });
+    const detached = await chrome.evaluate(() => {
+      const { old } = globalThis as unknown as { old: CSSRule[] };
+      const rules = Array.from(document.querySelector('style')?.sheet?.cssRules ?? []);
+      return old.map(r => [r.parentStyleSheet === null, rules.includes(r)]);
+    });
+    assert.deepEqual(detached, [
+      [true, false],
+      [true, false],
+    ]);
+  } finally {
+    await chrome.close();
+  }
+  const [ours] = await run(css, [text]);
+  assert.ok(ours?.retexted);
+  assert.equal(ours?.got, ours?.want);
+  const kept = await page.evaluate(
+    (css, text) => {
+      const m = (globalThis as unknown as { __sheetText: unknown }).__sheetText as {
+        SheetTexts: new () => {
+          set(s: CSSStyleSheet, t: string): void;
+          source(s: CSSStyleSheet, f: (s: CSSStyleSheet) => CSSRule[]): unknown;
+          retext(s: CSSStyleSheet, t: string, f: (s: CSSStyleSheet) => CSSRule[]): boolean;
+        };
+      };
+      const rulesOf = (s: CSSStyleSheet) => Array.from(s.cssRules);
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(css);
+      const store = new m.SheetTexts();
+      store.set(sheet, css);
+      store.source(sheet, rulesOf);
+      const old = rulesOf(sheet);
+      const retexted = store.retext(sheet, text, rulesOf);
+      return { retexted, rules: old.map(r => [r.parentStyleSheet === sheet, rulesOf(sheet).includes(r)]) };
+    },
+    css,
+    text
+  );
+  // In place, not all the rules replaced: `.a` kept in its sheet, `.b` replaced and detached.
+  assert.equal(kept.retexted, true);
+  assert.deepEqual(kept.rules, [
+    [true, true],
+    [false, false],
+  ]);
+});

@@ -51,6 +51,8 @@ const DW = 6;
 /** A rule's flags: its kind in the low bits, and whether its block is unclosed. */
 const KIND_MASK = 3;
 const UNCLOSED = 4;
+/** Left behind by an edit, unreachable (`bury`). */
+const DEAD = 8;
 const QUALIFIED = 0;
 const AT = 1;
 const NESTED = 2;
@@ -255,6 +257,37 @@ export class CssOutline {
       bump(d, i + D_VALUE_END, delta);
     }
     for (let c = this.firstChild(r); c >= 0; c = this.next(c)) this.shift(c, delta);
+  }
+
+  /** Moves the end of rule `r` (and of its block) by `delta`: a rule in it grew or shrank. */
+  stretch(r: number, delta: number): void {
+    const at = r * RW;
+    bump(this.rules, at + R_END, delta);
+    if ((this.rules[at + R_BLOCK_START] as number) >= 0) bump(this.rules, at + R_BLOCK_END, delta);
+  }
+
+  /**
+   * Puts rule `copy` (one `graft` made, linked to nothing) in the place of `old` among the rules
+   * of `parent`, `prev` the rule before `old` there (-1 when it is the first): `old`'s records are
+   * left where they are, unreachable from `parent`. False, nothing changed, when `old` is not
+   * where told, or a record named is dead (`markDead`).
+   */
+  relink(parent: number, prev: number, old: number, copy: number): boolean {
+    if ((prev < 0 ? this.firstChild(parent) : this.next(prev)) !== old) return false;
+    // Dead records keep their links: one of them is not where the rule is.
+    if (this.dead_(parent) || this.dead_(old) || (prev >= 0 && this.dead_(prev))) return false;
+    const a = this.rules;
+    a[copy * RW + R_NEXT] = this.next(old);
+    a[prev < 0 ? parent * RW + R_CHILD : prev * RW + R_NEXT] = copy;
+    return true;
+  }
+
+  /** Marks rule `r`'s record dead: left behind, unreachable; `relink` refuses it. */
+  markDead(r: number): void {
+    this.rules[r * RW + R_FLAGS] = (this.rules[r * RW + R_FLAGS] as number) | DEAD;
+  }
+  private dead_(r: number): boolean {
+    return !!(this.r(r, R_FLAGS) & DEAD);
   }
 
   /** How many rules `r` is, with those in it. */

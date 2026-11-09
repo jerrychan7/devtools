@@ -6,7 +6,7 @@ import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { replacedLines } from './text-lines';
 import { ownCall } from '../watch/cssom-watch';
-import { type SheetSource, TOP, childRules, pairList, tagOf } from './pair';
+import { type SheetSource, TOP, type Wrap, childRules, pairList, tagOf } from './pair';
 
 /**
  * The page's changes to a serialized sheet, kept until its source is asked for (a page may change
@@ -105,20 +105,177 @@ export function applied(source: SheetSource, pending: Pending, rules: CSSRule[])
 }
 
 /**
+ * Rules whose block, at the top level or in such rules only, is parsed as the sheet's top level
+ * is (a list of rules), so that a rule in it outlined alone is outlined as it is there. Not
+ * @scope, whose block takes declarations, as a style rule's does.
+ */
+const GROUPS = new Set([
+  'CSSMediaRule',
+  'CSSSupportsRule',
+  'CSSContainerRule',
+  'CSSLayerBlockRule',
+  'CSSStartingStyleRule',
+]);
+/** How pairList parses the preludes of a @keyframes rule's keyframes. */
+const KEYFRAME: Wrap = p => `@keyframes x{${p}{}}`;
+
+/** Declarations no longer reachable in each outline, left behind with the rules `dead` counts. */
+const deadDecls = new WeakMap<CssOutline, number>();
+
+/** How many of `o`'s declaration records are dead: for tests. */
+export const deadDeclarations = (o: CssOutline): number => deadDecls.get(o) ?? 0;
+
+/** Dead declarations below which an outline is not given up for them (`worn`). */
+const DECL_SLACK = 1024;
+
+/**
+ * Whether as many of `o`'s rule records, or of its declaration records, are dead as live: the text
+ * is then to be outlined and paired anew, which leaves none, rather than grafted onto again. A rule
+ * of many declarations edited again and again leaves few dead rules but many dead declarations;
+ * those are counted once there are more than `DECL_SLACK`, so that a small sheet, which has fewer
+ * declarations than rules, keeps being edited in place as before.
+ */
+const worn = (o: CssOutline) => {
+  const decls = deadDecls.get(o) ?? 0;
+  return o.dead * 2 > o.ruleCount || (decls > DECL_SLACK && decls * 2 > o.declCount);
+};
+
+/**
+ * Counts rule `r` of `o`, its declarations and the rules in it dead; calls `each` with each rule.
+ * `as`, when given, is an outline of the same text as those records, whose rule `r` is counted in
+ * their place (`retexted`'s, made alone, for nodes of `o` it has no index of).
+ */
+function bury(o: CssOutline, r: number, each?: (r: number) => void, as: CssOutline = o): void {
+  let rules = 0;
+  let decls = 0;
+  const walk = (n: number) => {
+    rules++;
+    decls += as.declCountOf(n);
+    if (as === o) o.markDead(n);
+    each?.(n);
+    for (let c = as.firstChild(n); c >= 0; c = as.next(c)) walk(c);
+  };
+  walk(r);
+  o.dead += rules;
+  deadDecls.set(o, (deadDecls.get(o) ?? 0) + decls);
+}
+
+/**
  * The source after `[start, end)` of its text was replaced by `insert`, the CSSOM changed the
- * same way: only the top-level rule around the change is outlined and paired again
- * (`replaceTops`). null when the change is not inside one rule or does not leave it one rule.
+ * same way: only the innermost rule around the change is outlined and paired again. null when the
+ * change is not inside one top-level rule or does not leave it one rule. As with `replaceTops`,
+ * the old source is changed in place and must not be used again, even when null is returned.
+ *
+ * The top-level rule is found by a binary search, then the rule in it, down through group rules
+ * (`GROUPS`) and into @keyframes, by a binary search of their CSSOM rules, which are in the order
+ * of the text, each paired: a sheet wrapped in one @media or @layer (as Tailwind's are) is not
+ * outlined and paired again whole for each declaration edited. The change must be strictly inside
+ * that rule (an insertion at its edge may add a rule beside it), and its new text outlined alone
+ * exactly one rule, ended, from its first code unit to its last: then the rules around it are
+ * parsed as they were. Its records are grafted onto the outline in place of the old ones, which
+ * alone are counted dead, and pairs left with the old records (rules in it the CSSOM replaced)
+ * dropped. When the change is in a top-level rule's own text, or its new text is not one such
+ * rule, the top-level rule is replaced (`replaceTops`).
+ *
+ * The rules after the change, in the rules around it and at the top level, are still moved one
+ * by one (`shift`): an edit costs time in proportion to the rules after it, though they are not
+ * outlined nor paired again. Offsets kept relative to their parent would avoid that, at the cost
+ * of every read of an offset, which the outline's many readers make far more often than edits.
  */
 export function respliced(source: SheetSource, start: number, end: number, insert: string): SheetSource | null {
   const o = source.outline;
-  const k = source.topNodes.findIndex(n => o.start(n) <= start && end <= o.end(n));
-  if (k < 0) return null;
-  const rule = source.topRules[k] as CSSRule;
-  const node = source.topNodes[k] as number;
+  const { topRules, topNodes, nodes } = source;
+  const k = search(topNodes, n => o.end(n) >= end);
+  const top = topNodes[k];
+  if (top === undefined || o.start(top) > start) return null;
+  const topRule = topRules[k] as CSSRule;
+  // Down to the innermost paired rule strictly around the change; `path` the rules around it,
+  // `prev` the rule before it in its parent (-1 for none).
+  const path: number[] = [];
+  let node = top;
+  let rule = topRule;
+  let prev = -1;
+  let wrap = TOP;
+  for (let tag = tagOf(rule); GROUPS.has(tag) || tag === 'CSSKeyframesRule'; tag = tagOf(rule)) {
+    const kids = childRules(rule);
+    let unpaired = false;
+    const nodeOf = (i: number) => {
+      const n = nodes.get(kids[i] as CSSRule);
+      if (n === undefined) unpaired = true;
+      return n ?? -1;
+    };
+    let lo = 0;
+    let hi = kids.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const n = nodeOf(mid);
+      if (n < 0) break;
+      if (o.end(n) >= end) hi = mid;
+      else lo = mid + 1;
+    }
+    if (unpaired || lo >= kids.length) break;
+    const kid = nodeOf(lo);
+    if (unpaired || !(o.start(kid) < start && end < o.end(kid)) || o.kind(kid) === 'nested') break;
+    // The rule before it: that of the CSSOM rule before, or past nodes the CSSOM dropped. Expected
+    // live (pairs are on live records, the walk follows live links); if not, relink refuses it and
+    // respliced gives up.
+    let before = lo > 0 ? nodeOf(lo - 1) : -1;
+    if (before < 0 && o.firstChild(node) !== kid) before = o.firstChild(node);
+    while (before >= 0 && o.next(before) !== kid) before = o.next(before);
+    if (unpaired || (before < 0 && o.firstChild(node) !== kid)) break;
+    path.push(node);
+    if (tag === 'CSSKeyframesRule') wrap = KEYFRAME;
+    node = kid;
+    prev = before;
+    rule = kids[lo] as CSSRule;
+  }
   const from = o.start(node);
   const to = o.end(node);
   const slice = source.text.slice(from, start) + insert + source.text.slice(end, to);
-  return replaceTops(source, [{ from: k, count: 1, start: from, end: to, insert: slice, rules: [rule] }]);
+  const parent = path[path.length - 1];
+  const alone = parent === undefined || worn(o) ? null : outline(slice);
+  const one = alone?.firstChild(ROOT) ?? -1;
+  if (
+    parent === undefined ||
+    !alone ||
+    one < 0 ||
+    alone.next(one) >= 0 ||
+    alone.start(one) !== 0 ||
+    alone.end(one) !== slice.length ||
+    !(alone.blockStart(one) >= 0 ? alone.closed(one) : slice.charCodeAt(slice.length - 1) === 59) /* ; */
+  ) {
+    const whole =
+      node === top ? slice : source.text.slice(o.start(top), start) + insert + source.text.slice(end, o.end(top));
+    return replaceTops(source, [
+      { from: k, count: 1, start: o.start(top), end: o.end(top), insert: whole, rules: [topRule] },
+    ]);
+  }
+  const delta = insert.length - (end - start);
+  const result: SheetSource = {
+    ...source,
+    text: source.text.slice(0, start) + insert + source.text.slice(end),
+    lines: replacedLines(source.lines, [{ start, end, insert }]),
+  };
+  const copy = o.graft(alone, one, from);
+  if (!pairList(result, copy, [rule], wrap) || !o.relink(parent, prev, node, copy)) return null;
+  // The old records: pairs still on them are of rules the CSSOM replaced, gone from the sheet.
+  // Those rules are no longer in the CSSOM to be walked, so the pairs are all looked through, as
+  // many as the sheet's rules: only when the rule edited had rules in it.
+  const old = new Set<number>();
+  bury(o, node, n => old.add(n));
+  if (old.size > 1) for (const [r, n] of nodes) if (old.has(n)) nodes.delete(r);
+  // The rules after it in each rule around it, and after that rule at the top level, moved.
+  if (delta) {
+    let inner = copy;
+    for (let i = path.length - 1; i >= 0; i--) {
+      const outer = path[i] as number;
+      for (let s = o.next(inner); s >= 0; s = o.next(s)) o.shift(s, delta);
+      o.stretch(outer, delta);
+      inner = outer;
+    }
+    for (let i = k + 1; i < topNodes.length; i++) o.shift(topNodes[i] as number, delta);
+  }
+  return result;
 }
 
 /**
@@ -160,7 +317,7 @@ export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource 
   const o = source.outline;
   const { topRules, topNodes } = source;
   const count = topRules.length;
-  if (o.dead * 2 > o.ruleCount) return null;
+  if (worn(o)) return null;
   const parts: string[] = [];
   let at = 0;
   let next = 0;
@@ -216,7 +373,7 @@ export function replaceTops(source: SheetSource, edits: TopEdit[]): SheetSource 
   edits.forEach((e, i) => {
     keep(e.from);
     for (; k < e.from + e.count; k++) {
-      o.dead += o.size(topNodes[k] as number);
+      bury(o, topNodes[k] as number);
       forget(result.nodes, topRules[k] as CSSRule);
     }
     const nodes = added[i] ?? [];
@@ -404,6 +561,13 @@ function unpaired(
  * The rules kept keep their records' order and number (pre-order, those of a rule follow each
  * other), so that their pairs move by an offset. Those inserted are paired with the records they
  * were inserted from. `source` is given up as by `respliced`.
+ *
+ * Unlike Chrome, on purpose: its CSS.setStyleSheetText (InspectorStyleSheet::SetText, then
+ * CSSStyleSheet::SetText) clears all the rules before parsing the text, so every old CSSRule is
+ * detached (parentStyleSheet null), those whose text is the same too. Here those stay in the
+ * sheet as the same objects: replacing all the rules would re-pair the whole sheet on each edit
+ * of a large one, and the page's references to the rules not edited keep working. Recorded in
+ * docs/limitations.md and pinned by sheet-text-retext.conformance.test.ts.
  */
 export function retexted(
   sheet: CSSStyleSheet,
@@ -436,7 +600,7 @@ export function retexted(
   let b = search(topNodes, node => o.start(node) >= old.length - s);
   const from = a ? o.end(topNodes[a - 1] as number) : 0;
   const slice = text.slice(from, (b < count ? o.start(topNodes[b] as number) : old.length) + delta);
-  let n = o.dead * 2 > o.ruleCount ? null : outline(slice);
+  let n = worn(o) ? null : outline(slice);
   let nodes = n && wholeRules(slice, n);
   const local = !!nodes;
   let newText = slice;
@@ -539,10 +703,10 @@ export function retexted(
   if (local) {
     const head = nodes[0];
     if (head !== undefined) base = o.graft(outlined, head, from) - head;
-    for (let i = a; i < b; i++) o.dead += o.size(topNodes[i] as number);
+    for (let i = a; i < b; i++) bury(o, topNodes[i] as number);
     if (oldSide)
       for (let i = 0; i < before.length; i++)
-        if ((ruleAt[i] as number) < 0) o.dead += oldSide.outline.size(oldSide.nodes[i] as number);
+        if ((ruleAt[i] as number) < 0) bury(o, oldSide.nodes[i] as number, undefined, oldSide.outline);
   }
   const segRules: CSSRule[] = [];
   const segNodes: number[] = [];
