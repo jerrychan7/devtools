@@ -85,9 +85,21 @@ interface Mask {
 
 let current: Mask | null = null;
 
-/** The CSS filter of the vision deficiency emulated, if any: screenshots apply it too, as Chrome's do. */
-let filterValue: string | null = null;
-export const visionFilter = () => filterValue;
+/** The vision deficiency emulated, if any. */
+let emulated: string | null = null;
+
+/** `type`'s filter as a CSS url(), its blur scaled by `scale` (that of an image of the page). */
+function filterUrl(type: string, scale = 1): string {
+  const filter = (VISION[type] ?? '').replace('stdDeviation="2"', `stdDeviation="${2 * scale}"`);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg"><filter id="f">${filter}</filter></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
+}
+
+/**
+ * The CSS filter of the vision deficiency emulated, if any, for an image of the page drawn at
+ * `scale` image pixels per CSS pixel: screenshots apply it too, as Chrome's do.
+ */
+export const visionFilter = (scale: number) => (emulated ? filterUrl(emulated, scale) : null);
 
 /** Whether the mask was raised during this frame, and whether to raise it again at the next. */
 let raised = false;
@@ -176,7 +188,7 @@ function listenToRoots(m: Mask) {
 export function setVision(type: string): void {
   const filter = VISION[type];
   if (!filter) {
-    filterValue = null;
+    emulated = null;
     if (!current) return;
     const m = current;
     current = null;
@@ -203,9 +215,8 @@ export function setVision(type: string): void {
       listenToRoots(m);
     }
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg"><filter id="f">${filter}</filter></svg>`;
-  const url = `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
-  filterValue = url;
+  const url = filterUrl(type);
+  emulated = type;
   current.style.textContent = `div { backdrop-filter: ${url}; -webkit-backdrop-filter: ${url}; }`;
   if (!current.host.isConnected) doc.documentElement.append(current.host);
   raise();

@@ -407,3 +407,50 @@ test('captureScreenshot is filtered by an emulated vision deficiency, as in Chro
     await s.page.close();
   }
 });
+
+for (const [scale, dpr] of [
+  [2, 1],
+  [1, 2],
+] as const)
+  test(`captureScreenshot blurs as Chrome does at clip scale ${scale}, devicePixelRatio ${dpr}`, async () => {
+    const { s, ours, chrome } = await screenshotPage();
+    if (dpr !== 1) {
+      const { width, height } = s.page.viewport() ?? { width: 800, height: 600 };
+      await s.page.setViewport({ width, height, deviceScaleFactor: dpr });
+      await s.page.evaluate(() => scrollTo(0, 500));
+    }
+    /** The green channel across the box's right edge (CSS x 110), at y 545. */
+    const row = (data: string) =>
+      s.page.evaluate(async d => {
+        const img = new Image();
+        img.src = 'data:image;base64,' + d;
+        await img.decode();
+        const canvas = Object.assign(document.createElement('canvas'), { width: img.width, height: img.height });
+        const g = canvas.getContext('2d');
+        if (!g) throw new Error('no 2d context');
+        g.drawImage(img, 0, 0);
+        const y = img.height >> 1;
+        return Array.from(g.getImageData(0, y, img.width, 1).data).filter((_, i) => i % 4 === 1);
+      }, data);
+    try {
+      const clip = { x: 100, y: 540, width: 20, height: 10, scale };
+      await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type: 'blurredVision' });
+      const theirs = await row((await chrome({ clip })).data);
+      await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+      await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'blurredVision' });
+      const mine = await row((await ours({ clip })).data);
+      await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+      // Away from the image's own edges, where the two fade differently.
+      const inner = (r: number[]) => r.slice(10, 30);
+      assert.ok(
+        inner(mine).every((v, i) => Math.abs(v - (inner(theirs)[i] ?? 0)) <= 6),
+        `ours ${JSON.stringify(inner(mine))}, Chrome's ${JSON.stringify(inner(theirs))}`
+      );
+      assert.ok(
+        inner(theirs).some(v => v > 10 && v < 245),
+        'the edge is blurred'
+      );
+    } finally {
+      await s.page.close();
+    }
+  });
