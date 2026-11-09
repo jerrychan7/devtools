@@ -143,7 +143,9 @@ const textOf = (value: unknown) =>
 /**
  * `CSS` and its `supports`, as the page found them: the probe's, taken before the page's code
  * (`useCssNatives`), else those of this realm when this module loaded. The answer for a property
- * name does not depend on the realm, so sheets of iframes use the same.
+ * name does not depend on the realm, so sheets of iframes use the same. Known limit: without the
+ * probe's (an older probe), a page that replaced `CSS` or `CSS.supports` before this bundle loaded
+ * has its function called, and its answers taken.
  */
 let cssNatives: CssNatives | undefined = typeof CSS === 'undefined' ? undefined : { CSS, supports: CSS.supports };
 
@@ -174,15 +176,18 @@ const nameChar = (c: string | undefined) =>
  * included (`--` alone is none). A name the page's own conversion makes (an object) is taken as
  * one. Only string indexing and comparisons: no method of the page's prototypes is called.
  */
-function knownProperty(value: unknown): boolean {
+export function knownProperty(value: unknown): boolean {
   const name = typeof value === 'string' ? value : textOf(value);
   if (name === undefined) return true;
-  if (name.length > 2 && name[0] === '-' && name[1] === '-') return true;
+  if (isCustom(name)) return true;
   let known = knownNames[name];
   if (known !== undefined) return known;
   known = name.length > 0;
   for (let i = 0; known && i < name.length; i++) known = nameChar(name[i]);
-  if (known && cssNatives)
+  // Descriptors are names to Chrome too, in any rule (`src` in a style rule counts), though
+  // CSS.supports() knows them not.
+  if (known && DESCRIPTORS[asciiLower(name)]) known = true;
+  else if (known && cssNatives)
     try {
       known = Reflect.apply(cssNatives.supports, cssNatives.CSS, [name, 'inherit']) === true;
     } catch {
@@ -195,6 +200,133 @@ function knownProperty(value: unknown): boolean {
   knownNames[name] = known;
   knownCount++;
   return known;
+}
+
+/** A custom property's name: `--` and more. */
+const isCustom = (name: string) => name.length > 2 && name[0] === '-' && name[1] === '-';
+
+/** A dictionary of `names`, made with no method of the page's called. */
+const dictionary = (names: string[]): Record<string, true> => {
+  const out = { __proto__: null } as unknown as Record<string, true>;
+  for (let i = 0; i < names.length; i++) out[names[i] ?? ''] = true;
+  return out;
+};
+
+/**
+ * The descriptors of at-rules that are no properties (Chrome's property ids for them): written
+ * through any rule's style, they change it in Chrome, as properties do. CSS.supports() knows
+ * none of them (a descriptor that is a property too, such as @page's `size`, it does). Taken
+ * from the descriptors of @font-face, @property, @font-palette-values, @counter-style, @page and
+ * @view-transition, and checked in Chrome 157.0.8103.39 for `src`, `syntax`, `system`,
+ * `types`, `navigation` and `range`; `marks`, `bleed` and `font-named-instance` change nothing
+ * there and are left out. Tested in cssom-watch.test.ts.
+ */
+const DESCRIPTORS = dictionary([
+  'src',
+  'unicode-range',
+  'font-display',
+  'ascent-override',
+  'descent-override',
+  'line-gap-override',
+  'size-adjust',
+  'syntax',
+  'inherits',
+  'initial-value',
+  'base-palette',
+  'override-colors',
+  'system',
+  'symbols',
+  'additive-symbols',
+  'negative',
+  'prefix',
+  'suffix',
+  'range',
+  'pad',
+  'speak-as',
+  'fallback',
+  'page-orientation',
+  'navigation',
+  'types',
+]);
+
+/**
+ * The properties an @position-try rule takes (insets, margins, sizes, self-alignment, the
+ * anchor and area, as CSS Anchor Positioning lists them): setProperty() of any other there,
+ * custom ones included, changes nothing in Chrome 157.0.8103.39 (removeProperty() of a known
+ * one does change it). Tested in cssom-watch.test.ts.
+ */
+const POSITION_TRY = dictionary([
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'inset',
+  'inset-block',
+  'inset-block-start',
+  'inset-block-end',
+  'inset-inline',
+  'inset-inline-start',
+  'inset-inline-end',
+  'margin',
+  'margin-top',
+  'margin-right',
+  'margin-bottom',
+  'margin-left',
+  'margin-block',
+  'margin-block-start',
+  'margin-block-end',
+  'margin-inline',
+  'margin-inline-start',
+  'margin-inline-end',
+  'width',
+  'height',
+  'min-width',
+  'min-height',
+  'max-width',
+  'max-height',
+  'block-size',
+  'inline-size',
+  'min-block-size',
+  'min-inline-size',
+  'max-block-size',
+  'max-inline-size',
+  'align-self',
+  'justify-self',
+  'place-self',
+  'position-anchor',
+  'position-area',
+  'inset-area',
+]);
+
+const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const LOWER = 'abcdefghijklmnopqrstuvwxyz';
+const TO_LOWER = { __proto__: null } as unknown as Record<string, string>;
+for (let i = 0; i < UPPER.length; i++) TO_LOWER[UPPER[i] ?? ''] = LOWER[i] ?? '';
+
+/** A name in ASCII lower case, with no method called. */
+function asciiLower(name: string): string {
+  let out = '';
+  for (let i = 0; i < name.length; i++) {
+    const c = name[i] ?? '';
+    out += TO_LOWER[c] ?? c;
+  }
+  return out;
+}
+
+/** An @position-try rule, of any realm (as `isCssom`, which has no type for it). */
+function isPositionTry(rule: unknown): boolean {
+  if (typeof rule !== 'object' || rule === null) return false;
+  for (let proto: unknown = Object.getPrototypeOf(rule); typeof proto === 'object' && proto !== null;) {
+    if (Object.getOwnPropertyDescriptor(proto, Symbol.toStringTag)?.value === 'CSSPositionTryRule') return true;
+    proto = Object.getPrototypeOf(proto);
+  }
+  return false;
+}
+
+/** Whether setProperty() of `value` changes an @position-try rule, as in Chrome. */
+export function positionTryTakes(value: unknown): boolean {
+  const name = typeof value === 'string' ? value : textOf(value);
+  return name === undefined || (!isCustom(name) && POSITION_TRY[asciiLower(name)] === true);
 }
 
 /** `important` in any ASCII case, with no method called. */
@@ -510,23 +642,23 @@ function install(realm: Window & typeof globalThis) {
   // Like Chrome, setProperty() and removeProperty() with a name no property has, and
   // setProperty() with a priority other than `important`, change nothing: no change is told.
   // With a value the property rejects, setProperty() does change the sheet (it is mutable).
-  // A descriptor rule's names (@font-face's `src`, @page's `size`) are no properties: written,
-  // they change the rule, as in Chrome.
-  const styleWritten = (args: unknown[], self: unknown) => {
+  // The same in every kind of rule (@font-face, @page and its margin rules, keyframes), but
+  // @position-try, where setProperty() takes only the properties it allows.
+  const styleWritten = (args: unknown[], self: unknown, set: boolean) => {
     let rule: unknown;
     try {
       rule = parentRule ? Reflect.apply(parentRule, self, []) : null;
     } catch {
       return; // Not a style.
     }
-    const ofProperties =
-      isCssom(rule, 'CSSStyleRule') || isCssom(rule, 'CSSNestedDeclarations') || isCssom(rule, 'CSSKeyframeRule');
-    if (!ofProperties || knownProperty(args[0])) styleChanged(self, args, undefined);
+    if (!knownProperty(args[0])) return;
+    if (set && isPositionTry(rule) && !positionTryTakes(args[0])) return;
+    styleChanged(self, args, undefined);
   };
   hook(realm.CSSStyleDeclaration.prototype, 'setProperty', (self, args) => {
-    if (validPriority(args[2])) styleWritten(args, self);
+    if (validPriority(args[2])) styleWritten(args, self, true);
   });
-  hook(realm.CSSStyleDeclaration.prototype, 'removeProperty', (self, args) => styleWritten(args, self));
+  hook(realm.CSSStyleDeclaration.prototype, 'removeProperty', (self, args) => styleWritten(args, self, false));
   // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are no
   // accessors, so `el.style.left = …` is not hooked and costs nothing), a rule's selector, a
   // keyframe's key. While watching, an element's `style.cssText = …` costs about 40% more

@@ -382,7 +382,8 @@ test("isMutable: names are checked with the CSS.supports the probe took, not the
     async t => {
       for (const side of [t.chrome, t.ours]) await side.send('CSS.enable');
       // Other code of the bundle calls the page's CSS.supports when it loads (the panel's
-      // viewport units): only the calls from here on are the CSS domain's.
+      // viewport units): only the calls from here on, the writes below, are counted. Calls made
+      // during and before CSS.enable are left out, whoever made them.
       const count = () => t.page.evaluate(() => (window as unknown as { supportsCalls: number }).supportsCalls);
       const before = await count();
       await t.page.evaluate(() => {
@@ -425,46 +426,91 @@ test('isMutable: names past the 1024 kept still count right', () =>
     await compare(t, 4, { flood: false, known: true, unknown: false, imp: false }, 'many names');
   }));
 
-test("isMutable: descriptors written through a rule's style count, as properties do", () =>
+/** Writes through the style of other kinds of rules, with whether Chrome counts each. */
+const RULE_KINDS: [label: string, text: string, write: string, counts: boolean][] = (() => {
+  const face = '@font-face { font-family: f; src: local(f); }';
+  const page = '@page { margin: 1cm; @top-left { content: "x"; } }';
+  const tryRule = '@position-try --t { top: 1px; }';
+  const style = '.a { color: red; }';
+  return [
+    // Descriptors and properties alike, in any rule; names neither is, nowhere. A value the
+    // descriptor rejects (`nope`) counts as a valid one would.
+    ['ff-src', face, `r.style.setProperty('src', 'nope')`, true],
+    ['ff-range', face, `r.style.setProperty('unicode-range', 'U+0-7F')`, true],
+    ['ff-remove-src', face, `r.style.removeProperty('src')`, true],
+    ['ff-color', face, `r.style.setProperty('color', 'red')`, true],
+    ['ff-foo', face, `r.style.setProperty('foo', 'x')`, false],
+    ['ff-remove-foo', face, `r.style.removeProperty('foo')`, false],
+    // `size` is a property too: known through CSS.supports(), not the descriptors' list.
+    ['page-size', page, `r.style.setProperty('size', 'A4')`, true],
+    ['page-src', page, `r.style.setProperty('src', 'nope')`, true],
+    ['page-color', page, `r.style.setProperty('color', 'red')`, true],
+    ['page-foo', page, `r.style.setProperty('foo', 'x')`, false],
+    ['page-remove-foo', page, `r.style.removeProperty('foo')`, false],
+    // A margin rule's sheet is its @page's: styleSheetChanged names that sheet.
+    ['margin-color', page, `r.cssRules[0].style.setProperty('color', 'red')`, true],
+    ['margin-foo', page, `r.cssRules[0].style.setProperty('foo', 'x')`, false],
+    ['margin-remove-foo', page, `r.cssRules[0].style.removeProperty('foo')`, false],
+    ['style-src', style, `r.style.setProperty('src', 'nope')`, true],
+    ['style-syntax', style, `r.style.setProperty('syntax', '"*"')`, true],
+    ['style-types', style, `r.style.setProperty('types', 'x')`, true],
+    ['style-navigation', style, `r.style.setProperty('navigation', 'auto')`, true],
+    ['style-range', style, `r.style.setProperty('range', 'auto')`, true],
+    // Not descriptors to Chrome.
+    ['style-marks', style, `r.style.setProperty('marks', 'crop')`, false],
+    ['style-bleed', style, `r.style.setProperty('bleed', '1px')`, false],
+    // @position-try: setProperty() of the properties it takes only; removeProperty() of any.
+    ['try-left', tryRule, `r.style.setProperty('left', '1px')`, true],
+    ['try-margin', tryRule, `r.style.setProperty('MARGIN-LEFT', '1px')`, true],
+    ['try-area', tryRule, `r.style.setProperty('position-area', 'top')`, true],
+    ['try-bad-value', tryRule, `r.style.setProperty('left', 'nope')`, true],
+    ['try-color', tryRule, `r.style.setProperty('color', 'red')`, false],
+    ['try-display', tryRule, `r.style.setProperty('display', 'block')`, false],
+    ['try-custom', tryRule, `r.style.setProperty('--x', '1')`, false],
+    ['try-src', tryRule, `r.style.setProperty('src', 'nope')`, false],
+    ['try-foo', tryRule, `r.style.setProperty('foo', 'x')`, false],
+    ['try-remove-color', tryRule, `r.style.removeProperty('color')`, true],
+    ['try-remove-src', tryRule, `r.style.removeProperty('src')`, true],
+    ['try-remove-foo', tryRule, `r.style.removeProperty('foo')`, false],
+  ];
+})();
+
+test('isMutable: writes through the style of @font-face, @page, margin and @position-try rules', () =>
   withPage(
-    async () => {
-      const add = (id: string, css: string) => {
-        const style = document.createElement('style');
-        style.id = id;
-        style.textContent = css;
-        document.head.append(style);
-      };
-      const face = '@font-face { font-family: f; src: url(a.woff); }';
-      add('src', face);
-      add('range', face);
-      add('remove-src', face);
-      add('size', '@page { margin: 1cm; }');
-      Object.assign(window, {
-        sheetOf: (id: string) => (document.getElementById(id) as HTMLStyleElement).sheet,
-      });
-    },
+    async () => {},
     async t => {
+      await t.page.evaluate(
+        (kinds: [string, string][]) => {
+          for (const [id, css] of kinds) {
+            const style = document.createElement('style');
+            style.id = id;
+            style.textContent = css;
+            document.head.append(style);
+          }
+        },
+        RULE_KINDS.map(([id, css]) => [id, css] as [string, string])
+      );
+      const count = RULE_KINDS.length;
       const ids = { chrome: new Map<string, string>(), ours: new Map<string, string>() };
       for (const name of ['chrome', 'ours'] as const) {
         await t[name].send('CSS.enable');
-        ids[name] = (await mutable(t[name], 4)).ids;
+        ids[name] = (await mutable(t[name], count)).ids;
       }
-      const steps: Step[] = [
-        ['src', () => (sheetOf('src').cssRules[0] as CSSFontFaceRule).style.setProperty('src', 'url(b.woff)')],
-        ['range', () => (sheetOf('range').cssRules[0] as CSSFontFaceRule).style.setProperty('unicode-range', 'U+0-7F')],
-        ['remove-src', () => (sheetOf('remove-src').cssRules[0] as CSSFontFaceRule).style.removeProperty('src')],
-        ['size', () => (sheetOf('size').cssRules[0] as CSSPageRule).style.setProperty('size', 'A4')],
-      ];
-      let expected: Mutable = { src: false, range: false, 'remove-src': false, size: false };
-      for (const [target, fn] of steps) {
-        await t.page.evaluate(fn);
+      let expected: Mutable = Object.fromEntries(RULE_KINDS.map(([id]) => [id, false]));
+      for (const [target, , write, counts] of RULE_KINDS) {
+        await t.page.evaluate(
+          `(() => { const r = document.getElementById(${JSON.stringify(target)}).sheet.cssRules[0]; ${write}; })()`
+        );
         // No rule.style read before (that would be seen when compared): the write's own hook.
-        const changed = await both(t, 'CSS.styleSheetChanged', 1);
-        assert.deepEqual(changed.chrome, [{ styleSheetId: idOf(ids.chrome, target) }], target);
-        assert.deepEqual(changed.ours, [{ styleSheetId: idOf(ids.ours, target) }], target);
-        expected = { ...expected, [target]: true };
-        await compare(t, 4, expected, target);
+        const changed = await both(t, 'CSS.styleSheetChanged', counts ? 1 : 0);
+        if (counts) {
+          assert.deepEqual(changed.chrome, [{ styleSheetId: idOf(ids.chrome, target) }], target);
+          assert.deepEqual(changed.ours, [{ styleSheetId: idOf(ids.ours, target) }], target);
+          expected = { ...expected, [target]: true };
+        }
+        for (const side of [t.chrome, t.ours]) await side.clear();
       }
+      await compare(t, count, expected, 'rule kinds');
     }
   ));
 
