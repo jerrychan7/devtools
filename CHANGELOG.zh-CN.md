@@ -16,6 +16,7 @@
 - 问题面板显示 CSP 违规、弃用、怪异模式和表单问题；Console 显示慢 handler 和强制重排的 `[Violation]` 消息。
 - 已链接的跨域 iframe 里的 `DOM.scrollIntoViewIfNeeded` 会和 Chrome 一样继续滚动外层页面。
 - 壳模式：Service Worker 按脚本内容的哈希记住每个同源脚本里 `debugger` 语句的位置，再次加载时不再重新解析（7 MB 的 bundle 约省 80 ms），改过的脚本会重新改写；同一行 `x-->0` 之后的 `debugger` 现在也能找到。Console 里同一行 `}` 之后的表达式重新给出结果值；名为 `catch`、`if` 等的方法不再干扰顶层 `return` 的判断。
+- 内存：页面移除的 `<devtools-anywhere>`（页面放置的或全局的）连同其面板和 frontend iframe 可以被垃圾回收；移除的带 shadow root 的元素也能被回收，不必等页面增删 iframe，探针不再拉住它们。
 
 ### 接口变化
 

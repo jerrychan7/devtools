@@ -16,6 +16,7 @@ All packages share one version and are released together (see DEV.md, "Releasing
 - The Issues panel shows CSP violations, deprecations, quirks mode and form issues; the Console shows `[Violation]` messages for slow handlers and forced reflows.
 - `DOM.scrollIntoViewIfNeeded` in a linked cross-origin iframe scrolls the pages holding it too, as in Chrome.
 - Shell mode: the Service Worker remembers where each same-origin script's `debugger` statements are, by the hash of its content, so a script loaded again is not parsed again (about 80 ms saved on a 7 MB bundle) and an edited one is rewritten anew; `debugger` after `x-->0` on the same line is now found. In the Console, an expression after a `}` on the same line gives its value again, and a method named `catch`, `if` or the like no longer breaks top-level `return` checks.
+- Memory: a `<devtools-anywhere>` the page removes, placed by the page or the global one, can be garbage collected with its panel and its frontend iframe; removed elements with a shadow root are collected too, without waiting for an iframe to be added or removed, as the probe no longer keeps them alive.
 
 ### API changes
 
