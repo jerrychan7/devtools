@@ -7,6 +7,7 @@ import {
   isShellPage,
   isTrusted,
   markOwn,
+  markOwnPopover,
   OWN_ATTRIBUTE,
   readShellConfig,
   refuseShell,
@@ -180,6 +181,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
     this.toggler = part<HTMLButtonElement>('.toggler');
+    markOwnPopover(this.panel);
+    markOwnPopover(this.toggler);
     this.toggler.addEventListener('click', () => {
       // The F12 button in the shell's page toggles the shell's element.
       if (!shellTogglers.has(this)) this.setOpen(!this.isOpen);

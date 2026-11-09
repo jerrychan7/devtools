@@ -305,7 +305,8 @@ test("a vision deficiency keeps the page's own filter on <html>, applied under i
   await set('hue-rotate(120deg)');
   try {
     const own = await pixel();
-    assert.notDeepEqual(own, await (set(''), pixel()));
+    await set('');
+    assert.notDeepEqual(own, await pixel());
     await set('hue-rotate(120deg)');
     const seen = await filtered('protanopia', 40, async () => assert.equal(await computed(), 'hue-rotate(120deg)'));
     assert.notDeepEqual(seen, own);
@@ -368,6 +369,23 @@ for (const [what, name] of [
   });
 }
 
+test('the filter comes back when the page takes the mask out with the rest of <html>', async () => {
+  const seen = await filtered('tritanopia');
+  await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'tritanopia' });
+  try {
+    // Everything in <html> replaced, then the page's content put back in a new <body>.
+    await t.page.evaluate(() => {
+      const html = document.documentElement.innerHTML;
+      document.documentElement.innerHTML = '';
+      document.documentElement.innerHTML = html.replace(/<div data-devtools-anywhere="vision"[^>]*><\/div>/, '');
+    });
+    await t.page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    assert.deepEqual(await pixel(), seen);
+  } finally {
+    await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+  }
+});
+
 test('a page opening a popover whenever one opens does not loop with the mask', async () => {
   await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'deuteranopia' });
   try {
@@ -404,5 +422,20 @@ test('an unknown vision deficiency fails', async () => {
       side.send('Emulation.setEmulatedVisionDeficiency', { type: 'nope' as 'none' }),
       /Unknown vision deficiency type/
     );
+  }
+});
+
+test('the mask is not in the DOM tree', async () => {
+  const look = async () => {
+    const { root } = await t.ours.send('DOM.getDocument', { depth: -1, pierce: true });
+    return JSON.stringify(root).replace(/"(nodeId|backendNodeId|parentId)":\d+/g, '');
+  };
+  const plain = await look();
+  await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'achromatopsia' });
+  try {
+    const seen = await look();
+    assert.equal(seen, plain);
+  } finally {
+    await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
   }
 });

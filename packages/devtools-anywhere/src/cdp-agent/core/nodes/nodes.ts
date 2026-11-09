@@ -37,6 +37,18 @@ export function markOwn(node: Node): void {
   ownNodes.add(node);
 }
 
+/**
+ * Our own popovers (the panel and its toggler), registered by their element: the vision
+ * deficiency mask puts them back above it, without looking for them through the page's DOM.
+ */
+export const ownPopovers = new Set<HTMLElement>();
+
+/** Registers one of our popovers, also hiding it from the client ({@link markOwn}). @internal */
+export function markOwnPopover(el: HTMLElement): void {
+  markOwn(el);
+  ownPopovers.add(el);
+}
+
 /** Whether `node` itself was registered with {@link markOwn}. */
 export const isOwn = (node: Node) => ownNodes.has(node);
 

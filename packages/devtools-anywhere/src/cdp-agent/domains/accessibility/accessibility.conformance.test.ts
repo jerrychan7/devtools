@@ -234,3 +234,14 @@ describe('the whole tree', () => {
     assert.deepEqual(visible(ours.nodes), visible(chrome.nodes));
   });
 });
+
+test('the vision deficiency mask is not in the accessibility tree', async () => {
+  const count = async () => (await t.ours.send('Accessibility.getFullAXTree', {})).nodes.length;
+  const plain = await count();
+  await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'achromatopsia' });
+  try {
+    assert.equal(await count(), plain);
+  } finally {
+    await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+  }
+});

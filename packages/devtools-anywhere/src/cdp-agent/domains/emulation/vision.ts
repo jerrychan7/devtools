@@ -2,7 +2,7 @@
 // transparent mask in the top layer whose backdrop-filter is that filter, so the page's own
 // `filter` on <html> stays and getComputedStyle sees nothing of ours.
 import { frames } from '../../core/frames/frames';
-import { OWN_ATTRIBUTE, closestOwn, isOwn, markOwn } from '../../core/nodes/nodes';
+import { OWN_ATTRIBUTE, closestOwn, isOwn, markOwn, ownPopovers } from '../../core/nodes/nodes';
 import type { ShadowRootTracker } from '../../core/nodes/shadow-roots';
 import type { TopNatives } from '../../probe/types';
 
@@ -85,6 +85,10 @@ interface Mask {
 
 let current: Mask | null = null;
 
+/** The CSS filter of the vision deficiency emulated, if any: screenshots apply it too, as Chrome's do. */
+let filterValue: string | null = null;
+export const visionFilter = () => filterValue;
+
 /** Whether the mask was raised during this frame, and whether to raise it again at the next. */
 let raised = false;
 let pending = false;
@@ -104,25 +108,26 @@ function raise() {
     return;
   }
   raised = true;
-  requestAnimationFrame(() => {
-    raised = false;
-    if (pending) {
-      pending = false;
-      raise();
-    }
-  });
-  try {
-    if (m.mask.matches(':popover-open')) Reflect.apply(hide, m.mask, []);
-    Reflect.apply(show, m.mask, []);
-  } catch {
-    return;
-  }
-  for (const el of m.doc.querySelectorAll(`[${OWN_ATTRIBUTE}]`)) {
-    if (!isOwn(el) || !el.shadowRoot || el === m.host) continue;
-    for (const open of el.shadowRoot.querySelectorAll<HTMLElement>(':popover-open')) {
-      Reflect.apply(hide, open, []);
-      Reflect.apply(show, open, []);
-    }
+  Reflect.apply(natives.raf, window, [
+    () => {
+      raised = false;
+      if (pending) {
+        pending = false;
+        raise();
+      }
+    },
+  ]);
+  // A host the page took out (`documentElement.innerHTML = ''`, a new <html>) goes back.
+  if (!m.host.isConnected) m.doc.documentElement?.append(m.host);
+  const open = (el: Element) => Reflect.apply(natives.matches, el, [':popover-open']) as boolean;
+  // Showing fails only out of the document (no <html> to put the host in).
+  if (!m.host.isConnected) return;
+  if (open(m.mask)) Reflect.apply(hide, m.mask, []);
+  Reflect.apply(show, m.mask, []);
+  for (const el of ownPopovers) {
+    if (!open(el)) continue;
+    Reflect.apply(hide, el, []);
+    Reflect.apply(show, el, []);
   }
 }
 
@@ -131,24 +136,29 @@ function create(doc: Document): Mask {
   // composed), so the page does not see them.
   const host = doc.createElement('div');
   markOwn(host);
-  host.setAttribute(OWN_ATTRIBUTE, 'vision');
-  host.inert = true;
-  host.setAttribute('aria-hidden', 'true');
-  const root = host.attachShadow({ mode: 'closed' });
+  const set = (el: Element, name: string, value: string) => Reflect.apply(natives.setAttr, el, [name, value]);
+  set(host, OWN_ATTRIBUTE, 'vision');
+  set(host, 'inert', '');
+  set(host, 'aria-hidden', 'true');
+  // The browser's attachShadow: the page's (or the probe's hook) would see the closed root.
+  const root = Reflect.apply(natives.attach, host, [{ mode: 'closed' }]) as ShadowRoot;
   const style = doc.createElement('style');
   const css = doc.createElement('style');
   css.textContent = MASK_STYLE;
   const mask = doc.createElement('div');
-  mask.popover = 'manual';
+  set(mask, 'popover', 'manual');
   root.append(css, style, mask);
   const onEvent = (e: Event) => {
     if (e.type === 'toggle' && (e as ToggleEvent).newState !== 'open') return;
-    if (e.target instanceof Node && closestOwn(e.target)) return;
+    // Ours (a full-screen panel, retargeted to its host): not put under the mask.
+    if (isOwn(e.target as Node)) return;
     raise();
   };
   // Dialogs opened by the page with show() or showModal() before toggle events fired for them.
+  // Also our host taken out of the document, put back by raise().
   const observer = new natives.MO(records => {
-    if (records.some(r => r.target instanceof HTMLDialogElement && r.target.open)) raise();
+    if (!host.isConnected || records.some(r => r.attributeName === 'open' && (r.target as HTMLDialogElement).open))
+      raise();
   });
   return { doc, host, mask, style, onEvent, observer, roots: new Set(), stop: () => {} };
 }
@@ -166,13 +176,14 @@ function listenToRoots(m: Mask) {
 export function setVision(type: string): void {
   const filter = VISION[type];
   if (!filter) {
+    filterValue = null;
     if (!current) return;
     const m = current;
     current = null;
     off(m.doc, m.onEvent);
     for (const root of m.roots) off(root, m.onEvent);
     m.stop();
-    m.observer.disconnect();
+    Reflect.apply(natives.disconnect, m.observer, []);
     m.host.remove();
     return;
   }
@@ -181,7 +192,7 @@ export function setVision(type: string): void {
   if (!current) {
     const m = (current = create(doc));
     on(doc, m.onEvent);
-    m.observer.observe(doc, { subtree: true, attributeFilter: ['open'] });
+    Reflect.apply(natives.observe, m.observer, [doc, { subtree: true, childList: true, attributeFilter: ['open'] }]);
     if (shadowRoots) {
       const release = shadowRoots.acquire();
       const unsubscribe = shadowRoots.onStale(() => current === m && listenToRoots(m));
@@ -194,6 +205,7 @@ export function setVision(type: string): void {
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg"><filter id="f">${filter}</filter></svg>`;
   const url = `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
+  filterValue = url;
   current.style.textContent = `div { backdrop-filter: ${url}; -webkit-backdrop-filter: ${url}; }`;
   if (!current.host.isConnected) doc.documentElement.append(current.host);
   raise();

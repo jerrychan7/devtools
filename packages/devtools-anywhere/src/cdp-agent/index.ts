@@ -38,7 +38,7 @@ import type { Probe } from './probe/types';
 
 export { CdpError, CdpSession, END_SESSION_CALLS, type Handler } from './core/session';
 export { installProbe } from './probe';
-export { OWN_ATTRIBUTE, markOwn } from './core/nodes/nodes';
+export { OWN_ATTRIBUTE, markOwn, markOwnPopover } from './core/nodes/nodes';
 export {
   SHELL_KEY,
   SHELL_MODE_KEY,
