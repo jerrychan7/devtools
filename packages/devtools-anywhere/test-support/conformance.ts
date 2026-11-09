@@ -47,8 +47,14 @@ export interface TestPage {
   ours: Side;
 }
 
-export async function openPage(env: Env, events: EventName[]): Promise<TestPage> {
+/** `beforeGoto`: runs on the new page before it loads the fixture (evaluateOnNewDocument). */
+export async function openPage(
+  env: Env,
+  events: EventName[],
+  beforeGoto?: (page: Page) => Promise<unknown>
+): Promise<TestPage> {
   const page = await env.browser.newPage();
+  await beforeGoto?.(page);
   await page.goto(env.baseUrl + '/packages/devtools-anywhere/test-support/fixture.html');
   const session = await page.createCDPSession();
   const chromeEvents: { method: string; params: unknown }[] = [];

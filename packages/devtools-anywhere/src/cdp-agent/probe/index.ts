@@ -104,6 +104,7 @@ export function installProbe(): Probe {
       rate: own('playbackRate'),
       time: own('currentTime'),
     },
+    css: w.CSS && { CSS: w.CSS, supports: w.CSS.supports },
     listeners: new WeakMap(),
     ownUrls: new Set(),
     // Old WebViews without fetch: a rejection callers handle like any failed request.

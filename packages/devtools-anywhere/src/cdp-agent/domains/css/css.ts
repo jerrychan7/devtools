@@ -43,6 +43,8 @@ import {
   ownEdit,
   ownSet,
   ownStyle,
+  settle,
+  useCssNatives,
   watchCssom,
   watchRealms,
   watching,
@@ -125,6 +127,7 @@ export function registerCss(ctx: Context) {
     return roots;
   }
 
+  useCssNatives(ctx.probe.css);
   const sheets = new SheetRegistry(ctx.probe.fetch, shadowRoots, ctx.frames);
   const forced = new ForcedPseudoClasses(
     () => sheets.trees(),
@@ -231,6 +234,9 @@ export function registerCss(ctx: Context) {
   }
 
   function reportSheets() {
+    // What the page wrote through the styles it took counts in the headers (isMutable): settled
+    // once for the batch (header() settles too, a no-op within the same microtask).
+    settle();
     const scoped = sheets.scoped();
     const current = new Set(scoped.map(s => s.sheet));
     const added: CSSStyleSheet[] = [];

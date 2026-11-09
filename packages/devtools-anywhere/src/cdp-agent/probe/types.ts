@@ -212,6 +212,12 @@ export interface AnimationNatives {
   time: PropertyDescriptor | undefined;
 }
 
+/** @internal See {@link Probe.css}. */
+export interface CssNatives {
+  CSS: typeof CSS;
+  supports: (typeof CSS)['supports'];
+}
+
 /** @internal */
 export interface Probe {
   version: 1;
@@ -250,6 +256,13 @@ export interface Probe {
    * not seen by the page, as in Chrome. Undefined without `Animation` (or from an older probe).
    */
   animation?: AnimationNatives | undefined;
+  /**
+   * The `CSS` namespace and its `supports`, taken before the page's code: the CSS domain asks it
+   * whether a name the page gives setProperty() or removeProperty() is a property's, whatever the
+   * page puts in `window.CSS` later.
+   * Undefined without `CSS` (or from an older probe).
+   */
+  css?: CssNatives | undefined;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;
   /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */

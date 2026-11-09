@@ -1,4 +1,5 @@
 import { isCssom, realmOf } from '../../../../core/realm';
+import type { CssNatives } from '../../../../probe/types';
 
 /**
  * Notices the page changing style sheets through the CSSOM: the methods that add and remove
@@ -69,8 +70,8 @@ export function recordPageChanges(fn: Recorder): void {
   record = fn;
 }
 
-function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange, counts = true) {
-  if (!own) report(sheet, text, change, counts);
+function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
+  if (!own) report(sheet, text, change);
 }
 
 /**
@@ -140,6 +141,79 @@ const textOf = (value: unknown) =>
   (typeof value === 'object' && value !== null) || typeof value === 'function' ? undefined : String(value);
 
 /**
+ * `CSS` and its `supports`, as the page found them: the probe's, taken before the page's code
+ * (`useCssNatives`), else those of this realm when this module loaded. The answer for a property
+ * name does not depend on the realm, so sheets of iframes use the same.
+ */
+let cssNatives: CssNatives | undefined = typeof CSS === 'undefined' ? undefined : { CSS, supports: CSS.supports };
+
+/** Takes the probe's `CSS` natives (undefined from an older probe: those found when loaded stay). */
+export function useCssNatives(natives: CssNatives | undefined): void {
+  if (!natives) return;
+  cssNatives = natives;
+  knownNames = { __proto__: null } as unknown as Record<string, boolean>;
+  knownCount = 0;
+}
+
+/**
+ * Whether a property has the name, by name as written, kept for the next writes: a dictionary
+ * with no prototype, read and written with no method of the page's to call (Map's could be
+ * replaced), emptied past `KNOWN_NAMES_LIMIT` names.
+ */
+let knownNames: Record<string, boolean> = { __proto__: null } as unknown as Record<string, boolean>;
+let knownCount = 0;
+const KNOWN_NAMES_LIMIT = 1024;
+
+/** ASCII letter, digit or `-`, the characters a property's name has, with no method called. */
+const nameChar = (c: string | undefined) =>
+  c !== undefined && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '-');
+
+/**
+ * Whether a name given to setProperty() or removeProperty() is a property's, as Chrome reads it:
+ * as written (no unescaping, no trimming; ASCII case does not matter), custom properties
+ * included (`--` alone is none). A name the page's own conversion makes (an object) is taken as
+ * one. Only string indexing and comparisons: no method of the page's prototypes is called.
+ */
+function knownProperty(value: unknown): boolean {
+  const name = typeof value === 'string' ? value : textOf(value);
+  if (name === undefined) return true;
+  if (name.length > 2 && name[0] === '-' && name[1] === '-') return true;
+  let known = knownNames[name];
+  if (known !== undefined) return known;
+  known = name.length > 0;
+  for (let i = 0; known && i < name.length; i++) known = nameChar(name[i]);
+  if (known && cssNatives)
+    try {
+      known = Reflect.apply(cssNatives.supports, cssNatives.CSS, [name, 'inherit']) === true;
+    } catch {
+      known = true;
+    }
+  if (knownCount >= KNOWN_NAMES_LIMIT) {
+    knownNames = { __proto__: null } as unknown as Record<string, boolean>;
+    knownCount = 0;
+  }
+  knownNames[name] = known;
+  knownCount++;
+  return known;
+}
+
+/** `important` in any ASCII case, with no method called. */
+function isImportant(text: string): boolean {
+  const lower = 'important';
+  const upper = 'IMPORTANT';
+  if (text.length !== lower.length) return false;
+  for (let i = 0; i < lower.length; i++) if (text[i] !== lower[i] && text[i] !== upper[i]) return false;
+  return true;
+}
+
+/** Whether setProperty() takes a priority: none, empty, or `important` in any ASCII case. */
+function validPriority(value: unknown): boolean {
+  if (value === undefined) return true;
+  const text = typeof value === 'string' ? value : textOf(value);
+  return text === undefined || text === '' || isImportant(text);
+}
+
+/**
  * Hooks a method, or with `part`, an accessor's setter or getter, calling `after` past the native
  * one, while some session watches and, but with `always`, outside the CSS domain's own code.
  */
@@ -195,9 +269,9 @@ let taken = 0;
 let settled = false;
 /**
  * How many rules are watched: past that, taken between two `settle`s or kept from before, the
- * sheets they are in are taken as changed everywhere (their texts serialized anew) and none is
- * watched any more, rather than reading every style taken each time. A style the page keeps from
- * then on and writes later goes unseen.
+ * sheets they are in are taken as changed everywhere (their texts serialized anew; not taken as
+ * mutated) and none is watched any more, rather than reading every style taken each time. A
+ * style the page keeps from then on and writes later goes unseen.
  */
 const SUSPECTS_LIMIT = 2048;
 
@@ -433,28 +507,26 @@ function install(realm: Window & typeof globalThis) {
     }
     if (rule) notify(sheetOf(rule), undefined, inRule(rule));
   };
-  // Like Chrome, setProperty() with a name no property has changes nothing: the sheet is not
-  // taken as mutated (its text is dropped all the same). With a value the property rejects, it is.
-  const supports = realm.CSS?.supports;
-  const known = (name: unknown) => {
-    const text = textOf(name)?.trim();
-    if (text === undefined || !supports) return true;
-    try {
-      return text.startsWith('--') || Reflect.apply(supports, realm.CSS, [text, 'inherit']) === true;
-    } catch {
-      return true;
-    }
-  };
-  hook(realm.CSSStyleDeclaration.prototype, 'setProperty', (self, args) => {
+  // Like Chrome, setProperty() and removeProperty() with a name no property has, and
+  // setProperty() with a priority other than `important`, change nothing: no change is told.
+  // With a value the property rejects, setProperty() does change the sheet (it is mutable).
+  // A descriptor rule's names (@font-face's `src`, @page's `size`) are no properties: written,
+  // they change the rule, as in Chrome.
+  const styleWritten = (args: unknown[], self: unknown) => {
     let rule: unknown;
     try {
       rule = parentRule ? Reflect.apply(parentRule, self, []) : null;
     } catch {
       return; // Not a style.
     }
-    if (rule) notify(sheetOf(rule), undefined, inRule(rule), known(args[0]));
+    const ofProperties =
+      isCssom(rule, 'CSSStyleRule') || isCssom(rule, 'CSSNestedDeclarations') || isCssom(rule, 'CSSKeyframeRule');
+    if (!ofProperties || knownProperty(args[0])) styleChanged(self, args, undefined);
+  };
+  hook(realm.CSSStyleDeclaration.prototype, 'setProperty', (self, args) => {
+    if (validPriority(args[2])) styleWritten(args, self);
   });
-  hook(realm.CSSStyleDeclaration.prototype, 'removeProperty', styleChanged);
+  hook(realm.CSSStyleDeclaration.prototype, 'removeProperty', (self, args) => styleWritten(args, self));
   // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are no
   // accessors, so `el.style.left = …` is not hooked and costs nothing), a rule's selector, a
   // keyframe's key. While watching, an element's `style.cssText = …` costs about 40% more
@@ -478,12 +550,13 @@ function install(realm: Window & typeof globalThis) {
     const proto: unknown = (Reflect.get(realm, name) as { prototype?: unknown } | undefined)?.prototype;
     if (typeof proto !== 'object' || proto === null) continue;
     // The setters of each kind of rule (a selector, a key, a counter style's `system`, a font
-    // feature's `fontFamily`…); CSSRule's `cssText` sets nothing, and `media` is forwarded to the
-    // list's `mediaText`, watched below.
+    // feature's `fontFamily`…); CSSRule's `cssText` sets nothing, `media` is forwarded to the
+    // list's `mediaText`, watched below, and `style` (`rule.style = …`) to the style's `cssText`,
+    // watched above (hooking it too would tell the change twice).
     if (name !== 'CSSRule' && name.endsWith('Rule'))
       for (const prop of Object.getOwnPropertyNames(proto))
         // Like Chrome, a key it rejects (and throws for) still takes the sheet as mutated.
-        if (prop !== 'media' && Object.getOwnPropertyDescriptor(proto, prop)?.set)
+        if (prop !== 'media' && prop !== 'style' && Object.getOwnPropertyDescriptor(proto, prop)?.set)
           hook(proto, prop, changed, 'set', false, true);
     hook(proto, 'style', (self, _args, style) => taking(self, style), 'get');
     hook(
