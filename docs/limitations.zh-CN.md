@@ -36,7 +36,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 | Rendering 面板的模拟 | 部分支持 | [「模拟页面处于焦点」、自动深色模式、双指缩放重置做不到](#rendering-emulation)，返回错误 |
 | 模拟媒体特性 | 部分支持 | 媒体特性和媒体类型[通过改写页面的样式表实现](#emulated-media) |
 | 模拟安全区 | 部分支持 | [在页面的样式表里替换](#safe-area-insets) `env(safe-area-inset-*)` |
-| 色觉缺陷模拟 | 完整支持 | 和 Chrome 一样在 `<html>` 上加 SVG 滤镜：会覆盖页面自己在 `<html>` 上的 `filter`，内嵌的面板也会被滤镜，`getComputedStyle` 能看到 |
+| 色觉缺陷模拟 | 完整支持 | 和 Chrome 相同的 SVG 滤镜，作为顶层（top layer）里一个透明遮罩的 backdrop-filter：页面自己在 `<html>` 上的 `filter` 保留，`getComputedStyle` 看不到；页面之后打开的 dialog、popover、全屏元素会立即被压回遮罩之下，内嵌面板保持在遮罩之上。滤不到：浏览器自己的弹层（`<select>` 下拉、日期选择器、customizable select 的 `::picker`）和页面 shadow root 里开关的 popover。与 Chrome 的差异：同源 iframe 和页面一起滤一次，而不是各滤各的；模糊在视口边缘不向外淡出（约 4px） |
 | 布局叠加层 | 部分支持 | Grid、Flex、容器查询、scroll-snap、隔离、铰链、刘海和 frame 叠加层，[按计算样式近似绘制](#layout-overlays) |
 | 网络条件 | 部分支持 | [只对探针拦截的 `fetch()`、XHR 生效](#network-conditions)，不支持限速 |
 | 无障碍树 | 部分支持 | Accessibility 窗格和 `Accessibility` 命令，由 `accessibility.js` [在页面里算出](#accessibility) |
