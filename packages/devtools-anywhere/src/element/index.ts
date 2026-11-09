@@ -505,6 +505,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     // whatever it puts inside.
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
+    this.grip.attach();
     // Only an element the page placed lets it style DevTools' iframe; known once connected, as a
     // global element is marked after it is created.
     this.frame.part.toggle('iframe', isCustom(this));
@@ -563,6 +564,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   disconnectedCallback() {
     markOwnPopover(this.panel, false);
     markOwnPopover(this.toggler, false);
+    // Its pointer listener would keep the element alive once the page drops it.
+    this.grip.detach();
     // Removed by the page: the shell shows its own button again until it is back.
     if (shellTogglers.has(this)) this.shellLink?.detach();
     customElementsLoading.delete(this);

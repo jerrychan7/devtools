@@ -66,6 +66,7 @@ export class ShellLayout {
     });
     this.grip.element.style.pointerEvents = 'auto';
     this.grip.show(true);
+    this.grip.attach();
     this.pageArea.append(this.grip.element);
     document.body.append(this.pageArea);
     addEventListener('resize', this.onResize);
