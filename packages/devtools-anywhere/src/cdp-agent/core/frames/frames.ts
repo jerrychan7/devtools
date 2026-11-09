@@ -365,6 +365,7 @@ export class FrameRegistry {
       this.#observer = new MutationObserver(records => {
         this.#noteInsertions(records);
         if (touchesFrames(records, this.shadowRootOf)) this.sync();
+        else if (this.#watchedRoots.size && records.some(r => r.removedNodes.length)) this.#releaseRoots();
       });
       for (const frame of this) this.#watch(frame.document);
       this.sync();
@@ -440,13 +441,23 @@ export class FrameRegistry {
   sync(): void {
     // Insertions not yet delivered to the observer: another observer's callback may sync first.
     if (this.#observer) this.#noteInsertions(this.#observer.takeRecords());
-    // Shadow roots that left the page are let go, not kept with their trees for the page's life.
+    this.#releaseRoots();
+    this.#syncChildren(this.top);
+  }
+
+  /**
+   * Lets go of the shadow roots whose host left the page, not to keep them with their trees for
+   * the page's life. Run on every batch of mutation records that removes nodes (once per batch,
+   * not per record), as most removals do not touch frames and so do not sync. The observer stays
+   * registered on a released root (that keeps nothing alive): should its host come back and an
+   * iframe be added in it, the record still arrives, the sync finds the root and watches it again.
+   */
+  #releaseRoots(): void {
     for (const root of this.#watchedRoots)
       if (!root.host.isConnected) {
         root.removeEventListener('load', this.#onLoad, true);
         this.#watchedRoots.delete(root);
       }
-    this.#syncChildren(this.top);
   }
 
   #syncChildren(parent: Frame): void {
