@@ -131,21 +131,21 @@ describe('Animation, beyond getAnimations()', () => {
       // Its own reports, by kind, without the fence's.
       const own = async () => (await reports(side)).filter(r => r.split(' ')[1] === id).map(r => r.split(' ')[0]);
       await own();
-      const steps: Record<string, string[]> = {};
+      const steps: Record<string, (string | undefined)[]> = {};
       // Run to its end by its play state, not `finished`: under load Chrome left the promise of the
       // new time unsettled (and the time running on past 0), while its play state said finished.
       const ended = 'while (__rerun.playState !== "finished") await new Promise(r => requestAnimationFrame(r))';
       for (const [name, code] of [
         ['reversed', '__rerun.reverse()'],
         ['moved', '__rerun.currentTime = 50'],
-      ]) {
+      ] as const) {
         await t.page.evaluate(`(async () => { ${code}; ${ended} })()`);
         await fence(t, side);
         steps[name] = await own();
       }
       return steps;
     });
-    assert.ok(chrome.reversed?.length, 'Chrome reports the reverse');
+    assert.ok(chrome['reversed']?.length, 'Chrome reports the reverse');
     assert.deepEqual(ours, chrome);
   });
 

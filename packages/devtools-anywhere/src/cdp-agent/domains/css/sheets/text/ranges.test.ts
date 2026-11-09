@@ -114,7 +114,7 @@ test('runsOf: dropped at-rules count, `a {{` does not', () => {
 test('runsOf: rules that no longer pair with the outline (the page changed them) make no runs', () => {
   const { s, top, parent } = source('.a{x:a{} top:0; b{} left:1px}', [2]);
   // A CSSOM rule with no node: inserted by the page.
-  (parent.cssRules as unknown as CSSRule[]).unshift(rule());
+  ((parent as CSSGroupingRule).cssRules as unknown as CSSRule[]).unshift(rule());
   assert.equal(runsOf(s, top, parent), null);
 });
 
@@ -123,7 +123,7 @@ test('runsOf: worked out once per block and source, again when the CSSOM rules c
   const first = runsOf(s, top, parent);
   assert.ok(first);
   assert.equal(runsOf(s, top, parent), first);
-  (parent.cssRules as unknown as CSSRule[]).push(rule());
+  ((parent as CSSGroupingRule).cssRules as unknown as CSSRule[]).push(rule());
   assert.equal(runsOf(s, top, parent), null);
 });
 
@@ -132,7 +132,7 @@ test('runsOf: as many CSSOM rules as before, but another object, is worked out a
   const { s, top, parent } = source('.a{x:a{} top:0; b{} left:1px}', [2]);
   const first = runsOf(s, top, parent);
   assert.ok(first);
-  (parent.cssRules as unknown as CSSRule[])[0] = rule();
+  ((parent as CSSGroupingRule).cssRules as unknown as CSSRule[])[0] = rule();
   assert.equal(runsOf(s, top, parent), null);
 });
 

@@ -190,6 +190,7 @@ async function inline(text: string) {
       return { attr: style(attr.inlineStyle), set, again: style(again.inlineStyle) };
     })
   );
+  assert.ok(ours && chrome);
   return { ours, chrome };
 }
 

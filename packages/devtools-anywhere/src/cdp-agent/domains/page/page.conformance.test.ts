@@ -400,7 +400,7 @@ test('captureScreenshot is filtered by an emulated vision deficiency, as in Chro
     await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
     assert.notDeepEqual(theirs.center, [255, 0, 0]);
     assert.ok(
-      mine.center.every((v, i) => Math.abs(v - (theirs.center[i] ?? 0)) <= 2),
+      mine.center.every((v, i) => Math.abs((v ?? NaN) - (theirs.center[i] ?? 0)) <= 2),
       `ours ${JSON.stringify(mine.center)}, Chrome's ${JSON.stringify(theirs.center)}`
     );
   } finally {
