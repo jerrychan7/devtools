@@ -136,6 +136,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private toggler: HTMLButtonElement;
   private frame: HTMLIFrameElement;
   private loadedUrl = '';
+  /** Stops hiding it while linked to the parent's DevTools (hideWhileLinked), while connected. */
+  private unwatchLink: (() => void) | null = null;
   private disconnect: (() => void) | null = null;
   private frontendOrigin = '';
   /** Whether DevTools is shown. */
@@ -506,6 +508,7 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
     this.grip.attach();
+    if (globalElements.has(this)) this.unwatchLink ??= hideWhileLinked(this);
     // Only an element the page placed lets it style DevTools' iframe; known once connected, as a
     // global element is marked after it is created.
     this.frame.part.toggle('iframe', isCustom(this));
@@ -566,6 +569,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     markOwnPopover(this.toggler, false);
     // Its pointer listener would keep the element alive once the page drops it.
     this.grip.detach();
+    this.unwatchLink?.();
+    this.unwatchLink = null;
     // Removed by the page: the shell shows its own button again until it is back.
     if (shellTogglers.has(this)) this.shellLink?.detach();
     customElementsLoading.delete(this);
@@ -665,20 +670,40 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
+/** The global elements hidden for a link to the parent's DevTools. */
+const hiddenByLink = new WeakSet<HTMLElement>();
+
 /**
  * Hides a global element, its F12 button and panel, while the page, in a cross-origin iframe, is
- * debugged from its parent's DevTools (frame-links/); shows it again once the link closes.
+ * debugged from its parent's DevTools (frame-links/); shows it again once the link closes. For
+ * as long as the element is connected: returns what stops it, as the page's links are module
+ * state that would otherwise keep a removed element alive.
  */
-function hideWhileLinked(element: HTMLElement) {
+function hideWhileLinked(element: HTMLElement): () => void {
+  let offClose: (() => void) | undefined;
+  const show = () => {
+    hiddenByLink.delete(element);
+    // Global elements after the first stay hidden.
+    if (!inactiveGlobals.has(element) && !childTargets.parent) element.style.removeProperty('display');
+  };
   const follow = (link: ParentLink) => {
+    hiddenByLink.add(element);
     element.style.setProperty('display', 'none', 'important');
-    link.onClose(() => {
-      // Global elements after the first stay hidden.
-      if (!inactiveGlobals.has(element) && !childTargets.parent) element.style.removeProperty('display');
+    offClose?.();
+    offClose = link.onClose(() => {
+      offClose = undefined;
+      show();
     });
   };
   if (childTargets.parent) follow(childTargets.parent);
-  childTargets.onParent(follow);
+  // Hidden for a link that closed while it was out of the document.
+  else if (hiddenByLink.has(element)) show();
+  const offParent = childTargets.onParent(follow);
+  return () => {
+    offParent();
+    offClose?.();
+    offClose = undefined;
+  };
 }
 
 /** Creates a global element with the probe's options: only the first one connected works. @internal */
@@ -687,7 +712,6 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
     const element = new DevtoolsAnywhereElement();
     globalElements.add(element);
     globalConfigs.set(element, config);
-    hideWhileLinked(element);
     if (config.frontend && !globals.probeFrontend) {
       globals.probeFrontend = config.frontend;
       customElementsLoading.forEach(load => load());

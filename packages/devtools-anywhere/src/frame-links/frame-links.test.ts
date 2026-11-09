@@ -339,6 +339,55 @@ test("the iframe's own F12 button is hidden while linked, and back once the link
   }
 });
 
+/** Takes the child page's global element out of its document and puts it back. */
+const reinsert = (child: Frame) =>
+  child.evaluate(() => {
+    const el = document.querySelector('devtools-anywhere');
+    if (!el) throw new Error('no element');
+    el.remove();
+    document.body.append(el);
+    return true;
+  });
+
+test("the iframe's global element put back while linked stays hidden, and is back once the link closes", async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForChildLinked(child);
+    await waitForF12(child, false);
+    await reinsert(child);
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(await f12Shown(child), false);
+    await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()][0]?.close());
+    await waitForF12(child, true);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the iframe's global element, out of its document when the link closes, is shown once put back", async () => {
+  const { page, child } = await open(originOf('127.0.0.1'), originOf('localhost'));
+  try {
+    await waitForChildLinked(child);
+    await waitForF12(child, false);
+    await child.evaluate(() => {
+      const el = document.querySelector('devtools-anywhere');
+      if (!el) throw new Error('no element');
+      el.remove();
+      (window as unknown as { kept: Element }).kept = el;
+      return true;
+    });
+    await page.evaluate(() => [...window.__devtoolsAnywhereTest.childTargets.children()][0]?.close());
+    await waitForChildLinked(child, false);
+    await child.evaluate(() => {
+      document.body.append((window as unknown as { kept: Element }).kept);
+      return true;
+    });
+    await waitForF12(child, true);
+  } finally {
+    await page.close();
+  }
+});
+
 test('an iframe that trusts no parent keeps its F12 button', async () => {
   const { page, child } = await open(originOf('127.0.0.1'), null);
   try {

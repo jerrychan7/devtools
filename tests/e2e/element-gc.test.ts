@@ -95,6 +95,12 @@ test('an element the page placed is collected once removed', async () => {
   assert.deepEqual(await alive(3000), [false, false, false], 'element, panel, frontend iframe');
 });
 
+test('the global element is collected once removed', async () => {
+  await page.goto(env?.baseUrl + '/tests/e2e/pages/zero-config.html');
+  await removeOnceLoaded('devtools-anywhere');
+  assert.deepEqual(await alive(3000), [false, false, false], 'element, panel, frontend iframe');
+});
+
 /** The global element's grip: its middle and size, and the panel's height. */
 const gripState = () =>
   page.evaluate(() => {
