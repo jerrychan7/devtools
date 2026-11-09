@@ -24,7 +24,11 @@ const STYLE = `
     --right: env(safe-area-inset-right, 9px);
     width: calc(10px + var(--right));
   }
-  #vd { position: fixed; top: 0; left: 0; width: 20px; height: 20px; background: rgb(200, 40, 40) }
+  #vd { position: fixed; top: 0; left: 0; width: 80px; height: 80px; background: rgb(200, 40, 40) }
+  #pop, #dlg {
+    position: fixed; inset: 20px auto auto 20px; width: 40px; height: 40px;
+    margin: 0; padding: 0; border: 0; background: rgb(30, 160, 220);
+  }
 `;
 
 setUpAndTearDown(
@@ -35,7 +39,10 @@ setUpAndTearDown(
       const s = document.createElement('style');
       s.textContent = style;
       document.head.appendChild(s);
-      document.body.insertAdjacentHTML('beforeend', '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div>');
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div><div id="pop" popover="manual"></div><dialog id="dlg"></dialog>'
+      );
     }, STYLE);
   },
   () => env?.close()
@@ -215,29 +222,113 @@ test('insets not set keep their real value', async () => {
   await both(...safeArea({}));
 });
 
-const pixel = async () => {
-  const shot = await t.page.screenshot({ clip: { x: 5, y: 5, width: 1, height: 1 }, encoding: 'base64' });
-  return t.page.evaluate(async data => {
-    const img = new Image();
-    img.src = `data:image/png;base64,${data}`;
-    await img.decode();
-    const canvas = new OffscreenCanvas(1, 1);
-    const g = canvas.getContext('2d');
-    g?.drawImage(img, 0, 0);
-    return Array.from(g?.getImageData(0, 0, 1, 1).data ?? []);
-  }, shot);
+/**
+ * A pixel of the screenshot, inside #vd and away from the viewport's edges, where Chrome's blur
+ * fades out and ours does not; on #vd's right edge for the blur, which changes nothing inside.
+ * The shot takes the area around it: a backdrop filter in a 1×1 shot sees only that pixel.
+ */
+const pixel = async (x = 40) => {
+  const shot = await t.page.screenshot({ clip: { x: 0, y: 0, width: 120, height: 80 }, encoding: 'base64' });
+  return t.page.evaluate(
+    async (data, x) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = new OffscreenCanvas(img.width, img.height);
+      const g = canvas.getContext('2d');
+      g?.drawImage(img, 0, 0);
+      return Array.from(g?.getImageData(x, 40, 1, 1).data ?? []);
+    },
+    shot,
+    x
+  );
 };
 
-for (const type of ['achromatopsia', 'deuteranopia', 'protanopia', 'tritanopia', 'reducedContrast'] as const) {
+type Vision = Protocol.Emulation.SetEmulatedVisionDeficiencyRequest['type'];
+
+/**
+ * The pixel each side gives under `type` once `before` ran, `after` running before it is cleared.
+ * The two sides' filters round apart by a unit or two.
+ */
+async function filtered(type: Vision, x = 40, before = async () => {}, after = async () => {}) {
+  const results: number[][] = [];
+  for (const side of [t.chrome, t.ours]) {
+    await side.send('Emulation.setEmulatedVisionDeficiency', { type });
+    try {
+      await before();
+      results.push(await pixel(x));
+    } finally {
+      await after();
+      await side.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+    }
+  }
+  const [chrome = [], ours = []] = results;
+  assert.ok(
+    ours.length === 4 && ours.every((v, i) => Math.abs(v - (chrome[i] ?? 0)) <= 2),
+    `ours ${JSON.stringify(ours)}, Chrome's ${JSON.stringify(chrome)}`
+  );
+  return chrome;
+}
+
+for (const type of [
+  'blurredVision',
+  'achromatopsia',
+  'deuteranopia',
+  'protanopia',
+  'tritanopia',
+  'reducedContrast',
+] as const) {
   test(`vision deficiency: ${type}`, async () => {
+    const x = type === 'blurredVision' ? 79 : 40;
+    const plain = await pixel(x);
+    assert.notDeepEqual(await filtered(type, x), plain);
+    assert.deepEqual(await pixel(x), plain);
+  });
+}
+
+test("a vision deficiency keeps the page's own filter on <html>, applied under it", async () => {
+  const set = (filter: string) =>
+    t.page.evaluate(f => {
+      document.documentElement.style.filter = f;
+    }, filter);
+  const computed = () => t.page.evaluate(() => getComputedStyle(document.documentElement).filter);
+  const without = await filtered('protanopia');
+  await set('hue-rotate(120deg)');
+  try {
+    const own = await pixel();
+    assert.notDeepEqual(own, await (set(''), pixel()));
+    await set('hue-rotate(120deg)');
+    const seen = await filtered('protanopia', 40, async () => assert.equal(await computed(), 'hue-rotate(120deg)'));
+    assert.notDeepEqual(seen, own);
+    assert.notDeepEqual(seen, without);
+  } finally {
+    await set('');
+  }
+});
+
+for (const [what, open, close] of [
+  [
+    'popover',
+    () => document.querySelector<HTMLElement>('#pop')?.showPopover(),
+    () => document.querySelector<HTMLElement>('#pop')?.hidePopover(),
+  ],
+  [
+    'modal dialog',
+    () => document.querySelector('dialog')?.showModal(),
+    () => document.querySelector('dialog')?.close(),
+  ],
+] as const) {
+  test(`a ${what} opened after a vision deficiency is filtered too`, async () => {
+    await t.page.evaluate(open);
     const plain = await pixel();
-    const seen = await both(
-      side => side.send('Emulation.setEmulatedVisionDeficiency', { type }),
-      side => side.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' }),
-      pixel
+    await t.page.evaluate(close);
+    const seen = await filtered(
+      'deuteranopia',
+      40,
+      () => t.page.evaluate(open),
+      () => t.page.evaluate(close)
     );
     assert.notDeepEqual(seen, plain);
-    assert.deepEqual(await pixel(), plain);
   });
 }
 
