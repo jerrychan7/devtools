@@ -27,6 +27,10 @@ node lexer-compare.bench.ts --rev cb7f711~1
 | mixed | 93 KB | The harder cases, 300 times: escapes, strings with escaped newlines, bad strings and URLs, CDO and CDC, signed numbers with exponents and units, `-` before names and escapes, non-ASCII, NUL, CR LF and FF |
 | all.css | 125 KB | The release build of [webPixelUIengine](https://github.com/jerrychan7/webPixelUIengine/blob/04ca2e7061845f9cabe7cae8f76ec48a59734f87/release/all.css): thousands of custom properties, `var()` and `calc()`. Downloaded once at that commit and checked against its SHA-256 |
 
+## Data the tests share
+
+The unit tests next to this directory import some of its modules too: `materials.ts` and `outline-fragments.ts` (the WebAssembly outline against the TypeScript one), and `dashed-names.ts`, names of declarations and whether they are a custom property's once escapes are decoded (`css-outline.test.ts` and `css-outline-wasm.test.ts`).
+
 ## What `lexer.bench.ts` reports
 
 For each material and each lexer (the working tree's, each `--rev`, and a read-only floor):

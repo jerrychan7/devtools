@@ -6,11 +6,13 @@ import { build } from 'esbuild';
 import type * as Outline from './css-outline.ts';
 import type { CssDecl, CssRule } from './css-outline.ts';
 import { lineStarts, offsetAt, positionAt } from '../text/text-lines.ts';
+import { DASHED } from './bench/dashed-names.ts';
 
 // Bundled: the sources import each other without extensions, which Node does not resolve.
 const bundled = await build({
   stdin: {
-    contents: "export { outlineTree as outline, outline as outlineRaw, ruleObject, topRules } from './css-outline.ts';",
+    contents:
+      "export { outlineTree as outline, outline as outlineRaw, ruleObject, topRules, dashed } from './css-outline.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },
@@ -24,7 +26,9 @@ const {
   outlineRaw,
   ruleObject,
   topRules,
+  dashed,
 }: {
+  dashed: typeof Outline.dashed;
   outline: typeof Outline.outlineTree;
   outlineRaw: typeof Outline.outline;
   ruleObject: typeof Outline.ruleObject;
@@ -98,6 +102,53 @@ test('values hold strings, url() and blocks with `;` and `}` in them', () => {
   assert.deepEqual(parse('a{b:f(;}) [;];c:d}'), [['a', 'b=f(;}) [;];', 'c=d']]);
   assert.deepEqual(parse('a{--x:{a;b};y:z}'), [['a', '--x={a;b};', 'y=z']]);
   assert.deepEqual(parse('a{--x: ;}'), [['a', '--x=;']]);
+});
+
+test("a custom property's value holds `{}` blocks among other tokens (against Chrome: css-outline.conformance.test.ts)", () => {
+  assert.deepEqual(parse('a { --x: {} b { c: d } e: f }'), [['a', '--x={} b { c: d } e: f']]);
+  assert.deepEqual(parse('a{--x:{a} b; top:0}'), [['a', '--x={a} b;', 'top=0']]);
+  assert.deepEqual(parse('a { --x: a {} ; top: 0}'), [['a', '--x=a {};', 'top=0']]);
+  assert.deepEqual(parse('p { q { --x: {} b { c: d } e: f } }'), [['p', ['q', '--x={} b { c: d } e: f']]]);
+  assert.deepEqual(parse('p{x:1; q{} --x:{a} b; top:0}'), [['p', 'x=1;', ['q'], ['nested', '--x={a} b;', 'top=0']]]);
+  // In conditional rules.
+  assert.deepEqual(parse('@media screen { a { --x: {} b { c: d } e: f } }'), [
+    ['@media screen', ['a', '--x={} b { c: d } e: f']],
+  ]);
+  assert.deepEqual(parse('@supports (top: 0) { p { q {} --x:{a} b; top:0 } }'), [
+    ['@supports (top: 0)', ['p', ['q'], ['nested', '--x={a} b;', 'top=0']]],
+  ]);
+  assert.deepEqual(parse('@layer l { a { --x: a {} ; top: 0} }'), [['@layer l', ['a', '--x=a {};', 'top=0']]]);
+  // At its edges: !important after a block, a block left open, a block alone, an open `(`.
+  assert.deepEqual(parse('a { --x: {} b !important; top: 0 }'), [['a', '--x={} b!;', 'top=0']]);
+  assert.deepEqual(parse('a { --x: {a} !important; top: 0 }'), [['a', '--x={a}!;', 'top=0']]);
+  assert.deepEqual(parse('a{--x:{ b'), [['a{', '--x={ b']]);
+  assert.deepEqual(parse('a{--x:{}}'), [['a', '--x={}']]);
+  assert.deepEqual(parse('a{--x:{a} (b;top:0}'), [['a{', '--x={a} (b;top:0}']]);
+});
+
+test("a custom property's name may be escaped: `\\2d-x`, `\\-\\-x`", () => {
+  for (const name of ['\\2d-x', '\\-\\-x', '-\\-x', '\\2d\\2dx', '\\00002D -x', '\\2d\r\n-x'])
+    assert.deepEqual(parse(`a{${name}:{a} b;top:0}`), [['a', `${name}={a} b;`, 'top=0']], name);
+  // Not two dashes once decoded.
+  assert.deepEqual(parse('a{\\2e-x:{a} b;top:0}'), [['a', ['\\2e-x:'], ['nested', 'top=0']]]);
+  assert.deepEqual(parse('a{-\\2ex:{a} b;top:0}'), [['a', ['-\\2ex:'], ['nested', 'top=0']]]);
+  // A prelude that starts like an escaped custom property declaration makes no rule either.
+  assert.deepEqual(parse('\\2d-x: {a} b{}'), [['b']]);
+  assert.deepEqual(parse('\\2d-x /**/ : {a} b{}'), [['b']]);
+});
+
+test('dashed: two `-` once escapes are decoded', () => {
+  for (const [name, expected] of DASHED) assert.equal(dashed(name, 0, name.length), expected, JSON.stringify(name));
+  // Within the token only.
+  assert.equal(dashed('--x', 0, 1), false);
+  assert.equal(dashed('a --x', 2, 5), true);
+});
+
+test("any other property's value with a block is no declaration, at the top, nested and in conditions", () => {
+  assert.deepEqual(parse('a{x:a {} ; top:0}'), [['a', ['x:a'], ['nested', 'top=0']]]);
+  assert.deepEqual(parse('p{q{x:a {} ; top:0}}'), [['p', ['q', ['x:a'], ['nested', 'top=0']]]]);
+  assert.deepEqual(parse('p{r{} x:a {} ; top:0}'), [['p', ['r'], ['x:a'], ['nested', 'top=0']]]);
+  assert.deepEqual(parse('@media all{a{x:a {} ; top:0}}'), [['@media all', ['a', ['x:a'], ['nested', 'top=0']]]]);
 });
 
 test('at-rules: blockless, with blocks, nested, unknown', () => {

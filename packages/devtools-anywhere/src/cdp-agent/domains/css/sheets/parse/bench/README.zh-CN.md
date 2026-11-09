@@ -27,6 +27,10 @@ node lexer-compare.bench.ts --rev cb7f711~1
 | mixed | 93 KB | 较难处理的情况，重复 300 次：转义、带转义换行的字符串、坏字符串和坏 URL、CDO 和 CDC、带符号、指数和单位的数字、`-` 后跟名字或转义、非 ASCII 字符、NUL、CR LF 和 FF |
 | all.css | 125 KB | [webPixelUIengine](https://github.com/jerrychan7/webPixelUIengine/blob/04ca2e7061845f9cabe7cae8f76ec48a59734f87/release/all.css) 的发布构建：大量自定义属性、`var()` 和 `calc()`。按这个固定提交下载一次，并校验 SHA-256 |
 
+## 测试共用的数据
+
+旁边目录的单元测试也引用这里的一些模块：`materials.ts` 和 `outline-fragments.ts`（WebAssembly 大纲与 TypeScript 版比对），以及 `dashed-names.ts`：一组声明名，和它们解码转义后是不是自定义属性的名字（`css-outline.test.ts` 和 `css-outline-wasm.test.ts` 用）。
+
 ## `lexer.bench.ts` 输出什么
 
 每份材料、每个词法器各一行。词法器包括当前工作区的版本、每个 `--rev` 指定的版本，以及一个只读下限：

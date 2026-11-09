@@ -10,12 +10,12 @@ import type { Env } from '../../../../../../test-support/conformance.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import type { CssRule, outlineTree as Outline } from './css-outline.ts';
+import type { CssRule, dashed as Dashed, outlineTree as Outline } from './css-outline.ts';
 
 // Bundled: the sources import each other without extensions, which Node does not resolve.
 const bundled = await build({
   stdin: {
-    contents: "export { outlineTree as outline } from './css-outline.ts';",
+    contents: "export { outlineTree as outline, dashed } from './css-outline.ts';",
     resolveDir: path.dirname(fileURLToPath(import.meta.url)),
     loader: 'ts',
   },
@@ -24,7 +24,7 @@ const bundled = await build({
   platform: 'neutral',
   write: false,
 });
-const { outline }: { outline: typeof Outline } = await import(
+const { outline, dashed }: { outline: typeof Outline; dashed: typeof Dashed } = await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 );
 
@@ -143,4 +143,155 @@ test('nesting', async () => {
     @media print { a { b { c { d: e } } } }
     @supports (x: y) { a { @layer l { top: 0 } } }
   `);
+});
+
+/**
+ * Where a rule's text `a{…}` is put: as it is, nested, in nested declarations, and each of those
+ * in @media, @supports and @layer.
+ */
+const places = (text: string): string[] => {
+  const inner = text.slice(text.indexOf('{') + 1, text.endsWith('}') ? -1 : undefined);
+  const three = [text, `p { color: red; ${text} }`, `p { q {} ${inner} }`];
+  return [
+    ...three,
+    ...three.map(t => `@media all { ${t} }`),
+    ...three.map(t => `@supports (top:0) { ${t} }`),
+    ...three.map(t => `@layer l { ${t} }`),
+  ];
+};
+
+/** Each `--x` of `t` Chrome keeps, with its priority; and whether any style holds `top`. */
+function chromeCustom(t: string): Promise<{ found: [string, string][]; top: boolean }> {
+  return page.evaluate(t => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(t);
+    const found: [string, string][] = [];
+    let top = false;
+    const look = (rules: CSSRuleList) => {
+      for (const r of Array.from(rules)) {
+        const style = 'style' in r ? (r.style as CSSStyleDeclaration) : undefined;
+        if (style && Array.from(style).includes('--x'))
+          found.push([style.getPropertyValue('--x').trim(), style.getPropertyPriority('--x')]);
+        if (style && Array.from(style).includes('top')) top = true;
+        if ('cssRules' in r && r.cssRules instanceof CSSRuleList) look(r.cssRules);
+      }
+    };
+    look(sheet.cssRules);
+    return { found, top };
+  }, t);
+}
+
+/** The outline's declarations of `t` that pass `keep`, wherever they are. */
+function oursDecls(t: string, keep: (d: CssRule['decls'][number]) => boolean): CssRule['decls'] {
+  const list: CssRule['decls'] = [];
+  const collect = (rules: CssRule[]) => {
+    for (const r of rules) {
+      list.push(...r.decls.filter(d => d.kind === 'decl' && keep(d)));
+      collect(r.rules);
+    }
+  };
+  collect(outline(t));
+  return list;
+}
+
+test("`{}` blocks in a custom property's value, at the top, nested and in conditions", async () => {
+  // The text; the custom property's value and priority Chrome reads, `dropped` where it drops
+  // the declaration, `none` where the name is no custom property's; whether to put it in places().
+  type Expected = [string, string] | 'dropped' | 'none';
+  const cases: [string, Expected, boolean][] = [
+    ['a { --x: {} b { c: d } e: f }', ['{} b { c: d } e: f', ''], true],
+    ['a{--x:{a} b; top:0}', ['{a} b', ''], true],
+    ['a { --x: a {} ; top: 0}', ['a {}', ''], true],
+    ['a { --x: {} b !important; top: 0 }', ['{} b', 'important'], true],
+    ['a { --x: {a} !important; top: 0 }', ['{a}', 'important'], true],
+    ['a{--x:{}}', ['{}', ''], true],
+    // Escaped names, which Chrome takes for `--x`, or not (`\2da` is `ڪ`).
+    ['a{\\2d-x:{a} b;top:0}', ['{a} b', ''], true],
+    ['a{\\-\\-x:{a} b;top:0}', ['{a} b', ''], true],
+    ['a{-\\-x:{a} b;top:0}', ['{a} b', ''], true],
+    ['a{\\2d\\2dx:{a} b;top:0}', ['{a} b', ''], true],
+    ['a{\\2D\\2D x:{a} b;top:0}', ['{a} b', ''], true],
+    ['a{\\2da-x:{a} b;top:0}', 'none', true],
+    // An unclosed `(` takes the rest of the text into the value, which Chrome drops: one
+    // declaration still, that pairs with none.
+    ['a{--x:{a} (b;top:0}', 'dropped', true],
+    // A block left open runs to the end of the text: not put in other rules, which it would take.
+    ['a{--x:{ b', ['{ b', ''], false],
+    ['p { q {} --x:{ b', ['{ b', ''], false],
+    ['@media all { a{--x:{ b', ['{ b', ''], false],
+  ];
+  for (const [text, expected, wrap] of cases) {
+    for (const t of wrap ? places(text) : [text]) {
+      // Nested rules compared only where the CSSOM keeps the declarations (see check): not where
+      // it drops one, or a rule given up as one (`\2da-x:{a} b`, a rule with an invalid selector).
+      await check(t, typeof expected !== 'string');
+      const chrome = await chromeCustom(t);
+      const ours = oursDecls(t, d => dashed(t, d.start, d.nameEnd));
+      if (expected === 'none' || expected === 'dropped') assert.deepEqual(chrome.found, [], t);
+      else {
+        assert.deepEqual(chrome.found, [expected], t);
+        assert.deepEqual(
+          ours.map(d => [t.slice(d.valueStart, d.valueEnd), d.important]),
+          [[expected[0], expected[1] === 'important']],
+          t
+        );
+      }
+      if (expected === 'none') {
+        assert.deepEqual(ours, [], t);
+        // Ours has it as a declaration of its own name, given up at its `{` (then a rule).
+        const name = text.slice(text.indexOf('{') + 1, text.indexOf(':'));
+        assert.ok(
+          outline(t).some(function has(r: CssRule): boolean {
+            return t.slice(r.preludeStart, r.preludeEnd).startsWith(name) || r.rules.some(has);
+          }),
+          t
+        );
+      }
+      if (expected === 'dropped') {
+        // `top:0` is in the value on both sides, which runs to the end of the text.
+        assert.equal(chrome.top, false, t);
+        assert.deepEqual(
+          oursDecls(t, d => t.startsWith('top', d.start)),
+          [],
+          t
+        );
+        assert.equal(ours.length, 1, t);
+        assert.equal(ours[0]?.valueEnd, t.trimEnd().length, t);
+      }
+    }
+  }
+});
+
+test('in Chrome, `top` after `x:a {}` belongs to the style rule or the nested declarations', async () => {
+  // `x:a {}` is a rule with an invalid selector, which the CSSOM drops. Only the premise of how
+  // the CSS domain reads it is checked here: `top:0` after it is the style rule's own in Chrome,
+  // or of the nested declarations after `q {}`, though the outline makes it a nested run after
+  // `x:a {}` either way. Reading it so (sheets/text/ranges.ts, runsOf) is compared with Chrome in
+  // source-text/ranges.conformance.test.ts.
+  const expected = ['CSSStyleRule', 'CSSStyleRule', 'CSSNestedDeclarations'];
+  const all = places('a{x:a {} ; top:0}');
+  // The three places, then each of them in three conditions.
+  assert.equal(all.length, 12);
+  for (const [i, t] of all.entries()) {
+    await check(t, false);
+    const chrome = await page.evaluate(t => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(t);
+      const holders: string[] = [];
+      const look = (rules: CSSRuleList) => {
+        for (const r of Array.from(rules)) {
+          const style = 'style' in r ? (r.style as CSSStyleDeclaration) : undefined;
+          if (style && Array.from(style).includes('top')) holders.push(r.constructor.name);
+          if ('cssRules' in r && r.cssRules instanceof CSSRuleList) look(r.cssRules);
+        }
+      };
+      look(sheet.cssRules);
+      return holders;
+    }, t);
+    assert.deepEqual(chrome, [expected[i % 3]], t);
+  }
+});
+
+test('a prelude that starts like an escaped custom property declaration makes no rule', async () => {
+  for (const t of ['\\2d-x: {a} b{}', '\\-\\-x: {a} b{}', '\\2e-x: {a} b{}', '\\2d-x /**/ : {a} b{}']) await check(t);
 });

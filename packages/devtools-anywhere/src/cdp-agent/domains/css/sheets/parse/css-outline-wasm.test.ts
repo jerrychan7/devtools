@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build as bundle } from 'esbuild';
+import { DASHED } from './bench/dashed-names.ts';
 import { materials } from './bench/materials.ts';
 import { fragment, outlineDiff, random } from './bench/outline-fragments.ts';
 import type { CssOutline } from './css-outline.ts';
@@ -65,6 +66,50 @@ test('the same outline as css-outline.ts on random fragments', async () => {
       // Whatever the length: short texts are compared too, though `outline` keeps them in TypeScript.
       same(text, mod.outlineWasm(w, text), mod.outlineTs(text));
     }
+  }
+});
+
+test('the same outline as css-outline.ts for `{}` blocks in custom property values', async () => {
+  const mod = await load();
+  const w = mod.wasmExports();
+  assert.ok(w);
+  for (const text of [
+    'a { --x: {} b { c: d } e: f }',
+    'a{--x:{a} b; top:0}',
+    'a { --x: a {} ; top: 0}',
+    'p { q { --x: {} b { c: d } e: f } }',
+    'p{x:1; q{} --x:{a} b; top:0}',
+    '@media screen { a { --x: {} b { c: d } e: f } }',
+    '@supports (top: 0) { p { q {} --x:{a} b; top:0 } }',
+    '@layer l { a { --x: a {} ; top: 0} }',
+    'a { --x: {} b !important; top: 0 }',
+    'a { --x: {a} !important; top: 0 }',
+    'a{--x:{ b',
+    'a{--x:{}}',
+    'a{--x:{a} (b;top:0}',
+    'a{\\2d-x:{a} b;top:0}',
+    'a{\\-\\-x:{a} b;top:0}',
+    'a{-\\-x:{a} b;top:0}',
+    'a{\\2d\\2dx:{a} b;top:0}',
+    'a{\\00002D -x:{a} b;top:0}',
+    'a{\\2d\r\n-x:{a} b;top:0}',
+    'a{\\2e-x:{a} b;top:0}',
+    'a{-\\2ex:{a} b;top:0}',
+    '\\2d-x: {a} b{}',
+    '\\2d-x /**/ : {a} b{}',
+    ...DASHED.map(([name]) => `a{${name}:{a} b;top:0}`),
+    'a{x:a {} ; top:0}',
+    'p{q{x:a {} ; top:0}}',
+    'p{r{} x:a {} ; top:0}',
+    '@media all{a{x:a {} ; top:0}}',
+  ]) {
+    const expected = mod.outlineTs(text);
+    same(text, mod.outlineWasm(w, text), expected);
+    // Through the entry point too, and copied in as UTF-16.
+    same(text, mod.outline(text), expected);
+    const wide = `/* é */${text}`;
+    same(wide, mod.outlineWasm(w, wide), mod.outlineTs(wide));
+    same(wide, mod.outline(wide), mod.outlineTs(wide));
   }
 });
 

@@ -121,12 +121,12 @@ export function outlineInto(m: A.Module): void {
   m.declare('atRule', ['nested'], 1, ['r', 'from', 't', 'pe', 'j']);
   m.declare('qualified', ['nested'], 1, ['from', 't', 'custom', 'mm', 'r']);
   m.declare('important', ['a', 'b'], 1);
+  m.declare('dashed', ['a', 'e'], 1, ['n', 'c', 'v', 'h', 'x']);
   m.declare('declaration', [], 1, [
     'start',
     'nameEnd',
     'from',
-    'braces',
-    'other',
+    'custom',
     'last',
     'prev',
     't',
@@ -329,7 +329,7 @@ export function outlineInto(m: A.Module): void {
       if_(isK(get('t'), Tok.LBrace), () => [
         set('custom', i32(0)),
         if_(isK(kind(get('from')), Tok.Ident), () => [
-          set('custom', and(eq(ch(pos(get('from'))), i32(45)), eq(ch(add(pos(get('from')), i32(1))), i32(45)))),
+          set('custom', call('dashed', pos(get('from')), pos(add(get('from'), i32(1))))),
         ]),
         set('mm', add(get('from'), i32(1))),
         loop('s', () => [if_(trivia(kind(get('mm'))), () => [inc('mm'), br('s')])]),
@@ -357,6 +357,56 @@ export function outlineInto(m: A.Module): void {
     i32(1),
   ]);
 
+  // css-outline.ts `dashed`: whether the ident in [a, e) starts with two `-`, escapes decoded.
+  m.define('dashed', () => [
+    set('n', i32(0)),
+    loop('d', () => [
+      if_(eq(get('n'), i32(2)), () => [ret(i32(1))]),
+      if_(geS(get('a'), get('e')), () => [ret(i32(0))]),
+      set('c', ch(get('a'))),
+      inc('a'),
+      if_(eq(get('c'), i32(45)), () => [inc('n'), br('d')]),
+      if_(or(ne(get('c'), i32(92)), geS(get('a'), get('e'))), () => [ret(i32(0))]),
+      set('v', i32(0)),
+      set('h', i32(0)),
+      block('hx', () => [
+        loop('hl', () => [
+          brIf('hx', or(eq(get('h'), i32(6)), geS(get('a'), get('e')))),
+          set('c', ch(get('a'))),
+          set('x', i32(-1)),
+          if_(leU(sub(get('c'), i32(48)), i32(9)), () => [set('x', sub(get('c'), i32(48)))]),
+          if_(leU(sub(or(get('c'), i32(32)), i32(97)), i32(5)), () => [set('x', sub(or(get('c'), i32(32)), i32(87)))]),
+          brIf('hx', ltS(get('x'), i32(0))),
+          set('v', add(mul(get('v'), i32(16)), get('x'))),
+          inc('h'),
+          inc('a'),
+          br('hl'),
+        ]),
+      ]),
+      if_(eqz(get('h')), () => [if_(ne(ch(get('a')), i32(45)), () => [ret(i32(0))]), inc('a'), inc('n'), br('d')]),
+      if_(ne(get('v'), i32(45)), () => [ret(i32(0))]),
+      // One whitespace after the digits is part of the escape (CR LF as one).
+      if_(ltS(get('a'), get('e')), () => [
+        set('c', ch(get('a'))),
+        if_(
+          or(
+            or(eq(get('c'), i32(32)), eq(get('c'), i32(9))),
+            or(or(eq(get('c'), i32(10)), eq(get('c'), i32(12))), eq(get('c'), i32(13)))
+          ),
+          () => [
+            inc('a'),
+            if_(and(eq(get('c'), i32(13)), ltS(get('a'), get('e'))), () => [
+              if_(eq(ch(get('a')), i32(10)), () => [inc('a')]),
+            ]),
+          ]
+        ),
+      ]),
+      inc('n'),
+      br('d'),
+    ]),
+    i32(0),
+  ]);
+
   m.define('declaration', () => [
     if_(ne(kind(get('i')), i32(Tok.Ident)), () => [ret(i32(0))]),
     set('start', pos(get('i'))),
@@ -367,8 +417,10 @@ export function outlineInto(m: A.Module): void {
     inc('i'),
     loop('s2', () => [if_(trivia(kind(get('i'))), () => [inc('i'), br('s2')])]),
     set('from', get('i')),
-    set('braces', i32(0)),
-    set('other', i32(0)),
+    // Whether the name is a custom property's, with escapes decoded (`dashed`: `--x`, `\2d-x`):
+    // any other's value is given up at its first `{`, as in css-outline.ts, not scanned on to the
+    // end of the parent's block.
+    set('custom', call('dashed', get('start'), get('nameEnd'))),
     set('last', i32(-1)),
     set('prev', i32(-1)),
     block('done', () => [
@@ -378,19 +430,10 @@ export function outlineInto(m: A.Module): void {
         if_(eqz(trivia(get('t'))), () => [
           set('prev', get('last')),
           set('last', get('i')),
-          if_(
-            isK(get('t'), Tok.LBrace),
-            () => [inc('braces')],
-            () => [inc('other')]
-          ),
+          if_(and(isK(get('t'), Tok.LBrace), eqz(get('custom'))), () => [ret(i32(0))]),
         ]),
         call('value'),
         br('v'),
-      ]),
-    ]),
-    if_(get('braces'), () => [
-      if_(or(eqz(and(eq(ch(get('start')), i32(45)), eq(ch(add(get('start'), i32(1))), i32(45)))), get('other')), () => [
-        ret(i32(0)),
       ]),
     ]),
     set('imp', i32(0)),

@@ -297,6 +297,38 @@ export class CssOutline {
   }
 }
 
+/**
+ * Whether the ident token `text.slice(at, end)` starts with two `-` once escapes are decoded, as
+ * a custom property's name does: `--x`, but also `\2d-x` or `\-\-x`, which Chrome takes for one.
+ */
+export function dashed(text: string, at: number, end: number): boolean {
+  let p = at;
+  for (let n = 0; n < 2; n++) {
+    if (p >= end) return false;
+    const c = text.charCodeAt(p++);
+    if (c === 45) continue;
+    if (c !== 92 || p >= end) return false;
+    let v = 0;
+    let h = 0;
+    for (; h < 6 && p < end; h++, p++) {
+      const d = text.charCodeAt(p);
+      const x = d >= 48 && d <= 57 ? d - 48 : (d | 32) >= 97 && (d | 32) <= 102 ? (d | 32) - 87 : -1;
+      if (x < 0) break;
+      v = v * 16 + x;
+    }
+    if (!h) {
+      if (text.charCodeAt(p++) !== 45) return false;
+      continue;
+    }
+    if (v !== 45) return false;
+    // One whitespace after the digits is part of the escape (CR LF as one).
+    const w = text.charCodeAt(p);
+    if (p < end && (w === 32 || w === 9 || w === 10 || w === 12 || w === 13))
+      p += w === 13 && text.charCodeAt(p + 1) === 10 ? 2 : 1;
+  }
+  return true;
+}
+
 /** The top-level rules of `o`, in order. */
 export function topRules(o: CssOutline): number[] {
   const list: number[] = [];
@@ -501,7 +533,7 @@ function parse(text: string, inBlock: boolean, into?: CssOutline): CssOutline {
       if (k === Tok.Eof || (nested && (k === Tok.Semi || k === Tok.RBrace))) return -1;
       if (k === Tok.LBrace) {
         // A prelude that starts like a custom property declaration (`--x: {}`) makes no rule.
-        const custom = kind(from) === Tok.Ident && text.startsWith('--', pos(from));
+        const custom = kind(from) === Tok.Ident && dashed(text, pos(from), pos(from + 1));
         let m = from + 1;
         while (trivia(kind(m))) m++;
         const r = o.addRule(QUALIFIED, pos(from));
@@ -533,13 +565,12 @@ function parse(text: string, inBlock: boolean, into?: CssOutline): CssOutline {
     i++;
     while (trivia(kind(i))) i++;
     const from = i;
-    // §5.5.6 step 7: a `{}` block in a value makes no declaration, but for a custom property's
-    // value that is the block alone. Any other's is given up at its `{`, not past the block: a
-    // rule like `a:hover {}` is parsed again from its start, and scanning on to the end of the
-    // parent's block would make a block of such rules quadratic.
-    const custom = text.startsWith('--', start);
-    let braces = 0;
-    let other = 0;
+    // §5.5.6 step 7: a `{}` block in a value makes no declaration, except in a custom property's,
+    // where like Chrome any `{}` blocks may sit among other tokens (`--x: {} b { c: d } e`). Any
+    // other's is given up at its `{`, not past the block: a rule like `a:hover {}` is parsed again
+    // from its start, and scanning on to the end of the parent's block would make a block of such
+    // rules quadratic.
+    const custom = dashed(text, start, nameEnd);
     let last = -1;
     let prev = -1;
     for (;;) {
@@ -549,12 +580,9 @@ function parse(text: string, inBlock: boolean, into?: CssOutline): CssOutline {
         if (k === Tok.LBrace && !custom) return false;
         prev = last;
         last = i;
-        if (k === Tok.LBrace) braces++;
-        else other++;
       }
       value();
     }
-    if (braces && other) return false;
     const important =
       prev >= 0 &&
       kind(prev) === Tok.Delim &&
