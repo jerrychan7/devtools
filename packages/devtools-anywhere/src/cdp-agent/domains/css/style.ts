@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
 import { ownSet } from './sheets/watch/cssom-watch';
-import { reportedComment } from './sheets/text/commented';
+import { textStyle } from './sheets/text/ranges';
 
 export type CSSStyle = Protocol.CSS.CSSStyle;
 export type CSSProperty = Protocol.CSS.CSSProperty;
@@ -67,26 +67,6 @@ export interface Declaration {
   disabled: boolean;
 }
 
-/** Declarations of a style text in order, those in comments disabled. */
-function declarations(text: string): Declaration[] {
-  const result: Declaration[] = [];
-  const comment = /\/\*([\s\S]*?)\*\//g;
-  let last = 0;
-  const enabled = (part: string) => splitTopLevel(part, ';').forEach(raw => result.push({ raw, disabled: false }));
-  for (let m = comment.exec(text); m; m = comment.exec(text)) {
-    enabled(text.slice(last, m.index));
-    last = m.index + m[0].length;
-    const inner = (m[1] ?? '').trim().replace(/;$/, '');
-    const colon = inner.indexOf(':');
-    // Like Chrome, only a declaration it would parse (as in a style sheet's text).
-    const value = inner.slice(colon + 1).replace(/\s*!\s*important\s*$/i, '');
-    if (colon >= 0 && reportedComment(inner.slice(0, colon).trim(), value.trim()))
-      result.push({ raw: inner, disabled: true });
-  }
-  enabled(text.slice(last));
-  return result;
-}
-
 /**
  * Like Chrome, after the declared properties come the longhands the style actually holds,
  * without ranges: normal ones first, then !important ones, each in declaration order.
@@ -129,7 +109,7 @@ export interface Written {
 export function styleOf(
   styleSheetId: string,
   decl: CSSStyleDeclaration,
-  written: Written[],
+  written: readonly Written[],
   cssText: string,
   range: Protocol.CSS.SourceRange
 ): CSSStyle {
@@ -151,7 +131,8 @@ export function styleOf(
       // Like Chrome, only reported when false, and not for a disabled one (`-webkit-foo: )`).
       ...(!parsedOk && !disabled && { parsedOk }),
       disabled,
-      range,
+      // A copy: `written` may be kept for the next call (textWritten).
+      range: { ...range },
     };
     cssProperties.push(property);
     if (disabled || !parsedOk) continue;
@@ -173,18 +154,18 @@ export function styleOf(
 }
 
 /**
- * Serializes declarations as `name: value;` separated by spaces, the text the client edits;
- * disabled ones as `/* name: value; *\/`, on `line` from `column`.
+ * A style on `line` from `column`: as the text it was given writes it (`textStyle`), while that
+ * text is still what it holds; otherwise (no text, or the page changed the style since) its
+ * declarations serialized as `name: value;` separated by spaces, the text the client edits.
  */
 export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: number, column: number): CSSStyle {
   const source = sources.get(decl);
-  const list =
-    source && source.applied === decl.cssText
-      ? declarations(source.text)
-      : splitTopLevel(decl.cssText, ';').map(raw => ({ raw, disabled: false }));
+  const current = source && source.applied === decl.cssText ? source.text : undefined;
+  // Like Chrome, the text as written, each declaration with its range in it.
+  if (current !== undefined) return textStyle(styleSheetId, decl, current, line, column);
   let text = '';
   const written: Written[] = [];
-  for (const { raw, disabled } of list) {
+  for (const raw of splitTopLevel(decl.cssText, ';')) {
     const colon = raw.indexOf(':');
     if (colon < 0) continue;
     const name = raw.slice(0, colon).trim();
@@ -192,8 +173,7 @@ export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line
     if (!name) continue;
     const important = /!\s*important$/i.test(value);
     if (important) value = value.replace(/\s*!\s*important$/i, '');
-    const declText = `${name}: ${value}${important ? ' !important' : ''};`;
-    const propertyText = disabled ? `/* ${declText} */` : declText;
+    const propertyText = `${name}: ${value}${important ? ' !important' : ''};`;
     if (text) text += ' ';
     const start = column + text.length;
     text += propertyText;
@@ -201,7 +181,7 @@ export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line
       name,
       value,
       important,
-      disabled,
+      disabled: false,
       text: propertyText,
       range: { startLine: line, startColumn: start, endLine: line, endColumn: start + propertyText.length },
     });

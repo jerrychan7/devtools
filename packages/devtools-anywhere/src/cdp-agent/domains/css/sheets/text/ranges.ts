@@ -1,8 +1,9 @@
 // What the CSS domain reads from a paired SheetSource: ranges in lines and columns, the spans of
 // a rule's selectors and style, and a rule's style as written in the text.
 import { Tok, tokenize } from '../parse/css-lexer-wasm';
-import type { CssOutline } from '../parse/css-outline';
-import { offsetAt, positionAt } from './text-lines';
+import { type CssOutline, ROOT } from '../parse/css-outline';
+import { outline } from '../parse/css-outline-wasm';
+import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
 import { type CSSStyle, type Written, styleOf } from '../../style';
 import type { SheetSource } from './pair';
@@ -100,8 +101,206 @@ export function sourceStyle(
   source: SheetSource,
   node: number
 ): CSSStyle {
-  const { text, outline: o } = source;
   const [from, to] = styleSpan(source, node);
+  const written = writtenOf(source.text, source.outline, node, to, (s, e) => rangeOf(source, s, e));
+  return styleOf(styleSheetId, decl, written, source.text.slice(from, to), rangeOf(source, from, to));
+}
+
+/**
+ * A style as `text` writes it (a style attribute, or a style's text set by setStyleTexts), its
+ * text starting at `line` and `column`: each declaration with its text and range as written, the
+ * commented-out ones Chrome reports, as in a sheet's rule.
+ */
+export function textStyle(
+  styleSheetId: string,
+  decl: CSSStyleDeclaration,
+  text: string,
+  line: number,
+  column: number
+): CSSStyle {
+  return styleOf(styleSheetId, decl, textWritten(text, line, column), text, textRange(text, line, column));
+}
+
+/** The range of `text` starting at `line` and `column`. */
+export function textRange(text: string, line: number, column: number): Protocol.CSS.SourceRange {
+  const end = at(lineStarts(text), text.length, line, column);
+  return { startLine: line, startColumn: column, endLine: end.line, endColumn: end.column };
+}
+
+/** Offset `offset` of a text starting at `line` and `column`, its lines starting at `starts`. */
+function at(starts: readonly number[], offset: number, line: number, column: number) {
+  const p = positionAt(starts, offset);
+  return p.line === 0 ? { line, column: column + p.column } : { line: line + p.line, column: p.column };
+}
+
+/**
+ * The last text read by `textWritten`, and what it gave: a style is asked for again and again.
+ * The answer depends on the text and start alone: whether a comment is reported also depends on
+ * CSS.supports(), but on the one the probe took (commented.ts), which stays the same.
+ */
+let lastWritten: { text: string; line: number; column: number; written: readonly Written[] } | undefined;
+
+/**
+ * The declarations `text` writes, as `textStyle` reports them; kept for the next call, so not to
+ * be changed (styleOf() copies what it reports). Like Chrome, the text is a list of declarations
+ * with no rule around it and none in it (`textParts`), each declaration read as in a sheet's rule.
+ */
+export function textWritten(text: string, line: number, column: number): readonly Written[] {
+  if (lastWritten?.text === text && lastWritten.line === line && lastWritten.column === column)
+    return lastWritten.written;
+  const starts = lineStarts(text);
+  const written: Written[] = [];
+  for (const [from, to] of textParts(text)) {
+    // The part alone in a rule, from the start of the line after its `{`, its braces masked
+    // (`maskBraces`), of the same length: the text is read from the part as written.
+    const head = '*{\n';
+    const part = text.slice(from, to);
+    const o = outline(head + maskBraces(part));
+    const node = o.firstChild(ROOT);
+    if (node < 0) continue;
+    const range = (start: number, end: number): Protocol.CSS.SourceRange => {
+      const a = at(starts, from + start - head.length, line, column);
+      const b = at(starts, from + end - head.length, line, column);
+      return { startLine: a.line, startColumn: a.column, endLine: b.line, endColumn: b.column };
+    };
+    written.push(...writtenOf(head + part, o, node, head.length + part.length, range));
+  }
+  lastWritten = { text, line, column, written };
+  return written;
+}
+
+/** The token closing a block each opening one starts. */
+const CLOSER: Partial<Record<number, number>> = {
+  [Tok.LParen]: Tok.RParen,
+  [Tok.Func]: Tok.RParen,
+  [Tok.LBracket]: Tok.RBracket,
+  [Tok.LBrace]: Tok.RBrace,
+};
+const isCloser = (k: number) => k === Tok.RParen || k === Tok.RBracket || k === Tok.RBrace;
+
+/**
+ * The parts of a style attribute's text that may be declarations, as Blink reads it (measured in
+ * Chrome 157): its comments between declarations, and each declaration, from a name and its `:` to
+ * its `;`, or to a `{` (the block and what follows to the next `;` dropped), except that a custom
+ * property's value may hold blocks (`--x: a {b}`). An at-rule is skipped to its `;` or the end of
+ * its block; anything else to the next `;`. A block ends only at the token closing it, as in CSS
+ * Syntax: `}` closes no `(`, and one closing no block is a token like any other. A custom property
+ * with such a token is no declaration (`--x: ( } )`), as its value would not parse.
+ */
+function textParts(text: string): [number, number][] {
+  const { kinds, starts } = tokenize(text);
+  const n = kinds.length;
+  const end = (i: number) => starts[i + 1] ?? text.length;
+  const parts: [number, number][] = [];
+  /** Past the token closing the block opened at `i`, or the end. */
+  const skipBlock = (i: number) => {
+    const open: number[] = [];
+    for (; i < n; i++) {
+      const k = kinds[i] ?? Tok.Eof;
+      const closer = CLOSER[k];
+      if (closer !== undefined) open.push(closer);
+      else if (k === open[open.length - 1]) {
+        open.pop();
+        if (!open.length) return i + 1;
+      }
+    }
+    return n;
+  };
+  /** The first token from `i` that `stop` accepts, not in a block, or the end. */
+  const scan = (i: number, stop: (k: number) => boolean) => {
+    while (i < n) {
+      const k = kinds[i] ?? Tok.Eof;
+      if (stop(k)) return i;
+      i = CLOSER[k] !== undefined ? skipBlock(i) : i + 1;
+    }
+    return n;
+  };
+  /** Whether tokens `from` to `to` hold one closing no block they hold. */
+  const unmatched = (from: number, to: number) => {
+    const open: number[] = [];
+    for (let i = from; i < to; i++) {
+      const k = kinds[i] ?? Tok.Eof;
+      const closer = CLOSER[k];
+      if (closer !== undefined) open.push(closer);
+      else if (isCloser(k) && open.pop() !== k) return true;
+    }
+    return false;
+  };
+  let i = 0;
+  while (i < n) {
+    const k = kinds[i];
+    if (k === Tok.Ws || k === Tok.Semi) i++;
+    else if (k === Tok.Comment) {
+      parts.push([starts[i] ?? 0, end(i)]);
+      i++;
+    } else if (k === Tok.At) {
+      // To its `;`, or past its block.
+      const stop = scan(i + 1, k => k === Tok.Semi || k === Tok.LBrace);
+      i = kinds[stop] === Tok.LBrace ? skipBlock(stop) : stop + 1;
+    } else if (k === Tok.Ident && kinds[colonAfter(kinds, i + 1)] === Tok.Colon) {
+      const custom = text.startsWith('--', starts[i] ?? 0);
+      const stop = scan(i + 1, k => k === Tok.Semi || (k === Tok.LBrace && !custom));
+      if (kinds[stop] === Tok.LBrace) {
+        parts.push([starts[i] ?? 0, starts[stop] ?? text.length]);
+        i = scan(stop, k => k === Tok.Semi) + 1;
+      } else {
+        if (!custom || !unmatched(i + 1, stop)) parts.push([starts[i] ?? 0, stop < n ? end(stop) : text.length]);
+        i = stop + 1;
+      }
+    } else i = scan(i, k => k === Tok.Semi) + 1;
+  }
+  return parts;
+}
+
+/**
+ * The index of the first token from `i` that is no white space or comment. Chrome keeps a comment
+ * before the `:` in the name (`color /*x*\/ : red` names `color /*x*\/`), the outline does not:
+ * both would change to follow it.
+ */
+function colonAfter(kinds: ArrayLike<number>, i: number): number {
+  while (kinds[i] === Tok.Ws || kinds[i] === Tok.Comment) i++;
+  return i;
+}
+
+/**
+ * `part` with its `{` made `(` and the `}` closing each made `)`, as the outline reads blocks of
+ * neither, and a `}` closing no block (`color: f( }`, `color: red } x`) made a `%`, which closes
+ * nothing either.
+ */
+function maskBraces(part: string): string {
+  const { kinds, starts } = tokenize(part);
+  const masks: [number, string][] = [];
+  const open: number[] = [];
+  kinds.forEach((k, i) => {
+    const closer = CLOSER[k];
+    if (closer !== undefined) {
+      open.push(closer);
+      if (k === Tok.LBrace) masks.push([starts[i] ?? 0, '(']);
+    } else if (isCloser(k)) {
+      const matches = open[open.length - 1] === k;
+      if (matches) open.pop();
+      if (k === Tok.RBrace) masks.push([starts[i] ?? 0, matches ? ')' : '%']);
+    }
+  });
+  if (!masks.length) return part;
+  const pieces: string[] = [];
+  let last = 0;
+  for (const [at, c] of masks) {
+    pieces.push(part.slice(last, at), c);
+    last = at + 1;
+  }
+  pieces.push(part.slice(last));
+  return pieces.join('');
+}
+
+/** The declarations of `node`, its style ending at `to`, with the ranges `range` gives. */
+function writtenOf(
+  text: string,
+  o: CssOutline,
+  node: number,
+  to: number,
+  range: (start: number, end: number) => Protocol.CSS.SourceRange
+): Written[] {
   const last = o.lastDecl(node);
   const written: Written[] = [];
   for (let d = o.firstDecl(node); d <= last; d++) {
@@ -126,8 +325,8 @@ export function sourceStyle(
       important: o.important(d) && !comment,
       disabled: comment,
       text: text.slice(start, end),
-      range: rangeOf(source, start, end),
+      range: range(start, end),
     });
   }
-  return styleOf(styleSheetId, decl, written, text.slice(from, to), rangeOf(source, from, to));
+  return written;
 }

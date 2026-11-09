@@ -38,6 +38,8 @@ test('custom properties: one with no value or only white space is reported', () 
   assert.equal(reportedComment('\\2d-x', ''), true);
 });
 
+// Last: the natives it gives stay set for the module (useCssNatives has no undoing), which the
+// tests above, run first and in order, rely on not being.
 test('the natives given are called on their CSS, with the name unescaped', () => {
   const calls: unknown[][] = [];
   const fakeCss = { supports: () => false } as unknown as typeof CSS;
