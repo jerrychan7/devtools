@@ -75,7 +75,7 @@ export function createRender(load: SnapdomLoader): Render {
     // The mask that filters the page is ours, left out: its filter is applied to the image instead.
     const filter = visionFilter(scale * dpr);
     if (!filter) return canvas;
-    const out = document.createElement('canvas');
+    const out = canvas.ownerDocument.createElement('canvas');
     out.width = canvas.width;
     out.height = canvas.height;
     const g = out.getContext('2d');

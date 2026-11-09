@@ -120,7 +120,7 @@ function raise() {
     return;
   }
   raised = true;
-  Reflect.apply(natives.raf, window, [
+  Reflect.apply(natives.raf, frames.top.window, [
     () => {
       raised = false;
       if (pending) {
