@@ -38,15 +38,20 @@ export function markOwn(node: Node): void {
 }
 
 /**
- * Our own popovers (the panel and its toggler), registered by their element: the vision
- * deficiency mask puts them back above it, without looking for them through the page's DOM.
+ * Our own popovers (the panel and its toggler) while their element is in a document, registered
+ * by it: the vision deficiency mask puts them back above it, without looking for them through
+ * the page's DOM. Taken out when the element is removed, so that it is not kept alive.
  */
 export const ownPopovers = new Set<HTMLElement>();
 
-/** Registers one of our popovers, also hiding it from the client ({@link markOwn}). @internal */
-export function markOwnPopover(el: HTMLElement): void {
+/**
+ * Registers our popovers while their element is connected, or takes them out (`connected` false);
+ * they are hidden from the client too ({@link markOwn}). @internal
+ */
+export function markOwnPopover(el: HTMLElement, connected = true): void {
   markOwn(el);
-  ownPopovers.add(el);
+  if (connected) ownPopovers.add(el);
+  else ownPopovers.delete(el);
 }
 
 /** Whether `node` itself was registered with {@link markOwn}. */

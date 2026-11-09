@@ -181,8 +181,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
     this.toggler = part<HTMLButtonElement>('.toggler');
-    markOwnPopover(this.panel);
-    markOwnPopover(this.toggler);
+    markOwn(this.panel);
+    markOwn(this.toggler);
     this.toggler.addEventListener('click', () => {
       // The F12 button in the shell's page toggles the shell's element.
       if (!shellTogglers.has(this)) this.setOpen(!this.isOpen);
@@ -497,6 +497,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Connects the page's CDP session (or, with `shell`, registers the Service Worker) and lays out the panel. */
   connectedCallback() {
+    markOwnPopover(this.panel);
+    markOwnPopover(this.toggler);
     // Registers the element so the CDP domains hide it from the Elements panel; the
     // attribute only isolates its styles, as the page can set it too. A page that writes
     // <devtools-anywhere> itself (a supported way to mount it) gets it hidden too, with
@@ -559,6 +561,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Disconnects the frontend and stops listening to it. */
   disconnectedCallback() {
+    markOwnPopover(this.panel, false);
+    markOwnPopover(this.toggler, false);
     // Removed by the page: the shell shows its own button again until it is back.
     if (shellTogglers.has(this)) this.shellLink?.detach();
     customElementsLoading.delete(this);
