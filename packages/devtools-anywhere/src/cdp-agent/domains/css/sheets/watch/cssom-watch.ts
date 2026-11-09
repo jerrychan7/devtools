@@ -45,6 +45,19 @@ let own = 0;
 /** How many times each sheet was reported changed, or edited by a session: for replace(). */
 const versions = new WeakMap<CSSStyleSheet, number>();
 const changedAgain = (sheet: CSSStyleSheet) => versions.set(sheet, (versions.get(sheet) ?? 0) + 1);
+/** The sheets whose rules the page or a session changed while watched (`rulesChanged`). */
+const mutated = new WeakSet<CSSStyleSheet>();
+
+/**
+ * Whether the page (through the CSSOM) or a session changed the rules of `sheet` while watched:
+ * like Chrome's StyleSheetContents::IsMutable(), set by CSSStyleSheet::WillMutateRules and never
+ * cleared. A change the page made while nobody watched goes unseen (Chrome counts it), and so
+ * does a property written by name with a value the browser rejects (`style.color = 'nope'`,
+ * seen only by comparing texts: Chrome counts it too).
+ */
+export function rulesChanged(sheet: CSSStyleSheet): boolean {
+  return mutated.has(sheet);
+}
 
 type Recorder = (sheet: CSSStyleSheet, text?: string, change?: CssomChange) => void;
 
@@ -56,14 +69,18 @@ export function recordPageChanges(fn: Recorder): void {
   record = fn;
 }
 
-function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
-  if (!own) report(sheet, text, change);
+function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange, counts = true) {
+  if (!own) report(sheet, text, change, counts);
 }
 
-/** Records and tells a change of the page, even from within the CSS domain's code (`settle`). */
-function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
+/**
+ * Records and tells a change of the page, even from within the CSS domain's code (`settle`).
+ * `counts`: Chrome would take the sheet as mutated (`rulesChanged`); its text is dropped either way.
+ */
+function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange, counts = true) {
   if (!sheet || !listeners.size) return;
   changedAgain(sheet);
+  if (counts) mutated.add(sheet);
   if (change?.kind === 'rule' && suspects.size) reported.add(change.rule);
   try {
     record(sheet, text, change);
@@ -126,7 +143,7 @@ const textOf = (value: unknown) =>
  * Hooks a method, or with `part`, an accessor's setter or getter, calling `after` past the native
  * one, while some session watches and, but with `always`, outside the CSS domain's own code.
  */
-function hook(proto: object, name: string, after: After, part: Part = 'value', always = false) {
+function hook(proto: object, name: string, after: After, part: Part = 'value', always = false, onThrow = false) {
   let hooked = natives.get(proto);
   const key = `${part}:${name}`;
   if (hooked?.has(key)) return;
@@ -136,13 +153,22 @@ function hook(proto: object, name: string, after: After, part: Part = 'value', a
   if (!descriptor?.configurable || typeof native !== 'function') return;
   const proxy = new Proxy(native, {
     apply(f, self, args) {
-      const result: unknown = Reflect.apply(f, self, args);
-      if (listeners.size && (always || !own))
-        try {
-          after(self, args, result);
-        } catch {
-          // Ours, not the page's: its call went through.
-        }
+      const tell = (result: unknown) => {
+        if (listeners.size && (always || !own))
+          try {
+            after(self, args, result);
+          } catch {
+            // Ours, not the page's: its call went through.
+          }
+      };
+      let result: unknown;
+      try {
+        result = Reflect.apply(f, self, args);
+      } catch (e) {
+        if (onThrow) tell(undefined);
+        throw e;
+      }
+      tell(result);
       return result;
     },
   });
@@ -175,12 +201,16 @@ let settled = false;
  */
 const SUSPECTS_LIMIT = 2048;
 
-/** The sheets of `rules` changed where it is not told: their texts are serialized anew. */
+/**
+ * The sheets of `rules` changed where it is not told: their texts are serialized anew. They are
+ * not taken as mutated (`rulesChanged`): most of these styles were only read, and Chrome keeps
+ * such sheets immutable; a write through one of them goes uncounted.
+ */
 const lost = (rules: Iterable<CSSRule>) => {
   const seen = new Set<CSSStyleSheet>();
   for (const rule of rules) {
     const sheet = sheetOf(rule);
-    if (sheet && !seen.has(sheet)) report(sheet);
+    if (sheet && !seen.has(sheet)) report(sheet, undefined, undefined, false);
     if (sheet) seen.add(sheet);
   }
 };
@@ -403,7 +433,28 @@ function install(realm: Window & typeof globalThis) {
     }
     if (rule) notify(sheetOf(rule), undefined, inRule(rule));
   };
-  for (const name of ['setProperty', 'removeProperty']) hook(realm.CSSStyleDeclaration.prototype, name, styleChanged);
+  // Like Chrome, setProperty() with a name no property has changes nothing: the sheet is not
+  // taken as mutated (its text is dropped all the same). With a value the property rejects, it is.
+  const supports = realm.CSS?.supports;
+  const known = (name: unknown) => {
+    const text = textOf(name)?.trim();
+    if (text === undefined || !supports) return true;
+    try {
+      return text.startsWith('--') || Reflect.apply(supports, realm.CSS, [text, 'inherit']) === true;
+    } catch {
+      return true;
+    }
+  };
+  hook(realm.CSSStyleDeclaration.prototype, 'setProperty', (self, args) => {
+    let rule: unknown;
+    try {
+      rule = parentRule ? Reflect.apply(parentRule, self, []) : null;
+    } catch {
+      return; // Not a style.
+    }
+    if (rule) notify(sheetOf(rule), undefined, inRule(rule), known(args[0]));
+  });
+  hook(realm.CSSStyleDeclaration.prototype, 'removeProperty', styleChanged);
   // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are no
   // accessors, so `el.style.left = …` is not hooked and costs nothing), a rule's selector, a
   // keyframe's key. While watching, an element's `style.cssText = …` costs about 40% more
@@ -431,7 +482,9 @@ function install(realm: Window & typeof globalThis) {
     // list's `mediaText`, watched below.
     if (name !== 'CSSRule' && name.endsWith('Rule'))
       for (const prop of Object.getOwnPropertyNames(proto))
-        if (prop !== 'media' && Object.getOwnPropertyDescriptor(proto, prop)?.set) hook(proto, prop, changed, 'set');
+        // Like Chrome, a key it rejects (and throws for) still takes the sheet as mutated.
+        if (prop !== 'media' && Object.getOwnPropertyDescriptor(proto, prop)?.set)
+          hook(proto, prop, changed, 'set', false, true);
     hook(proto, 'style', (self, _args, style) => taking(self, style), 'get');
     hook(
       proto,
@@ -502,6 +555,8 @@ export function watchCssom(listener: Listener, realms: () => (Window & typeof gl
   listeners.add(listener);
   realms().forEach(tryInstall);
   return () => {
+    // What the page wrote through the styles it took is counted before they are dropped.
+    settle();
     listeners.delete(listener);
     if (!listeners.size) uninstall();
   };
@@ -524,6 +579,7 @@ export function watchRealms(docs: Document[]): void {
  */
 export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefined): void {
   changedAgain(sheet);
+  mutated.add(sheet);
   for (const listener of listeners)
     try {
       listener(sheet, text, by);

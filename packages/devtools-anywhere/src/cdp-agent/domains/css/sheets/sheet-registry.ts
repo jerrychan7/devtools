@@ -7,7 +7,7 @@ import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
 import { type StyleOrigin, buildStyle } from '../style';
-import { ownStyle } from './watch/cssom-watch';
+import { ownStyle, rulesChanged, settle } from './watch/cssom-watch';
 import { type SheetSource, namespaceText } from './text/pair';
 import { offsetsOf, selectorSpans, styleSpan } from './text/ranges';
 import { sheetTexts } from './text/sheet-text';
@@ -414,6 +414,8 @@ export class SheetRegistry {
   }
 
   header(sheet: CSSStyleSheet): Protocol.CSS.CSSStyleSheetHeader {
+    // What the page wrote through the styles it took counts for isMutable (at most once a microtask).
+    settle();
     // The recorded text as it is, its check and pairing left to its first use (`peek`).
     const source = this.texts.peek(sheet) ?? this.sourceOf(sheet);
     const text = source?.text ?? this.serialized(sheet);
@@ -439,7 +441,10 @@ export class SheetRegistry {
       title: sheet.title ?? '',
       disabled: sheet.disabled,
       isInline: !sheet.href && !isInspector && !local,
-      isMutable: isInspector || constructed,
+      // Like Chrome, constructed sheets, and others once their rules were changed through the CSSOM
+      // (by the page, or by an edit of a session: inspector sheets too, which start immutable). Told
+      // in the next styleSheetAdded only: styleSheetChanged has no header.
+      isMutable: constructed || rulesChanged(sheet),
       isConstructed: constructed,
       // Like Chrome, for constructed sheets and those of files.
       ...((constructed || !!sheet.href) && { loadingFailed: false }),
