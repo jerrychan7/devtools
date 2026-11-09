@@ -4,7 +4,7 @@ import { CdpError } from '../../core/session';
 import { mediaRewrite } from './media';
 import { rewriteMedia, rewriteValues } from './rewrite';
 import { safeAreaRewrite } from './safe-area';
-import { VISION, setVision } from './vision';
+import { VISION, setVision, useVisionContext } from './vision';
 
 /**
  * What each emulation is set to by which session: like Chrome's, it is the page's, the last
@@ -25,6 +25,7 @@ const RESETS: Record<string, () => void> = {
 
 export function registerEmulation(ctx: Context) {
   const { session } = ctx;
+  useVisionContext(ctx.probe.top, ctx.shadowRoots);
   session.register('Emulation', {
     // Done by rewriting the @media conditions of the page's style sheets (domains/emulation/rewrite.ts).
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {

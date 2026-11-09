@@ -25,10 +25,11 @@ const STYLE = `
     width: calc(10px + var(--right));
   }
   #vd { position: fixed; top: 0; left: 0; width: 80px; height: 80px; background: rgb(200, 40, 40) }
-  #pop, #dlg {
+  .top {
     position: fixed; inset: 20px auto auto 20px; width: 40px; height: 40px;
     margin: 0; padding: 0; border: 0; background: rgb(30, 160, 220);
   }
+  #fs:not(:fullscreen) { display: none }
 `;
 
 setUpAndTearDown(
@@ -41,8 +42,16 @@ setUpAndTearDown(
       document.head.appendChild(s);
       document.body.insertAdjacentHTML(
         'beforeend',
-        '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div><div id="pop" popover="manual"></div><dialog id="dlg"></dialog>'
+        '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div><div id="pop" class="top" popover="manual"></div><dialog id="dlg" class="top"></dialog>' +
+          '<div id="auto" class="top" popover="auto"></div><div id="hint" class="top" popover="hint"></div>' +
+          '<div id="again" class="top" popover="manual"></div><div id="fs" class="top"></div><div id="host"></div>'
       );
+      // A popover in a shadow tree: its toggle events do not reach the document.
+      const root = document.getElementById('host')?.attachShadow({ mode: 'closed' });
+      if (root) {
+        root.innerHTML = `<style>${style.match(/\.top \{[^}]*\}/)?.[0] ?? ''}</style><div class="top" popover="manual"></div>`;
+        Reflect.set(window, '__shadowPopover', root.lastElementChild);
+      }
     }, STYLE);
   },
   () => env?.close()
@@ -306,31 +315,88 @@ test("a vision deficiency keeps the page's own filter on <html>, applied under i
   }
 });
 
-for (const [what, open, close] of [
-  [
-    'popover',
-    () => document.querySelector<HTMLElement>('#pop')?.showPopover(),
-    () => document.querySelector<HTMLElement>('#pop')?.hidePopover(),
-  ],
-  [
-    'modal dialog',
-    () => document.querySelector('dialog')?.showModal(),
-    () => document.querySelector('dialog')?.close(),
-  ],
+/** Opens or closes the page's top-layer element `what` (see the fixture). */
+const toggle = (what: string, open: boolean) =>
+  t.page.evaluate(
+    async (what, open) => {
+      const el =
+        what === 'shadow popover'
+          ? (Reflect.get(window, '__shadowPopover') as HTMLElement)
+          : (document.getElementById(what) as HTMLElement);
+      if (what === 'dlg') {
+        if (open) (el as HTMLDialogElement).showModal();
+        else (el as HTMLDialogElement).close();
+      } else if (what === 'fs') {
+        // Full screen needs a user gesture: done from a click below.
+        if (!open && document.fullscreenElement) await document.exitFullscreen();
+      } else el.togglePopover(open);
+      await new Promise(requestAnimationFrame);
+    },
+    what,
+    open
+  );
+
+const openFullscreen = async () => {
+  await t.page.evaluate(() => {
+    const fs = document.getElementById('fs');
+    if (fs) fs.onclick = () => void fs.requestFullscreen();
+    // Shown for the click only: full screen, it is shown by the style.
+    fs?.style.setProperty('display', 'block');
+  });
+  await t.page.click('#fs');
+  await t.page.evaluate(() => document.getElementById('fs')?.style.removeProperty('display'));
+  await t.page.waitForFunction(() => document.fullscreenElement !== null);
+  await t.page.evaluate(() => new Promise(requestAnimationFrame));
+};
+
+for (const [what, name] of [
+  ['manual popover', 'pop'],
+  ['auto popover', 'auto'],
+  ['hint popover', 'hint'],
+  ['modal dialog', 'dlg'],
+  ['popover in a shadow tree', 'shadow popover'],
+  ['full-screen element', 'fs'],
 ] as const) {
   test(`a ${what} opened after a vision deficiency is filtered too`, async () => {
-    await t.page.evaluate(open);
+    const open = () => (name === 'fs' ? openFullscreen() : toggle(name, true));
+    const close = () => toggle(name, false);
+    await open();
     const plain = await pixel();
-    await t.page.evaluate(close);
-    const seen = await filtered(
-      'deuteranopia',
-      40,
-      () => t.page.evaluate(open),
-      () => t.page.evaluate(close)
-    );
+    await close();
+    const seen = await filtered('deuteranopia', 40, open, close);
     assert.notDeepEqual(seen, plain);
   });
 }
+
+test('a page opening a popover whenever one opens does not loop with the mask', async () => {
+  await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'deuteranopia' });
+  try {
+    // For half a second, the page shows #again anew each time it opens: a toggle every task.
+    const count = await t.page.evaluate(async () => {
+      const again = document.getElementById('again') as HTMLElement;
+      let toggles = 0;
+      let stop = false;
+      const onToggle = (e: Event) => {
+        if (stop || e.target !== again || (e as ToggleEvent).newState !== 'open') return;
+        toggles++;
+        again.hidePopover();
+        again.showPopover();
+      };
+      document.addEventListener('toggle', onToggle, true);
+      again.showPopover();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      stop = true;
+      document.removeEventListener('toggle', onToggle, true);
+      return toggles;
+    });
+    assert.ok(count > 0);
+    // The page still answers, and #again, opened last, is under the mask.
+    assert.notDeepEqual(await pixel(), [30, 160, 220, 255]);
+  } finally {
+    await toggle('again', false);
+    await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+  }
+});
 
 test('an unknown vision deficiency fails', async () => {
   for (const side of [t.chrome, t.ours]) {

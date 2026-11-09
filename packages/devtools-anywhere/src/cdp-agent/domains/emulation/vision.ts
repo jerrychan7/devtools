@@ -2,7 +2,9 @@
 // transparent mask in the top layer whose backdrop-filter is that filter, so the page's own
 // `filter` on <html> stays and getComputedStyle sees nothing of ours.
 import { frames } from '../../core/frames/frames';
-import { OWN_ATTRIBUTE, isOwn, markOwn } from '../../core/nodes/nodes';
+import { OWN_ATTRIBUTE, closestOwn, isOwn, markOwn } from '../../core/nodes/nodes';
+import type { ShadowRootTracker } from '../../core/nodes/shadow-roots';
+import type { TopNatives } from '../../probe/types';
 
 /** The SVG filters Chrome puts on the page for each vision deficiency. */
 export const VISION: Record<string, string> = {
@@ -22,12 +24,35 @@ function matrix(rgb: string): string {
   return `<feColorMatrix values="${row(0)} ${row(1)} ${row(2)} 0 0 0 1 0"/>`;
 }
 
-// The browser's own functions, taken before the page can replace them on the prototypes later.
-const proto = typeof HTMLElement === 'function' ? HTMLElement.prototype : undefined;
-const showPopover = proto?.showPopover;
-const hidePopover = proto?.hidePopover;
-const listen = EventTarget.prototype.addEventListener;
-const unlisten = EventTarget.prototype.removeEventListener;
+/**
+ * The browser's own functions: the probe's (taken before the page's code and the probe's own
+ * hooks, so that our listeners are not listed as the page's either), else those found when this
+ * module loaded.
+ */
+let natives: TopNatives = {
+  show: HTMLElement.prototype.showPopover,
+  hide: HTMLElement.prototype.hidePopover,
+  listen: EventTarget.prototype.addEventListener,
+  unlisten: EventTarget.prototype.removeEventListener,
+  MO: MutationObserver,
+};
+
+/** The shadow roots of the frames' documents, whose popovers and dialogs the page toggles too. */
+let shadowRoots: ShadowRootTracker | undefined;
+
+/** Takes the probe's natives (undefined from an older probe) and the shadow root tracker. */
+export function useVisionContext(top: TopNatives | undefined, tracker: ShadowRootTracker): void {
+  if (top) natives = top;
+  shadowRoots = tracker;
+}
+
+const EVENTS = ['toggle', 'fullscreenchange'];
+const on = (target: EventTarget, listener: (e: Event) => void) => {
+  for (const t of EVENTS) Reflect.apply(natives.listen, target, [t, listener, true]);
+};
+const off = (target: EventTarget, listener: (e: Event) => void) => {
+  for (const t of EVENTS) Reflect.apply(natives.unlisten, target, [t, listener, true]);
+};
 
 /**
  * The mask's popover style: the browser's popover style undone, over the whole viewport, letting
@@ -47,6 +72,9 @@ interface Mask {
   style: HTMLStyleElement;
   onEvent: (e: Event) => void;
   observer: MutationObserver;
+  /** The shadow roots listened to: their toggle events do not reach the document. */
+  roots: Set<ShadowRoot>;
+  stop: () => void;
 }
 
 let current: Mask | null = null;
@@ -63,7 +91,8 @@ let pending = false;
  */
 function raise() {
   const m = current;
-  if (!m || !showPopover || !hidePopover) return;
+  const { show, hide } = natives;
+  if (!m || !show || !hide) return;
   if (raised) {
     pending = true;
     return;
@@ -77,16 +106,16 @@ function raise() {
     }
   });
   try {
-    if (m.mask.matches(':popover-open')) Reflect.apply(hidePopover, m.mask, []);
-    Reflect.apply(showPopover, m.mask, []);
+    if (m.mask.matches(':popover-open')) Reflect.apply(hide, m.mask, []);
+    Reflect.apply(show, m.mask, []);
   } catch {
     return;
   }
   for (const el of m.doc.querySelectorAll(`[${OWN_ATTRIBUTE}]`)) {
     if (!isOwn(el) || !el.shadowRoot || el === m.host) continue;
     for (const open of el.shadowRoot.querySelectorAll<HTMLElement>(':popover-open')) {
-      Reflect.apply(hidePopover, open, []);
-      Reflect.apply(showPopover, open, []);
+      Reflect.apply(hide, open, []);
+      Reflect.apply(show, open, []);
     }
   }
 }
@@ -107,14 +136,24 @@ function create(doc: Document): Mask {
   mask.popover = 'manual';
   root.append(css, style, mask);
   const onEvent = (e: Event) => {
-    if (e.type === 'toggle' && ((e as ToggleEvent).newState !== 'open' || e.target === mask)) return;
+    if (e.type === 'toggle' && (e as ToggleEvent).newState !== 'open') return;
+    if (e.target instanceof Node && closestOwn(e.target)) return;
     raise();
   };
   // Dialogs opened by the page with show() or showModal() before toggle events fired for them.
-  const observer = new MutationObserver(records => {
+  const observer = new natives.MO(records => {
     if (records.some(r => r.target instanceof HTMLDialogElement && r.target.open)) raise();
   });
-  return { doc, host, mask, style, onEvent, observer };
+  return { doc, host, mask, style, onEvent, observer, roots: new Set(), stop: () => {} };
+}
+
+/** Listens to the shadow roots of `m`'s document not listened to yet. */
+function listenToRoots(m: Mask) {
+  for (const root of shadowRoots?.roots() ?? []) {
+    if (m.roots.has(root) || root.host.ownerDocument !== m.doc || closestOwn(root.host)) continue;
+    m.roots.add(root);
+    on(root, m.onEvent);
+  }
 }
 
 /** Filters the top document with `type`'s filter, or stops ('none' or an unknown type). */
@@ -124,7 +163,9 @@ export function setVision(type: string): void {
     if (!current) return;
     const m = current;
     current = null;
-    for (const t of ['toggle', 'fullscreenchange']) Reflect.apply(unlisten, m.doc, [t, m.onEvent, true]);
+    off(m.doc, m.onEvent);
+    for (const root of m.roots) off(root, m.onEvent);
+    m.stop();
     m.observer.disconnect();
     m.host.remove();
     return;
@@ -132,9 +173,18 @@ export function setVision(type: string): void {
   const doc = frames.top.document;
   if (current && current.doc !== doc) setVision('none');
   if (!current) {
-    current = create(doc);
-    for (const t of ['toggle', 'fullscreenchange']) Reflect.apply(listen, doc, [t, current.onEvent, true]);
-    current.observer.observe(doc, { subtree: true, attributeFilter: ['open'] });
+    const m = (current = create(doc));
+    on(doc, m.onEvent);
+    m.observer.observe(doc, { subtree: true, attributeFilter: ['open'] });
+    if (shadowRoots) {
+      const release = shadowRoots.acquire();
+      const unsubscribe = shadowRoots.onStale(() => current === m && listenToRoots(m));
+      m.stop = () => {
+        unsubscribe();
+        release();
+      };
+      listenToRoots(m);
+    }
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg"><filter id="f">${filter}</filter></svg>`;
   const url = `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
