@@ -136,3 +136,36 @@ test('typing in the panel goes on while the page opens a popover', async () => {
     await send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
   }
 });
+
+test('the panel of an element removed and inserted again goes above the mask again', async () => {
+  const old = frontend;
+  await page.evaluate(() => {
+    const el = document.querySelector('devtools-anywhere');
+    el?.remove();
+    if (el) document.body.append(el);
+  });
+  // Its frontend loads again: found, and given the page's color again.
+  for (let start = Date.now(); ;) {
+    const found = page.frames().find(f => f !== old && !f.detached && f.url().includes('fake-frontend.html'));
+    if (found && (await found.evaluate(() => document.readyState === 'complete'))) {
+      frontend = found;
+      break;
+    }
+    assert.ok(Date.now() - start < 5000, 'the fake frontend again');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  await frontend.evaluate(red => {
+    document.documentElement.style.background = red;
+  }, RED);
+  await send('Emulation.setEmulatedVisionDeficiency', { type: 'achromatopsia' });
+  try {
+    await page.evaluate(() => document.getElementById('pop')?.showPopover());
+    await waitFrames();
+    const seen = await colors();
+    assert.deepEqual(seen.panel, [200, 40, 40, 255], 'the panel is above the mask');
+    assert.notDeepEqual(seen.page, seen.panel, 'the page is under it');
+  } finally {
+    await page.evaluate(() => document.getElementById('pop')?.hidePopover());
+    await send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+  }
+});
