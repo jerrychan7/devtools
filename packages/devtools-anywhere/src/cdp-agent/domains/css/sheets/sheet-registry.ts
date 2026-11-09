@@ -6,10 +6,10 @@ import { CdpError } from '../../../core/session';
 import { adoptedOf } from '../../../core/nodes/adopted';
 import { type TreeScope } from '../matching/forced-pseudo';
 import { type Entry, type StyleRule, importedLayer, layerKeys, realmOfSheet, selectorLabel } from '../matching/rules';
-import { type StyleOrigin, buildStyle } from '../style';
+import { INLINE_PREFIX, type StyleOrigin, buildStyle } from '../style';
 import { ownStyle, rulesChanged, settle } from './watch/cssom-watch';
 import { type SheetSource, namespaceText } from './text/pair';
-import { offsetsOf, selectorSpans, styleSpan } from './text/ranges';
+import { offsetsOf, rangeOf, selectorSpans, styleSpan } from './text/ranges';
 import { sheetTexts } from './text/sheet-text';
 import { textEnd } from './text/text-lines';
 
@@ -368,6 +368,45 @@ export class SheetRegistry {
         return rule;
     }
     throw new CdpError(at === 'style' ? STYLE_MISMATCH : RANGE_MISMATCH);
+  }
+
+  /**
+   * The range of each edit of a CSS.setStyleTexts call in the text its sheet has when it is
+   * applied, as Chrome reads them (Chrome 157): every range is taken in the text the sheet had
+   * before the first edit, a range outside it refused before any edit is made (`OUT_OF_BOUNDS`,
+   * thrown here), and the offsets found there applied to the text the edits before it left. So an
+   * edit after another that made a style of the same sheet before it longer or shorter is at
+   * offsets that moved, most often no style's (on another line too), past the text's end when it
+   * got shorter. Ranges of elements' styles, and of sheets whose text is serialized
+   * (where a rule's line is its id), are taken as they are.
+   */
+  rangesAtStart(edits: Protocol.CSS.StyleDeclarationEdit[]): (i: number) => Protocol.CSS.SourceRange {
+    const sourceOf = (id: string) => {
+      if (id.startsWith(INLINE_PREFIX)) return null;
+      try {
+        return this.sourceOf(this.get(id));
+      } catch {
+        // No such sheet: told when the edit is applied.
+        return null;
+      }
+    };
+    const offsets = edits.map(({ styleSheetId, range: r }) => {
+      const source = sourceOf(styleSheetId);
+      // A range starting past its end is refused as such when its edit is applied.
+      const ordered = r.startLine < r.endLine || (r.startLine === r.endLine && r.startColumn <= r.endColumn);
+      return source && ordered ? offsetsOf(source, r) : undefined;
+    });
+    // Checked before any edit is made, as Chrome does: told first, without the edit's number.
+    if (offsets.includes(null)) throw new CdpError(OUT_OF_BOUNDS);
+    return i => {
+      const edit = edits[i] as Protocol.CSS.StyleDeclarationEdit;
+      const at = offsets[i];
+      if (!at) return edit.range;
+      const source = sourceOf(edit.styleSheetId);
+      // Past the end of the text the edits before it left: no style's (Chrome names the edit).
+      if (source && at[1] > source.text.length) throw new CdpError(STYLE_MISMATCH);
+      return source ? rangeOf(source, at[0], at[1]) : edit.range;
+    };
   }
 
   /** The text the sheet was written in, with its rules in it; null when unknown. */

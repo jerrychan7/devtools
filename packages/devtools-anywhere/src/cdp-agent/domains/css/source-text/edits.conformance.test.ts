@@ -510,3 +510,132 @@ test("setStyleTexts: a range that is no style's is told before an invalid text; 
   assert.match(chrome.second, /edit #1/);
   assert.ok(chrome.text.includes('.sw { top: 0 }'));
 });
+
+test('setStyleTexts: two edits, the first making its style longer, the second at its range from before', async () => {
+  // Every range is read in the text from before the first edit, its offsets applied to the text
+  // the edits before it left: once `.sv` is longer, those of `.sw` are no style's, on its line
+  // or on the next.
+  const [ours, chrome] = await each(async (side, t) => {
+    const out: unknown[] = [];
+    for (const css of [STYLED, '.sv { color: red } .sw { top: 0 }\n'])
+      for (const second of [' top: 2px; left: 0 ', ' top: 2px }']) {
+        const at = await addStyle(t, css, '<p class="sv sw">x</p>');
+        const res = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, `${at} p`) });
+        const rules = res.matchedCSSRules?.map(m => m.rule) ?? [];
+        const sv = rules.findLast(r => r.selectorList.text === '.sv');
+        const sw = rules.findLast(r => r.selectorList.text === '.sw');
+        assert.ok(sv?.styleSheetId && sv.style.range && sw?.style.range);
+        const got = await outcome(
+          side.send('CSS.setStyleTexts', {
+            edits: [
+              { styleSheetId: sv.styleSheetId, range: sv.style.range, text: ' color: green; left: 10px ' },
+              { styleSheetId: sv.styleSheetId, range: sw.style.range, text: second },
+            ],
+          })
+        );
+        out.push({ css, second, got, text: await text(side, sv.styleSheetId) });
+      }
+    return out;
+  });
+  assert.deepEqual(ours, chrome);
+  for (const r of chrome) assert.match((r as { got: string }).got, /^Failed applying edit #1: /);
+});
+
+test('setStyleTexts: a range outside the text is told before any edit; the text made shorter; two sheets', async () => {
+  const css = '.sv { color: red; top: 1px; left: 2px }\n.sw { top: 0 }\n';
+  const [ours, chrome] = await each(async (side, t) => {
+    let made = 0;
+    const sheetOf = async () => {
+      // Each text its own: Chrome shares the rules of <style> elements of the same text.
+      const at = await addStyle(t, `${css}/* ${++made} */\n`, '<p class="sv sw">x</p>');
+      const res = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, `${at} p`) });
+      const rules = res.matchedCSSRules?.map(m => m.rule) ?? [];
+      const sv = rules.findLast(r => r.selectorList.text === '.sv');
+      const sw = rules.findLast(r => r.selectorList.text === '.sw');
+      assert.ok(sv?.styleSheetId && sv.style.range && sw?.style.range);
+      return { id: sv.styleSheetId, sv: sv.style.range, sw: sw.style.range };
+    };
+    const outside = { startLine: 5, startColumn: 0, endLine: 5, endColumn: 1 };
+    const out: unknown[] = [];
+    const run = async (name: string, edits: Protocol.CSS.StyleDeclarationEdit[], ids: string[]) => {
+      const got = await outcome(side.send('CSS.setStyleTexts', { edits }));
+      out.push({ name, got, texts: await Promise.all(ids.map(id => text(side, id))) });
+    };
+    for (const [name, first] of [
+      ['no style at the first range', (a: Awaited<ReturnType<typeof sheetOf>>) => ({ ...a.sv, startColumn: 4 })],
+      ['the first fine', (a: Awaited<ReturnType<typeof sheetOf>>) => a.sv],
+    ] as const) {
+      const a = await sheetOf();
+      await run(
+        `outside, after ${name}`,
+        [
+          { styleSheetId: a.id, range: first(a), text: ' color: blue ' },
+          { styleSheetId: a.id, range: outside, text: 'top: 1px' },
+        ],
+        [a.id]
+      );
+    }
+    {
+      // `.sw`'s range from before: past the end of the text once `.sv`'s style is empty.
+      const a = await sheetOf();
+      const pastEnd = { ...a.sw, endColumn: a.sw.endColumn + 1 };
+      await run(
+        'shorter, then past its end',
+        [
+          { styleSheetId: a.id, range: a.sv, text: '' },
+          { styleSheetId: a.id, range: pastEnd, text: ' top: 9px ' },
+        ],
+        [a.id]
+      );
+    }
+    {
+      const [a, b] = [await sheetOf(), await sheetOf()];
+      await run(
+        'two sheets',
+        [
+          { styleSheetId: a.id, range: a.sv, text: ' color: blue; left: 100px; top: 2px ' },
+          { styleSheetId: b.id, range: b.sw, text: ' top: 9px ' },
+        ],
+        [a.id, b.id]
+      );
+    }
+    return out;
+  });
+  assert.deepEqual(ours, chrome);
+  const got = chrome.map(r => (r as { got: string }).got);
+  assert.deepEqual(got.slice(0, 2), ['Specified range is out of bounds', 'Specified range is out of bounds']);
+  assert.match(got[2] as string, /^Failed applying edit #1: /);
+  assert.equal(got[3], 'ok');
+});
+
+test('setStyleTexts: a sheet and an element in one call, in either order, a refused one taking back the other', async () => {
+  const [ours, chrome] = await each(async (side, t) => {
+    const out: unknown[] = [];
+    let made = 0;
+    for (const sheetFirst of [true, false])
+      for (const elementText of [' top: 3px; left: 1px ', ' top: 3px }']) {
+        // Each text its own: Chrome shares the rules of <style> elements of the same text.
+        const at = await addStyle(t, `${STYLED}/* ${++made} */\n`, '<p class="sv" style="top: 1px">x</p>');
+        const res = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, `${at} p`) });
+        const sv = res.matchedCSSRules?.map(m => m.rule).findLast(r => r.selectorList.text === '.sv');
+        const inline = res.inlineStyle;
+        assert.ok(sv?.styleSheetId && sv.style.range && inline?.styleSheetId && inline.range);
+        const sheetEdit = { styleSheetId: sv.styleSheetId, range: sv.style.range, text: ' color: green; left: 10px ' };
+        const elementEdit = { styleSheetId: inline.styleSheetId, range: inline.range, text: elementText };
+        const got = await outcome(
+          side.send('CSS.setStyleTexts', { edits: sheetFirst ? [sheetEdit, elementEdit] : [elementEdit, sheetEdit] })
+        );
+        const attribute = await t.page.evaluate(at => document.querySelector(`${at} p`)?.getAttribute('style'), at);
+        out.push({ sheetFirst, elementText, got, text: await text(side, sv.styleSheetId), attribute });
+      }
+    return out;
+  });
+  assert.deepEqual(ours, chrome);
+  const got = chrome.map(r => (r as { got: string }).got);
+  assert.deepEqual(got, [
+    'ok',
+    'Failed applying edit #1: SyntaxError Style text is not valid.',
+    'ok',
+    'Failed applying edit #0: SyntaxError Style text is not valid.',
+  ]);
+});

@@ -786,18 +786,18 @@ export function registerCss(ctx: Context) {
     setStyleTexts(params: Protocol.CSS.SetStyleTextsRequest): Protocol.CSS.SetStyleTextsResponse {
       // Like Chrome, all or none: an edit failing takes back those before it, unrecorded.
       const done: { revert: () => void; action: Action }[] = [];
+      const rangeAt = sheets.rangesAtStart(params.edits);
       batch = done;
       let styles: CSSStyle[];
       try {
         styles = params.edits.map((edit, i) => {
           try {
-            return applyEdit(edit);
+            return applyEdit({ ...edit, range: rangeAt(i) });
           } catch (e) {
             for (const { revert } of done.reverse()) revert();
             // Like Chrome, a range that is no style's, or a text that is none, names the edit.
-            if (e instanceof CdpError && (e.message === STYLE_MISMATCH || e.message === INVALID_STYLE))
-              throw new CdpError(`Failed applying edit #${i}: ${e.message}`);
-            throw e;
+            const named = e instanceof CdpError && [STYLE_MISMATCH, INVALID_STYLE].includes(e.message);
+            throw named ? new CdpError(`Failed applying edit #${i}: ${(e as Error).message}`) : e;
           }
         });
       } finally {
