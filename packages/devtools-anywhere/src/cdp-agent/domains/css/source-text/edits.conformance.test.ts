@@ -359,3 +359,154 @@ test('selectors with escapes: setStyleTexts and setRuleSelector edit the text as
   assert.ok(ours.text.includes('.\\78 2\\:b,  .x\\31 0 { color: blue }'), ours.text);
   assert.ok(ours.text.includes(':\\6e ot(.\\7a)'), ours.text);
 });
+
+/** As Chrome's VerifyStyleText refuses them: closing the block, a `}` more, something left open. */
+const REFUSED = [
+  ' color: blue }',
+  ' color: blue } .d { top: 1px ',
+  ' color: blue } }',
+  ' color: blue; /* open',
+  ' color: blue; x { top: 1px ',
+  ' color: "open',
+  ' color: blue } @import "y.css"; .a2 { top: 1px ',
+  ' color: blue } @layer y',
+  ' color: red; } ',
+  'color:red } ; top:0',
+  'color: red; } top: 1px',
+];
+/** Taken: what stays in the block, `}` in a string, comment or URL, rules in the block. */
+const TAKEN = [
+  '',
+  ';',
+  ' content: "}" ',
+  ' /* } */ color: red ',
+  ' color: red !important ',
+  ' background: url(a}) ',
+  ' --x: { a } ',
+  ' color: red; & i { top: 1px } ',
+  'color: blue; }{',
+  'color: red; ]',
+  // Taken for an element's style too, though its attribute is read as declarations only.
+  'a{top:0} color:red',
+  '@media x{} color:red',
+  'x { top: 1px } left: 2px',
+  '@media x { top: 1px } color: red',
+];
+const STYLED = '@media screen {\n  .sv { color: red }\n  .sw { top: 0 }\n}\n.sx { color: red }\n';
+const outcome = (p: Promise<unknown>) =>
+  p.then(
+    () => 'ok',
+    (e: Error) => (e.message.split('\n')[0] ?? '').replace(/^Protocol error \([\w.]+\): /, '')
+  );
+
+/**
+ * Each text set, with CSS.setStyleTexts, on `.sv` in an @media and on an element's style, each in
+ * a sheet and an element of its own: the outcome of both, the sheet's text and the element's style
+ * attribute after them. `around`, when given, runs the two edits.
+ */
+async function styleTexts(
+  side: Side,
+  t: TestPage,
+  texts: string[],
+  around?: (edit: () => Promise<void>) => Promise<void>
+) {
+  const out: { to: string; sheet: string; element: string; text: string; attribute: unknown }[] = [];
+  for (const to of texts) {
+    const at = await addStyle(t, STYLED, '<p class="sv sw sx" style="top: 1px">x</p>');
+    const res = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, `${at} p`) });
+    // The last: in this text's sheet, added after the others.
+    const found = res.matchedCSSRules?.map(m => m.rule).findLast(r => r.selectorList.text === '.sv');
+    const inline = res.inlineStyle;
+    assert.ok(found?.styleSheetId && found.style.range && inline?.styleSheetId && inline.range);
+    const [sheetId, range, inlineId, inlineRange] = [
+      found.styleSheetId,
+      found.style.range,
+      inline.styleSheetId,
+      inline.range,
+    ];
+    let sheet = '';
+    let element = '';
+    const edit = async () => {
+      sheet = await outcome(
+        side.send('CSS.setStyleTexts', {
+          edits: [{ styleSheetId: sheetId, range, text: to }],
+        })
+      );
+      element = await outcome(
+        side.send('CSS.setStyleTexts', {
+          edits: [{ styleSheetId: inlineId, range: inlineRange, text: to }],
+        })
+      );
+    };
+    await (around ? around(edit) : edit());
+    const attribute = await t.page.evaluate(at => document.querySelector(`${at} p`)?.getAttribute('style'), at);
+    out.push({ to, sheet, element, text: await text(side, sheetId), attribute });
+  }
+  return out;
+}
+
+test('style texts that would not stay the style are refused, in a sheet and on an element', async () => {
+  const [ours, chrome] = await each((side, t) => styleTexts(side, t, [...REFUSED, ...TAKEN]));
+  assert.deepEqual(ours, chrome);
+  for (const r of chrome.slice(0, REFUSED.length)) assert.ok(r.sheet !== 'ok' && r.element !== 'ok', r.to);
+  for (const r of chrome.slice(REFUSED.length)) assert.ok(r.sheet === 'ok' && r.element === 'ok', r.to);
+});
+
+test('style texts checked through the native CSSOM, though the page replaced it', async () => {
+  // What styleTextFits reads (style.ts), replaced by the page: the check is Chrome's still.
+  const [ours, chrome] = await each((side, t) =>
+    styleTexts(side, t, [' color: blue }', ' color: red; } ', ' color: green ', ' content: "}" '], async edit => {
+      try {
+        await t.page.evaluate(() => {
+          // What to put back, kept before anything is replaced.
+          const saved: [object, string, PropertyDescriptor][] = [];
+          (globalThis as unknown as { restore?: () => void }).restore = () => {
+            for (const [proto, name, d] of saved) Object.defineProperty(proto, name, d);
+          };
+          const lie = (proto: object, name: string, d: PropertyDescriptor) => {
+            saved.push([proto, name, Object.getOwnPropertyDescriptor(proto, name) as PropertyDescriptor]);
+            Object.defineProperty(proto, name, { configurable: true, ...d });
+          };
+          lie(CSSStyleDeclaration.prototype, 'length', { get: () => 1 });
+          lie(CSSStyleRule.prototype, 'selectorText', { get: () => 'div' });
+          lie(CSSStyleDeclaration.prototype, 'getPropertyValue', { value: () => 'x' });
+          lie(CSSRuleList.prototype, 'item', { value: () => null });
+        });
+        await edit();
+      } finally {
+        await t.page.evaluate(() => (globalThis as unknown as { restore?: () => void }).restore?.());
+      }
+    })
+  );
+  assert.deepEqual(ours, chrome);
+});
+
+test("setStyleTexts: a range that is no style's is told before an invalid text; a second edit refused takes back the first", async () => {
+  const [ours, chrome] = await each(async (side, t) => {
+    const at = await addStyle(t, STYLED, '<p class="sv sw sx">x</p>');
+    const res = await side.send('CSS.getMatchedStylesForNode', { nodeId: await nodeId(side, `${at} p`) });
+    const rules = res.matchedCSSRules?.map(m => m.rule) ?? [];
+    // The last: in this test's sheet, added after the others.
+    const sv = rules.findLast(r => r.selectorList.text === '.sv');
+    const sw = rules.findLast(r => r.selectorList.text === '.sw');
+    assert.ok(sv?.styleSheetId && sv.style.range && sw?.style.range);
+    const id = sv.styleSheetId;
+    const wrong = { ...sv.style.range, startColumn: sv.style.range.startColumn - 1 };
+    const mismatch = await outcome(
+      side.send('CSS.setStyleTexts', { edits: [{ styleSheetId: id, range: wrong, text: '}' }] })
+    );
+    const second = await outcome(
+      side.send('CSS.setStyleTexts', {
+        edits: [
+          // The later style first: the first edit moves no range of the second.
+          { styleSheetId: id, range: sw.style.range, text: ' top: 2px; left: 0 ' },
+          { styleSheetId: id, range: sv.style.range, text: ' color: green }' },
+        ],
+      })
+    );
+    return { mismatch, second, text: await text(side, id) };
+  });
+  assert.deepEqual(ours, chrome);
+  assert.match(chrome.second, /edit #1/);
+  assert.ok(chrome.text.includes('.sw { top: 0 }'));
+});

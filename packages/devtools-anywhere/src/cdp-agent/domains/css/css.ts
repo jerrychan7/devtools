@@ -42,6 +42,7 @@ import {
   ownCall,
   ownEdit,
   ownSet,
+  ownSheet,
   ownStyle,
   settle,
   useCssNatives,
@@ -53,9 +54,11 @@ import {
   type CSSStyle,
   type ComputedStyleResponse,
   INLINE_PREFIX,
+  INVALID_STYLE,
   buildStyle,
   normalizePseudo,
   setStyleText,
+  styleTextFits,
   sources,
 } from './style';
 
@@ -352,6 +355,7 @@ export function registerCss(ctx: Context) {
       if (!isNode(el) || !(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Node not found');
       const old = el.getAttribute('style');
       const oldSource = sources.get(el.style);
+      if (!styleTextFits(edit.text)) throw new CdpError(INVALID_STYLE); // As Chrome, as for a rule's.
       perform(
         () => setStyleText(el.style, edit.text, () => el.setAttribute('style', edit.text)),
         () => {
@@ -366,6 +370,7 @@ export function registerCss(ctx: Context) {
     const sheet = sheets.get(edit.styleSheetId);
     assertEditable(sheet);
     const rule = sheets.findRule(sheet, edit.range, 'style');
+    if (!styleTextFits(edit.text)) throw new CdpError(INVALID_STYLE);
     const style = ownStyle(rule);
     const old = style.cssText;
     const oldSource = sources.get(style);
@@ -491,7 +496,7 @@ export function registerCss(ctx: Context) {
     // A condition that leaves the rule unparsable is refused before the rule is taken out, as
     // Chrome leaves it.
     try {
-      ownCall(new CSSStyleSheet(), 'insertRule', after, 0);
+      ownCall(ownSheet(), 'insertRule', after, 0);
     } catch {
       throw new CdpError('SyntaxError Rule text is not valid.');
     }
@@ -789,8 +794,8 @@ export function registerCss(ctx: Context) {
             return applyEdit(edit);
           } catch (e) {
             for (const { revert } of done.reverse()) revert();
-            // Like Chrome, a range that is no style's names the edit.
-            if (e instanceof CdpError && e.message === STYLE_MISMATCH)
+            // Like Chrome, a range that is no style's, or a text that is none, names the edit.
+            if (e instanceof CdpError && (e.message === STYLE_MISMATCH || e.message === INVALID_STYLE))
               throw new CdpError(`Failed applying edit #${i}: ${e.message}`);
             throw e;
           }
@@ -884,7 +889,7 @@ export function registerCss(ctx: Context) {
       if (!isCssom(rule, 'CSSKeyframeRule')) throw new CdpError(RANGE_MISMATCH);
       const old = rule.keyText;
       // Chrome's error for a key the parser does not take.
-      const alone = new CSSStyleSheet();
+      const alone = ownSheet();
       ownCall(alone, 'replaceSync', `@keyframes x { ${params.keyText} {} }`);
       const parsed = alone.cssRules[0];
       if (!isCssom(parsed, 'CSSKeyframesRule') || parsed.cssRules.length !== 1)

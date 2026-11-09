@@ -177,7 +177,13 @@ async function inline(text: string) {
         })
         .then(
           r => (r.styles[0] ? style(r.styles[0]) : null),
-          (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) })
+          // The message alone: each side's transport wraps it its own way.
+          (e: unknown) => ({
+            error: ((e instanceof Error ? e.message : String(e)).split('\n')[0] ?? '').replace(
+              /^Protocol error \([\w.]+\): /,
+              ''
+            ),
+          })
         );
       const again = await side.send('CSS.getInlineStylesForNode', { nodeId: await nodeId(side, own) });
       assert.ok(again.inlineStyle);
@@ -257,15 +263,12 @@ for (const [label, text] of [
   test(`inline styles left open or with a \`}\`, as Chrome reads them: ${label}`, async () => {
     const { ours, chrome } = await inline(text);
     assert.deepEqual(ours.attr, chrome.attr);
-    // Chrome refuses such a text in setStyleTexts and leaves the style as it was; the agent
-    // applies it. The refusal comes with another branch: the styleTextFits check of setStyleTexts,
-    // in the commit "refuse style texts that are not a rule's style". Once it is merged, the assertions on `ours` below fail, and are to become
-    // `assert.deepEqual(ours.set, chrome.set)` and `assert.deepEqual(ours.again, chrome.again)`.
+    // Chrome refuses such a text in setStyleTexts and leaves the style as it was; so does the
+    // agent (styleTextFits).
     assert.ok(!isStyle(chrome.set) && chrome.set?.error.includes('Style text is not valid'));
     assert.deepEqual(chrome.again, { range: '0:0-0:0', cssText: '', properties: [] });
-    assert.ok(isStyle(ours.set));
-    assert.deepEqual(ours.again, ours.set);
-    assert.deepEqual(ours.set, ours.attr);
+    assert.deepEqual(ours.set, chrome.set);
+    assert.deepEqual(ours.again, chrome.again);
   });
 
 // Each with the names of the declarations Chrome reports, in order.

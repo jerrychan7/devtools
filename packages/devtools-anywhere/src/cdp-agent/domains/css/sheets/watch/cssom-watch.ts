@@ -495,6 +495,12 @@ const OWN_KEYS = [
   'set:keyText',
   'set:mediaText',
   'get:style',
+  // Read by the CSS domain on sheets of its own (style.ts `styleTextFits`).
+  'get:cssRules',
+  'get:length',
+  'value:item',
+  'get:selectorText',
+  'value:getPropertyValue',
 ];
 type Native = (...args: unknown[]) => unknown;
 
@@ -593,6 +599,33 @@ export function ownSet(self: object, name: string, value: unknown): void {
     () => void Reflect.set(self, name, value)
   );
 }
+
+/** `self`'s `name` read through the native getter, like `ownCall`. */
+export function ownGet<T>(self: object, name: string): T {
+  return viaNative(
+    self,
+    `get:${name}`,
+    fn => Reflect.apply(fn, self, []) as T,
+    () => Reflect.get(self, name) as T
+  );
+}
+
+/**
+ * The top window's CSSStyleSheet, taken when the agent loads, as `OWN_KEYS` are: a sheet of the CSS
+ * domain's own. The native one when the agent loads before the page's scripts (the probe, the
+ * Service Worker); a page that replaced it before then has its own called, as for `OWN_KEYS`.
+ */
+const TopSheet = CSSStyleSheet;
+export const ownSheet = (): CSSStyleSheet => new TopSheet();
+// Guarded: the module is loaded where there is no CSSOM too (unit tests of the modules using it).
+const TopStyleRule: unknown = typeof CSSStyleRule === 'function' ? CSSStyleRule.prototype : undefined;
+const protoOf = Object.getPrototypeOf;
+/**
+ * Whether `rule`, of a sheet `ownSheet` made, is a style rule: by its prototype, taken when the
+ * agent loads, rather than by `Symbol.toStringTag` (`isCssom`), which the page may change.
+ */
+export const isOwnStyleRule = (rule: unknown): rule is CSSStyleRule =>
+  typeof rule === 'object' && rule !== null && TopStyleRule !== undefined && protoOf(rule) === TopStyleRule;
 
 /** A rule's style, read by the CSS domain (not taken by the page): through the native getter. */
 export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclaration {

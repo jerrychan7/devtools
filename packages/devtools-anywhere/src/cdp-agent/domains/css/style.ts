@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
-import { ownSet } from './sheets/watch/cssom-watch';
+import { isOwnStyleRule, ownCall, ownGet, ownSet, ownSheet, ownStyle } from './sheets/watch/cssom-watch';
 import { textStyle } from './sheets/text/ranges';
 
 export type CSSStyle = Protocol.CSS.CSSStyle;
@@ -55,6 +55,36 @@ export function normalizePseudo(pseudo: string): string {
  * The source is used as long as the page has not changed the style since.
  */
 export const sources = new WeakMap<CSSStyleDeclaration, { text: string; applied: string }>();
+
+/** Chrome's, for a style text that would not stay a rule's style (setStyleTexts). */
+export const INVALID_STYLE = 'SyntaxError Style text is not valid.';
+
+/**
+ * Whether a style text stays a rule's style: as Chrome checks it (VerifyStyleText), the text
+ * put in `div {…}` and followed by a rule of one declaration must parse as those two rules
+ * only. So a text that closes the rule's block (`color: red }`) or leaves something open (a
+ * block, a comment, a string) is refused, which would change the rules around it.
+ */
+export function styleTextFits(text: string): boolean {
+  // The page may have changed these interfaces: read through the native functions.
+  const probe = ownSheet();
+  try {
+    ownCall(probe, 'replaceSync', `div {${text}} div { --verify-style-text: none; }`);
+  } catch {
+    return false;
+  }
+  const list = ownGet<CSSRuleList>(probe, 'cssRules');
+  if (ownGet<number>(list, 'length') !== 2) return false;
+  const isDiv = (rule: CSSRule | null): rule is CSSStyleRule =>
+    isOwnStyleRule(rule) && ownGet<string>(rule, 'selectorText') === 'div';
+  const first = ownCall<CSSRule | null>(list, 'item', 0);
+  const last = ownCall<CSSRule | null>(list, 'item', 1);
+  if (!isDiv(first) || !isDiv(last)) return false;
+  const style = ownStyle(last);
+  return (
+    ownGet<number>(style, 'length') === 1 && ownCall<string>(style, 'getPropertyValue', '--verify-style-text') !== ''
+  );
+}
 
 /** Sets `text` on a style, keeping it to report disabled and invalid declarations. */
 export function setStyleText(decl: CSSStyleDeclaration, text: string, apply: () => void) {
