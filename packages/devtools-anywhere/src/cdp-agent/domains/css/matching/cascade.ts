@@ -397,7 +397,9 @@ export class Cascade {
     if (!(isHtmlElement(el) || isSvgElement(el))) return undefined;
     // Like Chrome, declarations in the order of the style attribute, which the CSSOM does not keep.
     const attribute = el.getAttribute('style');
+    // None once the page removed it: an attribute of comments only held what the style holds now.
     if (attribute !== null) sources.set(el.style, { text: attribute, applied: el.style.cssText });
+    else sources.delete(el.style);
     return buildStyle(INLINE_PREFIX + this.nodes.backendIdOf(el), el.style, 0, 0);
   }
 
