@@ -7,6 +7,7 @@ import { ownCall, ownStyle } from '../watch/cssom-watch';
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { atName, loose } from './loose';
+import { cssSupports } from './commented';
 import { lineStarts } from './text-lines';
 
 /**
@@ -208,7 +209,7 @@ function matches(source: SheetSource, node: number, rule: CSSRule, tag: string, 
       if (o.commented(d)) continue;
       const name = text.slice(o.declStart(d), o.nameEnd(d));
       if (style.getPropertyValue(name) === '') continue;
-      if (name.startsWith('--') || CSS.supports(name, text.slice(o.valueStart(d), o.valueEnd(d)))) return true;
+      if (name.startsWith('--') || cssSupports(name, text.slice(o.valueStart(d), o.valueEnd(d)))) return true;
     }
     return false;
   }

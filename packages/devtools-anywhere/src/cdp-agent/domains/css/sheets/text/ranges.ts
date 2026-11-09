@@ -6,6 +6,7 @@ import { offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
 import { type CSSStyle, type Written, styleOf } from '../../style';
 import type { SheetSource } from './pair';
+import { reportedComment } from './commented';
 
 /** A range of the text, in lines and columns. */
 export function rangeOf(source: SheetSource, start: number, end: number): Protocol.CSS.SourceRange {
@@ -106,13 +107,7 @@ export function sourceStyle(
   for (let d = o.firstDecl(node); d <= last; d++) {
     const comment = o.commented(d);
     const dStart = o.declStart(d);
-    // Like Chrome, a comment is a disabled declaration only of a property it knows: the rule's
-    // style has a string attribute for each (`margin-top`, …), not `length` or `item`.
-    if (
-      comment &&
-      !text.startsWith('--', dStart) &&
-      typeof Reflect.get(decl, text.slice(dStart, o.nameEnd(d)).toLowerCase()) !== 'string'
-    )
+    if (comment && !reportedComment(text.slice(dStart, o.nameEnd(d)), text.slice(o.valueStart(d), o.valueEnd(d))))
       continue;
     const [start, span] = declSpan(text, o, d);
     const semicolon = o.semicolon(d);

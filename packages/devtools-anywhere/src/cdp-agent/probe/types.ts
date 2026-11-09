@@ -258,8 +258,8 @@ export interface Probe {
   animation?: AnimationNatives | undefined;
   /**
    * The `CSS` namespace and its `supports`, taken before the page's code: the CSS domain asks it
-   * whether a name the page gives setProperty() or removeProperty() is a property's, whatever the
-   * page puts in `window.CSS` later.
+   * whether a name the page gives setProperty() or removeProperty() is a property's, and which
+   * commented-out declarations parse, whatever the page puts in `window.CSS` later.
    * Undefined without `CSS` (or from an older probe).
    */
   css?: CssNatives | undefined;

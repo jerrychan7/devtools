@@ -157,6 +157,11 @@ export function useCssNatives(natives: CssNatives | undefined): void {
   knownCount = 0;
 }
 
+/** `CSS.supports(property, value)`, the native one; false where there is no CSS. */
+export function cssSupports(property: string, value: string): boolean {
+  return !!cssNatives && Reflect.apply(cssNatives.supports, cssNatives.CSS, [property, value]) === true;
+}
+
 /**
  * Whether a property has the name, by name as written, kept for the next writes: a dictionary
  * with no prototype, read and written with no method of the page's to call (Map's could be

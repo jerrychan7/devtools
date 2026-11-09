@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
 import { ownSet } from './sheets/watch/cssom-watch';
+import { reportedComment } from './sheets/text/commented';
 
 export type CSSStyle = Protocol.CSS.CSSStyle;
 export type CSSProperty = Protocol.CSS.CSSProperty;
@@ -76,7 +77,11 @@ function declarations(text: string): Declaration[] {
     enabled(text.slice(last, m.index));
     last = m.index + m[0].length;
     const inner = (m[1] ?? '').trim().replace(/;$/, '');
-    if (inner.includes(':')) result.push({ raw: inner, disabled: true });
+    const colon = inner.indexOf(':');
+    // Like Chrome, only a declaration it would parse (as in a style sheet's text).
+    const value = inner.slice(colon + 1).replace(/\s*!\s*important\s*$/i, '');
+    if (colon >= 0 && reportedComment(inner.slice(0, colon).trim(), value.trim()))
+      result.push({ raw: inner, disabled: true });
   }
   enabled(text.slice(last));
   return result;
@@ -143,8 +148,8 @@ export function styleOf(
       ...(important && { important }),
       implicit: false,
       text,
-      // Like Chrome, only reported when false.
-      ...(!parsedOk && { parsedOk }),
+      // Like Chrome, only reported when false, and not for a disabled one (`-webkit-foo: )`).
+      ...(!parsedOk && !disabled && { parsedOk }),
       disabled,
       range,
     };
