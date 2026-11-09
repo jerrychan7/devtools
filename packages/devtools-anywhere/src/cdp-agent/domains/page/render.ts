@@ -1,4 +1,5 @@
 import { isOwn } from '../../core/nodes/nodes';
+import { visionFilter } from '../emulation/vision';
 
 /** A rectangle in page (document) coordinates, CSS pixels. */
 export interface PageRect {
@@ -70,7 +71,18 @@ export function createRender(load: SnapdomLoader): Render {
     } catch (e) {
       throw new CaptureError(e);
     }
-    return result.toCanvas({ scale, dpr });
+    const canvas = await result.toCanvas({ scale, dpr });
+    // The mask that filters the page is ours, left out: its filter is applied to the image instead.
+    const filter = visionFilter();
+    if (!filter) return canvas;
+    const out = document.createElement('canvas');
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const g = out.getContext('2d');
+    if (!g) return canvas;
+    g.filter = filter;
+    g.drawImage(canvas, 0, 0);
+    return out;
   };
 }
 

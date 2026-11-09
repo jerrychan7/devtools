@@ -386,3 +386,24 @@ test('Page.navigate with a frameId navigates that frame, not the page', async ()
   );
   assert.equal(await t.page.evaluate(() => location.href), top);
 });
+
+test('captureScreenshot is filtered by an emulated vision deficiency, as in Chrome', async () => {
+  const { s, ours, chrome, look } = await screenshotPage();
+  try {
+    const clip = { x: 10, y: 520, width: 100, height: 50, scale: 1 };
+    const type = 'deuteranopia';
+    await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type });
+    const theirs = await look((await chrome({ clip })).data);
+    await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+    await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type });
+    const mine = await look((await ours({ clip })).data);
+    await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+    assert.notDeepEqual(theirs.center, [255, 0, 0]);
+    assert.ok(
+      mine.center.every((v, i) => Math.abs(v - (theirs.center[i] ?? 0)) <= 2),
+      `ours ${JSON.stringify(mine.center)}, Chrome's ${JSON.stringify(theirs.center)}`
+    );
+  } finally {
+    await s.page.close();
+  }
+});
