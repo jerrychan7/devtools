@@ -439,3 +439,31 @@ test('the mask is not in the DOM tree', async () => {
     await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
   }
 });
+
+test('a page removing the mask whenever it sees it does not loop with it', async () => {
+  const seen = await filtered('protanopia');
+  await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'protanopia' });
+  try {
+    const removals = await t.page.evaluate(async () => {
+      let count = 0;
+      const observer = new MutationObserver(() => {
+        for (const el of document.documentElement.children)
+          if (el.getAttribute('data-devtools-anywhere') === 'vision') {
+            el.remove();
+            count++;
+          }
+      });
+      observer.observe(document.documentElement, { childList: true });
+      document.querySelector('[data-devtools-anywhere="vision"]')?.remove();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      observer.disconnect();
+      return count;
+    });
+    // Put back once a frame at most: about 30 times in half a second, not thousands.
+    assert.ok(removals < 100, `${removals} removals`);
+    await t.page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    assert.deepEqual(await pixel(), seen);
+  } finally {
+    await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+  }
+});
