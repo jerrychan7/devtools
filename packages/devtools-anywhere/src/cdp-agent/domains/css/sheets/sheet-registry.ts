@@ -363,7 +363,7 @@ export class SheetRegistry {
       if (at === 'selector' && source.outline.preludeStart(node) !== offsets[0]) continue;
       const spans = at === 'selector' ? selectorSpans(source, node) : [];
       const [start, end] =
-        at === 'style' ? styleSpan(source, node) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
+        at === 'style' ? styleSpan(source, node, rule) : [spans[0]?.[0] ?? -1, spans[spans.length - 1]?.[1] ?? -1];
       if (start === offsets[0] && end === offsets[1] && (at === 'style' || source.outline.kind(node) === 'qualified'))
         return rule;
     }

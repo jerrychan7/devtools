@@ -98,6 +98,8 @@ export interface Written {
   shown?: string;
   important: boolean;
   disabled: boolean;
+  /** Not a declaration whatever its value: one given up at a `{` (`color: red {}`). */
+  invalid?: boolean;
   text: string;
   range: Protocol.CSS.SourceRange;
 }
@@ -116,9 +118,9 @@ export function styleOf(
   const cssProperties: CSSProperty[] = [];
   const shorthandEntries: Protocol.CSS.ShorthandEntry[] = [];
   const probe = document.createElement('div').style;
-  for (const { name, value, shown: asWritten, important, disabled, text, range } of written) {
+  for (const { name, value, shown: asWritten, important, disabled, invalid, text, range } of written) {
     // Whether the browser accepts the declaration.
-    ownSet(probe, 'cssText', `${name}: ${value}${important ? ' !important' : ''};`);
+    ownSet(probe, 'cssText', invalid ? '' : `${name}: ${value}${important ? ' !important' : ''};`);
     const parsedOk = probe.length > 0;
     // Like Chrome, values of !important declarations keep the flag.
     const shown = asWritten ?? (important ? `${value} !important` : value);
@@ -148,7 +150,7 @@ export function styleOf(
       property.longhandProperties = longhands;
     }
   }
-  const list = written.map(w => ({ raw: `${w.name}:${w.value}`, disabled: w.disabled }));
+  const list = written.map(w => ({ raw: `${w.name}:${w.value}`, disabled: w.disabled || w.invalid === true }));
   cssProperties.push(...appliedProperties(decl, list));
   return { styleSheetId, cssProperties, shorthandEntries, cssText, range };
 }

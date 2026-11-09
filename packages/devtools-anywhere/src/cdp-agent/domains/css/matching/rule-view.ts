@@ -24,7 +24,7 @@ export class RuleView {
   ruleStyle(sheet: CSSStyleSheet, rule: Styled): CSSStyle {
     const source = this.sheets.sourceOf(sheet);
     const node = source?.nodes.get(rule);
-    if (source && node !== undefined) return sourceStyle(this.sheets.idOf(sheet), ownStyle(rule), source, node);
+    if (source && node !== undefined) return sourceStyle(this.sheets.idOf(sheet), ownStyle(rule), source, node, rule);
     if (isCssom(rule, 'CSSKeyframeRule'))
       return buildStyle(this.sheets.idOf(sheet), ownStyle(rule), 0, rule.keyText.length + 3);
     const line = this.sheets.ruleId(sheet, rule);
@@ -149,7 +149,7 @@ export class RuleView {
             keyText: this.keyText(sheet, k),
             style:
               source && node !== undefined
-                ? sourceStyle(styleSheetId, ownStyle(k), source, node)
+                ? sourceStyle(styleSheetId, ownStyle(k), source, node, k)
                 : buildStyle(styleSheetId, ownStyle(k), 0, k.keyText.length + 3),
           };
         }),

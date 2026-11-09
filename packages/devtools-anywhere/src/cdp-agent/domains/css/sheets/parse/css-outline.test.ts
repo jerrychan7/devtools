@@ -145,6 +145,9 @@ test('dashed: two `-` once escapes are decoded', () => {
 });
 
 test("any other property's value with a block is no declaration, at the top, nested and in conditions", () => {
+  // The outline's own structure: `x:a {}` a rule, what follows a nested run. In Chrome the rule is
+  // dropped for its selector and `top` is `a`'s own; that is read where the outline is paired
+  // with the CSSOM (sheets/text/ranges.ts, runOf), which knows the rule was dropped.
   assert.deepEqual(parse('a{x:a {} ; top:0}'), [['a', ['x:a'], ['nested', 'top=0']]]);
   assert.deepEqual(parse('p{q{x:a {} ; top:0}}'), [['p', ['q', ['x:a'], ['nested', 'top=0']]]]);
   assert.deepEqual(parse('p{r{} x:a {} ; top:0}'), [['p', ['r'], ['x:a'], ['nested', 'top=0']]]);

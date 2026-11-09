@@ -6,7 +6,7 @@ import { outline } from '../parse/css-outline-wasm';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
 import { type CSSStyle, type Written, styleOf } from '../../style';
-import type { SheetSource } from './pair';
+import { type SheetSource, childRules } from './pair';
 import { reportedComment } from './commented';
 
 /** A range of the text, in lines and columns. */
@@ -62,29 +62,206 @@ export function selectorText(range: string): string {
 }
 
 /**
- * Where the declarations of a rule are, as Chrome's style range: from past `{` to before `}`, or
- * to the first nested rule; for nested declarations, from the first to the last of them.
+ * A part of a run of declarations as Chrome reads it: the declarations of an outline node (a
+ * rule's own, or nested ones), or a rule in the block the CSSOM dropped (`x:a {}`, `!!{}`,
+ * `@foo {}`, `@import …;`).
  */
-export function styleSpan(source: SheetSource, node: number): [number, number] {
+export type Part = { decls: number } | { dropped: number };
+/** A run of declarations, and whether it ends at a rule the CSSOM kept (else at the block's end). */
+export interface Run {
+  parts: Part[];
+  kept: boolean;
+}
+/** The runs of a block that a dropped rule changes, by the node whose style each is. */
+interface Runs {
+  /** The CSSOM's rules in the block when they were worked out, in order. */
+  rules: CSSRule[];
+  byNode: Map<number, Run> | null;
+}
+/** Per source (a new one for each change of the text), per block: its runs. */
+const RUNS = new WeakMap<SheetSource, Map<number, Runs>>();
+
+/**
+ * The runs of declarations in block `parent`, of CSSOM rule `parentRule`, as Chrome reads them:
+ * rules the CSSOM dropped do not end a run, so the declarations after one are still the rule's
+ * own, or of the same nested declarations rule (`a { x:a {} top: 0 }` is `a { top: 0 }`). Null
+ * where no rule of the block was dropped, or where its rules and the CSSOM's do not pair up
+ * (the page changed them): each style is then its node's declarations alone.
+ */
+export function runsOf(source: SheetSource, parent: number, parentRule: CSSRule): Map<number, Run> | null {
+  const children = childRules(parentRule);
+  let cache = RUNS.get(source);
+  if (!cache) RUNS.set(source, (cache = new Map()));
+  const hit = cache.get(parent);
+  if (hit && sameRules(hit.rules, children)) return hit.byNode;
+  const byNode = blockRuns(source, parent, children);
+  cache.set(parent, { rules: Array.from(children), byNode });
+  return byNode;
+}
+
+/**
+ * Whether `list` holds the rules `then` held, the same objects in the same order. Each use of the
+ * runs compares them again, in O(rules of the block): a style's run is asked for once per style
+ * reported, and the block's rules are read in place, so this is the cost of reading the block's
+ * rules once more; a block of many rules with a dropped one is rare.
+ */
+function sameRules(then: CSSRule[], list: ArrayLike<CSSRule>): boolean {
+  if (then.length !== list.length) return false;
+  for (let i = 0; i < then.length; i++) if (then[i] !== list[i]) return false;
+  return true;
+}
+
+function blockRuns(source: SheetSource, parent: number, children: ArrayLike<CSSRule>): Map<number, Run> | null {
+  const o = source.outline;
+  const first = o.firstChild(parent);
+  if (first < 0) return null;
+  const kept = new Set<number>();
+  for (let i = 0; i < children.length; i++) {
+    const n = source.nodes.get(children[i] as CSSRule);
+    if (n !== undefined) kept.add(n);
+  }
+  // Each CSSOM rule has its node: else the outline is not the CSSOM's any more.
+  if (kept.size !== children.length) return null;
+  let any = false;
+  for (let c = first; c >= 0 && !any; c = o.next(c)) any = o.kind(c) !== 'nested' && !kept.has(c);
+  if (!any) return null;
+  const byNode = new Map<number, Run>();
+  // A style rule's own declarations start its first run; an at-rule's block has none.
+  const own = o.kind(parent) === 'qualified';
+  let parts: Part[] = own ? [{ decls: parent }] : [];
+  let members = own ? [parent] : [];
+  let dropped = false;
+  const finish = (ends: boolean) => {
+    if (dropped) for (const m of members) byNode.set(m, { parts, kept: ends });
+    parts = [];
+    members = [];
+    dropped = false;
+  };
+  for (let c = first; c >= 0; c = o.next(c)) {
+    const kind = o.kind(c);
+    if (kind === 'nested') {
+      parts.push({ decls: c });
+      if (kept.has(c)) members.push(c);
+    } else if (kept.has(c)) finish(true);
+    else {
+      // A rule with no selector (`a {{`) Chrome reads otherwise (`ownStart`): as without runs.
+      if (kind === 'qualified' && o.preludeStart(c) === o.preludeEnd(c)) return null;
+      parts.push({ dropped: c });
+      dropped = true;
+    }
+  }
+  finish(false);
+  return byNode.size ? byNode : null;
+}
+
+/** The run `node`, the node of CSSOM rule `rule`, is written in (`runsOf`), or null. */
+function runOf(source: SheetSource, node: number, rule: CSSRule): Run | null {
+  const nested = source.outline.kind(node) === 'nested';
+  const parentRule = nested ? rule.parentRule : rule;
+  const parent = parentRule ? (nested ? source.nodes.get(parentRule) : node) : undefined;
+  if (!parentRule || parent === undefined) return null;
+  return runsOf(source, parent, parentRule)?.get(node) ?? null;
+}
+
+/**
+ * Of a rule given up as a declaration (`color: red {}`), what Chrome lists as one: the name, the
+ * value as written to the `{` (comments in it), the text to the `{`. With nothing but comments and
+ * white space before the `{` (`x:{}`), like Chrome, value and text run on to `to`, the end of the
+ * style. Null for other rules.
+ */
+export function givenUp(source: SheetSource, node: number, to: number): Written | null {
+  const { text, outline: o } = source;
+  if (o.kind(node) !== 'qualified') return null;
+  const from = o.preludeStart(node);
+  const end = o.blockStart(node);
+  const prelude = text.slice(from, end);
+  const { kinds, starts } = tokenize(prelude);
+  let i = 0;
+  if (kinds[i] !== Tok.Ident) return null;
+  const nameEnd = starts[++i] ?? prelude.length;
+  while (kinds[i] === Tok.Ws || kinds[i] === Tok.Comment) i++;
+  if (kinds[i] !== Tok.Colon) return null;
+  const valueStart = starts[i + 1] ?? prelude.length;
+  let j = i + 1;
+  while (kinds[j] === Tok.Ws || kinds[j] === Tok.Comment) j++;
+  // Like Chrome, to the `{`, the white space before it included; with no value, to `to`.
+  const until = j < kinds.length ? end : Math.max(end, to);
+  const written = text.slice(from, until);
+  return {
+    name: prelude.slice(0, nameEnd),
+    value: written.slice(valueStart).replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ''),
+    important: false,
+    disabled: false,
+    invalid: true,
+    text: written,
+    range: rangeOf(source, from, until),
+  };
+}
+
+/** Where nested declarations `node` end, as Chrome's style range does. */
+function nestedEnd(source: SheetSource, node: number): number {
   const { text, outline: o } = source;
   const last = o.lastDecl(node);
-  if (o.kind(node) === 'nested') {
-    if (last < 0 || o.semicolon(last) || o.commented(last)) return [o.start(node), o.end(node)];
-    // A last declaration without `;` runs to the `}`.
-    let end = o.end(node);
-    while (end < text.length && /\s/.test(text[end] ?? '')) end++;
-    return [o.start(node), text[end] === '}' || end >= text.length ? end : o.end(node)];
-  }
-  // Like Chrome, after the `{` of a nested rule with no selector first in the block (`a {{`).
+  if (last < 0 || o.semicolon(last) || o.commented(last)) return o.end(node);
+  // A last declaration without `;` runs to the `}`.
+  let end = o.end(node);
+  while (end < text.length && /\s/.test(text[end] ?? '')) end++;
+  return text[end] === '}' || end >= text.length ? end : o.end(node);
+}
+
+/**
+ * Where the declarations of a rule are, as Chrome's style range: from past `{` to before `}`, or
+ * to the first nested rule; for nested declarations, from the first to the last of them. With
+ * `rule`, the CSSOM rule of `node`, through nested rules the CSSOM dropped (`runOf`).
+ */
+export function styleSpan(source: SheetSource, node: number, rule?: CSSRule): [number, number] {
+  const run = rule ? runOf(source, node, rule) : null;
+  return run ? runSpan(source, node, run) : nodeSpan(source, node);
+}
+
+/** Where a rule's own declarations start: past `{`, or like Chrome past the `{` of a nested rule with
+ * no selector first in the block (`a {{`). */
+function ownStart(source: SheetSource, node: number): number {
+  const o = source.outline;
   const first = o.firstChild(node);
-  const start =
-    first >= 0 && o.kind(first) === 'qualified' && o.preludeStart(first) === o.preludeEnd(first) && last < 0
-      ? o.blockStart(first) + 1
-      : o.blockStart(node) + 1;
+  return first >= 0 &&
+    o.kind(first) === 'qualified' &&
+    o.preludeStart(first) === o.preludeEnd(first) &&
+    o.lastDecl(node) < 0
+    ? o.blockStart(first) + 1
+    : o.blockStart(node) + 1;
+}
+
+function nodeSpan(source: SheetSource, node: number): [number, number] {
+  const { text, outline: o } = source;
+  const last = o.lastDecl(node);
+  if (o.kind(node) === 'nested') return [o.start(node), nestedEnd(source, node)];
+  const first = o.firstChild(node);
+  const start = ownStart(source, node);
   // Declarations before nested rules end with the last of them.
   const end =
     first >= 0 && last >= 0 ? declSpan(text, o, last)[1] : o.closed(node) ? o.blockEnd(node) - 1 : o.blockEnd(node);
   return [Math.min(start, end), Math.max(end, Math.min(start, text.length))];
+}
+
+function runSpan(source: SheetSource, node: number, run: Run): [number, number] {
+  const { text, outline: o } = source;
+  const own = o.kind(node) !== 'nested';
+  const head = run.parts[0] as Part;
+  const start = own ? ownStart(source, node) : o.start('decls' in head ? head.decls : head.dropped);
+  let end: number;
+  if (own && !run.kept) end = o.closed(node) ? o.blockEnd(node) - 1 : o.blockEnd(node);
+  else {
+    const tail = run.parts[run.parts.length - 1] as Part;
+    // A dropped rule last: to its `{`, as its text as a declaration; one without a block, its end.
+    if ('dropped' in tail) end = o.blockStart(tail.dropped) >= 0 ? o.blockStart(tail.dropped) : o.end(tail.dropped);
+    else if (tail.decls !== node || !own) end = nestedEnd(source, tail.decls);
+    else {
+      const last = o.lastDecl(node);
+      end = last >= 0 ? declSpan(text, o, last)[1] : start;
+    }
+  }
+  return [Math.min(start, end), Math.max(start, end)];
 }
 
 /** Where declaration `d` is: one in a comment is the whole comment. */
@@ -94,16 +271,33 @@ function declSpan(text: string, o: CssOutline, d: number): [number, number] {
   return [text.lastIndexOf('/*', o.declStart(d)), close < 0 ? text.length : close + 2];
 }
 
-/** The style of a rule as written in the text. */
+/**
+ * The style of a rule as written in the text. With `rule`, the CSSOM rule of `node`, through
+ * nested rules the CSSOM dropped (`runOf`).
+ */
 export function sourceStyle(
   styleSheetId: string,
   decl: CSSStyleDeclaration,
   source: SheetSource,
-  node: number
+  node: number,
+  rule?: CSSRule
 ): CSSStyle {
-  const [from, to] = styleSpan(source, node);
-  const written = writtenOf(source.text, source.outline, node, to, (s, e) => rangeOf(source, s, e));
-  return styleOf(styleSheetId, decl, written, source.text.slice(from, to), rangeOf(source, from, to));
+  const { text, outline: o } = source;
+  const run = rule ? runOf(source, node, rule) : null;
+  const [from, to] = run ? runSpan(source, node, run) : nodeSpan(source, node);
+  const parts: Part[] = run?.parts ?? [{ decls: node }];
+  const range = (s: number, e: number) => rangeOf(source, s, e);
+  const written: Written[] = [];
+  parts.forEach((part, p) => {
+    if ('dropped' in part) {
+      const w = givenUp(source, part.dropped, to);
+      if (w) written.push(w);
+      return;
+    }
+    // Only the run's last declaration may run to its end.
+    written.push(...writtenOf(text, o, part.decls, to, range, p === parts.length - 1));
+  });
+  return styleOf(styleSheetId, decl, written, text.slice(from, to), rangeOf(source, from, to));
 }
 
 /**
@@ -293,13 +487,17 @@ function maskBraces(part: string): string {
   return pieces.join('');
 }
 
-/** The declarations of `node`, its style ending at `to`, with the ranges `range` gives. */
+/**
+ * The declarations of `node`, its style ending at `to`, with the ranges `range` gives; the last
+ * one without `;` runs to `to` only when `final` (the last part of a run, `Run`).
+ */
 function writtenOf(
   text: string,
   o: CssOutline,
   node: number,
   to: number,
-  range: (start: number, end: number) => Protocol.CSS.SourceRange
+  range: (start: number, end: number) => Protocol.CSS.SourceRange,
+  final = true
 ): Written[] {
   const last = o.lastDecl(node);
   const written: Written[] = [];
@@ -313,7 +511,7 @@ function writtenOf(
     const valueStart = o.valueStart(d);
     const valueEnd = o.valueEnd(d);
     // The last declaration without `;` runs to the `}`.
-    const end = !comment && !semicolon && d === last ? Math.max(span, to) : span;
+    const end = !comment && !semicolon && final && d === last ? Math.max(span, to) : span;
     // Like Chrome, the value with `!important` as written.
     let until = semicolon ? o.declEnd(d) - 1 : o.declEnd(d);
     while (until > valueEnd && /\s/.test(text[until - 1] ?? '')) until--;
