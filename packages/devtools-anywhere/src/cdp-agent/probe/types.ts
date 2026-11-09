@@ -225,6 +225,12 @@ export interface TopNatives {
   listen: EventTarget['addEventListener'];
   unlisten: EventTarget['removeEventListener'];
   MO: typeof MutationObserver;
+  observe: MutationObserver['observe'];
+  disconnect: MutationObserver['disconnect'];
+  attach: Element['attachShadow'];
+  setAttr: Element['setAttribute'];
+  matches: Element['matches'];
+  raf: typeof requestAnimationFrame;
 }
 
 /** @internal */
@@ -273,8 +279,9 @@ export interface Probe {
    */
   css?: CssNatives | undefined;
   /**
-   * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener` and `MutationObserver`
-   * taken before the probe's hooks and the page's code: the vision deficiency mask goes on top
+   * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener`, `MutationObserver` and
+   * its `observe` and `disconnect`, `attachShadow`, `setAttribute`, `matches` and
+   * `requestAnimationFrame` taken before the probe's hooks and the page's code: the vision deficiency mask goes on top
    * and follows the top layer without the page seeing or changing it. Undefined from an older probe.
    */
   top?: TopNatives | undefined;

@@ -35,6 +35,12 @@ let natives: TopNatives = {
   listen: EventTarget.prototype.addEventListener,
   unlisten: EventTarget.prototype.removeEventListener,
   MO: MutationObserver,
+  observe: MutationObserver.prototype.observe,
+  disconnect: MutationObserver.prototype.disconnect,
+  attach: Element.prototype.attachShadow,
+  setAttr: Element.prototype.setAttribute,
+  matches: Element.prototype.matches,
+  raf: requestAnimationFrame,
 };
 
 /** The shadow roots of the frames' documents, whose popovers and dialogs the page toggles too. */

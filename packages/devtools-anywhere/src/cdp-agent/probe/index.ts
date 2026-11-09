@@ -105,13 +105,19 @@ export function installProbe(): Probe {
       time: own('currentTime'),
     },
     css: w.CSS && { CSS: w.CSS, supports: w.CSS.supports },
-    // Before hookListeners() below.
+    // Before hookListeners() and hookShadowRoots() below.
     top: {
       show: HTMLElement.prototype.showPopover,
       hide: HTMLElement.prototype.hidePopover,
       listen: EventTarget.prototype.addEventListener,
       unlisten: EventTarget.prototype.removeEventListener,
       MO: MutationObserver,
+      observe: MutationObserver.prototype.observe,
+      disconnect: MutationObserver.prototype.disconnect,
+      attach: Element.prototype.attachShadow,
+      setAttr: Element.prototype.setAttribute,
+      matches: Element.prototype.matches,
+      raf: requestAnimationFrame,
     },
     listeners: new WeakMap(),
     ownUrls: new Set(),
