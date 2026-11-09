@@ -105,6 +105,14 @@ export function installProbe(): Probe {
       time: own('currentTime'),
     },
     css: w.CSS && { CSS: w.CSS, supports: w.CSS.supports },
+    // Before hookListeners() below.
+    top: {
+      show: HTMLElement.prototype.showPopover,
+      hide: HTMLElement.prototype.hidePopover,
+      listen: EventTarget.prototype.addEventListener,
+      unlisten: EventTarget.prototype.removeEventListener,
+      MO: MutationObserver,
+    },
     listeners: new WeakMap(),
     ownUrls: new Set(),
     // Old WebViews without fetch: a rejection callers handle like any failed request.

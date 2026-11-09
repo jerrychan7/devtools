@@ -286,6 +286,7 @@ export function viewProbe(probe: Probe): ProbeView {
     onAnimation: listener => probe.onAnimation(listener),
     animation: probe.animation,
     css: probe.css,
+    top: probe.top,
     listeners: probe.listeners,
     ownUrls: probe.ownUrls,
     fetch: probe.fetch,

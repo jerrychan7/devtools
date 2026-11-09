@@ -22,7 +22,7 @@ All packages share one version and are released together (see DEV.md, "Releasing
 Public API, as in `packages/*/etc/*.public.api.md`: unchanged since 0.3.0.
 
 - `devtools-anywhere` ships two more files in `dist/`, loaded on first use: `accessibility.js` (exported as `./accessibility.js`) and `chromium-html.css`; self-hosted, serve them with the bundle. `chromium-html.css` is under the LGPL (2.0 or later), the package's only file that is not MIT or BSD; its license ships as `chromium-html.LICENSE.txt`, and leaving both out only drops the user agent stylesheet rules. It depends on `dom-accessibility-api` now.
-- The probe grows from 18948 to 20671 bytes minified, mostly for the Animations panel's hooks and the browser functions saved for them (an internal interface of the probe, not public API).
+- The probe grows from 18948 to 20872 bytes minified, mostly for the Animations panel's hooks and the browser functions saved for them and for the vision deficiency mask (an internal interface of the probe, not public API).
 - In shell mode the Service Worker keeps its `debugger` rewrite record in the Cache API, under `devtools-anywhere-service-worker-rewrites`; it is deleted when a new worker activates and when shell mode ends.
 - The messages between the probe in a cross-origin iframe and its parent gained the internal event `DevtoolsAnywhere.scrollParent`: use the same version of the probe on both sides.
 

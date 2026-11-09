@@ -218,6 +218,15 @@ export interface CssNatives {
   supports: (typeof CSS)['supports'];
 }
 
+/** @internal See {@link Probe.top}. */
+export interface TopNatives {
+  show: HTMLElement['showPopover'] | undefined;
+  hide: HTMLElement['hidePopover'] | undefined;
+  listen: EventTarget['addEventListener'];
+  unlisten: EventTarget['removeEventListener'];
+  MO: typeof MutationObserver;
+}
+
 /** @internal */
 export interface Probe {
   version: 1;
@@ -263,6 +272,12 @@ export interface Probe {
    * Undefined without `CSS` (or from an older probe).
    */
   css?: CssNatives | undefined;
+  /**
+   * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener` and `MutationObserver`
+   * taken before the probe's hooks and the page's code: the vision deficiency mask goes on top
+   * and follows the top layer without the page seeing or changing it. Undefined from an older probe.
+   */
+  top?: TopNatives | undefined;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;
   /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */
