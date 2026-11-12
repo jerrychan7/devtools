@@ -10,6 +10,7 @@
 // the browser dispatches its own before that frame's callbacks; and a list the page made before the
 // hooks were in place (before the probe ran or, in a same-origin iframe, before its load event) is
 // not known to them, so it keeps the browser's own result and events.
+import { onAbort } from './natives';
 import type { Realm } from './network';
 import type { TopNatives } from './types';
 
@@ -33,16 +34,23 @@ interface Shadow {
   forward: () => void;
 }
 
+/** A listener counted: what takes away the listeners the probe added with it, and the signal it was added with. */
+interface Counted {
+  off: () => void;
+  signal?: unknown;
+}
+
 interface Rec {
   /** The query as the browser gives it. */
   text: string;
   natives: MediaNatives;
   /**
    * The page's change listeners of the list that are still there, by listener (the onchange handler
-   * by ONCHANGE): 1 for one that bubbles, 2 for one that captures. While there are any, the guard and
-   * the shadow's forwarder are listeners too; with none, they are not, and the list can be collected.
+   * by ONCHANGE): under 1 for one that bubbles, under 2 for one that captures (see Counted and
+   * add). While there are any, the guard and the shadow's
+   * forwarder are listeners too; with none, they are not, and the list can be collected.
    */
-  listeners: Map<object, number>;
+  listeners: Map<object, Partial<Record<number, Counted>>>;
   /** Set while the rewrite changes the query. */
   shadow: Shadow | null;
   /**
@@ -58,13 +66,26 @@ const ONCHANGE = {};
 const isObject = (value: unknown): value is object =>
   (typeof value === 'object' && value !== null) || typeof value === 'function';
 
+/** Whether `signal` is a signal that is aborted. What is not a signal is the browser's to refuse, with its own message. */
+function isAborted(signal: unknown): boolean {
+  try {
+    return isObject(signal) && Reflect.get(signal, 'aborted') === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The options of addEventListener (`adding`) or removeEventListener, as the browser converts them (WebIDL): whether the
- * listener captures, and the options the browser is given in their place. An object's members are read once each, in
+ * listener captures, whether the browser removes it once it has run (`once`), the signal that removes it, and the
+ * options the browser is given in their place. An object's members are read once each, in
  * WebIDL's order, so the page's getters run here and not again in the browser (or in the probe's own listener wrapper,
  * which is given the same options); a value that is not an object is given as the boolean it converts to.
  */
-function optionsOf(options: unknown, adding: boolean): { capture: boolean; given: unknown } {
+function optionsOf(
+  options: unknown,
+  adding: boolean
+): { capture: boolean; given: unknown; once?: boolean; signal?: unknown } {
   if (!isObject(options)) {
     const capture = !!options;
     return { capture, given: capture };
@@ -74,7 +95,12 @@ function optionsOf(options: unknown, adding: boolean): { capture: boolean; given
   const once = !!Reflect.get(options, 'once');
   const passive = Reflect.get(options, 'passive');
   const signal = Reflect.get(options, 'signal');
-  return { capture, given: { capture, once, passive: passive === undefined ? undefined : !!passive, signal } };
+  return {
+    capture,
+    once,
+    signal,
+    given: { capture, once, passive: passive === undefined ? undefined : !!passive, signal },
+  };
 }
 
 /**
@@ -94,19 +120,29 @@ const listenerTrap =
       // A type that does not convert is refused by the browser, with its own message: the call goes on as it was made.
       return Reflect.apply(f, self, args);
     }
-    const { capture, given } = optionsOf(args[2], adding);
+    const { capture, given, once, signal } = optionsOf(args[2], adding);
     if (type !== 'change') return Reflect.apply(f, self, [type, args[1], given]);
     const call = () => Reflect.apply(f, self, [type, args[1], given]);
     const mql = self as MediaQueryList;
-    return adding ? state.add(mql, args[1], capture, call) : state.remove(mql, args[1], capture, call);
+    return adding ? state.add(mql, args[1], capture, call, once, signal) : state.remove(mql, args[1], capture, call);
   };
 
 /** The state the hooks of every window share. */
 export interface MediaState {
   set(rewrite: MediaRewrite | null): void;
   keep(mql: MediaQueryList, natives: MediaNatives): void;
-  /** Runs `call`, which adds `listener` (ONCHANGE for the onchange handler) to `mql`, and counts it. */
-  add(mql: MediaQueryList, listener: unknown, capture: boolean, call: () => unknown): unknown;
+  /**
+   * Runs `call`, which adds `listener` (ONCHANGE for the onchange handler) to `mql`, and counts it: until the page
+   * removes it, or the browser does, after its first event with `once`, or when `signal` is aborted.
+   */
+  add(
+    mql: MediaQueryList,
+    listener: unknown,
+    capture: boolean,
+    call: () => unknown,
+    once?: boolean,
+    signal?: unknown
+  ): unknown;
   /** Runs `call`, which removes `listener` from `mql`, and uncounts it. */
   remove(mql: MediaQueryList, listener: unknown, capture: boolean, call: () => unknown): unknown;
   shadowOf(mql: MediaQueryList): MediaQueryList | null;
@@ -148,6 +184,18 @@ export function mediaState({ listen, unlisten, raf }: TopNatives): MediaState {
   function close(mql: MediaQueryList, rec: Rec) {
     Reflect.apply(unlisten, mql, ['change', guard, true]);
     if (rec.shadow) Reflect.apply(unlisten, rec.shadow.list, ['change', rec.shadow.forward]);
+  }
+
+  // Uncounts the listener `listener` of the list that `bit` names (1 bubbles, 2 captures), which the page or the
+  // browser removed, with what the probe added for it; with none left, the guard and the forwarder go too.
+  function drop(mql: MediaQueryList, rec: Rec, listener: object, bit: number) {
+    const offs = rec.listeners.get(listener);
+    const counted = offs?.[bit];
+    if (!offs || !counted) return;
+    counted.off();
+    delete offs[bit];
+    if (!offs[3 - bit]) rec.listeners.delete(listener);
+    if (rec.listeners.size === 0) close(mql, rec);
   }
 
   function attach(rec: Rec, mql: MediaQueryList) {
@@ -237,34 +285,51 @@ export function mediaState({ listen, unlisten, raf }: TopNatives): MediaState {
       kept.push(new WeakRef(mql));
       attach(rec, mql);
     },
-    add(mql, listener, capture, call) {
+    add(mql, listener, capture, call, once, signal) {
       const rec = recs.get(mql);
-      if (!rec || !isObject(listener)) return call();
+      // With a signal aborted already, the browser adds no listener.
+      if (!rec || !isObject(listener) || isAborted(signal)) return call();
+      const bit = capture ? 2 : 1;
+      // A listener counted whose signal is aborted is one the browser has removed: the page's own listeners of
+      // that signal run before the probe hears of the abort, and one of them may add the listener again here.
+      if (isAborted(rec.listeners.get(listener)?.[bit]?.signal)) drop(mql, rec, listener, bit);
+      const offs = rec.listeners.get(listener) ?? {};
+      // A listener the list has already is not added again, and keeps the options it was added with.
+      const known = offs[bit];
       // The guard goes in first: before the page's first listener, and as the first one again after none.
       const first = rec.listeners.size === 0;
       if (first) open(mql, rec);
+      const gone = () => drop(mql, rec, listener, bit);
+      // A listener the browser removes after its first event is uncounted by a listener of the probe's own,
+      // removed the same way and added just before it: where this one runs, that one runs next.
+      if (!known && once) Reflect.apply(listen, mql, ['change', gone, { capture, once }]);
       let result: unknown;
       try {
         result = call();
       } catch (error) {
+        Reflect.apply(unlisten, mql, ['change', gone, capture]);
         if (first) close(mql, rec);
         throw error;
       }
-      rec.listeners.set(listener, (rec.listeners.get(listener) ?? 0) | (capture ? 2 : 1));
+      if (!known) {
+        // The browser took the signal, so it is one: its abort removes the listener, and uncounts it.
+        const offAbort = isObject(signal) ? onAbort(listen, unlisten, signal as AbortSignal, gone) : undefined;
+        offs[bit] = {
+          off: () => {
+            Reflect.apply(unlisten, mql, ['change', gone, capture]);
+            offAbort?.();
+          },
+          signal,
+        };
+        rec.listeners.set(listener, offs);
+      }
       return result;
     },
     remove(mql, listener, capture, call) {
       const rec = recs.get(mql);
       if (!rec || !isObject(listener)) return call();
       const result = call();
-      const bit = capture ? 2 : 1;
-      const bits = rec.listeners.get(listener) ?? 0;
-      if (bits & bit) {
-        const left = bits & ~bit;
-        if (left) rec.listeners.set(listener, left);
-        else rec.listeners.delete(listener);
-        if (rec.listeners.size === 0) close(mql, rec);
-      }
+      drop(mql, rec, listener, capture ? 2 : 1);
       return result;
     },
     shadowOf: mql => recs.get(mql)?.shadow?.list ?? null,
@@ -277,10 +342,12 @@ const printed = new WeakMap<object, string>();
 /**
  * Hooks `w`'s matchMedia(), the `matches` getter of its MediaQueryList, the ways of adding and removing
  * a listener of one (addEventListener, addListener, onchange, removeEventListener, removeListener) and
- * Function.prototype.toString, for `state`. The hooks are proxies: their name and length are the browser's,
- * and so is their text, which `printed` gives to Function.prototype.toString. An error thrown through a hook
- * has the browser's message, but a stack with frames of this bundle that the browser's stack does not have
- * (docs/limitations.md, "Errors").
+ * Function.prototype.toString, for `state`. The hooks are proxies of the functions they replace: they have
+ * their name and length, and their text, which `printed` gives to Function.prototype.toString. Those are the
+ * browser's, except for the top window's addEventListener and removeEventListener, which are the probe's own
+ * listener wrapper by then (index.ts): no name, a length of 3 where the browser's is 2, and the wrapper's source
+ * as their text. An error thrown through a hook has the browser's message, but a stack with frames of this
+ * bundle that the browser's stack does not have (docs/limitations.md, "Errors").
  */
 export function hookMedia(w: Realm, state: MediaState): void {
   const proto = w.MediaQueryList.prototype;

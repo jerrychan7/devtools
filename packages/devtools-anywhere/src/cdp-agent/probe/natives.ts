@@ -114,3 +114,23 @@ export function captureTop(): TopNatives {
     now: performance.now.bind(performance),
   };
 }
+
+/** The browser's AbortSignal.any (Chrome 116), taken as the module loads: a signal that follows others. */
+const anySignal = typeof AbortSignal === 'function' ? AbortSignal.any : undefined;
+
+/**
+ * Calls `gone` once `signal` is aborted, through `listen`, and returns what takes that back (`unlisten`). The
+ * listener is on a signal of the probe's own that follows `signal`, not on `signal`: there the page's listeners
+ * may come first, and one that stops the abort event would keep it from the probe's. A browser without
+ * AbortSignal.any gets the listener on `signal`, which such a page listener still stops.
+ */
+export function onAbort(
+  listen: TopNatives['listen'],
+  unlisten: TopNatives['unlisten'],
+  signal: AbortSignal,
+  gone: () => void
+): () => void {
+  const own: AbortSignal = anySignal ? Reflect.apply(anySignal, AbortSignal, [[signal]]) : signal;
+  Reflect.apply(listen, own, ['abort', gone, { once: true }]);
+  return () => void Reflect.apply(unlisten, own, ['abort', gone]);
+}
