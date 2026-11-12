@@ -1,4 +1,5 @@
 import { nativeCall, nativeGet, windowOf } from '../../core/natives';
+import { afterFrames, inTurn, MAX_WAIT, queue, turnOf } from '../../core/turn';
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
@@ -341,7 +342,7 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
 
 /*
  * Pacing. A page that answers a rewrite of ours in the same turn of its script (the microtasks after
- * our write, and the page's changes before the timer that closes the turn, see turnOf) can make the
+ * our write, and the page's changes before the timer that closes the turn, see core/turn.ts) can make the
  * rewrite answer it again forever: a mutation observer that puts back the text it had, for one, sees
  * our rewrite and restores its own text, which our observer sees and rewrites again, and no task ever
  * ends. So the rewrite of an attribute the page changed waits when the page changed it in the turn of
@@ -363,7 +364,6 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
  * REVERT_LIMIT of them, each revert doubles the wait, as an answer in the turn does. Until then a revert is written at
  * once, whatever it puts back. The writes an emulation change makes are never held back.
  */
-const MAX_WAIT = 64;
 /** The reverts of an attribute's rewrite are counted within this many ms, and more than REVERT_LIMIT back it off. */
 const REVERT_WINDOW = 3000;
 const REVERT_LIMIT = 3;
@@ -381,66 +381,6 @@ interface Pace {
   revertOf: number;
 }
 const paces = new WeakMap<Element, Map<string, Pace>>();
-
-/**
- * The turn of the page's script our writes are made in: a timer closes it, so one task's writes share it. The page can
- * clear that timer (a loop over timer ids clears it too), so a turn also ends TURN_MAX ms after it began: the page's
- * later changes are then not taken for answers in it, for ever.
- */
-let turnOpen = false;
-let turnNo = 0;
-let turnBegan = 0;
-const TURN_MAX = 1000;
-
-/** Whether the turn `turnNo` is open: its timer has not run, and it has not lasted TURN_MAX ms. */
-const turnIsOpen = (): boolean => turnOpen && windowOf().now() - turnBegan < TURN_MAX;
-
-function turnOf(): number {
-  if (!turnIsOpen()) {
-    // A turn still marked open here has run past TURN_MAX, its timer cleared by the page or not yet run: its writes are
-    // not answers in the new turn.
-    if (turnOpen) turnNo++;
-    turnOpen = true;
-    turnBegan = windowOf().now();
-    const no = turnNo;
-    // The timer is queued by a microtask, which runs after the page's observers have run their callbacks in this
-    // checkpoint: a timer one of them queues then comes before the close, whichever observer was made first.
-    queue(() => Reflect.apply(windowOf().timeout, globalThis, [() => closeTurn(no), 0]));
-  }
-  return turnNo;
-}
-
-/** Calls `fn` in a microtask, as the probe took it (natives). */
-const queue = (fn: () => void) => Reflect.apply(windowOf().microtask, globalThis, [fn]);
-/** Closes the turn `no`, if that is still the open one: a timer of an earlier turn does not close a later one. */
-const closeTurn = (no: number) => {
-  if (!turnOpen || no !== turnNo) return;
-  turnOpen = false;
-  turnNo++;
-};
-
-/*
- * The frames, timers and clock are the probe's (windowOf), not the page's: a page may replace them (a fake clock,
- * say), and the agent's own frames and timers must not be the page's to see or to run.
- */
-
-/** Calls `fn` at the next frame, or after 50 ms where frames do not come (a page in the background). */
-function nextFrame(fn: () => void): void {
-  let ran = false;
-  const run = () => {
-    if (ran) return;
-    ran = true;
-    fn();
-  };
-  Reflect.apply(windowOf().raf, globalThis, [run]);
-  Reflect.apply(windowOf().timeout, globalThis, [run, 50]);
-}
-
-/** Calls `fn` after `frames` frames. */
-function afterFrames(frames: number, fn: () => void): void {
-  if (frames <= 1) nextFrame(fn);
-  else nextFrame(() => afterFrames(frames - 1, fn));
-}
 
 /** Notes that the agent wrote `el`'s attribute `name` in the current turn (see holdBack). */
 function wroteAt(el: Element, name: string): void {
@@ -483,7 +423,7 @@ function holdBack(el: Element, name: string, text: string, record: Written | und
   if (!pace) return false;
   // The page's text is what was written: there is nothing to rewrite.
   if (record && text === record.applied) return false;
-  const answered = turnIsOpen() && pace.turn === turnNo;
+  const answered = inTurn(pace.turn);
   // A revert: a change after the turn has closed that the rewrite writes over, whether it is the original (which the
   // page's changes make the emulation's original) or another text, and whether or not the rewrite changes the text
   // itself: the original the change merges into may read differently (planText). Our record of the last write is not
