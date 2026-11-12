@@ -285,6 +285,13 @@ export interface Probe {
    * and follows the top layer without the page seeing or changing it. Undefined from an older probe.
    */
   top?: TopNatives | undefined;
+  /**
+   * What matchMedia() reports while media is emulated (Emulation.setEmulatedMedia): `set` gives the rewrite of
+   * the page's media queries (null for none), and the query lists whose results change get a change event in
+   * an animation frame callback of the next frame (Chrome dispatches its own before that frame's callbacks, see
+   * media.ts). Hooked with the probe, in every window it hooks. Undefined from an older probe.
+   */
+  media?: { set(rewrite: ((text: string) => string) | null): void } | undefined;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;
   /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */

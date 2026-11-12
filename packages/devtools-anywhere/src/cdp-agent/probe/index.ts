@@ -4,6 +4,7 @@
 // uncaught errors, fetch/XHR and WebSocket once, keeps recent events in ring buffers, and the CDP
 // agent reads those buffers later. The CDP agent installs it itself when no earlier
 // probe exists, so every API is hooked exactly once either way.
+import { hookMedia, mediaState } from './media';
 import { hookNetwork, keep, now, type NetworkSink } from './network';
 import {
   PROBE_KEY,
@@ -13,6 +14,7 @@ import {
   type ProbeRequest,
   type SocketRecord,
   type ToolRecord,
+  type TopNatives,
 } from './types';
 
 import { isShellPage, readShellConfig, writeShellDocument } from './shell';
@@ -51,6 +53,21 @@ export function installProbe(): Probe {
   const hooked = new WeakSet<Console>();
   const animProto = w.Animation?.prototype;
   const own = (name: string) => Object.getOwnPropertyDescriptor(animProto, name);
+  // Before hookListeners() and hookShadowRoots() below.
+  const natives: TopNatives = {
+    show: HTMLElement.prototype.showPopover,
+    hide: HTMLElement.prototype.hidePopover,
+    listen: EventTarget.prototype.addEventListener,
+    unlisten: EventTarget.prototype.removeEventListener,
+    MO: MutationObserver,
+    observe: MutationObserver.prototype.observe,
+    disconnect: MutationObserver.prototype.disconnect,
+    attach: Element.prototype.attachShadow,
+    setAttr: Element.prototype.setAttribute,
+    matches: Element.prototype.matches,
+    raf: requestAnimationFrame,
+  };
+  const media = mediaState(natives);
   const probe: Probe = {
     version: 1,
     hookNetwork(win, frame) {
@@ -87,6 +104,7 @@ export function installProbe(): Probe {
       hookErrors(add, win);
       hookShadowRoots(probe.shadowRoots, shadowRootListeners, win);
       hookAnimations(animationListeners, win);
+      hookMedia(win, media);
     },
     shadowRoots: new WeakMap(),
     onShadowRoot(listener) {
@@ -105,20 +123,8 @@ export function installProbe(): Probe {
       time: own('currentTime'),
     },
     css: w.CSS && { CSS: w.CSS, supports: w.CSS.supports },
-    // Before hookListeners() and hookShadowRoots() below.
-    top: {
-      show: HTMLElement.prototype.showPopover,
-      hide: HTMLElement.prototype.hidePopover,
-      listen: EventTarget.prototype.addEventListener,
-      unlisten: EventTarget.prototype.removeEventListener,
-      MO: MutationObserver,
-      observe: MutationObserver.prototype.observe,
-      disconnect: MutationObserver.prototype.disconnect,
-      attach: Element.prototype.attachShadow,
-      setAttr: Element.prototype.setAttribute,
-      matches: Element.prototype.matches,
-      raf: requestAnimationFrame,
-    },
+    top: natives,
+    media: { set: media.set },
     listeners: new WeakMap(),
     ownUrls: new Set(),
     // Old WebViews without fetch: a rejection callers handle like any failed request.
@@ -143,6 +149,9 @@ export function installProbe(): Probe {
   // The network hooks' own listeners are not the page's.
   const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
+  // After the listener wrapper, which it then wraps: the options a page gives are converted once, by the media hook, and
+  // the wrapper is given the converted ones (media.ts).
+  hookMedia(w, media);
   hookModelContext(probe.tools);
 
   let seq = 0;
