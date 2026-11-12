@@ -1,4 +1,4 @@
-import { quietly } from '../../../core/nodes/adopted';
+import { hideAdopted, quietly } from '../../../core/nodes/adopted';
 import { frames } from '../../../core/frames/frames';
 import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../../core/nodes/nodes';
@@ -314,54 +314,13 @@ class SharedForcedPseudoClasses {
   }
 
   /**
-   * Appends the companion after the tree's adopted sheets, and keeps it there when the page
-   * assigns new ones. The page does not see it: reading adoptedStyleSheets gives a copy without
-   * it. The trade-off: pushing onto or splicing that copy in place has no effect, where the page
-   * would change its adopted sheets; a live view would show the companion. Changes made in place
-   * on the real array before the hook (or by code holding it) move the companion away from the
-   * end, which reattach() repairs.
+   * Adopts the companion after the tree's sheets, hidden from the page (hideAdopted): the page does
+   * not see it in adoptedStyleSheets, and keeps it at the end when it assigns new ones. Adopting it
+   * again moves it to the end, which reattach() does after changes made in place on the real array
+   * (or by code holding it) moved it away.
    */
   private attach(tree: TreeScope, companion: Companion) {
-    const sheet = companion.sheet;
-    const realm = realmOf(tree);
-    const proto = isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
-    const get = descriptor?.get;
-    const set = descriptor?.set;
-    if (!get || !set) return;
-    const native = (): CSSStyleSheet[] => {
-      const value: unknown = get.call(tree);
-      return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => isCssom(s, 'CSSStyleSheet')) : [];
-    };
-    // Our own reads and writes are not changes of the page's adopted sheets.
-    quietly(() => {
-      const adopted = native();
-      if (adopted[adopted.length - 1] !== sheet) set.call(tree, [...adopted.filter(s => s !== sheet), sheet]);
-    });
-    if (companion.restore) return;
-    const own = Object.getOwnPropertyDescriptor(tree, 'adoptedStyleSheets');
-    Object.defineProperty(tree, 'adoptedStyleSheets', {
-      configurable: true,
-      enumerable: descriptor.enumerable ?? true,
-      get: (): CSSStyleSheet[] => native().filter(s => s !== sheet),
-      set(value: CSSStyleSheet[]) {
-        const sheets = Array.from(value).filter(s => s !== sheet);
-        set.call(tree, [...sheets, sheet]);
-      },
-    });
-    companion.restore = () => {
-      Reflect.deleteProperty(tree, 'adoptedStyleSheets');
-      if (own) Object.defineProperty(tree, 'adoptedStyleSheets', own);
-      // The page's sheets without the companion.
-      quietly(() => {
-        const adopted = native();
-        if (adopted.includes(sheet))
-          set.call(
-            tree,
-            adopted.filter(s => s !== sheet)
-          );
-      });
-    };
+    companion.restore = hideAdopted(tree, companion.sheet);
   }
 
   /** Removes the companion; the page's adopted sheets stay. */

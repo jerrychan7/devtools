@@ -1,9 +1,9 @@
-import { adoptedOf, quietly, watchAdopted } from '../../core/nodes/adopted';
+import { adoptedOf, isHiddenSheet, quietly, watchAdopted } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
 import { setWrittenAttribute, writtenAttribute } from '../../core/nodes/written-attributes';
 import { isCssom, isElement, isHtml, isNode, realmOf } from '../../core/realm';
-import { isCompanion, pageRulesRewritten } from '../css/matching/forced-pseudo';
+import { pageRulesRewritten } from '../css/matching/forced-pseudo';
 import { type CssomChange, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
@@ -71,6 +71,38 @@ export function rewriteMedia(name: string, rewrite: Rewrite | null): void {
   if (rewrite) mediaRewrites.set(name, rewrite);
   else mediaRewrites.delete(name);
   update();
+  for (const listener of mediaListeners)
+    try {
+      listener();
+    } catch {
+      // Ours, not the page's: the others are told too.
+    }
+}
+
+/** Told each time a media rewrite is set or removed (`rewriteMedia`), once the page's sheets are rewritten. */
+const mediaListeners = new Set<() => void>();
+
+/**
+ * The media rewrites now in effect, composed into one, or null when there are none: the text of a
+ * media query as the emulation has it, as a `matchMedia()` of the page would see it (a matchMedia
+ * hook calls it with the query's text, the query being whatever the page passed). Each call gives
+ * a new function; it does the same for as long as the media rewrites do not change.
+ *
+ * @internal
+ */
+export function currentMediaRewrite(): Rewrite | null {
+  return composed(mediaRewrites);
+}
+
+/**
+ * Calls `listener` each time a media rewrite is set or removed (`rewriteMedia`), after the page's
+ * sheets are rewritten with it. Returns the function that stops it.
+ *
+ * @internal
+ */
+export function onMediaRewriteChange(listener: () => void): () => void {
+  mediaListeners.add(listener);
+  return () => void mediaListeners.delete(listener);
 }
 
 /** Sets (or with null, removes) the declaration rewrite `name`, and rewrites the page's sheets with it. */
@@ -189,8 +221,8 @@ function fixRule(rule: CSSRule, act: Active): boolean {
   return changed;
 }
 
-/** Whether a sheet is not the page's to rewrite: one of ours, or a companion of the forced states. */
-const ownSheet = (sheet: CSSStyleSheet) => isCompanion(sheet) || (!!sheet.ownerNode && !!closestOwn(sheet.ownerNode));
+/** Whether a sheet is not the page's to rewrite: one of ours (a companion of the forced states, an injected one). */
+const ownSheet = (sheet: CSSStyleSheet) => isHiddenSheet(sheet) || (!!sheet.ownerNode && !!closestOwn(sheet.ownerNode));
 
 /** Rewrites a sheet: its media, and its rules. */
 function fixSheet(sheet: CSSStyleSheet, act: Active): boolean {

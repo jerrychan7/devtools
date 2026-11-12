@@ -70,7 +70,18 @@ declare global {
     __devtools?: DevtoolsAnywhereElement;
     resourceLoaded?: boolean;
     /** Internals the tests' bundle (dist-test/) exposes. */
-    __devtoolsAnywhereTest: { childTargets: ChildTargets; mergedFrames: MergedFrames; shellClients: () => string[] };
+    __devtoolsAnywhereTest: {
+      childTargets: ChildTargets;
+      mergedFrames: MergedFrames;
+      shellClients: () => string[];
+      /** The emulation's stable APIs, and the own style sheets and scans (domains/emulation/inject.ts). */
+      emulation: {
+        currentMediaRewrite: () => ((text: string) => string) | null;
+        onMediaRewriteChange: (listener: () => void) => () => void;
+        injectOwnStyle: (name: string, css: string | null) => void;
+        scanElements: (name: string, visit: ((el: Element) => void) | null) => void;
+      };
+    };
     /** The links frame-links.test.ts has seen, and how many of them have closed. */
     __links?: { frameId: string; closed: boolean }[];
     /** A flatten client of the page's agent: its events, and its commands' replies (oopif.conformance.test.ts). */

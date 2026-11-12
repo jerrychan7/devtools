@@ -33,9 +33,31 @@ const protoOf = (tree: Tree) => {
   return isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
 };
 
+/** The accessors of `adoptedStyleSheets` that the agent's own reads and writes call (see nativeOf). */
+type Native = { get: (this: Tree) => unknown; set: (this: Tree, v: unknown) => void };
+/**
+ * The native accessors of each prototype's `adoptedStyleSheets`, taken the first time the agent needs
+ * them (null: the prototype has none). The agent's own reads and writes call these, not whatever the
+ * page has put over the accessor since: a wrapper would see the sheets the agent hides.
+ */
+const nativeAccessors = new WeakMap<object, Native | null>();
+function nativeOf(proto: object): Native | null {
+  let native = nativeAccessors.get(proto);
+  if (native === undefined) {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
+    native = descriptor?.get && descriptor.set ? { get: descriptor.get, set: descriptor.set } : null;
+    nativeAccessors.set(proto, native);
+  }
+  return native;
+}
+// The top window's accessors are taken when the agent loads, so that a wrapper the page puts over them
+// later is not what the agent calls. (Other realms, the frames', are taken at their first use.)
+if (typeof Document === 'function') nativeOf(Document.prototype);
+if (typeof ShadowRoot === 'function') nativeOf(ShadowRoot.prototype);
+
 function read(tree: Tree): CSSStyleSheet[] {
-  const get = natives.get(protoOf(tree))?.get;
-  const value: unknown = get ? get.call(tree) : tree.adoptedStyleSheets;
+  const native = nativeOf(protoOf(tree));
+  const value: unknown = native ? native.get.call(tree) : tree.adoptedStyleSheets;
   return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => isCssom(s, 'CSSStyleSheet')) : [];
 }
 
@@ -67,6 +89,8 @@ function notify(tree: Tree) {
 /** Hooks the prototypes of a realm (a window's globals). */
 function install(realm: Window & typeof globalThis) {
   for (const proto of [realm.Document.prototype, realm.ShadowRoot.prototype]) {
+    // Taken before the hook goes over the accessor (see nativeOf).
+    nativeOf(proto);
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
     const get = descriptor?.get;
     const set = descriptor?.set;
@@ -137,17 +161,98 @@ export function quietly<T>(fn: () => T): T {
 }
 
 /**
- * The native accessors of a tree's `adoptedStyleSheets`: those our hooks call, so that a wrapper
- * the page put over them since does not see our own changes; the prototype's while not hooked.
+ * The native accessors of a tree's `adoptedStyleSheets` (see nativeOf): what the agent's own reads and
+ * writes call, so that a wrapper the page put over them since does not see our own changes.
  */
-export function nativeAdopted(
-  tree: Tree
-): { get: (this: Tree) => unknown; set: (this: Tree, v: unknown) => void } | null {
-  const hooked = natives.get(protoOf(tree));
-  if (hooked) return hooked;
-  const d = Object.getOwnPropertyDescriptor(protoOf(tree), 'adoptedStyleSheets');
-  return d?.get && d.set ? { get: d.get, set: d.set } : null;
+export function nativeAdopted(tree: Tree): Native | null {
+  return nativeOf(protoOf(tree));
 }
 
 /** The adopted style sheets of a tree, read without notifying. */
 export const adoptedOf = read;
+
+/** The number of trees each sheet devtools-anywhere adopts hidden is in (a sheet may be in several). */
+const hiddenSheets = new WeakMap<CSSStyleSheet, number>();
+/** Per tree, the sheets hidden in it (kept at its end, in this order), and the page's own property before. */
+const hiddenIn = new WeakMap<Tree, { sheets: Set<CSSStyleSheet>; own: PropertyDescriptor | undefined }>();
+
+/** Whether `sheet` is one devtools-anywhere adopted hidden from the page (`hideAdopted`), not the page's. */
+export const isHiddenSheet = (sheet: CSSStyleSheet): boolean => (hiddenSheets.get(sheet) ?? 0) > 0;
+
+/** Counts the trees `sheet` is hidden in by `by`: 1 when it is hidden in one more, -1 when in one fewer. */
+function countHidden(sheet: CSSStyleSheet, by: number): void {
+  const n = (hiddenSheets.get(sheet) ?? 0) + by;
+  if (n > 0) hiddenSheets.set(sheet, n);
+  else hiddenSheets.delete(sheet);
+}
+
+/**
+ * Adopts `sheet` into `tree`, after the page's sheets, hidden from the page: the page's reads of
+ * `adoptedStyleSheets` leave it out, and its assignments keep it at the end. Our own writes are not
+ * the page's changes (`quietly`), but the page's assignments are still seen by `watchAdopted`.
+ * Adopting a sheet again moves it to the end. Returns the function that takes it out of the tree.
+ * Several sheets of ours may be hidden in a tree at once.
+ *
+ * The trade-off of hiding: what the page reads is a copy, so pushing onto or splicing that copy in
+ * place has no effect, where the page would change its adopted sheets (a live view would show ours).
+ * Changes made in place on the real array, before the hook or by code holding it, move the sheet
+ * away from the end: adopting it again repairs that.
+ */
+export function hideAdopted(tree: Tree, sheet: CSSStyleSheet): () => void {
+  const realm = realmOf(tree);
+  const proto = isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
+  // The native accessors (nativeOf): a wrapper the page put over the prototype's is not called with the
+  // sheets hidden here. The page's own reads and assignments are still told to the watchers, as the
+  // prototype's hook tells them.
+  const native = nativeOf(proto);
+  if (!native) return () => {};
+  let hidden = hiddenIn.get(tree);
+  if (!hidden) {
+    const sheets = new Set<CSSStyleSheet>();
+    hidden = { sheets, own: Object.getOwnPropertyDescriptor(tree, 'adoptedStyleSheets') };
+    hiddenIn.set(tree, hidden);
+    Object.defineProperty(tree, 'adoptedStyleSheets', {
+      configurable: true,
+      enumerable: true,
+      get: (): CSSStyleSheet[] => {
+        const value: unknown = native.get.call(tree);
+        notify(tree);
+        return Array.isArray(value) ? value.filter(s => !sheets.has(s)) : [];
+      },
+      set: (value: CSSStyleSheet[]) => {
+        const rest = Array.from(value).filter(s => !sheets.has(s));
+        native.set.call(tree, [...rest, ...sheets]);
+        notify(tree);
+      },
+    });
+  }
+  const { sheets, own } = hidden;
+  if (!sheets.has(sheet)) countHidden(sheet, 1);
+  sheets.delete(sheet);
+  sheets.add(sheet);
+  // Our own reads and writes go around the page's hooks (nativeAdopted): a sheet the page assigned in
+  // the same task is still the page's change, and is not taken as seen here.
+  quietly(() => {
+    const value: unknown = native.get.call(tree);
+    const current = Array.isArray(value) ? (value as CSSStyleSheet[]) : [];
+    const wanted = [...current.filter(s => !sheets.has(s)), ...sheets];
+    if (wanted.length !== current.length || wanted.some((s, i) => s !== current[i])) native.set.call(tree, wanted);
+  });
+  return () => {
+    if (!sheets.delete(sheet)) return;
+    countHidden(sheet, -1);
+    quietly(() => {
+      const value: unknown = native.get.call(tree);
+      if (Array.isArray(value) && value.includes(sheet))
+        native.set.call(
+          tree,
+          value.filter(s => s !== sheet)
+        );
+    });
+    if (sheets.size) return;
+    // None of ours is left in the tree: the page's own property is back.
+    Reflect.deleteProperty(tree, 'adoptedStyleSheets');
+    if (own) Object.defineProperty(tree, 'adoptedStyleSheets', own);
+    hiddenIn.delete(tree);
+  };
+}

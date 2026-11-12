@@ -66,6 +66,8 @@ export {
 export { scrollFrameAreaIntoView } from './core/frames/geometry';
 export { frameOwners, ownerOfWindow, watchOwner } from './frame-owners';
 export { mergedFrames, type MergedFrames, type RouteTable } from './core/frames/merged-frames';
+export { currentMediaRewrite, onMediaRewriteChange } from './domains/emulation/rewrite';
+export { injectOwnStyle, scanElements } from './domains/emulation/inject';
 
 /**
  * Puts the ids this page's agent makes from now on in namespace `ns` (core/frames/merged-frames.ts):

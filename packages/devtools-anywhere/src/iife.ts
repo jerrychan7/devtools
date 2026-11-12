@@ -5,9 +5,13 @@
 import {
   childTargets,
   createCdpSession,
+  currentMediaRewrite,
+  injectOwnStyle,
   installProbe,
   isShellPage,
   mergedFrames,
+  onMediaRewriteChange,
+  scanElements,
   setShellScriptUrl,
 } from './cdp-agent';
 import { connectFrontend, connectToShell, emulateInShell, shellClients } from './connection';
@@ -56,5 +60,12 @@ if (!('DevtoolsAnywhere' in window)) {
   Object.assign(window, { DevtoolsAnywhere: api });
   // What the tests read in the page; not in the published bundle.
   if (DEVTOOLS_ANYWHERE_TEST)
-    Object.assign(window, { __devtoolsAnywhereTest: { childTargets, mergedFrames, shellClients } });
+    Object.assign(window, {
+      __devtoolsAnywhereTest: {
+        childTargets,
+        mergedFrames,
+        shellClients,
+        emulation: { currentMediaRewrite, injectOwnStyle, onMediaRewriteChange, scanElements },
+      },
+    });
 }

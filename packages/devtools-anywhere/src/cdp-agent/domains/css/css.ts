@@ -18,7 +18,7 @@ import { CdpError } from '../../core/session';
 import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
 import { historyOf, type Action } from '../../core/nodes/history';
-import { adoptedOf, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
+import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { ForcedPseudoClasses } from './matching/forced-pseudo';
 import { backgroundsBehind } from './color';
 import { Cascade } from './matching/cascade';
@@ -136,7 +136,8 @@ export function registerCss(ctx: Context) {
     () => sheets.trees(),
     sheet => sheets.rulesOf(sheet)
   );
-  sheets.isOwnSheet = sheet => forced.owns(sheet);
+  // Our own sheets (the companions of the forced states, the injected ones) are not the page's.
+  sheets.isOwnSheet = sheet => forced.owns(sheet) || isHiddenSheet(sheet);
   const rules = new RuleView(sheets, nodes);
   // DevTools' own request, not one of the page's.
   const uaUrl = userAgentSheetUrl;
