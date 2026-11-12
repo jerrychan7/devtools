@@ -297,9 +297,37 @@ async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
 
 const settle = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
 
-/** Waits for the browser to choose the images again (a <picture>'s source, an image's candidate): a few frames. */
-const settleImages = () =>
-  t.page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 100)))));
+/**
+ * Polls `read` until it gives `expected`, or gives up after a few seconds with what it last read: the
+ * browser chooses an image's candidate, and applies a media change, a little after the page's task.
+ */
+async function until<T>(read: () => Promise<T>, expected: T): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const value = await read();
+    if (value === expected || Date.now() - start > 3000) return value;
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+
+/**
+ * Reads `read` until it has given the same value for a few hundred milliseconds, for a value the
+ * browser settles on after a change, when there is no particular value to wait for.
+ */
+async function steady<T>(read: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  let last = await read();
+  let since = Date.now();
+  while (Date.now() - since < 250 && Date.now() - start < 3000) {
+    await new Promise(r => setTimeout(r, 25));
+    const value = await read();
+    if (value !== last) {
+      last = value;
+      since = Date.now();
+    }
+  }
+  return last;
+}
 
 test('an inline style with env() is emulated, and so is a style the page writes', async () => {
   await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="inl">inl</div>'));
@@ -360,14 +388,11 @@ test('a <picture> source with a media query is chosen as the emulation has it', 
   );
   try {
     const r = await sameOnBoth(async side => {
-      await settleImages();
-      const base = await shown('pici');
+      const base = await until(() => shown('pici'), '?pic-img');
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
-      await settleImages();
-      const printed = await shown('pici');
+      const printed = await until(() => shown('pici'), '?pic-source');
       await side.send('Emulation.setEmulatedMedia', {});
-      await settleImages();
-      return { base, printed, cleared: await shown('pici') };
+      return { base, printed, cleared: await until(() => shown('pici'), '?pic-img') };
     });
     assert.deepEqual(r, { base: '?pic-img', printed: '?pic-source', cleared: '?pic-img' });
   } finally {
@@ -386,18 +411,18 @@ test('a <source> media the page sets while emulated is its own once the emulatio
   );
   try {
     const r = await sameOnBoth(async side => {
-      await settleImages();
+      await t.page.evaluate(() => document.getElementById('pic2s')?.setAttribute('media', 'print'));
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
-      await settleImages();
-      // The page changes the media while the emulation rewrites it: the new value is its own.
-      await t.page.evaluate(() => document.getElementById('pic2s')?.setAttribute('media', 'all'));
-      await settleImages();
+      const printed = await until(() => shown('pic2i'), '?pic2-source');
+      // The page sets another media while the emulation rewrites this one: the page's value is its own.
+      await t.page.evaluate(() => document.getElementById('pic2s')?.setAttribute('media', 'screen'));
+      const during = await until(() => shown('pic2i'), '?pic2-img');
       await side.send('Emulation.setEmulatedMedia', {});
-      await settleImages();
+      const cleared = await until(() => shown('pic2i'), '?pic2-source');
       const media = await t.page.evaluate(() => document.getElementById('pic2s')?.getAttribute('media'));
-      return { media, shown: await shown('pic2i') };
+      return { printed, during, cleared, media };
     });
-    assert.deepEqual(r, { media: 'all', shown: '?pic2-source' });
+    assert.deepEqual(r, { printed: '?pic2-source', during: '?pic2-img', cleared: '?pic2-source', media: 'screen' });
   } finally {
     await t.page.evaluate(() => document.getElementById('pic2')?.remove());
   }
@@ -417,20 +442,20 @@ test('the sizes of an <img> are read as the emulation has them, when the image i
   try {
     const r = await sameOnBoth(async side => {
       const tag = side === t.chrome ? 'chrome' : 'ours';
+      // Dark, whatever the browser's own scheme is: the 100px slot, the larger candidate.
+      await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
       await make(`sz-base-${tag}`);
-      await settleImages();
-      const base = await chosen(`sz-base-${tag}`);
+      const base = await until(() => chosen(`sz-base-${tag}`), 'b');
       await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
       await make(`sz-light-${tag}`);
-      await settleImages();
-      const light = await chosen(`sz-light-${tag}`);
+      const light = await until(() => chosen(`sz-light-${tag}`), 'a');
       await side.send('Emulation.setEmulatedMedia', {});
       await make(`sz-cleared-${tag}`);
-      await settleImages();
-      return { base, light, cleared: await chosen(`sz-cleared-${tag}`) };
+      // Cleared, the browser's own scheme is back, whichever it is: compared with Chrome's, not assumed.
+      return { base, light, cleared: await steady(() => chosen(`sz-cleared-${tag}`)) };
     });
-    // Without the emulation the browser's colour scheme is dark: the 100px slot, the larger candidate.
-    assert.deepEqual(r, { base: 'b', light: 'a', cleared: 'b' });
+    assert.deepEqual(r.base, 'b');
+    assert.deepEqual(r.light, 'a');
   } finally {
     await t.page.evaluate(() => document.querySelectorAll('img[id^="sz-"]').forEach(img => img.remove()));
   }
@@ -515,6 +540,10 @@ test('an edit of a style under the emulation is undone to the text the page wrot
       const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#und' });
       await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
       await settle();
+      // The emulation takes effect, so that what follows is measured under it.
+      const during = await t.page.evaluate(
+        () => getComputedStyle(document.getElementById('und') ?? document.body).paddingTop
+      );
       await side.send('DOM.setAttributeValue', {
         nodeId,
         name: 'style',
@@ -528,12 +557,171 @@ test('an edit of a style under the emulation is undone to the text the page wrot
       await settle();
       const cleared = await t.page.evaluate(() => document.getElementById('und')?.getAttribute('style'));
       await side.send('DOM.disable');
-      return { undone: attributes.slice(2), cleared };
+      return { during, undone: attributes[attributes.indexOf('style') + 1], cleared };
     });
-    assert.deepEqual(r.undone, ['style', 'padding-top: env(safe-area-inset-top, 7px)']);
+    assert.equal(r.during, '5px');
+    assert.equal(r.undone, 'padding-top: env(safe-area-inset-top, 7px)');
     assert.equal(r.cleared, 'padding-top: env(safe-area-inset-top, 7px)');
   } finally {
     await t.page.evaluate(() => document.getElementById('und')?.remove());
+  }
+});
+
+test('an outerHTML edit under the emulation is undone to the text the page wrote', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="oh" style="padding-top: env(safe-area-inset-top, 7px)">oh</div>'
+    )
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('DOM.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#oh' });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      // The emulation takes effect, so that what follows is measured under it.
+      const during = await t.page.evaluate(
+        () => getComputedStyle(document.getElementById('oh') ?? document.body).paddingTop
+      );
+      // The markup drops the style and adds another declaration: the rewritten attribute is removed.
+      await side.send('DOM.setOuterHTML', { nodeId, outerHTML: '<div id="oh" style="color: red">oh</div>' });
+      await settle();
+      await side.send('DOM.undo');
+      await settle();
+      const { root: again } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId: back } = await side.send('DOM.querySelector', { nodeId: again.nodeId, selector: '#oh' });
+      const { attributes } = await side.send('DOM.getAttributes', { nodeId: back });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      const cleared = await t.page.evaluate(() => document.getElementById('oh')?.getAttribute('style'));
+      await side.send('DOM.disable');
+      return { during, undone: attributes[attributes.indexOf('style') + 1], cleared };
+    });
+    assert.equal(r.during, '5px');
+    assert.equal(r.undone, 'padding-top: env(safe-area-inset-top, 7px)');
+    assert.equal(r.cleared, 'padding-top: env(safe-area-inset-top, 7px)');
+  } finally {
+    await t.page.evaluate(() => document.getElementById('oh')?.remove());
+  }
+});
+
+test('a style the page changes in part under the emulation keeps the text the emulation replaced', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="part" style="padding-top: env(safe-area-inset-top, 7px)">part</div>'
+    )
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await t.page.evaluate(() =>
+        document.getElementById('part')?.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)')
+      );
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      // Another declaration of the style, set by the page's script: the padding is still the inset's.
+      await t.page.evaluate(() => {
+        const el = document.getElementById('part');
+        if (el) el.style.opacity = '0.5';
+      });
+      await settle();
+      const during = await t.page.evaluate(() => {
+        const el = document.getElementById('part');
+        return { padding: getComputedStyle(el ?? document.body).paddingTop, opacity: el?.style.opacity };
+      });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      const after = await t.page.evaluate(() => {
+        const el = document.getElementById('part');
+        return { padding: el?.style.paddingTop, opacity: el?.style.opacity };
+      });
+      return { during, after };
+    });
+    assert.deepEqual(r.during, { padding: '5px', opacity: '0.5' });
+    assert.deepEqual(r.after, { padding: 'env(safe-area-inset-top, 7px)', opacity: '0.5' });
+  } finally {
+    await t.page.evaluate(() => document.getElementById('part')?.remove());
+  }
+});
+
+test('a shorthand with env() keeps it when the page sets another declaration, the browser writing 0 as 0px', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="sh" style="margin: 0 env(safe-area-inset-right, 7px)">sh</div>'
+    )
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await t.page.evaluate(() =>
+        document.getElementById('sh')?.setAttribute('style', 'margin: 0 env(safe-area-inset-right, 7px)')
+      );
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { right: 6 } });
+      await settle();
+      // The page's script sets another declaration: the browser writes the whole block back, the 0 as 0px.
+      await t.page.evaluate(() => {
+        const el = document.getElementById('sh');
+        if (el) el.style.opacity = '0.5';
+      });
+      await settle();
+      const during = await t.page.evaluate(
+        () => getComputedStyle(document.getElementById('sh') ?? document.body).marginRight
+      );
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      // A longhand of a shorthand with env() reads as empty (pending substitution): the declaration text is looked at.
+      const after = await t.page.evaluate(() => {
+        const style = document.getElementById('sh')?.style;
+        return { env: style?.cssText.includes('env(safe-area-inset-right, 7px)') ?? false, opacity: style?.opacity };
+      });
+      return { during, after };
+    });
+    assert.equal(r.during, '6px');
+    assert.deepEqual(r.after, { env: true, opacity: '0.5' });
+  } finally {
+    await t.page.evaluate(() => document.getElementById('sh')?.remove());
+  }
+});
+
+test('an element taken out of the page while the emulation rewrites it gets its own text back', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="gone" style="padding-top: env(safe-area-inset-top, 7px)">gone</div>'
+    )
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await t.page.evaluate(() =>
+        document.getElementById('gone')?.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)')
+      );
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      // The emulation takes effect on the element before it is taken out.
+      const during = await t.page.evaluate(
+        () => getComputedStyle(document.getElementById('gone') ?? document.body).paddingTop
+      );
+      // Taken out while rewritten, the emulation ends, and the element is put back.
+      await t.page.evaluate(() => {
+        const el = document.getElementById('gone');
+        Reflect.set(window, 'gone', el);
+        el?.remove();
+      });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await t.page.evaluate(() => {
+        const el: unknown = Reflect.get(window, 'gone');
+        if (el instanceof HTMLElement) document.body.append(el);
+      });
+      await settle();
+      const style = await t.page.evaluate(() => document.getElementById('gone')?.getAttribute('style') ?? null);
+      return { during, style };
+    });
+    assert.equal(r.during, '5px');
+    assert.equal(r.style, 'padding-top: env(safe-area-inset-top, 7px)');
+  } finally {
+    await t.page.evaluate(() => document.getElementById('gone')?.remove());
   }
 });
 
@@ -553,6 +741,10 @@ test('the page sees the style attribute it wrote, and the emulation makes no DOM
       await side.clear();
       await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
       await settle();
+      // Under the emulation: the rewrite is in place, so that what the client is shown is compared with it.
+      const padding = await t.page.evaluate(
+        () => getComputedStyle(document.getElementById('inl') ?? document.body).paddingTop
+      );
       const during = await side.events('DOM.attributeModified');
       const { attributes } = await side.send('DOM.getAttributes', { nodeId });
       const { outerHTML } = await side.send('DOM.getOuterHTML', { nodeId });
@@ -562,8 +754,9 @@ test('the page sees the style attribute it wrote, and the emulation makes no DOM
       const after = await side.events('DOM.attributeModified');
       await side.send('CSS.disable');
       await side.send('DOM.disable');
-      return { during, after, attributes, outerHTML, css: inlineStyle?.cssText };
+      return { padding, during, after, attributes, outerHTML, css: inlineStyle?.cssText };
     });
+    assert.equal(r.padding, '5px');
     assert.deepEqual(r.during, []);
     assert.deepEqual(r.after, []);
     assert.deepEqual(r.attributes.slice(2), ['style', 'padding-top: env(safe-area-inset-top, 7px)']);
