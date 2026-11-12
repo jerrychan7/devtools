@@ -1,7 +1,7 @@
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
-import { setWrittenAttribute, writtenAttribute } from '../../core/nodes/written-attributes';
+import { setWrittenAttribute, type Written, writtenAttribute } from '../../core/nodes/written-attributes';
 import { isCssom, isElement, isHtml, isNode, isSvg, realmOf } from '../../core/realm';
 import { pageRulesRewritten } from '../css/matching/forced-pseudo';
 import { type CssomChange, ownCall, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
@@ -39,18 +39,24 @@ interface Rewritten {
  * client is shown the attribute as the page wrote it (core/nodes/written-attributes.ts), and our
  * writes are not reported as changes of the page's (core/nodes/own-mutations.ts).
  *
- * The page's changes through the CSSOM are rewritten at once, in the call that made them, so that
- * an insertRule() followed by getComputedStyle() in the same task sees the rewrite. The others are
- * seen by mutation observers and rewritten in a microtask after the change.
+ * The page's changes through the CSSOM are rewritten at once, in the call that made them (a rule
+ * inserted or changed, a sheet's own media list), so that an insertRule() followed by
+ * getComputedStyle() in the same task sees the rewrite; replace() is rewritten when its promise
+ * resolves. The others are seen by mutation observers and rewritten in a microtask after the change,
+ * unless the page answers a rewrite of ours in the same task (a guard putting back its text): then
+ * the rewrite waits for a frame, and the wait grows while the page keeps answering in that task (see the pacing
+ * note below).
  *
  * Limits: the rules of a sheet that cannot be read (cross-origin) are left as they are; its media is
  * rewritten like any other. matchMedia() is not affected. A <style> added in the same task as it is
  * read is rewritten after that task's script, and so is an element's style written in the task that
  * reads it. A property the page writes by name on a rule's style (rule.style.color = …) is seen only
- * once the CSS domain looks at the sheet. Our writes are seen by the page's own mutation observers,
- * and the page reads the rewritten values, as it reads them from the CSSOM and the attributes.
+ * once the CSS domain looks at the sheet, or at the next sync of the sheets. Our writes are seen by
+ * the page's own mutation observers, and the page reads the rewritten values, as it reads them from
+ * the CSSOM and the attributes.
  *
- * One for the page: a media rewrite and a value rewrite each, by name.
+ * The rewrites are set by name: a media rewrite and a value rewrite, each of them composed with the
+ * others of its kind, in the order their names were first set.
  */
 const mediaRewrites = new Map<string, Rewrite>();
 const valueRewrites = new Map<string, Rewrite>();
@@ -91,7 +97,8 @@ const mediaListeners = new Set<() => void>();
  * The media rewrites now in effect, composed into one, or null when there are none: the text of a
  * media query as the emulation has it, as a `matchMedia()` of the page would see it (a matchMedia
  * hook calls it with the query's text, the query being whatever the page passed). Each call gives
- * a new function; it does the same for as long as the media rewrites do not change.
+ * a new function; it does the same for as long as the media rewrites do not change. No caller in
+ * the agent yet: the matchMedia() task will use it.
  *
  * @internal
  */
@@ -203,16 +210,18 @@ const merges = (name: string): Merge => (name === 'style' ? mergeDeclarations : 
 /**
  * Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`).
  * Read and written through the agent's own natives (ownCall), not the element's methods, which a page
- * may have wrapped.
+ * may have wrapped. `paced`: the page changed the attribute, so the rewrite may be held (see holdBack).
  */
-function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boolean {
+function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced = false): boolean {
   const current = ownCall<string | null>(el, 'getAttribute', name);
   if (current === null) {
     setWrittenAttribute(el, name, undefined);
     return false;
   }
+  const record = writtenAttribute(el, name);
+  if (paced && rewrite && holdBack(el, name, current, record)) return false;
   const fixed = fixText(
-    writtenAttribute(el, name),
+    record,
     current,
     rewrite,
     merges(name),
@@ -220,11 +229,107 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boole
     text => {
       const before = ownCall<string | null>(el, 'getAttribute', name);
       quietMutations(() => ownCall(el, 'setAttribute', name, text), { target: el, name, before });
+      wroteAt(el, name);
     }
   );
   setWrittenAttribute(el, name, fixed.record);
   if (fixed.record) track(writtenElements, el);
   return fixed.changed;
+}
+
+/*
+ * Pacing. A page that answers a rewrite of ours in the same turn of its script (the microtasks after
+ * our write, and the page's changes before the timer that closes the turn, see turnOf) can make the
+ * rewrite answer it again forever: a mutation observer that puts back the text it had, for one, sees
+ * our rewrite and restores its own text, which our observer sees and rewrites again, and no task ever
+ * ends. So the rewrite of an attribute the page changed waits for a frame when the page changed it in
+ * the turn of our last write, or put back the text our rewrite replaced (`original`); each answer in
+ * a turn doubles the wait, up to MAX_WAIT frames. A put-back from a later task is held a frame, without
+ * the doubling; any other change from a later task is written at once. The writes an emulation change
+ * makes are never held back, nor those of a page's change that answers nothing.
+ */
+const MAX_WAIT = 64;
+
+/** How an attribute's rewrites are paced: the turn of our last write, and the frames of the next wait. */
+interface Pace {
+  turn: number;
+  wait: number;
+  /** Whether a rewrite is due and waiting for its frame: the page's text is rewritten then. */
+  held: boolean;
+}
+const paces = new WeakMap<Element, Map<string, Pace>>();
+
+/** The turn of the page's script our writes are made in: a timer closes it, so one task's writes share it. */
+let turnOpen = false;
+let turnNo = 0;
+function turnOf(): number {
+  if (!turnOpen) {
+    turnOpen = true;
+    Reflect.apply(setTimer, globalThis, [closeTurn, 0]);
+  }
+  return turnNo;
+}
+const closeTurn = () => {
+  turnOpen = false;
+  turnNo++;
+};
+
+/* The frames and timers as the agent found them: a page may replace them later (a fake clock, say). */
+const requestFrame = requestAnimationFrame;
+const setTimer = setTimeout;
+
+/** Calls `fn` at the next frame, or after 50 ms where frames do not come (a page in the background). */
+function nextFrame(fn: () => void): void {
+  let ran = false;
+  const run = () => {
+    if (ran) return;
+    ran = true;
+    fn();
+  };
+  Reflect.apply(requestFrame, globalThis, [run]);
+  Reflect.apply(setTimer, globalThis, [run, 50]);
+}
+
+/** Calls `fn` after `frames` frames. */
+function afterFrames(frames: number, fn: () => void): void {
+  if (frames <= 1) nextFrame(fn);
+  else nextFrame(() => afterFrames(frames - 1, fn));
+}
+
+/** Notes that the agent wrote `el`'s attribute `name` in the current turn (see holdBack). */
+function wroteAt(el: Element, name: string): void {
+  let byName = paces.get(el);
+  if (!byName) paces.set(el, (byName = new Map()));
+  const pace = byName.get(name) ?? { turn: 0, wait: 1, held: false };
+  pace.turn = turnOf();
+  byName.set(name, pace);
+}
+
+/**
+ * Whether the rewrite of `el`'s attribute `name` that the page's change to `text` calls for is held
+ * for frames, rather than made now (see the pacing note above). `record` is what was written last.
+ */
+function holdBack(el: Element, name: string, text: string, record: Written | undefined): boolean {
+  const pace = paces.get(el)?.get(name);
+  if (!pace) return false;
+  // The page's text is what was written: there is nothing to rewrite.
+  if (record && text === record.applied) return false;
+  const answered = turnOpen && pace.turn === turnNo;
+  if (!answered && !(record && text === record.original)) {
+    // A change that answers nothing is written at once, even while a rewrite is held: that rewrite, when it
+    // runs, rewrites whatever text the page has then.
+    pace.wait = 1;
+    return false;
+  }
+  // An answer while a rewrite is held is covered by that rewrite, which reads the page's text when it runs.
+  if (pace.held) return true;
+  pace.wait = answered ? Math.min(MAX_WAIT, pace.wait * 2) : 1;
+  pace.held = true;
+  afterFrames(pace.wait, () => {
+    pace.held = false;
+    if (rewriting()) fixElement(el, current(), false);
+  });
+  return true;
 }
 
 /*
@@ -277,13 +382,14 @@ const ELEMENTS = '[style], source[media], img[sizes], source[sizes]';
 /**
  * Rewrites the attributes of `el` that the emulation rewrites; returns whether a write was made. A
  * <picture>'s source is chosen again by the browser when its media changes, and an image's `sizes`
- * is read when the image is chosen: both are set before that, as the page sets them.
+ * is read when the image is chosen: both are set before that, as the page sets them. `paced`: the
+ * page changed them (see fixAttribute).
  */
-function fixElement(el: Element, act: Active): boolean {
-  let changed = fixAttribute(el, 'style', act.values);
-  if (isHtml(el, 'source')) changed = fixAttribute(el, 'media', act.media) || changed;
+function fixElement(el: Element, act: Active, paced = false): boolean {
+  let changed = fixAttribute(el, 'style', act.values, paced);
+  if (isHtml(el, 'source')) changed = fixAttribute(el, 'media', act.media, paced) || changed;
   if (isHtml(el, 'source') || isHtml(el, 'img'))
-    changed = fixAttribute(el, 'sizes', act.media && sizesRewrite(act.media)) || changed;
+    changed = fixAttribute(el, 'sizes', act.media && sizesRewrite(act.media), paced) || changed;
   return changed;
 }
 
@@ -296,7 +402,8 @@ function fixRule(rule: CSSRule, act: Active): boolean {
   }
   let changed = isCssom(rule, 'CSSMediaRule') ? fixMedia(rule.media, act.media) : false;
   const style: unknown = 'style' in rule ? ownStyle(rule as CSSRule & { style: CSSStyleDeclaration }) : null;
-  // Only blocks using env() are read again on every change (with the rewrite gone, those rewritten).
+  // A block using env() is read again on every change, and so is one this rewrote before (styles.has),
+  // which is restored when the rewrite is gone.
   if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || style.cssText.includes('env(')))
     changed = fixStyle(style, act.values) || changed;
   if (isCssom(rule, 'CSSGroupingRule') || isCssom(rule, 'CSSKeyframesRule'))
@@ -321,22 +428,28 @@ function fixSheet(sheet: CSSStyleSheet, act: Active): boolean {
   return changed;
 }
 
-/** Rewrites every readable sheet and element of the page; returns whether anything was written. */
-function sync(act: Active): boolean {
+/**
+ * Rewrites every readable sheet and element of the page; returns whether anything was written. `paced`:
+ * the sync follows a change of the page, so its attribute writes are paced as fixChanged's are (see
+ * holdBack), which keeps a page answering them from looping through here.
+ */
+function sync(act: Active, paced = false): boolean {
   let changed = false;
   for (const tree of pageTrees()) {
     for (const sheet of Array.from(tree.styleSheets))
       if (isCssom(sheet, 'CSSStyleSheet')) changed = fixSheet(sheet, act) || changed;
     for (const sheet of adoptedOf(tree)) changed = fixSheet(sheet, act) || changed;
-    for (const el of tree.querySelectorAll(ELEMENTS)) if (!closestOwn(el)) changed = fixElement(el, act) || changed;
+    for (const el of tree.querySelectorAll(ELEMENTS))
+      if (!closestOwn(el)) changed = fixElement(el, act, paced) || changed;
   }
   return changed;
 }
 
 /**
- * A change of the page through the CSSOM, told by cssom-watch.ts in the call that made it: the rule
- * it changed (or the one it inserted) is rewritten at once; the sheet's own media list is, when that
- * is what changed; the whole sheet when that is not known.
+ * A change of the page through the CSSOM, told by cssom-watch.ts in the call that made it, except
+ * replace() (told once its promise resolves) and a property written by name (told when the CSS domain
+ * settles the styles it took): the rule it changed (or the one it inserted) is rewritten at once; the
+ * sheet's own media list is, when that is what changed; the whole sheet when that is not known.
  */
 function onCssom(sheet: CSSStyleSheet, _text?: string, _by?: object, change?: CssomChange): void {
   if (!rewriting() || ownSheet(sheet)) return;
@@ -374,6 +487,10 @@ const isSheetOwner = (node: Node | null) => isHtml(node, 'style') || isSvg(node,
 /** Whether mutations may have added or changed style sheets (or added shadow trees, which may have some). */
 function touchesSheets(records: MutationRecord[]): boolean {
   for (const record of records) {
+    // The style or sizes attribute of a <style> or <link> changes no sheet, so it is no reason for a sync of
+    // the sheets: fixChanged rewrites it, paced like any other element's.
+    if (record.type === 'attributes' && (record.attributeName === 'style' || record.attributeName === 'sizes'))
+      continue;
     if (isSheetOwner(record.target) || isSheetOwner(record.target.parentNode)) return true;
     for (const node of Array.from(record.addedNodes)) {
       if (!isElement(node) || closestOwn(node)) continue;
@@ -393,17 +510,17 @@ function fixChanged(records: MutationRecord[], act: Active): void {
       const target = record.target;
       const name = record.attributeName;
       if (isElement(target) && !closestOwn(target) && (name === 'style' || name === 'media' || name === 'sizes'))
-        fixElement(target, act);
+        fixElement(target, act, true);
     } else
       for (const node of Array.from(record.addedNodes)) {
         if (!isElement(node) || closestOwn(node)) continue;
-        if (node.matches(ELEMENTS)) fixElement(node, act);
-        for (const el of node.querySelectorAll(ELEMENTS)) if (!closestOwn(el)) fixElement(el, act);
+        if (node.matches(ELEMENTS)) fixElement(node, act, true);
+        for (const el of node.querySelectorAll(ELEMENTS)) if (!closestOwn(el)) fixElement(el, act, true);
       }
   }
 }
 
-/** A <link> sheet (or an @import of a <style>) can only be read once loaded. */
+/** A <link> sheet can only be read once loaded. */
 const onLoad = (event: Event) => {
   const target = event.target;
   if (isNode(target) && isSheetOwner(target)) schedule();
@@ -414,7 +531,7 @@ function schedule() {
   scheduled = true;
   queueMicrotask(() => {
     scheduled = false;
-    update();
+    update(true);
   });
 }
 
@@ -441,9 +558,12 @@ function stopWatching(): void {
   watching = null;
 }
 
-/** Rewrites the page's sheets with the rewrites now set, and watches them for changes while there are any. */
-function update(): void {
-  const changed = quietly(() => sync(current()));
+/**
+ * Rewrites the page's sheets with the rewrites now set, and watches them for changes while there are any.
+ * `paced`: it follows a change of the page (schedule), not a change of the emulation, which takes effect at once.
+ */
+function update(paced = false): void {
+  const changed = quietly(() => sync(current(), paced));
   if (changed) pageRulesRewritten();
   if (!rewriting()) {
     // What was rewritten and has left the page goes back too, as the page's own.

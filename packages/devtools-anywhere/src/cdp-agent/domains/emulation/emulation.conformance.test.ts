@@ -24,12 +24,6 @@ const STYLE = `
     --right: env(safe-area-inset-right, 9px);
     width: calc(10px + var(--right));
   }
-  #vd { position: fixed; top: 0; left: 0; width: 80px; height: 80px; background: rgb(200, 40, 40) }
-  .top {
-    position: fixed; inset: 20px auto auto 20px; width: 40px; height: 40px;
-    margin: 0; padding: 0; border: 0; background: rgb(30, 160, 220);
-  }
-  #fs:not(:fullscreen) { display: none }
 `;
 
 setUpAndTearDown(
@@ -45,18 +39,7 @@ setUpAndTearDown(
       const s = document.createElement('style');
       s.textContent = style;
       document.head.appendChild(s);
-      document.body.insertAdjacentHTML(
-        'beforeend',
-        '<div id="em">em</div><div id="sa">sa</div><div id="vd"></div><div id="pop" class="top" popover="manual"></div><dialog id="dlg" class="top"></dialog>' +
-          '<div id="auto" class="top" popover="auto"></div><div id="hint" class="top" popover="hint"></div>' +
-          '<div id="again" class="top" popover="manual"></div><div id="fs" class="top"></div><div id="host"></div>'
-      );
-      // A popover in a shadow tree: its toggle events do not reach the document.
-      const root = document.getElementById('host')?.attachShadow({ mode: 'closed' });
-      if (root) {
-        root.innerHTML = `<style>${style.match(/\.top \{[^}]*\}/)?.[0] ?? ''}</style><div class="top" popover="manual"></div>`;
-        Reflect.set(window, '__shadowPopover', root.lastElementChild);
-      }
+      document.body.insertAdjacentHTML('beforeend', '<div id="em">em</div><div id="sa">sa</div>');
     }, STYLE);
   },
   () => env?.close()
@@ -306,11 +289,11 @@ const settle = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
  * Polls `read` until it gives `expected`, or gives up after a few seconds with what it last read: the
  * browser chooses an image's candidate, and applies a media change, a little after the page's task.
  */
-async function until<T>(read: () => Promise<T>, expected: T): Promise<T> {
+async function until<T>(read: () => Promise<T>, expected: T, timeout = 3000): Promise<T> {
   const start = Date.now();
   for (;;) {
     const value = await read();
-    if (value === expected || Date.now() - start > 3000) return value;
+    if (value === expected || Date.now() - start > timeout) return value;
     await new Promise(r => setTimeout(r, 20));
   }
 }
@@ -819,6 +802,169 @@ test("a page wrapping the element's getAttribute and setAttribute does not see t
   }
 });
 
+test('a page guard that puts back the style it had does not loop with the emulation', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="grd" style="padding-top: env(safe-area-inset-top, 7px)">grd</div>'
+    )
+  );
+  // The guard: a mutation observer that puts the original style back whenever the page changes it. Chrome
+  // never changes the attribute, so the guard never answers there.
+  await t.page.evaluate(() => {
+    const el = document.getElementById('grd');
+    if (!el) throw new Error('no guard element');
+    const original = el.getAttribute('style') ?? '';
+    const state = { fires: 0 };
+    const observer = new MutationObserver(() => {
+      if (el.getAttribute('style') === original) return;
+      state.fires++;
+      // Stops answering at 200: a loop then ends, and the count fails the test instead of hanging the page.
+      if (state.fires <= 200) el.setAttribute('style', original);
+    });
+    observer.observe(el, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'guard', { observer, state });
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    // Frames keep coming while the guard runs (the page is not held in a loop), and the guard is answered
+    // a few times, not once for each frame or more.
+    const { fires, frames } = await t.page.evaluate(
+      () =>
+        new Promise<{ fires: number; frames: number }>(resolve => {
+          const guard = Reflect.get(window, 'guard') as { state: { fires: number } };
+          const start = performance.now();
+          let frames = 0;
+          const frame = () => {
+            frames++;
+            if (performance.now() - start < 500) requestAnimationFrame(frame);
+            else resolve({ fires: guard.state.fires, frames });
+          };
+          requestAnimationFrame(frame);
+        })
+    );
+    assert.ok(frames > 3, `${frames} frames in half a second`);
+    assert.ok(fires <= 10, `${fires} answers to the guard`);
+    // Once the guard lets go, the emulation rewrites the element again (the last wait may be 64 frames).
+    await t.page.evaluate(() => (Reflect.get(window, 'guard') as { observer: MutationObserver }).observer.disconnect());
+    const padding = await until(
+      () => t.page.evaluate(() => getComputedStyle(document.getElementById('grd') ?? document.body).paddingTop),
+      '5px',
+      8000
+    );
+    assert.equal(padding, '5px');
+  } finally {
+    // The page first, and the emulation reset whatever happens there: the guard and its element must not outlive the test.
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'guard') as { observer: MutationObserver }).observer.disconnect();
+        document.getElementById('grd')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
+test('a page guard that puts back the style of a <style> element does not loop with the emulation', async () => {
+  // A <style> with a style attribute of its own: a sheet owner, whose style changes are no sheet changes.
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'gst';
+    style.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)');
+    style.textContent = '#em { color: rgb(1, 0, 0) }';
+    document.head.append(style);
+    const original = style.getAttribute('style') ?? '';
+    const state = { fires: 0 };
+    const observer = new MutationObserver(() => {
+      if (style.getAttribute('style') === original) return;
+      state.fires++;
+      // Stops answering at 200, as the guard above does.
+      if (state.fires <= 200) style.setAttribute('style', original);
+    });
+    observer.observe(style, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'styleGuard', { observer, state });
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await t.page.evaluate(() => new Promise(r => setTimeout(r, 300)));
+    const fires = await t.page.evaluate(
+      () => (Reflect.get(window, 'styleGuard') as { state: { fires: number } }).state.fires
+    );
+    assert.ok(fires <= 10, `${fires} answers to the guard`);
+    await t.page.evaluate(() =>
+      (Reflect.get(window, 'styleGuard') as { observer: MutationObserver }).observer.disconnect()
+    );
+    const style = await until(
+      () => t.page.evaluate(() => document.getElementById('gst')?.getAttribute('style') ?? null),
+      'padding-top: 5px',
+      8000
+    );
+    assert.equal(style, 'padding-top: 5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'styleGuard') as { observer: MutationObserver }).observer.disconnect();
+        document.getElementById('gst')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
+test('a guard that also answers each rewrite with a sheet attribute does not loop with the emulation', async () => {
+  // The guard above, on a <style> with a media of its own: each answer changes the sheet too, so it reaches
+  // the emulation as a change of the sheet, not only of the style.
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'gsm';
+    style.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)');
+    style.setAttribute('media', 'all');
+    style.textContent = '#em { color: rgb(1, 0, 0) }';
+    document.head.append(style);
+    const original = style.getAttribute('style') ?? '';
+    const state = { fires: 0 };
+    const observer = new MutationObserver(() => {
+      if (style.getAttribute('style') === original && style.getAttribute('media') === 'all') return;
+      state.fires++;
+      // Stops answering at 200, as the guard above does.
+      if (state.fires <= 200) {
+        style.setAttribute('style', original);
+        style.setAttribute('media', 'all');
+      }
+    });
+    observer.observe(style, { attributes: true, attributeFilter: ['style', 'media'] });
+    Reflect.set(window, 'sheetGuard', { observer, state });
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await t.page.evaluate(() => new Promise(r => setTimeout(r, 300)));
+    const fires = await t.page.evaluate(
+      () => (Reflect.get(window, 'sheetGuard') as { state: { fires: number } }).state.fires
+    );
+    assert.ok(fires <= 10, `${fires} answers to the guard`);
+    await t.page.evaluate(() =>
+      (Reflect.get(window, 'sheetGuard') as { observer: MutationObserver }).observer.disconnect()
+    );
+    const style = await until(
+      () => t.page.evaluate(() => document.getElementById('gsm')?.getAttribute('style') ?? null),
+      'padding-top: 5px',
+      8000
+    );
+    assert.equal(style, 'padding-top: 5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'sheetGuard') as { observer: MutationObserver }).observer.disconnect();
+        document.getElementById('gsm')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
 test("a sheet's own media list the page sets under the emulation is emulated in the same task", async () => {
   // Each step changes the list, and reads #em's word spacing in the same task: print applies the rule.
   // The list is not edited entry by entry (deleteMedium() of an entry the emulation rewrote finds none:
@@ -845,28 +991,36 @@ test("a sheet's own media list the page sets under the emulation is emulated in 
       document.head.append(link);
       await loaded;
     }, id);
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-    await side.send('Emulation.setEmulatedMedia', { media: 'print' });
-    // The link is the sheet with a data: URL. Only its events are counted: the setUp's <style>, whose @media
-    // rules the emulation rewrites, may be told of the rewrite too (a separate matter).
-    const linkId = (await side.events('CSS.styleSheetAdded')).find(e => e.header.sourceURL.startsWith('data:'))?.header
-      .styleSheetId;
-    assert.ok(linkId, 'the CSS domain knows the link');
-    await side.clear();
-    const words = [
-      await step(id, 'set', 'screen'),
-      await step(id, 'set', 'print'),
-      await step(id, 'append', 'screen'),
-      await step(id, 'set', 'screen'),
-    ];
-    // Chrome sends nothing for a change of the list alone, and so do we.
-    const changed = (await side.events('CSS.styleSheetChanged')).filter(e => e.styleSheetId === linkId);
-    await side.send('Emulation.setEmulatedMedia', {});
-    await side.send('CSS.disable');
-    await side.send('DOM.disable');
-    await t.page.evaluate(id => document.getElementById(id)?.remove(), id);
-    return { words, changed: changed.length };
+    try {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+      // The link is the sheet with a data: URL. Only its events are counted: the setUp's <style>, whose @media
+      // rules the emulation rewrites, may be told of the rewrite too (a separate matter).
+      const linkId = (await side.events('CSS.styleSheetAdded')).find(e => e.header.sourceURL.startsWith('data:'))
+        ?.header.styleSheetId;
+      assert.ok(linkId, 'the CSS domain knows the link');
+      await side.clear();
+      const words = [
+        await step(id, 'set', 'screen'),
+        await step(id, 'set', 'print'),
+        await step(id, 'append', 'screen'),
+        await step(id, 'set', 'screen'),
+      ];
+      // A change told a moment late would be counted too: the events of the moment after the steps are waited for.
+      await t.page.evaluate(() => new Promise(r => setTimeout(r, 200)));
+      // Chrome sends nothing for a change of the list alone, and so do we.
+      const changed = (await side.events('CSS.styleSheetChanged')).filter(e => e.styleSheetId === linkId);
+      return { words, changed: changed.length };
+    } finally {
+      try {
+        await t.page.evaluate(id => document.getElementById(id)?.remove(), id);
+      } finally {
+        await side.send('Emulation.setEmulatedMedia', {});
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+      }
+    }
   });
   assert.deepEqual(r, { words: ['0px', '9px', '9px', '0px'], changed: 0 });
 });
