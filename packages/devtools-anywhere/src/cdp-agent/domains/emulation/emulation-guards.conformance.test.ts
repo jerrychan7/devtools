@@ -914,3 +914,68 @@ test('a shorthand the rewrite changes keeps its rewrite when a longhand after it
     }
   }
 });
+
+test('a shadow host the page removes under the emulation is collected, an iframe once the emulation ends', async () => {
+  const collect = async () => {
+    const cdp = await t.page.createCDPSession();
+    try {
+      for (let i = 0; i < 3; i++) await cdp.send('HeapProfiler.collectGarbage');
+    } finally {
+      await cdp.detach();
+    }
+    return t.page.evaluate(() =>
+      (Reflect.get(window, '__gone') as WeakRef<Node>[]).map(ref => ref.deref() !== undefined)
+    );
+  };
+  const pause = () => t.page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+  /**
+   * Which of the host, its shadow root, the iframe and its document are alive once the page has removed them:
+   * while the emulation runs, and once it has ended.
+   */
+  const survivors = async (side: Side) => {
+    await side.send('Emulation.setEmulatedMedia', {
+      media: 'print',
+      features: [{ name: 'forced-colors', value: 'active' }],
+    });
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    let during: boolean[];
+    try {
+      await t.page.evaluate(async () => {
+        const host = document.createElement('div');
+        const root = host.attachShadow({ mode: 'open' });
+        root.innerHTML =
+          '<style>@media screen { p { color: red } }</style><p style="padding-top: env(safe-area-inset-top)">p</p>';
+        const frame = document.createElement('iframe');
+        frame.srcdoc = '<style>@media screen { p { color: red } }</style><p style="background: #123">p</p>';
+        const loaded = new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
+        document.body.append(host, frame);
+        await loaded;
+        const doc = frame.contentDocument;
+        if (!doc) throw new Error('the iframe has no document');
+        Reflect.set(window, '__gone', [new WeakRef(host), new WeakRef(root), new WeakRef(frame), new WeakRef(doc)]);
+      });
+      // The emulation has rewritten and scanned both trees by now; then the page takes them out.
+      await pause();
+      await t.page.evaluate(() => {
+        for (const ref of Reflect.get(window, '__gone') as WeakRef<Node>[]) {
+          const node = ref.deref();
+          if (node instanceof Element) node.remove();
+        }
+      });
+      await pause();
+      during = await collect();
+    } finally {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await side.send('Emulation.setEmulatedMedia', { media: '', features: [] });
+    }
+    await pause();
+    return { during, after: await collect() };
+  };
+  const none = [false, false, false, false];
+  assert.deepEqual(await survivors(t.chrome), { during: none, after: none }, 'under Chrome: the measure works');
+  const ours = await survivors(t.ours);
+  // The trees the emulation observes hold nothing back: the host and its shadow root go while it runs. The iframe
+  // and its document stay until it ends, kept by the hooks of their realm (docs/limitations.md, "Memory").
+  assert.deepEqual(ours.during.slice(0, 2), [false, false]);
+  assert.deepEqual(ours.after, none);
+});
