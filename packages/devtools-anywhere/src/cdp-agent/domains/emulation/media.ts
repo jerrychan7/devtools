@@ -179,6 +179,12 @@ export class MediaEmulation {
   end(session: object): Rewrite | null {
     return this.set(session, {});
   }
+
+  /** The color scheme the page's `prefers-color-scheme` is emulated as, or undefined when it is not. */
+  colorScheme(): 'light' | 'dark' | undefined {
+    const value = this.#features.get('prefers-color-scheme');
+    return value === 'light' || value === 'dark' ? value : undefined;
+  }
 }
 
 /**

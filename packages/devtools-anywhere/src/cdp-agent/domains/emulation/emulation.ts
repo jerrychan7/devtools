@@ -2,7 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 import { MediaEmulation } from './media';
-import { rewriteMedia, rewriteValues } from './rewrite';
+import { rewriteColorScheme, rewriteMedia, rewriteValues } from './rewrite';
 import { safeAreaRewrite } from './safe-area';
 import { useShadowRoots } from './trees';
 import { VISION, setVision, useVisionContext } from './vision';
@@ -36,6 +36,7 @@ export function registerEmulation(ctx: Context) {
     // and the `sizes` of its images (domains/emulation/rewrite.ts).
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
       rewriteMedia('media', media.set(session, params));
+      rewriteColorScheme(media.colorScheme());
     },
     // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes.
     setSafeAreaInsetsOverride({ insets }: Protocol.Emulation.SetSafeAreaInsetsOverrideRequest) {
@@ -53,6 +54,7 @@ export function registerEmulation(ctx: Context) {
   session.onReset(() => {
     // The session ends as a call with nothing, as Chrome's does: whoever set the media type, it goes.
     rewriteMedia('media', media.end(session));
+    rewriteColorScheme(media.colorScheme());
     for (const [what, owner] of owners) {
       if (owner !== session) continue;
       owners.delete(what);

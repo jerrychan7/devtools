@@ -4,8 +4,18 @@ import { quietMutations } from '../../core/nodes/own-mutations';
 import { setWrittenAttribute, type Written, writtenAttribute } from '../../core/nodes/written-attributes';
 import { isCssom, isElement, isHtml, isNode, isSvg, realmOf } from '../../core/realm';
 import { pageRulesRewritten } from '../css/matching/forced-pseudo';
-import { type CssomChange, ownCall, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
+import {
+  type CssomChange,
+  cssSupports,
+  ownCall,
+  ownSet,
+  ownStyle,
+  watchCssom,
+  watchRealms,
+} from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
+import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
+import { asciiLower } from './css-tokens';
 import { type Merge, mergeDeclarations, mergeList } from './merge';
 import { type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
@@ -17,6 +27,8 @@ export type Rewrite = (text: string) => string;
 interface Active {
   media: Rewrite | null;
   values: Rewrite | null;
+  /** The color-scheme value of the emulated preference, for a <meta name="color-scheme">'s content. */
+  scheme: Rewrite | null;
 }
 
 /**
@@ -65,7 +77,10 @@ const apply = (rewrites: Map<string, Rewrite>, text: string) => {
 const composed = (rewrites: Map<string, Rewrite>): Rewrite | null =>
   rewrites.size ? text => apply(rewrites, text) : null;
 
-const current = (): Active => ({ media: composed(mediaRewrites), values: composed(valueRewrites) });
+/** The color-scheme value of the emulated preference (rewriteColorScheme), or null for none. */
+let scheme: Rewrite | null = null;
+
+const current = (): Active => ({ media: composed(mediaRewrites), values: composed(valueRewrites), scheme });
 
 const rewriting = () => mediaRewrites.size > 0 || valueRewrites.size > 0;
 
@@ -114,6 +129,25 @@ export function rewriteValues(name: string, rewrite: Rewrite | null): void {
   if (rewrite) valueRewrites.set(name, rewrite);
   else valueRewrites.delete(name);
   update();
+}
+
+/** Whether Chrome reads a value as a color-scheme: the probe's CSS.supports (cssSupports), not the page's. */
+const supportsScheme = (value: string) => cssSupports('color-scheme', value);
+
+/** The color-scheme preference the page's values follow (rewriteColorScheme), or none. */
+let colorPreference: Preference | undefined;
+
+/**
+ * Makes the page's `color-scheme` values follow the emulated preference (color-scheme.ts): the declarations
+ * of its sheets, style attributes and CSSOM, and the content of its <meta name="color-scheme">. Given no
+ * preference, they are as the page wrote them again. The root is not given a scheme of its own.
+ */
+export function rewriteColorScheme(preference: Preference | undefined): void {
+  // Unchanged: the values already follow it, and the page is not read again for nothing.
+  if (preference === colorPreference) return;
+  colorPreference = preference;
+  scheme = preference ? schemeValue(preference, supportsScheme) : null;
+  rewriteValues('colorScheme', scheme && schemeDeclarations(scheme));
 }
 
 /** A media query list as the page wrote it, for showing: the original of a rewritten one. */
@@ -401,7 +435,7 @@ function track<T extends object>(set: Set<WeakRef<T>>, obj: T): void {
 function restoreWritten(): void {
   for (const ref of writtenElements) {
     const el = ref.deref();
-    if (el) for (const name of ['style', 'media', 'sizes']) fixAttribute(el, name, null);
+    if (el) for (const name of ['style', 'media', 'sizes', 'content']) fixAttribute(el, name, null);
   }
   for (const ref of writtenLists) {
     const list = ref.deref();
@@ -417,8 +451,14 @@ function restoreWritten(): void {
   refs = new WeakMap();
 }
 
-/** The elements whose attributes are rewritten: a `style`, the `media` of a <source>, the `sizes` of an <img> or <source>. */
-const ELEMENTS = '[style], source[media], img[sizes], source[sizes]';
+/**
+ * The elements whose attributes are rewritten: a `style`, the `media` of a <source>, the `sizes` of an <img> or
+ * <source>, and the `content` of a <meta>. Every <meta> is looked at: one may be made a color-scheme meta.
+ */
+const ELEMENTS = '[style], source[media], img[sizes], source[sizes], meta';
+
+/** A <meta name="color-scheme">, whose content is a color-scheme value (the name is ASCII case-insensitive). */
+const isColorSchemeMeta = (el: Element) => asciiLower(el.getAttribute('name') ?? '') === 'color-scheme';
 
 /**
  * Rewrites the attributes of `el` that the emulation rewrites; returns whether a write was made. A
@@ -431,6 +471,8 @@ function fixElement(el: Element, act: Active, paced = false): boolean {
   if (isHtml(el, 'source')) changed = fixAttribute(el, 'media', act.media, paced) || changed;
   if (isHtml(el, 'source') || isHtml(el, 'img'))
     changed = fixAttribute(el, 'sizes', act.media && sizesRewrite(act.media), paced) || changed;
+  if (isHtml(el, 'meta'))
+    changed = fixAttribute(el, 'content', isColorSchemeMeta(el) ? act.scheme : null, paced) || changed;
   return changed;
 }
 
@@ -443,9 +485,9 @@ function fixRule(rule: CSSRule, act: Active): boolean {
   }
   let changed = isCssom(rule, 'CSSMediaRule') ? fixMedia(rule.media, act.media) : false;
   const style: unknown = 'style' in rule ? ownStyle(rule as CSSRule & { style: CSSStyleDeclaration }) : null;
-  // A block using env() is read again on every change, and so is one this rewrote before (styles.has),
-  // which is restored when the rewrite is gone.
-  if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || style.cssText.includes('env(')))
+  // A block using env() or color-scheme is read again on every change, and so is one this rewrote before
+  // (styles.has), which is restored when the rewrite is gone.
+  if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || /env\(|color-scheme/.test(style.cssText)))
     changed = fixStyle(style, act.values) || changed;
   if (isCssom(rule, 'CSSGroupingRule') || isCssom(rule, 'CSSKeyframesRule'))
     for (const inner of Array.from(rule.cssRules)) changed = fixRule(inner, act) || changed;
@@ -519,7 +561,7 @@ const OBSERVED: MutationObserverInit = {
   childList: true,
   subtree: true,
   characterData: true,
-  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type', 'style', 'sizes'],
+  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type', 'style', 'sizes', 'name', 'content'],
 };
 
 /** The elements that own a style sheet: a <style> (HTML or SVG) and a <link>. */
@@ -550,7 +592,11 @@ function fixChanged(records: MutationRecord[], act: Active): void {
     if (record.type === 'attributes') {
       const target = record.target;
       const name = record.attributeName;
-      if (isElement(target) && !closestOwn(target) && (name === 'style' || name === 'media' || name === 'sizes'))
+      if (
+        isElement(target) &&
+        !closestOwn(target) &&
+        (name === 'style' || name === 'media' || name === 'sizes' || isHtml(target, 'meta'))
+      )
         fixElement(target, act, true);
     } else
       for (const node of Array.from(record.addedNodes)) {
