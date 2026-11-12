@@ -43,9 +43,9 @@ interface Rewritten {
  * inserted or changed, a sheet's own media list), so that an insertRule() followed by
  * getComputedStyle() in the same task sees the rewrite; replace() is rewritten when its promise
  * resolves. The others are seen by mutation observers and rewritten in a microtask after the change,
- * unless the page answers a rewrite of ours in the same task (a guard putting back its text): then
- * the rewrite waits for a frame, and the wait grows while the page keeps answering in that task (see the pacing
- * note below).
+ * unless the page answers a rewrite of ours in the same turn of its script (a guard putting back its text), or keeps
+ * putting back a value that the rewrite replaces from tasks of its own: then the rewrite waits, and the
+ * wait grows while the page keeps answering (see the pacing note below).
  *
  * Limits: the rules of a sheet that cannot be read (cross-origin) are left as they are; its media is
  * rewritten like any other. matchMedia() is not affected. A <style> added in the same task as it is
@@ -219,7 +219,7 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
     return false;
   }
   const record = writtenAttribute(el, name);
-  if (paced && rewrite && holdBack(el, name, current, record)) return false;
+  if (paced && rewrite && holdBack(el, name, current, record, rewrite)) return false;
   const fixed = fixText(
     record,
     current,
@@ -242,13 +242,24 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
  * our write, and the page's changes before the timer that closes the turn, see turnOf) can make the
  * rewrite answer it again forever: a mutation observer that puts back the text it had, for one, sees
  * our rewrite and restores its own text, which our observer sees and rewrites again, and no task ever
- * ends. So the rewrite of an attribute the page changed waits for a frame when the page changed it in
- * the turn of our last write, or put back the text our rewrite replaced (`original`); each answer in
- * a turn doubles the wait, up to MAX_WAIT frames. A put-back from a later task is held a frame, without
- * the doubling; any other change from a later task is written at once. The writes an emulation change
- * makes are never held back, nor those of a page's change that answers nothing.
+ * ends. So the rewrite of an attribute the page changed waits when the page changed it in the turn of
+ * our last write; each answer in a turn doubles the wait, from two frames up to MAX_WAIT frames.
+ *
+ * A page that answers from a task of its own (a timer its observer sets) is taken for an answer in the turn only
+ * if the timer runs before the turn closes. Observers run their callbacks in creation order: a page observer created
+ * before ours runs first, so the timer it queues comes before our turn timer, and runs while the turn is open.
+ * Otherwise it is a revert: a change after the turn has closed to a text that the rewrite would change again, such
+ * as one with env(), or a media list written in another form. Once the page has changed a text, the emulation takes
+ * the page's text as its original (fixText's merge), so a value the page keeps putting back is the original from
+ * then on, and it is a revert all the same. A revert answers one of our writes, so each write is counted once. The
+ * reverts of an attribute within REVERT_WINDOW are counted; above REVERT_LIMIT of them, each revert doubles the wait,
+ * as an answer in the turn does. Until then a revert is written at once, whatever it puts back. The writes an
+ * emulation change makes are never held back.
  */
 const MAX_WAIT = 64;
+/** The reverts of an attribute's rewrite are counted within this many ms, and more than REVERT_LIMIT back it off. */
+const REVERT_WINDOW = 3000;
+const REVERT_LIMIT = 3;
 
 /** How an attribute's rewrites are paced: the turn of our last write, and the frames of the next wait. */
 interface Pace {
@@ -256,6 +267,11 @@ interface Pace {
   wait: number;
   /** Whether a rewrite is due and waiting for its frame: the page's text is rewritten then. */
   held: boolean;
+  /** When the counted reverts of the rewrite were made (by `readClock`), those within REVERT_WINDOW. */
+  reverts: number[];
+  /** Our writes to the attribute so far, and the write the last counted revert answered. */
+  writes: number;
+  revertOf: number;
 }
 const paces = new WeakMap<Element, Map<string, Pace>>();
 
@@ -274,9 +290,11 @@ const closeTurn = () => {
   turnNo++;
 };
 
-/* The frames and timers as the agent found them: a page may replace them later (a fake clock, say). */
+/* The frames, timers and clock as the agent found them: a page may replace them later (a fake clock, say). */
 const requestFrame = requestAnimationFrame;
 const setTimer = setTimeout;
+const perf = performance;
+const readClock = perf.now;
 
 /** Calls `fn` at the next frame, or after 50 ms where frames do not come (a page in the background). */
 function nextFrame(fn: () => void): void {
@@ -300,30 +318,67 @@ function afterFrames(frames: number, fn: () => void): void {
 function wroteAt(el: Element, name: string): void {
   let byName = paces.get(el);
   if (!byName) paces.set(el, (byName = new Map()));
-  const pace = byName.get(name) ?? { turn: 0, wait: 1, held: false };
+  const pace = byName.get(name) ?? { turn: 0, wait: 1, held: false, reverts: [], writes: 0, revertOf: -1 };
   pace.turn = turnOf();
+  pace.writes++;
   byName.set(name, pace);
 }
 
 /**
- * Whether the rewrite of `el`'s attribute `name` that the page's change to `text` calls for is held
- * for frames, rather than made now (see the pacing note above). `record` is what was written last.
+ * Counts a revert of `pace`'s rewrite now. A revert answers one of our writes, so the first change counted after
+ * a write is the revert; another change before the next write (a second record of the same task, or one while
+ * the rewrite is held) is the same one.
  */
-function holdBack(el: Element, name: string, text: string, record: Written | undefined): boolean {
+function countRevert(pace: Pace): void {
+  if (pace.revertOf === pace.writes) return;
+  pace.revertOf = pace.writes;
+  pace.reverts.push(Reflect.apply(readClock, perf, []) as number);
+}
+
+/** Whether the reverts of `pace`'s rewrite within REVERT_WINDOW, as of now, are more than REVERT_LIMIT. */
+function revertsTooOften(pace: Pace): boolean {
+  // A held rewrite keeps the decision it was held with: its reverts do not age out while it waits.
+  if (!pace.held) {
+    const now = Reflect.apply(readClock, perf, []) as number;
+    pace.reverts = pace.reverts.filter(at => now - at < REVERT_WINDOW);
+  }
+  return pace.reverts.length > REVERT_LIMIT;
+}
+
+/**
+ * Whether the rewrite of `el`'s attribute `name` that the page's change to `text` calls for is held
+ * for frames, rather than made now (see the pacing note above). `record` is what was written last, and
+ * `rewrite` is what the attribute is rewritten with.
+ */
+function holdBack(el: Element, name: string, text: string, record: Written | undefined, rewrite: Rewrite): boolean {
   const pace = paces.get(el)?.get(name);
   if (!pace) return false;
   // The page's text is what was written: there is nothing to rewrite.
   if (record && text === record.applied) return false;
   const answered = turnOpen && pace.turn === turnNo;
-  if (!answered && !(record && text === record.original)) {
+  // A revert: a change after the turn has closed, to a text the rewrite would change again. Counted, whether it is
+  // the original (which the page's changes make the emulation's original) or another text. Our record of the last
+  // write is not needed for it: a clear of the style drops that record.
+  const reverted = !answered && rewrite(text) !== text;
+  if (reverted) countRevert(pace);
+  const backingOff = revertsTooOften(pace);
+  if (!answered && !reverted) {
     // A change that answers nothing is written at once, even while a rewrite is held: that rewrite, when it
-    // runs, rewrites whatever text the page has then.
+    // runs, rewrites whatever text the page has then. It resets the wait only once the window holds no more
+    // reverts than the limit: a clear of the style in between does not restart the wait.
+    if (!backingOff) pace.wait = 1;
+    return false;
+  }
+  // A revert that is not yet too many is written at once, whatever text it puts back, the original included: a page's
+  // own write of the text it had is not told from a guard's put-back, and the back-off above holds a page that keeps
+  // reverting past the limit.
+  if (!answered && !backingOff) {
     pace.wait = 1;
     return false;
   }
   // An answer while a rewrite is held is covered by that rewrite, which reads the page's text when it runs.
   if (pace.held) return true;
-  pace.wait = answered ? Math.min(MAX_WAIT, pace.wait * 2) : 1;
+  pace.wait = answered || backingOff ? Math.min(MAX_WAIT, pace.wait * 2) : 1;
   pace.held = true;
   afterFrames(pace.wait, () => {
     pace.held = false;
