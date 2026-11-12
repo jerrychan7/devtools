@@ -55,6 +55,28 @@ function valuesOf(block: string): Map<string, string> {
   return values;
 }
 
+/** A declaration block as the browser reads it: each name's value (valuesOf), and each name's declared text. */
+interface Reading {
+  values: Map<string, string>;
+  texts: Map<string, string>;
+}
+
+const readingOf = (block: string): Reading => ({
+  values: valuesOf(block),
+  texts: new Map(declarationsOf(block).map(d => [d.name, d.value.replace(/\s+/g, ' ')] as const)),
+});
+
+/**
+ * Whether the declaration `name` reads the same in both blocks: by the value the browser reads for it, or, where that value
+ * is empty, by the text declared. A shorthand with a longhand after it (or an env() or a var() on one of its sides) reads
+ * as empty, as its sides have no one value, so two such shorthands are the same only when their texts are.
+ */
+function sameReading(a: Reading, b: Reading, name: string): boolean {
+  const value = a.values.get(name);
+  if (value === undefined || value !== b.values.get(name)) return false;
+  return value !== '' || a.texts.get(name) === b.texts.get(name);
+}
+
 /**
  * Declaration blocks: a declaration whose value is still the one the rewrite gave it takes the
  * original declaration of its name back; the others are the page's, as it wrote them. A block the
@@ -66,26 +88,25 @@ export const mergeDeclarations: Merge = (original, applied, current) => {
   const declared = declarationsOf(current);
   if (declared.some(d => d.value === '')) return current;
   const kept = new Map(declarationsOf(original).map(d => [d.name, d.text] as const));
-  const was = valuesOf(applied);
-  const now = valuesOf(current);
+  const was = readingOf(applied);
+  const now = readingOf(current);
   return declared
     .map(d => {
       const own = kept.get(d.name);
-      return own !== undefined && was.get(d.name) === now.get(d.name) ? own : d.text;
+      return own !== undefined && sameReading(was, now, d.name) ? own : d.text;
     })
     .join('; ');
 };
 
 /**
- * Whether two declaration blocks declare the same names with the same values, as the browser reads them (valuesOf),
- * whatever their text. A value the browser reads as empty is never the same as another: a shorthand whose longhands
- * differ (an env() or a var() on one of them, say) reads so, and what it declares is then not in the values at all.
+ * Whether two declaration blocks declare the same names with the same values, as the browser reads them (sameReading),
+ * whatever their text.
  */
 export const sameDeclarations = (a: string, b: string): boolean => {
-  const left = valuesOf(a);
-  const right = valuesOf(b);
-  if (left.size !== right.size) return false;
-  for (const [name, value] of left) if (value === '' || right.get(name) !== value) return false;
+  const left = readingOf(a);
+  const right = readingOf(b);
+  if (left.values.size !== right.values.size) return false;
+  for (const name of left.values.keys()) if (!sameReading(left, right, name)) return false;
   return true;
 };
 

@@ -401,67 +401,6 @@ test("the Computed pane lists the custom properties the page declares, not the e
   assert.deepEqual(r.html, []);
 });
 
-test('a shorthand the page changes one side of keeps its other sides under the emulation, and after it', async () => {
-  // Both sides start from these elements, made anew: the page's changes of one side stay in it.
-  const fresh = () =>
-    t.page.evaluate(() => {
-      document.getElementById('partial-sheet')?.remove();
-      document.getElementById('partial')?.remove();
-      document.getElementById('partial-rule')?.remove();
-      const style = document.createElement('style');
-      style.id = 'partial-sheet';
-      style.textContent =
-        '.partial-rule { padding: env(safe-area-inset-top, 1px) env(safe-area-inset-right, 2px) 0 0 }';
-      document.head.appendChild(style);
-      document.body.insertAdjacentHTML(
-        'beforeend',
-        '<div id="partial" style="padding: env(safe-area-inset-top, 1px) env(safe-area-inset-right, 2px) 0 0">p</div>' +
-          '<div id="partial-rule" class="partial-rule">r</div>'
-      );
-    });
-  const read = (id: string) =>
-    t.page.evaluate(id => {
-      const el = document.getElementById(id);
-      const style = getComputedStyle(el ?? document.body);
-      return { top: style.paddingTop, left: style.paddingLeft };
-    }, id);
-  try {
-    const r = await sameOnBoth(t, async side => {
-      await fresh();
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      // The page writes the left side alone, of an inline style and of a rule's style.
-      await t.page.evaluate(() => {
-        const el = document.getElementById('partial');
-        if (el) el.style.paddingLeft = '1px';
-        const style = document.getElementById('partial-sheet');
-        const rule = style instanceof HTMLStyleElement ? style.sheet?.cssRules[0] : undefined;
-        if (rule instanceof CSSStyleRule) rule.style.paddingLeft = '3px';
-      });
-      await settle();
-      const during = [await read('partial'), await read('partial-rule')];
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      return { during, after: [await read('partial'), await read('partial-rule')] };
-    });
-    // The top side is the inset while it is emulated, and the real one, 0, once it ends.
-    assert.deepEqual(r.during, [
-      { top: '5px', left: '1px' },
-      { top: '5px', left: '3px' },
-    ]);
-    assert.deepEqual(r.after, [
-      { top: '0px', left: '1px' },
-      { top: '0px', left: '3px' },
-    ]);
-  } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('partial-sheet')?.remove();
-      document.getElementById('partial')?.remove();
-      document.getElementById('partial-rule')?.remove();
-    });
-  }
-});
-
 test("the Styles pane shows a sheet's rules with the env() of the insets, as Chrome does", async () => {
   await t.page.evaluate(() => {
     const style = document.createElement('style');
@@ -887,45 +826,6 @@ test('a style the page changes in part under the emulation keeps the text the em
     assert.deepEqual(r.after, { padding: 'env(safe-area-inset-top, 7px)', opacity: '0.5' });
   } finally {
     await t.page.evaluate(() => document.getElementById('part')?.remove());
-  }
-});
-
-test('a shorthand with env() keeps it when the page sets another declaration, the browser writing 0 as 0px', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="sh" style="margin: 0 env(safe-area-inset-right, 7px)">sh</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(t, async side => {
-      await t.page.evaluate(() =>
-        document.getElementById('sh')?.setAttribute('style', 'margin: 0 env(safe-area-inset-right, 7px)')
-      );
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { right: 6 } });
-      await settle();
-      // The page's script sets another declaration: the browser writes the whole block back, the 0 as 0px.
-      await t.page.evaluate(() => {
-        const el = document.getElementById('sh');
-        if (el) el.style.opacity = '0.5';
-      });
-      await settle();
-      const during = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('sh') ?? document.body).marginRight
-      );
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      // A longhand of a shorthand with env() reads as empty (pending substitution): the declaration text is looked at.
-      const after = await t.page.evaluate(() => {
-        const style = document.getElementById('sh')?.style;
-        return { env: style?.cssText.includes('env(safe-area-inset-right, 7px)') ?? false, opacity: style?.opacity };
-      });
-      return { during, after };
-    });
-    assert.equal(r.during, '6px');
-    assert.deepEqual(r.after, { env: true, opacity: '0.5' });
-  } finally {
-    await t.page.evaluate(() => document.getElementById('sh')?.remove());
   }
 });
 

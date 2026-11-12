@@ -763,6 +763,103 @@ test('a page edit of other declarations in a rewritten style attribute is not wr
   }
 });
 
+test('a page that sets back the rewritten text of a pending shorthand with another declaration writes nothing', async () => {
+  // A shorthand with an env() followed by a longhand reads as empty in the browser, as its sides have no one value. The
+  // page's text with the rewrite in it, and another declaration added (its own spelling, with a semicolon at the end),
+  // says what the rewrite says: the values alone do not show it, so the rewrite wrote its text again, a revert each time
+  // that backs the rewrites off.
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'pending-edits';
+    el.setAttribute('style', 'padding: env(safe-area-inset-top, 7px) 0 0 0; padding-left: 3px');
+    el.textContent = 'pending';
+    document.body.append(el);
+    const state = { records: 0 };
+    const counter = new MutationObserver(records => {
+      state.records += records.length;
+    });
+    counter.observe(el, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'pendingCounter', { counter, state });
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await t.page.evaluate(() => {
+      (Reflect.get(window, 'pendingCounter') as { state: { records: number } }).state.records = 0;
+    });
+    const EDITS = 8;
+    for (let i = 1; i <= EDITS; i++) {
+      // Each edit is a task of its own, as a page's animation frame is.
+      await t.page.evaluate(i => {
+        const el = document.getElementById('pending-edits');
+        el?.setAttribute('style', `${el.getAttribute('style') ?? ''}; --edit: ${i};`);
+      }, i);
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const records = await t.page.evaluate(
+      () => (Reflect.get(window, 'pendingCounter') as { state: { records: number } }).state.records
+    );
+    // Each edit is one record of the page's; a write of the emulation's would add one more.
+    assert.equal(records, EDITS, `${records} records of the attribute for ${EDITS} edits`);
+    const padding = await t.page.evaluate(
+      () => getComputedStyle(document.getElementById('pending-edits') ?? document.body).paddingTop
+    );
+    assert.equal(padding, '5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'pendingCounter') as { counter: MutationObserver }).counter.disconnect();
+        document.getElementById('pending-edits')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
+test('a page edit through the CSSOM of a rewritten pending shorthand shows the emulated value at the next frame', async () => {
+  // The browser writes such a block back with its longhands empty (the shorthand's value is not in it any more), so each
+  // edit of another declaration makes the rewrite write the shorthand again. That write answers no put-back of the
+  // page's: it must not count as one, or after a few edits the rewrites are held for frames and the padding is the
+  // browser's own, without the inset.
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'pending-cssom';
+    el.setAttribute('style', 'padding: env(safe-area-inset-top, 7px) 0 0 0; padding-left: 3px');
+    el.textContent = 'pending';
+    document.body.append(el);
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const EDITS = 8;
+    for (let i = 1; i < EDITS; i++) {
+      // Each edit is a task of its own, as a page's animation frame is.
+      await t.page.evaluate(i => {
+        document.getElementById('pending-cssom')?.style.setProperty('transform', `translate(${i}px)`);
+      }, i);
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    // The last edit, with the frame that follows it read before the edit is made: a rewrite held for frames shows then.
+    const padding = await t.page.evaluate(i => {
+      const el = document.getElementById('pending-cssom');
+      const frame = new Promise<string>(resolve =>
+        requestAnimationFrame(() => resolve(getComputedStyle(el ?? document.body).paddingTop))
+      );
+      el?.style.setProperty('transform', `translate(${i}px)`);
+      return frame;
+    }, EDITS);
+    assert.equal(padding, '5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => document.getElementById('pending-cssom')?.remove());
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
 test('a page that clears every timer id does not hold the rewrites of its later changes', async () => {
   // The emulation closes the turn of its writes with a timer. A page that clears every timer id, as a guard may do
   // from a microtask after the emulation's write (here, the guard's observer comes after the emulation's), clears

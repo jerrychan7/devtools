@@ -202,8 +202,15 @@ function planText(record: Rewritten | undefined, current: string, rewrite: Rewri
       ? record.original
       : kind.merge(record.original, record.applied, current);
   const target = rewrite ? rewrite(original) : original;
+  // The rewrite changes nothing here, so the original is written back only where the page's text says something else:
+  // a text that says the same, in other spacing, is left as the browser wrote it (as below).
   if (target === original)
-    return { original, target, write: current === original ? undefined : original, keep: undefined };
+    return {
+      original,
+      target,
+      write: current === original || kind.same(current, original) ? undefined : original,
+      keep: undefined,
+    };
   // The text already reads what the rewrite gives: nothing to write (a browser may read it back
   // differently from what was written, so a comparison with the written text would never agree).
   if (record && record.applied === current && record.target === target)
