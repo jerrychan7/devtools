@@ -414,6 +414,41 @@ test('a value Chrome does not read takes its feature back, whichever session set
   assert.notEqual(r[1]?.color, 'rgb(1, 0, 0)');
 });
 
+test('a feature name is compared as written: Chrome takes no other spelling of one', async () => {
+  // Both values: the page's own scheme is light or dark, and a name that is accepted changes the measure only
+  // when its value is the other one.
+  const none = await both(...media({}));
+  for (const value of ['light', 'dark'] as const) {
+    for (const name of ['Prefers-Color-Scheme', 'prefers-color-schem\\65', ' prefers-color-scheme']) {
+      assert.deepEqual(await both(...media({ features: [{ name, value }] })), none, `${name}: ${value}`);
+    }
+  }
+});
+
+test('prefers-reduced-data is not emulated: Chrome leaves its queries to the browser', async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'reduced-data-css';
+    style.textContent = '@media (prefers-reduced-data: reduce) { #reduced-data { font-size: 19px } }';
+    document.head.append(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="reduced-data"></div>');
+  });
+  try {
+    const size = await both(
+      (side: Side) =>
+        side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-data', value: 'reduce' }] }),
+      (side: Side) => side.send('Emulation.setEmulatedMedia', { media: '', features: [] }),
+      () => t.page.evaluate(() => getComputedStyle(document.getElementById('reduced-data') ?? document.body).fontSize)
+    );
+    assert.notEqual(size, '19px');
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('reduced-data-css')?.remove();
+      document.getElementById('reduced-data')?.remove();
+    });
+  }
+});
+
 const safeArea = (insets: Protocol.Emulation.SafeAreaInsets) =>
   [
     (side: Side) => side.send('Emulation.setSafeAreaInsetsOverride', { insets }),
@@ -491,6 +526,48 @@ test('a rule inside @media keeps the env() the page wrote, in the Styles pane an
     await t.page.evaluate(() => {
       document.getElementById('sa-media-css')?.remove();
       document.getElementById('sa-media')?.remove();
+    });
+  }
+});
+
+test('a rule under @supports with a string in its condition keeps the env() the page wrote, in the sheet text', async () => {
+  const css = '@supports (font-family: "A") { #sa-sup { padding-top: env(safe-area-inset-top, 7px) } }';
+  await t.page.evaluate(text => {
+    const style = document.createElement('style');
+    style.id = 'sa-supports-css';
+    style.textContent = text;
+    document.head.append(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="sa-sup"></div>');
+  }, css);
+  try {
+    const shown = await sameOnBoth(async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      try {
+        const { root } = await side.send('DOM.getDocument', {});
+        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-sup' });
+        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+        const matched = (matchedCSSRules ?? []).filter(m => m.rule.origin === 'regular');
+        const values = matched.flatMap(m =>
+          m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
+        );
+        const sheetId = matched[0]?.rule.styleSheetId;
+        const text = sheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId: sheetId })).text : undefined;
+        return { values, text };
+      } finally {
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      }
+    });
+    assert.ok(shown.values.length > 0);
+    for (const value of shown.values) assert.equal(value, 'env(safe-area-inset-top, 7px)');
+    assert.equal(shown.text, css);
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('sa-supports-css')?.remove();
+      document.getElementById('sa-sup')?.remove();
     });
   }
 });

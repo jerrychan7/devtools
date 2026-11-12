@@ -308,3 +308,54 @@ test("the Styles pane, the sheet's text and the DOM show the page's own values, 
     await cleanup();
   }
 });
+
+test('a color-scheme naming both schemes in a @media rule follows the preference, and the Styles pane shows it as written', async () => {
+  const cleanup = await inPage(
+    box('cs-media', 'class="cs-media-rule"'),
+    '@media all { .cs-media-rule { color-scheme: light dark } }'
+  );
+  try {
+    await followsPreference(['cs-media']);
+    const matched = await sameOnBoth(side =>
+      underPreference(side, 'dark', async () => {
+        await side.send('DOM.enable');
+        await side.send('CSS.enable');
+        try {
+          const { root } = await side.send('DOM.getDocument', {});
+          const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#cs-media' });
+          const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+          return (matchedCSSRules ?? []).flatMap(m =>
+            m.rule.style.cssProperties.filter(p => p.name === 'color-scheme').map(p => p.value)
+          );
+        } finally {
+          await side.send('CSS.disable');
+          await side.send('DOM.disable');
+        }
+      })
+    );
+    // The declared value, and then the longhand it holds: both the page's own, as in the test above.
+    assert.deepEqual(matched, ['light dark', 'light dark']);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('a page that replaces CSS.supports does not change which values Chrome reads', async () => {
+  const cleanup = await inPage(box('cs-replaced', 'style="color-scheme: light only dark"'));
+  await t.page.evaluate(() => {
+    const page = window as unknown as { __supports?: typeof CSS.supports };
+    page.__supports = CSS.supports;
+    // Answers yes to everything: a value Chrome does not read would then look read.
+    CSS.supports = () => true;
+  });
+  try {
+    // Chrome does not read `light only dark` (the names in the middle), so it keeps the scheme it has.
+    const shown = await sameOnBoth(side => underPreference(side, 'dark', () => readBoxes(['cs-replaced'])));
+    assert.deepEqual(shown['cs-replaced'], SCHEME.light);
+  } finally {
+    await t.page.evaluate(() => {
+      CSS.supports = (window as unknown as { __supports: typeof CSS.supports }).__supports;
+    });
+    await cleanup();
+  }
+});
