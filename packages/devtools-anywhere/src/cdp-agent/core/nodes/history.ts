@@ -1,4 +1,4 @@
-import { FORCE_ATTRIBUTE, isOwn } from './nodes';
+import { HIDDEN_ATTRIBUTES, isOwn } from './nodes';
 import { shownAttribute } from './written-attributes';
 import { documentOf, isDocument, isElement, isHtml, isShadowRoot } from '../realm';
 import { nativeCall, nativeGet } from '../natives';
@@ -261,10 +261,10 @@ function hash(s: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-/** devtools-anywhere's own attribute is neither compared nor patched; the page's values are, as written. */
+/** devtools-anywhere's own attributes are neither compared nor patched; the page's values are, as written. */
 const patchedAttributes = (el: Element) =>
   Array.from(nativeGet<NamedNodeMap>(el, 'attributes'))
-    .filter(a => a.name !== FORCE_ATTRIBUTE)
+    .filter(a => !HIDDEN_ATTRIBUTES.includes(a.name))
     .map(a => ({ name: a.name, value: shownAttribute(el, a.name, a.value) ?? a.value }));
 
 type Unused = Map<string, Digest>;

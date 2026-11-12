@@ -1,7 +1,8 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import {
-  FORCE_ATTRIBUTE,
+  HIDDEN_ATTRIBUTES,
+  HIDDEN_SELECTOR,
   PseudoElement,
   closestOwn,
   isCrossOrigin,
@@ -299,16 +300,16 @@ function searchNodes(
   return Array.from(found);
 }
 
-/** Markup of `node` as DOM.getOuterHTML returns it: without forced pseudo-class markers. */
+/** Markup of `node` as DOM.getOuterHTML returns it: without devtools-anywhere's own attributes. */
 function outerHTML(node: Node): string {
   if (isElement(node)) {
-    if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`) && !hasWritten(node))
+    if (!node.matches(HIDDEN_SELECTOR) && !node.querySelector(HIDDEN_SELECTOR) && !hasWritten(node))
       return node.outerHTML;
-    // Leave out forced pseudo-class markers, and show the attributes the page gave.
+    // Leave out devtools-anywhere's own attributes, and show the attributes the page gave.
     const copy = shownCopy(node);
     if (!isElement(copy)) return node.outerHTML;
-    for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
-      el.removeAttribute(FORCE_ATTRIBUTE);
+    for (const el of [copy, ...Array.from(copy.querySelectorAll(HIDDEN_SELECTOR))])
+      for (const name of HIDDEN_ATTRIBUTES) el.removeAttribute(name);
     return copy.outerHTML;
   }
   // The whole document, doctype included, like Chrome.
@@ -545,7 +546,7 @@ export function registerDom(ctx: Context) {
         });
       } else if (record.type === 'attributes' && targetId !== undefined && isElement(target)) {
         const name = record.attributeName;
-        if (name === null || name === FORCE_ATTRIBUTE) continue;
+        if (name === null || HIDDEN_ATTRIBUTES.includes(name)) continue;
         const written = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
         const value = shownAttribute(target, name, written);
         if (value === null) session.emit('DOM.attributeRemoved', { nodeId: targetId, name });
@@ -762,7 +763,7 @@ export function registerDom(ctx: Context) {
       const el = element(params);
       const renamed = el.ownerDocument.createElement(params.name);
       for (const attr of Array.from(el.attributes))
-        if (attr.name !== FORCE_ATTRIBUTE)
+        if (!HIDDEN_ATTRIBUTES.includes(attr.name))
           renamed.setAttributeNS(attr.namespaceURI, attr.name, shownAttribute(el, attr.name, attr.value) ?? attr.value);
       history.record(
         editReplace(
@@ -809,8 +810,8 @@ export function registerDom(ctx: Context) {
       const copy = shownCopy(resolveNode(ctx, params));
       // The copy is not forced into any pseudo-class state.
       if (isElement(copy))
-        for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
-          el.removeAttribute(FORCE_ATTRIBUTE);
+        for (const el of [copy, ...Array.from(copy.querySelectorAll(HIDDEN_SELECTOR))])
+          for (const name of HIDDEN_ATTRIBUTES) el.removeAttribute(name);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
       history.record(editPosition(copy, () => target.insertBefore(copy, before)));

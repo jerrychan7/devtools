@@ -65,6 +65,10 @@ export function closestOwn(node: Node): boolean {
 }
 /** Pseudo-classes forced on an element (CSS.forcePseudoState); hidden from the client. */
 export const FORCE_ATTRIBUTE = 'data-devtools-anywhere-force';
+/** The attributes devtools-anywhere writes into the page's elements: the client is never shown them. */
+export const HIDDEN_ATTRIBUTES: readonly string[] = [FORCE_ATTRIBUTE];
+/** The same attributes as a selector, for elements that have one of them. */
+export const HIDDEN_SELECTOR = HIDDEN_ATTRIBUTES.map(name => `[${name}]`).join(', ');
 
 /**
  * An element's attributes as sent to the client, without devtools-anywhere's own, and with those
@@ -72,7 +76,7 @@ export const FORCE_ATTRIBUTE = 'data-devtools-anywhere-force';
  */
 export const visibleAttributes = (el: Element) =>
   Array.from(el.attributes)
-    .filter(a => a.name !== FORCE_ATTRIBUTE)
+    .filter(a => !HIDDEN_ATTRIBUTES.includes(a.name))
     .flatMap(a => [a.name, shownAttribute(el, a.name, a.value) ?? a.value]);
 
 /** Text children up to this length are sent along with their element, like Chrome does. */
