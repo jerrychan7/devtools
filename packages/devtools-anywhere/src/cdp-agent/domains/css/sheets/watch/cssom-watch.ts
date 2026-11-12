@@ -488,7 +488,11 @@ export function forgetSheet(sheet: CSSStyleSheet): void {
   for (const rule of reported) if (sheetOf(rule) === sheet) reported.delete(rule);
 }
 
-/** What the CSS domain changes the CSSOM with, as `part:name`. */
+/**
+ * What the agent calls itself, as `part:name`: the CSS domain's changes of the CSSOM, and the
+ * attributes of elements the emulation rewrites (domains/emulation/rewrite.ts), which the page's
+ * wrappers of `getAttribute` and `setAttribute` must not see.
+ */
 const OWN_KEYS = [
   'value:insertRule',
   'value:deleteRule',
@@ -504,6 +508,8 @@ const OWN_KEYS = [
   'value:item',
   'get:selectorText',
   'value:getPropertyValue',
+  'value:getAttribute',
+  'value:setAttribute',
 ];
 type Native = (...args: unknown[]) => unknown;
 
@@ -517,7 +523,7 @@ type Native = (...args: unknown[]) => unknown;
 const topNatives = new Map<object, Map<string, Native>>();
 const ownNatives = new Map<string, Map<string, Native>>();
 for (const name of Object.getOwnPropertyNames(globalThis)) {
-  if (!/^(CSS\w*|MediaList)$/.test(name)) continue;
+  if (!/^(CSS\w*|Element|MediaList)$/.test(name)) continue;
   const proto: unknown = (Reflect.get(globalThis, name) as { prototype?: unknown } | undefined)?.prototype;
   if (typeof proto !== 'object' || proto === null) continue;
   const found = new Map<string, Native>();

@@ -767,6 +767,53 @@ test('the page sees the style attribute it wrote, and the emulation makes no DOM
   }
 });
 
+test("a page wrapping the element's getAttribute and setAttribute does not see the emulation's writes", async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="wrp" style="padding-top: env(safe-area-inset-top, 7px)">wrp</div>'
+    )
+  );
+  // The page wraps both methods after the agent has taken its own: the calls made on #wrp are recorded.
+  await t.page.evaluate(() => {
+    const seen: string[] = [];
+    const names = ['getAttribute', 'setAttribute'] as const;
+    const originals = names.map(name => Object.getOwnPropertyDescriptor(Element.prototype, name));
+    Reflect.set(window, 'wrapped', { seen, originals });
+    names.forEach((name, i) => {
+      const native: unknown = originals[i]?.value;
+      if (typeof native !== 'function') throw new Error(`no ${name}`);
+      Object.defineProperty(Element.prototype, name, {
+        configurable: true,
+        writable: true,
+        value(this: Element, ...args: unknown[]) {
+          if (this.id === 'wrp') seen.push(`${name} ${args.join(' ')}`);
+          return Reflect.apply(native, this, args);
+        },
+      });
+    });
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    const padding = await t.page.evaluate(
+      () => getComputedStyle(document.getElementById('wrp') ?? document.body).paddingTop
+    );
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    const seen = await t.page.evaluate(() => (Reflect.get(window, 'wrapped') as { seen: string[] }).seen);
+    assert.equal(padding, '5px');
+    assert.deepEqual(seen, []);
+  } finally {
+    await t.page.evaluate(() => {
+      const { originals } = Reflect.get(window, 'wrapped') as { originals: (PropertyDescriptor | undefined)[] };
+      ['getAttribute', 'setAttribute'].forEach((name, i) => {
+        const descriptor = originals[i];
+        if (descriptor) Object.defineProperty(Element.prototype, name, descriptor);
+      });
+      document.getElementById('wrp')?.remove();
+    });
+  }
+});
+
 /**
  * A pixel of the screenshot, inside #vd and away from the viewport's edges, where Chrome's blur
  * fades out and ours does not; on #vd's right edge for the blur, which changes nothing inside.

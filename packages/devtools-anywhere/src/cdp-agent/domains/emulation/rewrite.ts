@@ -4,7 +4,7 @@ import { quietMutations } from '../../core/nodes/own-mutations';
 import { setWrittenAttribute, writtenAttribute } from '../../core/nodes/written-attributes';
 import { isCssom, isElement, isHtml, isNode, isSvg, realmOf } from '../../core/realm';
 import { pageRulesRewritten } from '../css/matching/forced-pseudo';
-import { type CssomChange, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
+import { type CssomChange, ownCall, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
 import { type Merge, mergeDeclarations, mergeList } from './merge';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
@@ -200,9 +200,13 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
 /** How each attribute the emulation rewrites is merged back: a declaration block, or a list. */
 const merges = (name: string): Merge => (name === 'style' ? mergeDeclarations : mergeList);
 
-/** Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`). */
+/**
+ * Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`).
+ * Read and written through the agent's own natives (ownCall), not the element's methods, which a page
+ * may have wrapped.
+ */
 function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boolean {
-  const current = el.getAttribute(name);
+  const current = ownCall<string | null>(el, 'getAttribute', name);
   if (current === null) {
     setWrittenAttribute(el, name, undefined);
     return false;
@@ -212,10 +216,10 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boole
     current,
     rewrite,
     merges(name),
-    () => el.getAttribute(name) ?? '',
+    () => ownCall<string | null>(el, 'getAttribute', name) ?? '',
     text => {
-      const before = el.getAttribute(name);
-      quietMutations(() => el.setAttribute(name, text), { target: el, name, before });
+      const before = ownCall<string | null>(el, 'getAttribute', name);
+      quietMutations(() => ownCall(el, 'setAttribute', name, text), { target: el, name, before });
     }
   );
   setWrittenAttribute(el, name, fixed.record);
