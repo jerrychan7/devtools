@@ -3,6 +3,7 @@
 // a page too, so this module reads no DOM when it loads, and the copy shownStyle makes is parsed by the native
 // CSSOM.
 import { ownCall, ownGet, ownSheet, ownStyle } from '../css/sheets/watch/cssom-watch';
+import { unwrapSafeArea } from './safe-area';
 
 /** A text the page had, and what it was rewritten to: `applied` as it reads after the write. */
 export interface Rewritten {
@@ -18,10 +19,13 @@ export const styles = new WeakMap<CSSStyleDeclaration, Rewritten>();
 /** The records of the media query lists the emulation rewrote, held weakly (rewrite.ts keeps them). */
 export const mediaLists = new WeakMap<MediaList, Rewritten>();
 
-/** A declaration block as the page wrote it, for showing (and for an edit to undo to): the original of a rewritten one. */
+/**
+ * A declaration block as the page wrote it, for showing (and for an edit to undo to): the original of a
+ * rewritten one, and the env() of a safe area inset the rewrite made a var() of (safe-area.ts).
+ */
 export function shownCssText(style: CSSStyleDeclaration): string {
   const rewritten = styles.get(style);
-  return rewritten && rewritten.applied === style.cssText ? rewritten.original : style.cssText;
+  return unwrapSafeArea(rewritten && rewritten.applied === style.cssText ? rewritten.original : style.cssText);
 }
 
 /** A media query list as the page wrote it, for showing: the original of a rewritten one. */

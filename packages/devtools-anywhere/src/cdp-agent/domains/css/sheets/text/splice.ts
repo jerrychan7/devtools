@@ -5,6 +5,7 @@
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { replacedLines } from './text-lines';
+import { unwrapSafeArea } from '../../../emulation/safe-area';
 import { ownCall } from '../watch/cssom-watch';
 import { type SheetSource, TOP, type Wrap, childRules, pairList, tagOf } from './pair';
 
@@ -81,7 +82,7 @@ export function applied(source: SheetSource, pending: Pending, rules: CSSRule[])
       if (added.some(isLead)) return false;
       const start = from < count ? o.start(topNodes[from] as number) : text.length;
       const end = k < count ? o.start(topNodes[k] as number) : text.length;
-      const insert = added.map(r => `${r.cssText}\n`).join('');
+      const insert = added.map(r => `${unwrapSafeArea(r.cssText)}\n`).join('');
       edits.push({ from, count: k - from, start, end, insert, rules: added });
     }
     from = k + 1;

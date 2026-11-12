@@ -388,6 +388,166 @@ test("the Computed pane lists the custom properties the page declares, not the e
   assert.deepEqual(r.html, []);
 });
 
+test("the Styles pane shows a sheet's rules with the env() of the insets, as Chrome does", async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'styled-sheet';
+    style.textContent =
+      '.styled-pad { padding-top: env(safe-area-inset-top, 7px); padding-left: env(safe-area-inset-left) }\n' +
+      '.styled-cust { --cust: env(safe-area-inset-top, 9px); padding-top: var(--cust) }\n';
+    document.head.appendChild(style);
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="styled-pad" class="styled-pad">a</div><div id="styled-cust" class="styled-cust">b</div>'
+    );
+  });
+  try {
+    const r = await sameOnBoth(t, async side => {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const rulesOf = async (selector: string) => {
+        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+        const { matchedCSSRules = [] } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+        const rules = [];
+        for (const { rule } of matchedCSSRules) {
+          if (rule.origin !== 'regular' || !rule.styleSheetId) continue;
+          const { text } = await side.send('CSS.getStyleSheetText', { styleSheetId: rule.styleSheetId });
+          rules.push({
+            text: rule.style.cssText,
+            properties: rule.style.cssProperties.map(p => `${p.name}: ${p.value}`),
+            sheet: text.split('\n').filter(line => line.includes('styled-')),
+          });
+        }
+        return rules;
+      };
+      const result = { pad: await rulesOf('#styled-pad'), cust: await rulesOf('#styled-cust') };
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      return result;
+    });
+    // The declared properties come first; Chrome then lists the longhands the style holds, again.
+    assert.deepEqual(r.pad[0]?.properties.slice(0, 2), [
+      'padding-top: env(safe-area-inset-top, 7px)',
+      'padding-left: env(safe-area-inset-left)',
+    ]);
+    assert.deepEqual(r.cust[0]?.properties.slice(0, 1), ['--cust: env(safe-area-inset-top, 9px)']);
+    assert.ok(r.pad[0]?.sheet.some(line => line.includes('padding-top: env(safe-area-inset-top, 7px)')));
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('styled-sheet')?.remove();
+      document.getElementById('styled-pad')?.remove();
+      document.getElementById('styled-cust')?.remove();
+    });
+  }
+});
+
+test('a sheet added before CSS was enabled keeps its text when the emulation rewrites it', async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'unchecked-sheet';
+    style.textContent = '.unchecked-pad { padding-top: env(safe-area-inset-top, 6px) }';
+    document.head.appendChild(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="unchecked-pad" class="unchecked-pad">u</div>');
+  });
+  try {
+    const r = await sameOnBoth(t, async side => {
+      // The emulation starts before CSS is enabled: the sheet's text is checked when it is first read.
+      await side.clear();
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#unchecked-pad' });
+      const { matchedCSSRules = [] } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+      const styleSheetId = matchedCSSRules.find(m => m.rule.selectorList.text === '.unchecked-pad')?.rule.styleSheetId;
+      const text = styleSheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId })).text : null;
+      const changed = await side.events('CSS.styleSheetChanged');
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      return { text, changed: changed.length };
+    });
+    assert.equal(r.changed, 0);
+    assert.equal(r.text, '.unchecked-pad { padding-top: env(safe-area-inset-top, 6px) }');
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('unchecked-sheet')?.remove();
+      document.getElementById('unchecked-pad')?.remove();
+    });
+  }
+});
+
+test('a rule added through the CSS domain under the emulation is emulated, and redone as written', async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'added-sheet';
+    style.textContent = '.added-pad { color: red }\n';
+    document.head.appendChild(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="added-pad" class="added-pad">a</div>');
+  });
+  try {
+    const r = await sameOnBoth(t, async side => {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#added-pad' });
+      const { matchedCSSRules = [] } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+      const styleSheetId = matchedCSSRules.find(m => m.rule.origin === 'regular')?.rule.styleSheetId;
+      const padding = () =>
+        t.page.evaluate(() => getComputedStyle(document.getElementById('added-pad') ?? document.body).paddingTop);
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      const before = await padding();
+      if (!styleSheetId) throw new Error('no sheet of the element');
+      await side.send('CSS.addRule', {
+        styleSheetId,
+        ruleText: '.added-pad { padding-top: env(safe-area-inset-top, 9px) }',
+        location: { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 },
+      });
+      await settle();
+      const added = await padding();
+      await side.send('DOM.undo');
+      await settle();
+      const undone = await padding();
+      await side.send('DOM.redo');
+      await settle();
+      const redone = await padding();
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      const cleared = await padding();
+      // The rule the redo inserted, as the page reads it once the emulation is over.
+      const text = await t.page.evaluate(() => {
+        const style = document.getElementById('added-sheet');
+        const rules = style instanceof HTMLStyleElement ? Array.from(style.sheet?.cssRules ?? []) : [];
+        const rule = rules.find(
+          r => r instanceof CSSStyleRule && r.selectorText === '.added-pad' && r.style.paddingTop
+        );
+        return rule instanceof CSSStyleRule ? rule.style.paddingTop : null;
+      });
+      // The other side starts from the same page: the rule is taken out again, as its edit was redone.
+      await side.send('DOM.undo');
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      return { before, added, undone, redone, cleared, text };
+    });
+    assert.deepEqual(r, {
+      before: '0px',
+      added: '5px',
+      undone: '0px',
+      redone: '5px',
+      cleared: '0px',
+      text: 'env(safe-area-inset-top, 9px)',
+    });
+  } finally {
+    await t.page.evaluate(() => document.getElementById('added-sheet')?.remove());
+  }
+});
+
 test('an inset that is not an int32 fails, as Chrome fails it', async () => {
   for (const side of [t.chrome, t.ours]) {
     await assert.rejects(
@@ -592,6 +752,58 @@ test('a shorthand with env() keeps it when the page sets another declaration, th
     assert.deepEqual(r.after, { env: true, opacity: '0.5' });
   } finally {
     await t.page.evaluate(() => document.getElementById('sh')?.remove());
+  }
+});
+
+test('the Styles pane shows the env() a rule wrote after the page changed another of its declarations', async () => {
+  // Once the page changes a declaration of a rule through the CSSOM, the Styles pane reads the rule's declarations as the
+  // browser has them: the rewritten var() of the inset, which it must show as the env() the rule wrote.
+  const css = '#rule-styled { padding-top: env(safe-area-inset-top, 7px) }';
+  await t.page.evaluate(text => {
+    const style = document.createElement('style');
+    style.id = 'rule-css';
+    style.textContent = text;
+    document.head.append(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="rule-styled">rule</div>');
+  }, css);
+  try {
+    const shown = await sameOnBoth(t, async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      await t.page.evaluate(() => {
+        const rule = (document.getElementById('rule-css') as HTMLStyleElement).sheet?.cssRules[0];
+        if (rule instanceof CSSStyleRule) rule.style.marginLeft = '1px';
+      });
+      await settle();
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      try {
+        const { root } = await side.send('DOM.getDocument', {});
+        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#rule-styled' });
+        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+        const matched = (matchedCSSRules ?? []).filter(m => m.rule.origin === 'regular');
+        return {
+          text: matched.map(m => m.rule.style.cssText),
+          paddingTop: matched.flatMap(m =>
+            // Every entry of the property: the one the text gives, and the one the browser's own value gives.
+            m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
+          ),
+        };
+      } finally {
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      }
+    });
+    assert.equal(shown.text.length, 1);
+    assert.match(shown.text[0] ?? '', /padding-top: env\(safe-area-inset-top, 7px\)/);
+    assert.ok(shown.paddingTop.length > 0);
+    for (const value of shown.paddingTop) assert.equal(value, 'env(safe-area-inset-top, 7px)');
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('rule-css')?.remove();
+      document.getElementById('rule-styled')?.remove();
+    });
   }
 });
 

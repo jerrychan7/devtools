@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
+import { unwrapSafeArea } from '../emulation/safe-area';
 import { shownStyle } from '../emulation/shown-style';
 import { isOwnStyleRule, ownCall, ownGet, ownSet, ownSheet, ownStyle } from './sheets/watch/cssom-watch';
 import { textStyle } from './sheets/text/ranges';
@@ -109,7 +110,8 @@ export function appliedProperties(decl: CSSStyleDeclaration, list: Declaration[]
   const normal: CSSProperty[] = [];
   const important: CSSProperty[] = [];
   for (const name of Array.from(decl)) {
-    const value = decl.getPropertyValue(name);
+    // As the page wrote it: a value the emulation made a var() of reads back with its env().
+    const value = unwrapSafeArea(decl.getPropertyValue(name));
     if (decl.getPropertyPriority(name) === 'important') {
       important.push({ name, value: `${value} !important`, important: true });
       continue;
@@ -194,7 +196,9 @@ export function styleOf(
  */
 export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: number, column: number): CSSStyle {
   const source = sources.get(decl);
-  const current = source && source.applied === decl.cssText ? source.text : undefined;
+  // As the page wrote it: the env() of each safe area inset the emulation made a var() of.
+  const cssText = unwrapSafeArea(decl.cssText);
+  const current = source && unwrapSafeArea(source.applied) === cssText ? source.text : undefined;
   // Like Chrome, the text as written, each declaration with its range in it.
   if (current !== undefined) return textStyle(styleSheetId, decl, current, line, column);
   // The declarations as the page wrote them, where the emulation rewrote them (domains/emulation/rewrite.ts).

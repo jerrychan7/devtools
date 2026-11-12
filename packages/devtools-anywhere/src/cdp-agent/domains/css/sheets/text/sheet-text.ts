@@ -2,6 +2,7 @@
 // once against its CSSOM, made unknown or kept up to date as the page and the CSS domain change
 // the sheet, and paired with its rules when asked for (pair.ts, updated in place by splice.ts).
 import { isHtml } from '../../../../core/realm';
+import { unwrapSafeArea } from '../../../emulation/safe-area';
 import { mediaLists, shownCssText, shownMedia, styles } from '../../../emulation/shown-style';
 import { forgetSheet, ownEdit, ownStyle, recordPageChanges, type RuleChange, settle } from '../watch/cssom-watch';
 import { type SheetSource, childRules, pair, tagOf } from './pair';
@@ -401,7 +402,7 @@ export class SheetTexts {
   private serialize(sheet: CSSStyleSheet, rules: CSSRule[]): SheetSource | null {
     // What was written through the styles taken is in the rules' text now.
     forgetSheet(sheet);
-    const text = rules.map(r => `${r.cssText}\n`).join('');
+    const text = rules.map(r => `${unwrapSafeArea(r.cssText)}\n`).join('');
     const source = pair(text, rules);
     if (!source) return null;
     this.stale.delete(sheet);
