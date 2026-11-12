@@ -742,3 +742,39 @@ test('a document that answers the marks does not hold the scan of another, nor t
     await settle();
   }
 });
+
+test("an element's computed background is the canvas at the page's opacity, as in Chrome", async () => {
+  const backgrounds = async (side: Side) => {
+    await t.page.evaluate(() =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div id="bgs"><p style="background-color: #123456">opaque</p>' +
+          '<p style="background-color: rgba(10, 20, 30, 0.5)">translucent</p>' +
+          '<p style="background: linear-gradient(red, blue)">gradient</p><p>none</p></div>'
+      )
+    );
+    await side.send('Emulation.setEmulatedMedia', FORCED);
+    try {
+      await settle();
+      return await t.page.evaluate(() =>
+        Array.from(document.querySelectorAll('#bgs p'), el => {
+          const style = getComputedStyle(el);
+          return `${style.backgroundColor} ${style.backgroundImage}`;
+        })
+      );
+    } finally {
+      await t.page.evaluate(() => document.getElementById('bgs')?.remove());
+      await side.send('Emulation.setEmulatedMedia', CLEAR);
+      await settle();
+    }
+  };
+  const chrome = await backgrounds(t.chrome);
+  assert.deepEqual(await backgrounds(t.ours), chrome);
+  // The page's colour is not kept: the canvas, with the opacity the page gave its background.
+  assert.deepEqual(chrome, [
+    'rgb(0, 0, 0) none',
+    'rgba(0, 0, 0, 0.5) none',
+    'rgba(0, 0, 0, 0) none',
+    'rgba(0, 0, 0, 0) none',
+  ]);
+});

@@ -178,21 +178,27 @@ test('a page guard that puts back the style it had does not loop with the emulat
     await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
     // Frames keep coming while the guard runs (the page is not held in a loop), and the guard is answered
     // a few times, not once for each frame or more.
-    const { fires, frames } = await t.page.evaluate(
+    const { fires, frames, paddings } = await t.page.evaluate(
       () =>
-        new Promise<{ fires: number; frames: number }>(resolve => {
+        new Promise<{ fires: number; frames: number; paddings: string[] }>(resolve => {
           const guard = Reflect.get(window, 'guard') as { state: { fires: number } };
+          const el = document.getElementById('grd') ?? document.body;
           const start = performance.now();
           let frames = 0;
+          const paddings = new Set<string>();
           const frame = () => {
             frames++;
+            paddings.add(getComputedStyle(el).paddingTop);
             if (performance.now() - start < 500) requestAnimationFrame(frame);
-            else resolve({ fires: guard.state.fires, frames });
+            else resolve({ fires: guard.state.fires, frames, paddings: [...paddings] });
           };
           requestAnimationFrame(frame);
         })
     );
     assert.ok(frames > 3, `${frames} frames in half a second`);
+    // While the guard holds, every frame computes the padding the page wrote: the real inset (none here), not the
+    // emulated 5px.
+    assert.deepEqual(paddings, ['0px']);
     // At least one: the emulation did rewrite the element, and the guard did answer it.
     assert.ok(fires >= 1 && fires <= 10, `${fires} answers to the guard`);
     // Once the guard lets go, the emulation rewrites the element again (the last wait may be 64 frames).
