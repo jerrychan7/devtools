@@ -33,8 +33,11 @@ export type CssomChange =
   | { kind: 'insert'; index: number }
   | { kind: 'delete'; index: number };
 
-/** `by`: the CSS domain session that made the change, for one of its own edits. */
-type Listener = (sheet: CSSStyleSheet, text?: string, by?: object) => void;
+/**
+ * `by`: the CSS domain session that made the change, for one of its own edits. `change`: where in
+ * the sheet the page's change is, when known (see CssomChange); none for an edit of a session.
+ */
+type Listener = (sheet: CSSStyleSheet, text?: string, by?: object, change?: CssomChange) => void;
 type After = (self: unknown, args: unknown[], result: unknown) => void;
 /** What of a property is hooked: a method, or an accessor's getter or setter. */
 type Part = 'value' | 'get' | 'set';
@@ -90,7 +93,7 @@ function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?:
   }
   for (const listener of listeners)
     try {
-      listener(sheet, text);
+      listener(sheet, text, undefined, change);
     } catch {
       // Ours, not the page's: its call goes on.
     }
@@ -793,7 +796,11 @@ function uninstall() {
   installed = new WeakSet();
 }
 
-/** Calls `listener` with each sheet the page changes, and the text it replaces one with. */
+/**
+ * Calls `listener` with each sheet the page changes, and the text it replaces one with, in the call
+ * that made the change (so before the page's call returns): a listener may change the sheet in turn
+ * through ownSet() or ownCall(), which are not reported.
+ */
 export function watchCssom(listener: Listener, realms: () => (Window & typeof globalThis)[]): () => void {
   listeners.add(listener);
   realms().forEach(tryInstall);

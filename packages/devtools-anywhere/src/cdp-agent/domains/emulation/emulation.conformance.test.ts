@@ -171,6 +171,61 @@ test('emulated media apply to sheets added later', async () => {
   );
 });
 
+test('a rule the page inserts through the CSSOM is emulated in the same task', async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'cssom';
+    document.head.append(style);
+  });
+  // Inserted, read and taken back out within the task: nothing of the sheet is left for the other side.
+  const read = () =>
+    t.page.evaluate(() => {
+      const sheet = (document.getElementById('cssom') as HTMLStyleElement).sheet;
+      sheet?.insertRule('@media print { #em { border-left-color: rgb(1, 2, 3) } }', 0);
+      sheet?.insertRule('@media not print { #em { border-right-color: rgb(4, 5, 6) } }', 0);
+      const style = getComputedStyle(document.getElementById('em') ?? document.body);
+      // Not emulated, the right one is the text's own colour (border-right-color is currentcolor).
+      const out = { left: style.borderLeftColor, right: style.borderRightColor, color: style.color };
+      sheet?.deleteRule(0);
+      sheet?.deleteRule(0);
+      return out;
+    });
+  try {
+    const r = await both(
+      side => side.send('Emulation.setEmulatedMedia', { media: 'print' }),
+      side => side.send('Emulation.setEmulatedMedia', {}),
+      read
+    );
+    assert.equal(r.left, 'rgb(1, 2, 3)');
+    assert.equal(r.right, r.color);
+  } finally {
+    await t.page.evaluate(() => document.getElementById('cssom')?.remove());
+  }
+});
+
+test('a constructed sheet replaced with replaceSync is emulated in the same task', async () => {
+  // The sheet is adopted first, then replaced: each time, what is read in the task is the rewrite.
+  const read = () =>
+    t.page.evaluate(() => {
+      const sheet = new CSSStyleSheet();
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+      sheet.replaceSync('@media print { #em { outline-color: rgb(7, 7, 7) } }');
+      const print = getComputedStyle(document.getElementById('em') ?? document.body).outlineColor;
+      sheet.replaceSync('@media screen { #em { outline-color: rgb(8, 8, 8) } }');
+      const screen = getComputedStyle(document.getElementById('em') ?? document.body).outlineColor;
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter(s => s !== sheet);
+      const color = getComputedStyle(document.getElementById('em') ?? document.body).color;
+      return { print, screen, color };
+    });
+  const r = await both(
+    side => side.send('Emulation.setEmulatedMedia', { media: 'print' }),
+    side => side.send('Emulation.setEmulatedMedia', {}),
+    read
+  );
+  assert.equal(r.print, 'rgb(7, 7, 7)');
+  assert.equal(r.screen, r.color);
+});
+
 test('the Styles pane shows the media query as written', async () => {
   const shown = async (side: Side) => {
     await side.send('DOM.enable');

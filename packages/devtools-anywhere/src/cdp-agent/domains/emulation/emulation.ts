@@ -4,6 +4,7 @@ import { CdpError } from '../../core/session';
 import { mediaRewrite } from './media';
 import { rewriteMedia, rewriteValues } from './rewrite';
 import { safeAreaRewrite } from './safe-area';
+import { useShadowRoots } from './trees';
 import { VISION, setVision, useVisionContext } from './vision';
 
 /**
@@ -26,6 +27,7 @@ const RESETS: Record<string, () => void> = {
 export function registerEmulation(ctx: Context) {
   const { session } = ctx;
   useVisionContext(ctx.probe.top, ctx.shadowRoots);
+  useShadowRoots(ctx.shadowRoots);
   session.register('Emulation', {
     // Done by rewriting the @media conditions of the page's style sheets (domains/emulation/rewrite.ts).
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
