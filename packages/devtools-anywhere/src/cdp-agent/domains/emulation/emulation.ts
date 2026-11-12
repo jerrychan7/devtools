@@ -1,9 +1,10 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
+import { injectOwnStyle } from './inject';
 import { MediaEmulation } from './media';
 import { rewriteColorScheme, rewriteMedia, rewriteValues } from './rewrite';
-import { safeAreaRewrite } from './safe-area';
+import { safeAreaCss, safeAreaRewrite } from './safe-area';
 import { useShadowRoots } from './trees';
 import { VISION, setVision, useVisionContext } from './vision';
 
@@ -19,8 +20,30 @@ function own(owner: object, what: string, active: boolean) {
   else owners.delete(what);
 }
 
+/** Whether the safe area rewrite is in place: installed when an inset is first emulated, removed when none is. */
+let safeAreaRewriting = false;
+
+/**
+ * Emulates the insets set (null: none, which ends the emulation), and returns whether one is set. The
+ * rewrite of the page's style sheets is installed once, and a later change of the values only sets the
+ * custom properties of the emulation's own style sheet (safe-area.ts).
+ */
+function emulateSafeArea(insets: Protocol.Emulation.SafeAreaInsets | null): boolean {
+  const css = insets && safeAreaCss(insets);
+  if (!css) {
+    if (safeAreaRewriting) rewriteValues('safeArea', null);
+    safeAreaRewriting = false;
+    injectOwnStyle('safeArea', null);
+    return false;
+  }
+  if (!safeAreaRewriting) rewriteValues('safeArea', safeAreaRewrite);
+  safeAreaRewriting = true;
+  injectOwnStyle('safeArea', css);
+  return true;
+}
+
 const RESETS: Record<string, () => void> = {
-  safeArea: () => rewriteValues('safeArea', null),
+  safeArea: () => void emulateSafeArea(null),
   vision: () => setVision('none'),
 };
 
@@ -38,11 +61,10 @@ export function registerEmulation(ctx: Context) {
       rewriteMedia('media', media.set(session, params));
       rewriteColorScheme(media.colorScheme());
     },
-    // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes.
+    // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes to read custom
+    // properties (safe-area.ts).
     setSafeAreaInsetsOverride({ insets }: Protocol.Emulation.SetSafeAreaInsetsOverrideRequest) {
-      const rewrite = safeAreaRewrite(insets);
-      rewriteValues('safeArea', rewrite);
-      own(session, 'safeArea', !!rewrite);
+      own(session, 'safeArea', emulateSafeArea(insets));
     },
     // Chrome's SVG filters, as the backdrop filter of a mask in the top layer (vision.ts).
     setEmulatedVisionDeficiency({ type }: Protocol.Emulation.SetEmulatedVisionDeficiencyRequest) {

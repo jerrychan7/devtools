@@ -20,6 +20,7 @@ import { resolveElement } from '../dom/dom';
 import { historyOf, type Action } from '../../core/nodes/history';
 import { shownAttribute } from '../../core/nodes/written-attributes';
 import { shownCssText, shownMedia } from '../emulation/shown-style';
+import { isEmulationProperty } from '../emulation/safe-area';
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { environmentVariables } from './env-variables';
 import { ForcedPseudoClasses } from './matching/forced-pseudo';
@@ -720,8 +721,11 @@ export function registerCss(ctx: Context) {
       const { el, pseudo } = target(params.nodeId);
       // The element's own window: in an iframe, its viewport and media queries.
       const style = realmOf(el).getComputedStyle(el, pseudo ? `::${pseudo}` : null);
+      // The custom properties the emulation sets are not the page's: Chrome lists none of them.
       return {
-        computedStyle: Array.from(style, name => ({ name, value: style.getPropertyValue(name) })),
+        computedStyle: Array.from(style)
+          .filter(name => !isEmulationProperty(name))
+          .map(name => ({ name, value: style.getPropertyValue(name) })),
         extraFields: { isAppearanceBase: false, isTableSetVisuallyTable: false },
       };
     },

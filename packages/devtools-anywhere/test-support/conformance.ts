@@ -2,6 +2,7 @@
 // single action in the page produces events from both that can be compared.
 import type { Page } from 'puppeteer-core';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
+import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launch, setUpAndTearDown, type Env } from '../../../tests/support/browser.ts';
@@ -45,6 +46,18 @@ export interface TestPage {
   page: Page;
   chrome: Side;
   ours: Side;
+}
+
+/**
+ * What each side gives for `run`, run on each in turn on the same page: the two must give the same.
+ * Chrome's result is returned.
+ */
+export async function sameOnBoth<T>(t: TestPage, run: (side: Side) => Promise<T>): Promise<T> {
+  const results: T[] = [];
+  for (const side of [t.chrome, t.ours]) results.push(await run(side));
+  const [chrome, ours] = results;
+  assert.deepEqual(ours, chrome);
+  return chrome as T;
 }
 
 /** `beforeGoto`: runs on the new page before it loads the fixture (evaluateOnNewDocument). */

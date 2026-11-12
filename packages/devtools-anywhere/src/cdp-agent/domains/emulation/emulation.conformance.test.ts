@@ -1,10 +1,10 @@
-// Emulation of media and safe area insets. Chrome and we both act on the same page, so each side
-// emulates, measures and clears in turn. Vision deficiencies are in vision.conformance.test.ts.
+// Emulation of media. Chrome and we both act on the same page, so each side emulates, measures and clears
+// in turn. Vision deficiencies are in vision.conformance.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { CDPSession } from 'puppeteer-core';
-import { launch, setUpAndTearDown } from '../../../../test-support/conformance.ts';
+import { launch, sameOnBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 import { openEmulationPage } from '../../../../test-support/emulation-fixture.ts';
 
@@ -241,7 +241,7 @@ const REDUCE: Protocol.Emulation.MediaFeature = { name: 'prefers-reduced-motion'
 const NO_PREFERENCE: Protocol.Emulation.MediaFeature = { name: 'prefers-reduced-motion', value: 'no-preference' };
 
 test('omitted media and features are cleared, as media "" and features [] clear them', async () => {
-  const r = await sameOnBoth(async side => {
+  const r = await sameOnBoth(t, async side => {
     const seen: Awaited<ReturnType<typeof measure>>[] = [];
     await side.send('Emulation.setEmulatedMedia', { media: 'print', features: [LIGHT] });
     seen.push(await measure());
@@ -303,7 +303,7 @@ async function pairOf(side: Side): Promise<Pair> {
  * must read the same. Both sessions end after the steps, so that nothing is left emulated.
  */
 async function twoSessions<T>(steps: readonly Step[], read: () => Promise<T>): Promise<T[]> {
-  return sameOnBoth(async side => {
+  return sameOnBoth(t, async side => {
     const pair = await pairOf(side);
     const ended = new Set<0 | 1>();
     const end = async (which: 0 | 1) => {
@@ -449,223 +449,6 @@ test('prefers-reduced-data is not emulated: Chrome leaves its queries to the bro
   }
 });
 
-const safeArea = (insets: Protocol.Emulation.SafeAreaInsets) =>
-  [
-    (side: Side) => side.send('Emulation.setSafeAreaInsetsOverride', { insets }),
-    (side: Side) => side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} }),
-    measure,
-  ] as const;
-
-test('safe area insets, with fallbacks, shorthands and custom properties', async () => {
-  const r = await both(...safeArea({ top: 5, leftMax: 3, bottom: 4, right: 6 }));
-  assert.deepEqual([r.paddingTop, r.paddingLeft, r.marginTop, r.width], ['5px', '3px', '4px', '16px']);
-});
-
-test('insets not set keep their real value', async () => {
-  await both(...safeArea({ top: 8 }));
-  await both(...safeArea({}));
-});
-
-test("the Styles pane shows the env() a sheet's rule wrote, not the inset it is rewritten to", async () => {
-  const shown = await sameOnBoth(async side => {
-    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-    try {
-      const { root } = await side.send('DOM.getDocument', {});
-      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa' });
-      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
-      return (matchedCSSRules ?? []).flatMap(m =>
-        m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
-      );
-    } finally {
-      await side.send('CSS.disable');
-      await side.send('DOM.disable');
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-    }
-  });
-  assert.ok(shown.length > 0);
-  for (const value of shown) assert.equal(value, 'env(safe-area-inset-top, 7px)');
-});
-
-test('a rule inside @media keeps the env() the page wrote, in the Styles pane and the sheet text', async () => {
-  const css = '@media (min-width: 1px) { #sa-media { padding-top: env(safe-area-inset-top, 7px) } }';
-  await t.page.evaluate(text => {
-    const style = document.createElement('style');
-    style.id = 'sa-media-css';
-    style.textContent = text;
-    document.head.append(style);
-    document.body.insertAdjacentHTML('beforeend', '<div id="sa-media"></div>');
-  }, css);
-  try {
-    const shown = await sameOnBoth(async side => {
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await side.send('DOM.enable');
-      await side.send('CSS.enable');
-      try {
-        const { root } = await side.send('DOM.getDocument', {});
-        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-media' });
-        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
-        const matched = (matchedCSSRules ?? []).filter(m => m.rule.origin === 'regular');
-        const values = matched.flatMap(m =>
-          m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
-        );
-        const sheetId = matched[0]?.rule.styleSheetId;
-        const text = sheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId: sheetId })).text : undefined;
-        return { values, text };
-      } finally {
-        await side.send('CSS.disable');
-        await side.send('DOM.disable');
-        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      }
-    });
-    assert.ok(shown.values.length > 0);
-    for (const value of shown.values) assert.equal(value, 'env(safe-area-inset-top, 7px)');
-    assert.equal(shown.text, css);
-  } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('sa-media-css')?.remove();
-      document.getElementById('sa-media')?.remove();
-    });
-  }
-});
-
-test('a rule under @supports with a string in its condition keeps the env() the page wrote, in the sheet text', async () => {
-  const css = '@supports (font-family: "A") { #sa-sup { padding-top: env(safe-area-inset-top, 7px) } }';
-  await t.page.evaluate(text => {
-    const style = document.createElement('style');
-    style.id = 'sa-supports-css';
-    style.textContent = text;
-    document.head.append(style);
-    document.body.insertAdjacentHTML('beforeend', '<div id="sa-sup"></div>');
-  }, css);
-  try {
-    const shown = await sameOnBoth(async side => {
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await side.send('DOM.enable');
-      await side.send('CSS.enable');
-      try {
-        const { root } = await side.send('DOM.getDocument', {});
-        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-sup' });
-        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
-        const matched = (matchedCSSRules ?? []).filter(m => m.rule.origin === 'regular');
-        const values = matched.flatMap(m =>
-          m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
-        );
-        const sheetId = matched[0]?.rule.styleSheetId;
-        const text = sheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId: sheetId })).text : undefined;
-        return { values, text };
-      } finally {
-        await side.send('CSS.disable');
-        await side.send('DOM.disable');
-        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      }
-    });
-    assert.ok(shown.values.length > 0);
-    for (const value of shown.values) assert.equal(value, 'env(safe-area-inset-top, 7px)');
-    assert.equal(shown.text, css);
-  } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('sa-supports-css')?.remove();
-      document.getElementById('sa-sup')?.remove();
-    });
-  }
-});
-
-test('a rule nested in a rule with env() shows the change the page made to it before CSS was enabled', async () => {
-  await t.page.evaluate(() => {
-    const style = document.createElement('style');
-    style.id = 'sa-nested-css';
-    style.textContent = '.sa-nest { padding-top: env(safe-area-inset-top, 7px); .sa-nest-c { color: red } }';
-    document.head.append(style);
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="sa-nest" class="sa-nest"><span id="sa-nest-c" class="sa-nest-c">x</span></div>'
-    );
-    // Before anything watches the sheet: the change is not seen, and must not be lost once it is.
-    const parent = style.sheet?.cssRules[0] as CSSGroupingRule | undefined;
-    const child = parent?.cssRules[0] as CSSStyleRule | undefined;
-    if (child) child.style.color = 'blue';
-  });
-  try {
-    const colors = await sameOnBoth(async side => {
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await side.send('DOM.enable');
-      await side.send('CSS.enable');
-      try {
-        const { root } = await side.send('DOM.getDocument', {});
-        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-nest-c' });
-        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
-        // Distinct values: a declaration of a sheet served from the CSSOM may be listed twice (the same on
-        // both sides without the emulation), which is not what this test is about.
-        return [
-          ...new Set(
-            (matchedCSSRules ?? [])
-              .filter(m => m.rule.origin === 'regular')
-              .flatMap(m => m.rule.style.cssProperties.filter(p => p.name === 'color').map(p => p.value))
-          ),
-        ];
-      } finally {
-        await side.send('CSS.disable');
-        await side.send('DOM.disable');
-        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      }
-    });
-    assert.deepEqual(colors, ['blue']);
-  } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('sa-nested-css')?.remove();
-      document.getElementById('sa-nest')?.remove();
-    });
-  }
-});
-
-test('a @keyframes rule with env() is served as the page wrote it, in the sheet text', async () => {
-  const css = '@keyframes sa-slide { from { top: env(safe-area-inset-top, 7px) } to { top: 0 } }';
-  await t.page.evaluate(text => {
-    const style = document.createElement('style');
-    style.id = 'sa-keyframes-css';
-    style.textContent = text;
-    document.head.append(style);
-    document.body.insertAdjacentHTML('beforeend', '<div id="sa-kf" style="animation: sa-slide 1s"></div>');
-  }, css);
-  try {
-    const text = await sameOnBoth(async side => {
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await side.send('DOM.enable');
-      await side.send('CSS.enable');
-      try {
-        const { root } = await side.send('DOM.getDocument', {});
-        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-kf' });
-        const { cssKeyframesRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
-        const sheetId = cssKeyframesRules?.[0]?.keyframes[0]?.styleSheetId;
-        return sheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId: sheetId })).text : undefined;
-      } finally {
-        await side.send('CSS.disable');
-        await side.send('DOM.disable');
-        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      }
-    });
-    assert.equal(text, css);
-  } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('sa-keyframes-css')?.remove();
-      document.getElementById('sa-kf')?.remove();
-    });
-  }
-});
-
-/** What each side gives for `run`, run on each in turn: the two must give the same. */
-async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
-  const results: T[] = [];
-  for (const side of [t.chrome, t.ours]) results.push(await run(side));
-  const [chrome, ours] = results;
-  assert.deepEqual(ours, chrome);
-  return chrome as T;
-}
-
-const settle = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
-
 /**
  * Polls `read` until it gives `expected`, or gives up after a few seconds with what it last read: the
  * browser chooses an image's candidate, and applies a media change, a little after the page's task.
@@ -698,89 +481,6 @@ async function steady<T>(read: () => Promise<T>): Promise<T> {
   return last;
 }
 
-test('an inline style with env() is emulated, and so is a style the page writes', async () => {
-  await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="inl">inl</div>'));
-  const read = () =>
-    t.page.evaluate(() => {
-      const style = getComputedStyle(document.getElementById('inl') ?? document.body);
-      return { top: style.paddingTop, left: style.paddingLeft };
-    });
-  try {
-    const r = await sameOnBoth(async side => {
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 3 } });
-      await t.page.evaluate(() =>
-        document
-          .getElementById('inl')
-          ?.setAttribute(
-            'style',
-            'padding-top: env(safe-area-inset-top, 7px); padding-left: env(safe-area-inset-left, 9px)'
-          )
-      );
-      const first = await read();
-      // The page writes the style again: the new text is the original, rewritten in turn.
-      await t.page.evaluate(() =>
-        document.getElementById('inl')?.setAttribute('style', 'padding-top: env(safe-area-inset-top, 11px)')
-      );
-      const written = await read();
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      const cleared = await read();
-      return { first, written, cleared };
-    });
-    assert.deepEqual(r.first, { top: '5px', left: '3px' });
-    assert.equal(r.written.top, '5px');
-  } finally {
-    await t.page.evaluate(() => document.getElementById('inl')?.remove());
-  }
-});
-
-test("a rule's declaration the page read before the emulation is no change of its sheet", async () => {
-  await t.page.evaluate(() => {
-    const style = document.createElement('style');
-    style.id = 'read-sheet';
-    style.textContent = '.read-me { padding-top: env(safe-area-inset-top, 7px) }';
-    document.head.appendChild(style);
-    document.body.insertAdjacentHTML('beforeend', '<div id="read-me" class="read-me">read</div>');
-  });
-  try {
-    const r = await sameOnBoth(async side => {
-      await side.send('DOM.enable');
-      await side.send('CSS.enable');
-      const { root } = await side.send('DOM.getDocument', { depth: -1 });
-      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#read-me' });
-      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
-      const styleSheetId = (matchedCSSRules ?? []).find(m => m.rule.selectorList.text === '.read-me')?.rule
-        .styleSheetId;
-      // A script of the page takes the rule's style before the emulation rewrites it.
-      await t.page.evaluate(() => {
-        const style = document.getElementById('read-sheet');
-        const rule = style instanceof HTMLStyleElement ? Array.from(style.sheet?.cssRules ?? [])[0] : undefined;
-        if (rule instanceof CSSStyleRule) void rule.style.paddingTop;
-      });
-      await side.clear();
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      const during = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('read-me') ?? document.body).paddingTop
-      );
-      const changed = await side.events('CSS.styleSheetChanged');
-      const text = styleSheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId })).text : null;
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      await side.send('CSS.disable');
-      await side.send('DOM.disable');
-      return { during, changed: changed.length, text };
-    });
-    assert.equal(r.during, '5px');
-    assert.equal(r.changed, 0);
-    assert.equal(r.text, '.read-me { padding-top: env(safe-area-inset-top, 7px) }');
-  } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('read-sheet')?.remove();
-      document.getElementById('read-me')?.remove();
-    });
-  }
-});
-
 /** A test image's URL: the fixture's own pixel, with a query that names the candidate. */
 const image = (name: string) => `/packages/devtools-anywhere/test-support/assets/pixel.png?${name}`;
 
@@ -804,7 +504,7 @@ test('a <picture> source with a media query is chosen as the emulation has it', 
     [image('pic-source'), image('pic-img')]
   );
   try {
-    const r = await sameOnBoth(async side => {
+    const r = await sameOnBoth(t, async side => {
       const base = await until(() => shown('pici'), '?pic-img');
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
       const printed = await until(() => shown('pici'), '?pic-source');
@@ -827,7 +527,7 @@ test('a <source> media the page sets while emulated is its own once the emulatio
     [image('pic2-source'), image('pic2-img')]
   );
   try {
-    const r = await sameOnBoth(async side => {
+    const r = await sameOnBoth(t, async side => {
       await t.page.evaluate(() => document.getElementById('pic2s')?.setAttribute('media', 'print'));
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
       const printed = await until(() => shown('pic2i'), '?pic2-source');
@@ -857,7 +557,7 @@ test('the sizes of an <img> are read as the emulation has them, when the image i
       document.body.append(img);
     }, id);
   try {
-    const r = await sameOnBoth(async side => {
+    const r = await sameOnBoth(t, async side => {
       const tag = side === t.chrome ? 'chrome' : 'ours';
       // Dark, whatever the browser's own scheme is: the 100px slot, the larger candidate.
       await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
@@ -900,7 +600,7 @@ test('a <link> or a <style> with a media query is emulated, and so is a rule of 
     document.head.append(style);
   });
   try {
-    const r = await sameOnBoth(async side => {
+    const r = await sameOnBoth(t, async side => {
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
       const printed = await read();
       await side.send('Emulation.setEmulatedMedia', { media: '' });
@@ -920,7 +620,7 @@ test('a <link> with a media query that loads under the emulation is emulated onc
   const read = () =>
     t.page.evaluate(() => getComputedStyle(document.getElementById('app') ?? document.body).letterSpacing);
   try {
-    const r = await sameOnBoth(async side => {
+    const r = await sameOnBoth(t, async side => {
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
       await t.page.evaluate(async () => {
         const link = document.createElement('link');
@@ -943,247 +643,6 @@ test('a <link> with a media query that loads under the emulation is emulated onc
   }
 });
 
-test('an edit of a style under the emulation is undone to the text the page wrote', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="und" style="padding-top: env(safe-area-inset-top, 7px)">und</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(async side => {
-      await side.send('DOM.enable');
-      const { root } = await side.send('DOM.getDocument', { depth: -1 });
-      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#und' });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      // The emulation takes effect, so that what follows is measured under it.
-      const during = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('und') ?? document.body).paddingTop
-      );
-      await side.send('DOM.setAttributeValue', {
-        nodeId,
-        name: 'style',
-        value: 'padding-top: env(safe-area-inset-top, 9px)',
-      });
-      await settle();
-      await side.send('DOM.undo');
-      await settle();
-      const { attributes } = await side.send('DOM.getAttributes', { nodeId });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      const cleared = await t.page.evaluate(() => document.getElementById('und')?.getAttribute('style'));
-      await side.send('DOM.disable');
-      return { during, undone: attributes[attributes.indexOf('style') + 1], cleared };
-    });
-    assert.equal(r.during, '5px');
-    assert.equal(r.undone, 'padding-top: env(safe-area-inset-top, 7px)');
-    assert.equal(r.cleared, 'padding-top: env(safe-area-inset-top, 7px)');
-  } finally {
-    await t.page.evaluate(() => document.getElementById('und')?.remove());
-  }
-});
-
-test('an outerHTML edit under the emulation is undone to the text the page wrote', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="oh" style="padding-top: env(safe-area-inset-top, 7px)">oh</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(async side => {
-      await side.send('DOM.enable');
-      const { root } = await side.send('DOM.getDocument', { depth: -1 });
-      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#oh' });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      // The emulation takes effect, so that what follows is measured under it.
-      const during = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('oh') ?? document.body).paddingTop
-      );
-      // The markup drops the style and adds another declaration: the rewritten attribute is removed.
-      await side.send('DOM.setOuterHTML', { nodeId, outerHTML: '<div id="oh" style="color: red">oh</div>' });
-      await settle();
-      await side.send('DOM.undo');
-      await settle();
-      const { root: again } = await side.send('DOM.getDocument', { depth: -1 });
-      const { nodeId: back } = await side.send('DOM.querySelector', { nodeId: again.nodeId, selector: '#oh' });
-      const { attributes } = await side.send('DOM.getAttributes', { nodeId: back });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      const cleared = await t.page.evaluate(() => document.getElementById('oh')?.getAttribute('style'));
-      await side.send('DOM.disable');
-      return { during, undone: attributes[attributes.indexOf('style') + 1], cleared };
-    });
-    assert.equal(r.during, '5px');
-    assert.equal(r.undone, 'padding-top: env(safe-area-inset-top, 7px)');
-    assert.equal(r.cleared, 'padding-top: env(safe-area-inset-top, 7px)');
-  } finally {
-    await t.page.evaluate(() => document.getElementById('oh')?.remove());
-  }
-});
-
-test('a style the page changes in part under the emulation keeps the text the emulation replaced', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="part" style="padding-top: env(safe-area-inset-top, 7px)">part</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(async side => {
-      await t.page.evaluate(() =>
-        document.getElementById('part')?.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)')
-      );
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      // Another declaration of the style, set by the page's script: the padding is still the inset's.
-      await t.page.evaluate(() => {
-        const el = document.getElementById('part');
-        if (el) el.style.opacity = '0.5';
-      });
-      await settle();
-      const during = await t.page.evaluate(() => {
-        const el = document.getElementById('part');
-        return { padding: getComputedStyle(el ?? document.body).paddingTop, opacity: el?.style.opacity };
-      });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      const after = await t.page.evaluate(() => {
-        const el = document.getElementById('part');
-        return { padding: el?.style.paddingTop, opacity: el?.style.opacity };
-      });
-      return { during, after };
-    });
-    assert.deepEqual(r.during, { padding: '5px', opacity: '0.5' });
-    assert.deepEqual(r.after, { padding: 'env(safe-area-inset-top, 7px)', opacity: '0.5' });
-  } finally {
-    await t.page.evaluate(() => document.getElementById('part')?.remove());
-  }
-});
-
-test('a shorthand with env() keeps it when the page sets another declaration, the browser writing 0 as 0px', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="sh" style="margin: 0 env(safe-area-inset-right, 7px)">sh</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(async side => {
-      await t.page.evaluate(() =>
-        document.getElementById('sh')?.setAttribute('style', 'margin: 0 env(safe-area-inset-right, 7px)')
-      );
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { right: 6 } });
-      await settle();
-      // The page's script sets another declaration: the browser writes the whole block back, the 0 as 0px.
-      await t.page.evaluate(() => {
-        const el = document.getElementById('sh');
-        if (el) el.style.opacity = '0.5';
-      });
-      await settle();
-      const during = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('sh') ?? document.body).marginRight
-      );
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      // A longhand of a shorthand with env() reads as empty (pending substitution): the declaration text is looked at.
-      const after = await t.page.evaluate(() => {
-        const style = document.getElementById('sh')?.style;
-        return { env: style?.cssText.includes('env(safe-area-inset-right, 7px)') ?? false, opacity: style?.opacity };
-      });
-      return { during, after };
-    });
-    assert.equal(r.during, '6px');
-    assert.deepEqual(r.after, { env: true, opacity: '0.5' });
-  } finally {
-    await t.page.evaluate(() => document.getElementById('sh')?.remove());
-  }
-});
-
-test('an element taken out of the page while the emulation rewrites it gets its own text back', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="gone" style="padding-top: env(safe-area-inset-top, 7px)">gone</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(async side => {
-      await t.page.evaluate(() =>
-        document.getElementById('gone')?.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)')
-      );
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      // The emulation takes effect on the element before it is taken out.
-      const during = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('gone') ?? document.body).paddingTop
-      );
-      // Taken out while rewritten, the emulation ends, and the element is put back.
-      await t.page.evaluate(() => {
-        const el = document.getElementById('gone');
-        Reflect.set(window, 'gone', el);
-        el?.remove();
-      });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await t.page.evaluate(() => {
-        const el: unknown = Reflect.get(window, 'gone');
-        if (el instanceof HTMLElement) document.body.append(el);
-      });
-      await settle();
-      const style = await t.page.evaluate(() => document.getElementById('gone')?.getAttribute('style') ?? null);
-      return { during, style };
-    });
-    assert.equal(r.during, '5px');
-    assert.equal(r.style, 'padding-top: env(safe-area-inset-top, 7px)');
-  } finally {
-    await t.page.evaluate(() => document.getElementById('gone')?.remove());
-  }
-});
-
-test('the page sees the style attribute it wrote, and the emulation makes no DOM change', async () => {
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="inl" style="padding-top: env(safe-area-inset-top, 7px)">inl</div>'
-    )
-  );
-  try {
-    const r = await sameOnBoth(async side => {
-      await side.send('DOM.enable');
-      await side.send('CSS.enable');
-      const { root } = await side.send('DOM.getDocument', { depth: -1 });
-      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#inl' });
-      await side.clear();
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-      await settle();
-      // Under the emulation: the rewrite is in place, so that what the client is shown is compared with it.
-      const padding = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('inl') ?? document.body).paddingTop
-      );
-      const during = await side.events('DOM.attributeModified');
-      const { attributes } = await side.send('DOM.getAttributes', { nodeId });
-      const { outerHTML } = await side.send('DOM.getOuterHTML', { nodeId });
-      const { inlineStyle } = await side.send('CSS.getInlineStylesForNode', { nodeId });
-      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
-      await settle();
-      const after = await side.events('DOM.attributeModified');
-      await side.send('CSS.disable');
-      await side.send('DOM.disable');
-      return { padding, during, after, attributes, outerHTML, css: inlineStyle?.cssText };
-    });
-    assert.equal(r.padding, '5px');
-    assert.deepEqual(r.during, []);
-    assert.deepEqual(r.after, []);
-    assert.deepEqual(r.attributes.slice(2), ['style', 'padding-top: env(safe-area-inset-top, 7px)']);
-    assert.match(r.outerHTML, /style="padding-top: env\(safe-area-inset-top, 7px\)"/);
-    assert.equal(r.css, 'padding-top: env(safe-area-inset-top, 7px)');
-  } finally {
-    await t.page.evaluate(() => document.getElementById('inl')?.remove());
-  }
-});
-
 test("a sheet's own media list the page sets under the emulation is emulated in the same task", async () => {
   // Each step changes the list, and reads #em's word spacing in the same task: print applies the rule.
   // The list is not edited entry by entry (deleteMedium() of an entry the emulation rewrote finds none:
@@ -1199,7 +658,7 @@ test("a sheet's own media list the page sets under the emulation is emulated in 
       },
       [id, how, text] as const
     );
-  const r = await sameOnBoth(async side => {
+  const r = await sameOnBoth(t, async side => {
     const id = side === t.chrome ? 'sml-chrome' : 'sml-ours';
     await t.page.evaluate(async id => {
       const link = document.createElement('link');

@@ -240,12 +240,15 @@ test('a page guard that puts back the style of a <style> element does not loop w
     await t.page.evaluate(() =>
       (Reflect.get(window, 'styleGuard') as { observer: MutationObserver }).observer.disconnect()
     );
-    const style = await until(
-      () => t.page.evaluate(() => document.getElementById('gst')?.getAttribute('style') ?? null),
-      'padding-top: 5px',
+    // The page's style attribute reads the var() form now, so the padding is what the inset gives.
+    const padding = await until(
+      () => t.page.evaluate(() => getComputedStyle(document.getElementById('gst') ?? document.body).paddingTop),
+      '5px',
       8000
     );
-    assert.equal(style, 'padding-top: 5px');
+    assert.equal(padding, '5px');
+    const style = await t.page.evaluate(() => document.getElementById('gst')?.getAttribute('style') ?? null);
+    assert.notEqual(style, 'padding-top: env(safe-area-inset-top, 7px)');
   } finally {
     try {
       await t.page.evaluate(() => {
@@ -292,12 +295,14 @@ test('a guard that also answers each rewrite with a sheet attribute does not loo
     await t.page.evaluate(() =>
       (Reflect.get(window, 'sheetGuard') as { observer: MutationObserver }).observer.disconnect()
     );
-    const style = await until(
-      () => t.page.evaluate(() => document.getElementById('gsm')?.getAttribute('style') ?? null),
-      'padding-top: 5px',
+    const padding = await until(
+      () => t.page.evaluate(() => getComputedStyle(document.getElementById('gsm') ?? document.body).paddingTop),
+      '5px',
       8000
     );
-    assert.equal(style, 'padding-top: 5px');
+    assert.equal(padding, '5px');
+    const style = await t.page.evaluate(() => document.getElementById('gsm')?.getAttribute('style') ?? null);
+    assert.notEqual(style, 'padding-top: env(safe-area-inset-top, 7px)');
   } finally {
     try {
       await t.page.evaluate(() => {
