@@ -6,11 +6,12 @@ import type { Rewrite } from './rewrite';
 /**
  * The media features Emulation.setEmulatedMedia can set here, with their values. Chrome ignores
  * a value it does not know (the feature keeps its real value); so do we, and with names too.
+ * prefers-reduced-data is not one of them: Chrome 157 does not emulate it (set to either value, it
+ * matches nothing), so its queries are left to the browser.
  */
 const FEATURES: Record<string, string[]> = {
   'prefers-color-scheme': ['light', 'dark'],
   'prefers-reduced-motion': ['no-preference', 'reduce'],
-  'prefers-reduced-data': ['no-preference', 'reduce'],
   'prefers-reduced-transparency': ['no-preference', 'reduce'],
   'prefers-contrast': ['no-preference', 'more', 'less', 'custom'],
   'forced-colors': ['none', 'active'],

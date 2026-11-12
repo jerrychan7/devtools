@@ -109,6 +109,24 @@ test('prefers-reduced-transparency is emulated like the others', () => {
   ]);
 });
 
+test('prefers-reduced-data is not emulated: its queries are left to the browser', () => {
+  for (const value of ['reduce', 'no-preference']) {
+    const params = { features: [{ name: 'prefers-reduced-data', value }] };
+    assert.equal(mediaRewrite(params), null, value);
+    assert.equal(rewriteMediaQuery('(prefers-reduced-data: reduce)', params), '(prefers-reduced-data: reduce)', value);
+    assert.equal(rewriteMediaQuery('(prefers-reduced-data)', params), '(prefers-reduced-data)', value);
+  }
+  assert.equal(
+    rewriteMediaQuery('(prefers-reduced-data: reduce) and (prefers-color-scheme: dark)', {
+      features: [
+        { name: 'prefers-reduced-data', value: 'reduce' },
+        { name: 'prefers-color-scheme', value: 'dark' },
+      ],
+    }),
+    `(prefers-reduced-data: reduce) and ${TRUE}`
+  );
+});
+
 test('color-gamut: a screen that shows p3 shows srgb too', () => {
   expectRewrites({ features: [{ name: 'color-gamut', value: 'p3' }] }, [
     ['(color-gamut: srgb)', TRUE],
