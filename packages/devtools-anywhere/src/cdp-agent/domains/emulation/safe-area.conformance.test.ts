@@ -1,7 +1,7 @@
 // Emulation of the safe area insets: env(safe-area-inset-*) in the page's styles, and the insets the
 // page's own script reads. Chrome and we both act on the same page, so each side emulates, measures and
 // clears in turn.
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import { launch, openPage, sameOnBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
@@ -33,6 +33,15 @@ setUpAndTearDown(
   },
   () => env?.close()
 );
+
+// Whatever a test left on either side (the emulation, CSS, DOM), failed or not, is ended before the next one.
+afterEach(async () => {
+  for (const side of [t.chrome, t.ours]) {
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} }).catch(() => {});
+    await side.send('CSS.disable').catch(() => {});
+    await side.send('DOM.disable').catch(() => {});
+  }
+});
 
 const measure = () =>
   t.page.evaluate(() => {
@@ -138,14 +147,21 @@ test('a later change of the insets sets the sides it gives, and a sheet added si
       const style = getComputedStyle(document.getElementById('late') ?? document.body);
       return { top: style.paddingTop, right: style.paddingRight, left: style.paddingLeft };
     });
+  // Each side adds its sheet and element after its emulation starts; they are taken away before the next side.
+  const removeLate = () =>
+    t.page.evaluate(() => {
+      document.querySelectorAll('#late-sheet, #late').forEach(el => el.remove());
+    });
   try {
     const r = await sameOnBoth(t, async side => {
+      await removeLate();
       await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, right: 6 } });
       await t.page.evaluate(() => {
         const style = document.createElement('style');
         style.id = 'late-sheet';
         style.textContent =
-          '#late { padding-top: env(safe-area-inset-top, 1px); padding-right: env(safe-area-inset-right); padding-left: env(safe-area-inset-left, 2px) }';
+          '#late { padding-top: env(safe-area-inset-top, 1px); padding-right: env(safe-area-inset-right); ' +
+          'padding-left: env(safe-area-inset-left, 2px) }';
         document.head.appendChild(style);
         document.body.insertAdjacentHTML('beforeend', '<div id="late">late</div>');
       });
@@ -163,10 +179,7 @@ test('a later change of the insets sets the sides it gives, and a sheet added si
     assert.deepEqual(r.second, { top: '0px', right: '0px', left: '3px' });
     assert.deepEqual(r.cleared, { top: '0px', right: '0px', left: '0px' });
   } finally {
-    await t.page.evaluate(() => {
-      document.getElementById('late-sheet')?.remove();
-      document.getElementById('late')?.remove();
-    });
+    await removeLate();
   }
 });
 
@@ -527,6 +540,7 @@ test('a sheet added before CSS was enabled keeps its text when the emulation rew
       const { matchedCSSRules = [] } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
       const styleSheetId = matchedCSSRules.find(m => m.rule.selectorList.text === '.unchecked-pad')?.rule.styleSheetId;
       const text = styleSheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId })).text : null;
+      await settle();
       const changed = await side.events('CSS.styleSheetChanged');
       await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
       await side.send('CSS.disable');
@@ -619,6 +633,42 @@ test('an inset that is not an int32 fails, as Chrome fails it', async () => {
       side.send('Emulation.setSafeAreaInsetsOverride', { insets: { right: 2147483648 } }),
       /Invalid parameters/
     );
+    // The int32 limits are taken, as they are by Chrome.
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 2147483647, left: -2147483648 } });
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+  }
+  // At the limit the inset is applied, the same on both sides (Chrome lays out a length this large clamped).
+  const r = await underInsets({ top: 2147483647 });
+  assert.notEqual(r.paddingTop, '0px');
+});
+
+test('an env() that is not an inset keeps its fallback, and an inset inside it is emulated', async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'fallback-sheet';
+    style.textContent =
+      '#fb { padding-left: env(safe-area-inset-unknown, 6px); ' +
+      'padding-right: env(safe-area-inset-unknown, env(safe-area-inset-top, 4px)) }';
+    document.head.appendChild(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="fb">fb</div>');
+  });
+  try {
+    const r = await sameOnBoth(t, async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      const values = await t.page.evaluate(() => {
+        const computed = getComputedStyle(document.getElementById('fb') ?? document.body);
+        return { left: computed.paddingLeft, right: computed.paddingRight };
+      });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      return values;
+    });
+    assert.deepEqual(r, { left: '6px', right: '5px' });
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('fallback-sheet')?.remove();
+      document.getElementById('fb')?.remove();
+    });
   }
 });
 

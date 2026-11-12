@@ -195,6 +195,8 @@ test('unwrapping leaves the other var() calls alone', () => {
 test('the style sheet sets a custom property for each inset set, in px, and none for the others', () => {
   assert.equal(safeAreaCss({}), null);
   assert.equal(safeAreaCss({ top: 5 }), ':root{--da-sai-top:5px}');
+  // A negative inset is written as it is. Chrome makes its env() unavailable, so the fallback applies there: a known
+  // difference (docs/limitations.md), not Chrome's behaviour.
   assert.equal(safeAreaCss({ rightMax: 0, bottom: -3 }), ':root{--da-sai-bottom:-3px;--da-sai-max-right:0px}');
   assert.equal(
     safeAreaCss({ top: 1, topMax: 2, left: 3, leftMax: 4, bottom: 5, bottomMax: 6, right: 7, rightMax: 8 }),
