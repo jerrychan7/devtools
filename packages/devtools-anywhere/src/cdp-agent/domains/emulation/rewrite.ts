@@ -118,6 +118,12 @@ export function shownMedia(list: MediaList): string {
   return rewritten && rewritten.applied === list.mediaText ? rewritten.original : list.mediaText;
 }
 
+/** A declaration block as the page wrote it, for showing (and for an edit to undo to): the original of a rewritten one. */
+export function shownCssText(style: CSSStyleDeclaration): string {
+  const rewritten = styles.get(style);
+  return rewritten && rewritten.applied === style.cssText ? rewritten.original : style.cssText;
+}
+
 /**
  * Puts `rewrite` of a text the page has in place. `record` is what was kept for the text, and
  * `current` what it reads now: the page's original is `record.original` while the text still reads

@@ -18,6 +18,8 @@ import { CdpError } from '../../core/session';
 import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
 import { historyOf, type Action } from '../../core/nodes/history';
+import { shownAttribute } from '../../core/nodes/written-attributes';
+import { shownCssText, shownMedia } from '../emulation/rewrite';
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { ForcedPseudoClasses } from './matching/forced-pseudo';
 import { backgroundsBehind } from './color';
@@ -354,7 +356,8 @@ export function registerCss(ctx: Context) {
     if (edit.styleSheetId.startsWith(INLINE_PREFIX)) {
       const el = ctx.nodes.getByBackendId(Number(edit.styleSheetId.slice(INLINE_PREFIX.length)));
       if (!isNode(el) || !(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Node not found');
-      const old = el.getAttribute('style');
+      // As the page wrote it: an undo gives the page's text back, not the one the emulation rewrote.
+      const old = shownAttribute(el, 'style', el.getAttribute('style'));
       const oldSource = sources.get(el.style);
       if (!styleTextFits(edit.text)) throw new CdpError(INVALID_STYLE); // As Chrome, as for a rule's.
       perform(
@@ -373,7 +376,7 @@ export function registerCss(ctx: Context) {
     const rule = sheets.findRule(sheet, edit.range, 'style');
     if (!styleTextFits(edit.text)) throw new CdpError(INVALID_STYLE);
     const style = ownStyle(rule);
-    const old = style.cssText;
+    const old = shownCssText(style);
     const oldSource = sources.get(style);
     editSheet(
       sheet,
@@ -832,7 +835,7 @@ export function registerCss(ctx: Context) {
       const rule = atPrelude(sheet, params.range, r => isCssom(r, 'CSSMediaRule'));
       if (!isCssom(rule, 'CSSMediaRule')) throw new CdpError(RANGE_MISMATCH);
       const media = rule.media;
-      const old = media.mediaText;
+      const old = shownMedia(media);
       editSheet(
         sheet,
         splice(sheet, params.range, params.text),
@@ -1067,7 +1070,7 @@ export function registerCss(ctx: Context) {
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {
       const el = element(params.nodeId);
       if (!(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Element has no inline style');
-      const old = el.getAttribute('style');
+      const old = shownAttribute(el, 'style', el.getAttribute('style'));
       perform(
         () => el.style.setProperty(params.propertyName, params.value),
         () => (old === null ? el.removeAttribute('style') : el.setAttribute('style', old))

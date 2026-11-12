@@ -1,4 +1,5 @@
 import { FORCE_ATTRIBUTE, isOwn } from './nodes';
+import { shownAttribute } from './written-attributes';
 import { documentOf, isDocument, isElement, isHtml, isShadowRoot } from '../realm';
 
 /** An edit that can be taken back and done again. */
@@ -84,8 +85,14 @@ export function historyOf(owner: object): History {
 
 type Attributes = Map<string, { namespace: string | null; value: string }>;
 
+/** The attributes as the page wrote them (those the emulation rewrote shown as before it), so that an undo restores the page's. */
 function snapshotAttributes(el: Element): Attributes {
-  return new Map(Array.from(el.attributes, a => [a.name, { namespace: a.namespaceURI, value: a.value }]));
+  return new Map(
+    Array.from(el.attributes, a => [
+      a.name,
+      { namespace: a.namespaceURI, value: shownAttribute(el, a.name, a.value) ?? a.value },
+    ])
+  );
 }
 
 function applyAttributes(el: Element, from: Attributes, to: Attributes) {
@@ -212,7 +219,7 @@ function setAttribute(el: Element, name: string, value: string): Action {
 }
 
 function removeAttribute(el: Element, name: string): Action {
-  const old = el.getAttribute(name) ?? '';
+  const old = shownAttribute(el, name, el.getAttribute(name)) ?? '';
   const action = { undo: () => el.setAttribute(name, old), redo: () => el.removeAttribute(name) };
   action.redo();
   return action;
@@ -250,8 +257,11 @@ function hash(s: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-/** devtools-anywhere's own attribute is neither compared nor patched. */
-const patchedAttributes = (el: Element) => Array.from(el.attributes).filter(a => a.name !== FORCE_ATTRIBUTE);
+/** devtools-anywhere's own attribute is neither compared nor patched; the page's values are, as written. */
+const patchedAttributes = (el: Element) =>
+  Array.from(el.attributes)
+    .filter(a => a.name !== FORCE_ATTRIBUTE)
+    .map(a => ({ name: a.name, value: shownAttribute(el, a.name, a.value) ?? a.value }));
 
 type Unused = Map<string, Digest>;
 

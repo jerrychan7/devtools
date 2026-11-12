@@ -501,6 +501,42 @@ test('a <link> with a media query that loads under the emulation is emulated onc
   }
 });
 
+test('an edit of a style under the emulation is undone to the text the page wrote', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="und" style="padding-top: env(safe-area-inset-top, 7px)">und</div>'
+    )
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('DOM.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#und' });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      await side.send('DOM.setAttributeValue', {
+        nodeId,
+        name: 'style',
+        value: 'padding-top: env(safe-area-inset-top, 9px)',
+      });
+      await settle();
+      await side.send('DOM.undo');
+      await settle();
+      const { attributes } = await side.send('DOM.getAttributes', { nodeId });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      const cleared = await t.page.evaluate(() => document.getElementById('und')?.getAttribute('style'));
+      await side.send('DOM.disable');
+      return { undone: attributes.slice(2), cleared };
+    });
+    assert.deepEqual(r.undone, ['style', 'padding-top: env(safe-area-inset-top, 7px)']);
+    assert.equal(r.cleared, 'padding-top: env(safe-area-inset-top, 7px)');
+  } finally {
+    await t.page.evaluate(() => document.getElementById('und')?.remove());
+  }
+});
+
 test('the page sees the style attribute it wrote, and the emulation makes no DOM change', async () => {
   await t.page.evaluate(() =>
     document.body.insertAdjacentHTML(
