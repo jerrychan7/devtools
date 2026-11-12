@@ -28,6 +28,14 @@ async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
 
 const settle = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
 
+/** The computed top padding of the element `id`. An element that is not there fails the read: no other stands in. */
+const paddingTop = (id: string) =>
+  t.page.evaluate(id => {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`#${id} is not in the page`);
+    return getComputedStyle(el).paddingTop;
+  }, id);
+
 /**
  * Polls `read` until it gives `expected`, or gives up after a few seconds with what it last read: the
  * browser applies a change of the emulation a little after the page's task.
@@ -69,9 +77,7 @@ test("a page wrapping the element's getAttribute and setAttribute does not see t
   });
   try {
     await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-    const padding = await t.page.evaluate(
-      () => getComputedStyle(document.getElementById('wrp') ?? document.body).paddingTop
-    );
+    const padding = await paddingTop('wrp');
     await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
     const seen = await t.page.evaluate(() => (Reflect.get(window, 'wrapped') as { seen: string[] }).seen);
     assert.equal(padding, '5px');
@@ -123,9 +129,7 @@ test("a page wrapping the element's getAttribute and setAttribute does not see t
       const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#cpy' });
       await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
       await settle();
-      const padding = await t.page.evaluate(
-        () => getComputedStyle(document.getElementById('cpy') ?? document.body).paddingTop
-      );
+      const padding = await paddingTop('cpy');
       const { outerHTML } = await side.send('DOM.getOuterHTML', { nodeId });
       await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
       await side.send('DOM.disable');
@@ -189,14 +193,11 @@ test('a page guard that puts back the style it had does not loop with the emulat
         })
     );
     assert.ok(frames > 3, `${frames} frames in half a second`);
-    assert.ok(fires <= 10, `${fires} answers to the guard`);
+    // At least one: the emulation did rewrite the element, and the guard did answer it.
+    assert.ok(fires >= 1 && fires <= 10, `${fires} answers to the guard`);
     // Once the guard lets go, the emulation rewrites the element again (the last wait may be 64 frames).
     await t.page.evaluate(() => (Reflect.get(window, 'guard') as { observer: MutationObserver }).observer.disconnect());
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('grd') ?? document.body).paddingTop),
-      '5px',
-      8000
-    );
+    const padding = await until(() => paddingTop('grd'), '5px', 8000);
     assert.equal(padding, '5px');
   } finally {
     // The page first, and the emulation reset whatever happens there: the guard and its element must not outlive the test.
@@ -236,16 +237,13 @@ test('a page guard that puts back the style of a <style> element does not loop w
     const fires = await t.page.evaluate(
       () => (Reflect.get(window, 'styleGuard') as { state: { fires: number } }).state.fires
     );
-    assert.ok(fires <= 10, `${fires} answers to the guard`);
+    // At least one: the emulation did rewrite the element, and the guard did answer it.
+    assert.ok(fires >= 1 && fires <= 10, `${fires} answers to the guard`);
     await t.page.evaluate(() =>
       (Reflect.get(window, 'styleGuard') as { observer: MutationObserver }).observer.disconnect()
     );
     // The page's style attribute reads the var() form now, so the padding is what the inset gives.
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('gst') ?? document.body).paddingTop),
-      '5px',
-      8000
-    );
+    const padding = await until(() => paddingTop('gst'), '5px', 8000);
     assert.equal(padding, '5px');
     const style = await t.page.evaluate(() => document.getElementById('gst')?.getAttribute('style') ?? null);
     assert.notEqual(style, 'padding-top: env(safe-area-inset-top, 7px)');
@@ -291,15 +289,12 @@ test('a guard that also answers each rewrite with a sheet attribute does not loo
     const fires = await t.page.evaluate(
       () => (Reflect.get(window, 'sheetGuard') as { state: { fires: number } }).state.fires
     );
-    assert.ok(fires <= 10, `${fires} answers to the guard`);
+    // At least one: the emulation did rewrite the element, and the guard did answer it.
+    assert.ok(fires >= 1 && fires <= 10, `${fires} answers to the guard`);
     await t.page.evaluate(() =>
       (Reflect.get(window, 'sheetGuard') as { observer: MutationObserver }).observer.disconnect()
     );
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('gsm') ?? document.body).paddingTop),
-      '5px',
-      8000
-    );
+    const padding = await until(() => paddingTop('gsm'), '5px', 8000);
     assert.equal(padding, '5px');
     const style = await t.page.evaluate(() => document.getElementById('gsm')?.getAttribute('style') ?? null);
     assert.notEqual(style, 'padding-top: env(safe-area-inset-top, 7px)');
@@ -381,11 +376,7 @@ test('a page that clears its style and puts back a value with env() in each new 
       counter.disconnect();
       document.getElementById('clr')?.setAttribute('style', fixed);
     }, FIXED);
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('clr') ?? document.body).paddingTop),
-      '5px',
-      8000
-    );
+    const padding = await until(() => paddingTop('clr'), '5px', 8000);
     assert.equal(padding, '5px');
   } finally {
     try {
@@ -462,11 +453,7 @@ test('a page guard that puts back a value with env() in each new task is backed 
       guard.disconnect();
       counter.disconnect();
     });
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('tsk') ?? document.body).paddingTop),
-      '5px',
-      8000
-    );
+    const padding = await until(() => paddingTop('tsk'), '5px', 8000);
     assert.equal(padding, '5px');
   } finally {
     try {
@@ -542,11 +529,7 @@ test('a page guard that puts back the original value in each new task is backed 
       guard.disconnect();
       counter.disconnect();
     });
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('tso') ?? document.body).paddingTop),
-      '5px',
-      8000
-    );
+    const padding = await until(() => paddingTop('tso'), '5px', 8000);
     assert.equal(padding, '5px');
   } finally {
     try {
@@ -660,7 +643,7 @@ test("a timer guard's restores are answers in the turn of the rewrite, whichever
   assert.equal(newer, 1, 'the restores in the first frame with the emulation made first');
 });
 
-test('a timer guard that puts back another spelling of a value the emulation rewrites is backed off', async () => {
+test('a timer guard that puts back another spelling of the value the emulation writes is not written over', async () => {
   // The guard's text has no light and dark in it, so the rewrite leaves it alone; the rewrite then writes the value
   // back in its own spelling, and the guard puts its spelling back, in a timer of its own, again and again.
   await t.page.evaluate(() => {
@@ -691,12 +674,11 @@ test('a timer guard that puts back another spelling of a value the emulation rew
     await t.page.evaluate(() =>
       (Reflect.get(window, 'spellingGuard') as { guard: MutationObserver }).guard.disconnect()
     );
-    const scheme = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('spelling') ?? document.body).colorScheme),
-      'dark',
-      8000
-    );
-    assert.equal(scheme, 'dark');
+    // The guard's spelling stays once the guard is gone, past the longest wait of a held rewrite: the emulation,
+    // which writes `color-scheme: dark`, has no write of its own to make over a text that says the same.
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const style = await t.page.evaluate(() => document.getElementById('spelling')?.getAttribute('style') ?? null);
+    assert.equal(style, 'color-scheme:dark');
   } finally {
     try {
       await t.page.evaluate(() => {
@@ -747,9 +729,7 @@ test('a page edit of other declarations in a rewritten style attribute is not wr
     // Each edit is one record of the page's; a write of the emulation's would add one more.
     assert.equal(records, EDITS, `${records} records of the attribute for ${EDITS} edits`);
     // And the rewrite still applies: the inset is 5px, not the 7px the env() falls back to.
-    const padding = await t.page.evaluate(
-      () => getComputedStyle(document.getElementById('edits') ?? document.body).paddingTop
-    );
+    const padding = await paddingTop('edits');
     assert.equal(padding, '5px');
   } finally {
     try {
@@ -802,9 +782,7 @@ test('a page that sets back the rewritten text of a pending shorthand with anoth
     );
     // Each edit is one record of the page's; a write of the emulation's would add one more.
     assert.equal(records, EDITS, `${records} records of the attribute for ${EDITS} edits`);
-    const padding = await t.page.evaluate(
-      () => getComputedStyle(document.getElementById('pending-edits') ?? document.body).paddingTop
-    );
+    const padding = await paddingTop('pending-edits');
     assert.equal(padding, '5px');
   } finally {
     try {
@@ -844,10 +822,11 @@ test('a page edit through the CSSOM of a rewritten pending shorthand shows the e
     // The last edit, with the frame that follows it read before the edit is made: a rewrite held for frames shows then.
     const padding = await t.page.evaluate(i => {
       const el = document.getElementById('pending-cssom');
+      if (!el) throw new Error('#pending-cssom is not in the page');
       const frame = new Promise<string>(resolve =>
-        requestAnimationFrame(() => resolve(getComputedStyle(el ?? document.body).paddingTop))
+        requestAnimationFrame(() => resolve(getComputedStyle(el).paddingTop))
       );
-      el?.style.setProperty('transform', `translate(${i}px)`);
+      el.style.setProperty('transform', `translate(${i}px)`);
       return frame;
     }, EDITS);
     assert.equal(padding, '5px');
@@ -892,10 +871,11 @@ test('a page that clears every timer id does not hold the rewrites of its later 
     await new Promise(resolve => setTimeout(resolve, 1100));
     const padding = await t.page.evaluate(() => {
       const el = document.getElementById('cleared');
+      if (!el) throw new Error('#cleared is not in the page');
       const frame = new Promise<string>(resolve =>
-        requestAnimationFrame(() => resolve(getComputedStyle(el ?? document.body).paddingTop))
+        requestAnimationFrame(() => resolve(getComputedStyle(el).paddingTop))
       );
-      if (el) el.style.paddingTop = 'env(safe-area-inset-top, 9px)';
+      el.style.paddingTop = 'env(safe-area-inset-top, 9px)';
       return frame;
     });
     assert.equal(padding, '5px');
@@ -924,11 +904,7 @@ test('a shorthand the rewrite changes keeps its rewrite when a longhand after it
   });
   try {
     await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
-    const padding = await until(
-      () => t.page.evaluate(() => getComputedStyle(document.getElementById('shorthand') ?? document.body).paddingTop),
-      '5px',
-      3000
-    );
+    const padding = await until(() => paddingTop('shorthand'), '5px', 3000);
     assert.equal(padding, '5px');
   } finally {
     try {
