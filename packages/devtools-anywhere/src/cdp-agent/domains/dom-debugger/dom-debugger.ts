@@ -51,7 +51,9 @@ export function registerDomDebugger(ctx: Context) {
       if (target instanceof Node) listener.backendNodeId = nodes.backendIdOf(target);
       return listener;
     };
-    const result = (probe.listeners.get(target) ?? []).map(r => ({
+    // A listener whose signal is aborted is gone: the probe drops its record later (probe/index.ts, hookListeners).
+    const live = (probe.listeners.get(target) ?? []).filter(r => !r.signal?.aborted);
+    const result = live.map(r => ({
       ...base(r.type, r.listener),
       useCapture: r.capture,
       passive: r.passive,

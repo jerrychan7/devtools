@@ -193,6 +193,8 @@ export interface ListenerRecord {
   capture: boolean;
   passive: boolean;
   once: boolean;
+  /** The signal the listener was added with: once it is aborted, the browser has removed the listener. */
+  signal: AbortSignal | undefined;
 }
 
 /**

@@ -414,14 +414,17 @@ function forgetTool(tools: Probe['tools'], name: string, record: ToolRecord) {
 // ---- event listeners ----
 
 /**
- * Records listeners as the DOM keeps them: duplicates are ignored, `once` listeners are
- * forgotten after they run, and listeners with an aborted `signal` are forgotten too.
+ * Records listeners as the DOM keeps them: duplicates are ignored, `once` listeners are forgotten after they run,
+ * and a listener whose `signal` is aborted is gone from then on: its record is dropped at the next
+ * listener added to the target, and is not listed before that (the DOMDebugger domain leaves it out), with no `abort`
+ * listener of the probe's on the signal: one there would come after the page's own, which may stop the abort event or
+ * add the listener again, and would hold the target for as long as the signal lives.
  */
 function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
   const proto = EventTarget.prototype;
   const add = proto.addEventListener;
   const remove = proto.removeEventListener;
-  // Undoes what was added alongside a record (see below), for when the page removes it first.
+  // Takes away the helper added alongside a `once` record (see below), for when the page removes the listener first.
   const cleanups = new WeakMap<ListenerRecord, () => void>();
   const captureOf = (options?: boolean | EventListenerOptions) =>
     typeof options === 'boolean' ? options : !!options?.capture;
@@ -431,16 +434,19 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
     const target: EventTarget = this ?? globalThis;
     const opts = typeof options === 'object' ? options : undefined;
     const capture = captureOf(options);
+    const signal = opts?.signal;
     let found = listeners.get(target);
+    // The records of the listeners an aborted signal has removed go now: one of them may be this listener's.
+    if (found) for (let i = found.length; i--;) if (found[i]?.signal?.aborted) found.splice(i, 1);
     if (
       !listener ||
-      opts?.signal?.aborted ||
+      signal?.aborted ||
       found?.some(r => r.type === type && r.listener === listener && r.capture === capture)
     )
       return add.call(this, type, listener, options);
     if (!found) listeners.set(target, (found = []));
     const list = found;
-    const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once };
+    const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once, signal };
     // A method keeps its name through minification, so browser DevTools attached to the
     // page (which also list this helper) show what it is.
     const forget = {
@@ -449,10 +455,11 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
         if (i >= 0) list.splice(i, 1);
       },
     }.devtoolsAnywhereForget;
-    const signal = opts?.signal;
     // Before the page's listener: where this one runs, that one runs next, even if it stops the event for the
-    // listeners after it. Added after it, a listener that did so would leave this one on the target.
-    if (record.once) add.call(target, type, forget, { capture, once: true });
+    // listeners after it. Added after it, a listener that did so would leave this one on the target. It is added
+    // to the target with the page's signal as its option (no listener on the signal itself), so the browser
+    // removes both when that is aborted.
+    if (record.once) add.call(target, type, forget, { capture, once: true, signal } as AddEventListenerOptions);
     try {
       add.call(this, type, listener, options);
     } catch (e) {
@@ -460,12 +467,7 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
       throw e;
     }
     list.push(record);
-    if (signal) add.call(signal, 'abort', forget, { once: true });
-    if (record.once || signal)
-      cleanups.set(record, () => {
-        if (record.once) remove.call(target, type, forget, { capture });
-        if (signal) remove.call(signal, 'abort', forget);
-      });
+    if (record.once) cleanups.set(record, () => remove.call(target, type, forget, { capture }));
   };
 
   proto.removeEventListener = function (this: EventTarget, type, listener, options) {
