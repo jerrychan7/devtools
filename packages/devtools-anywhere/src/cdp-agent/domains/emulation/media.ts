@@ -185,6 +185,11 @@ export class MediaEmulation {
     const value = this.#features.get('prefers-color-scheme');
     return value === 'light' || value === 'dark' ? value : undefined;
   }
+
+  /** Whether forced colors are emulated: the `forced-colors` feature the sessions set is `active` (forced-colors.ts). */
+  forcedColors(): boolean {
+    return this.#features.get('forced-colors') === 'active';
+  }
 }
 
 /**

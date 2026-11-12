@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
+import { setForcedColors } from './forced-colors';
 import { injectOwnStyle } from './inject';
 import { MediaEmulation } from './media';
 import { rewriteColorScheme, rewriteMedia, rewriteValues } from './rewrite';
@@ -56,10 +57,12 @@ export function registerEmulation(ctx: Context) {
   useShadowRoots(ctx.shadowRoots);
   session.register('Emulation', {
     // Done by rewriting the media queries of the page's style sheets, the `media` of its <source> elements
-    // and the `sizes` of its images (domains/emulation/rewrite.ts).
+    // and the `sizes` of its images (domains/emulation/rewrite.ts), and for forced colors by the palette and
+    // the marks of forced-colors.ts.
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
       rewriteMedia('media', media.set(session, params));
       rewriteColorScheme(media.colorScheme());
+      setForcedColors(media.forcedColors());
     },
     // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes to read custom
     // properties (safe-area.ts).
@@ -77,6 +80,7 @@ export function registerEmulation(ctx: Context) {
     // The session ends as a call with nothing, as Chrome's does: whoever set the media type, it goes.
     rewriteMedia('media', media.end(session));
     rewriteColorScheme(media.colorScheme());
+    setForcedColors(media.forcedColors());
     for (const [what, owner] of owners) {
       if (owner !== session) continue;
       owners.delete(what);
