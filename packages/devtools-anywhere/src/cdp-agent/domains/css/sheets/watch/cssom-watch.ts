@@ -536,14 +536,31 @@ export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
   );
 }
 
-/** Sets `self`'s `name` (`cssText`, `selectorText`, `keyText`, `mediaText`), like `ownCall`. */
+/**
+ * Sets `self`'s `name` (`cssText`, `selectorText`, `keyText`, `mediaText`), like `ownCall`. The page's
+ * writes by name are told first (`settle`), so that this write is not taken for one of them. Then a
+ * style the page took is given the text this write left, so that it is not told as the page's either;
+ * a write by name that `settle` has not told yet (it holds back within a task that already ran it) is
+ * still to be told, so that style keeps its text. Told then, its rule is reported changed, and the text
+ * serialized from the rule later holds this write as well.
+ */
 export function ownSet(self: object, name: string, value: unknown): void {
+  settle();
+  const taken = isCssom(self, 'CSSStyleDeclaration') ? takenStyle(self) : undefined;
+  const pending = taken !== undefined && taken.text !== taken.style.cssText;
   viaOwn(
     self,
     `set:${name}`,
     fn => void Reflect.apply(fn, self, [value]),
     () => void Reflect.set(self, name, value)
   );
+  if (taken && !pending) taken.text = taken.style.cssText;
+}
+
+/** The record of a style the page took, of a rule (`suspects`), if `style` is that style. */
+function takenStyle(style: CSSStyleDeclaration): { style: CSSStyleDeclaration; text: string } | undefined {
+  const entry = style.parentRule ? suspects.get(style.parentRule) : undefined;
+  return entry && entry.style === style ? entry : undefined;
 }
 
 /** `self`'s `name` read through the native getter, like `ownCall`. */

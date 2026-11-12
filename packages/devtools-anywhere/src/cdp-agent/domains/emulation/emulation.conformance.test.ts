@@ -733,6 +733,54 @@ test('an inline style with env() is emulated, and so is a style the page writes'
   }
 });
 
+test("a rule's declaration the page read before the emulation is no change of its sheet", async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'read-sheet';
+    style.textContent = '.read-me { padding-top: env(safe-area-inset-top, 7px) }';
+    document.head.appendChild(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="read-me" class="read-me">read</div>');
+  });
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#read-me' });
+      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+      const styleSheetId = (matchedCSSRules ?? []).find(m => m.rule.selectorList.text === '.read-me')?.rule
+        .styleSheetId;
+      // A script of the page takes the rule's style before the emulation rewrites it.
+      await t.page.evaluate(() => {
+        const style = document.getElementById('read-sheet');
+        const rule = style instanceof HTMLStyleElement ? Array.from(style.sheet?.cssRules ?? [])[0] : undefined;
+        if (rule instanceof CSSStyleRule) void rule.style.paddingTop;
+      });
+      await side.clear();
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      const during = await t.page.evaluate(
+        () => getComputedStyle(document.getElementById('read-me') ?? document.body).paddingTop
+      );
+      const changed = await side.events('CSS.styleSheetChanged');
+      const text = styleSheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId })).text : null;
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      return { during, changed: changed.length, text };
+    });
+    assert.equal(r.during, '5px');
+    assert.equal(r.changed, 0);
+    assert.equal(r.text, '.read-me { padding-top: env(safe-area-inset-top, 7px) }');
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('read-sheet')?.remove();
+      document.getElementById('read-me')?.remove();
+    });
+  }
+});
+
 /** A test image's URL: the fixture's own pixel, with a query that names the candidate. */
 const image = (name: string) => `/packages/devtools-anywhere/test-support/assets/pixel.png?${name}`;
 
