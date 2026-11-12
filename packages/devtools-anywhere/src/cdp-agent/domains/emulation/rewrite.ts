@@ -1,11 +1,12 @@
-import { adoptedOf, isHiddenSheet, quietly, watchAdopted } from '../../core/nodes/adopted';
+import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
 import { setWrittenAttribute, writtenAttribute } from '../../core/nodes/written-attributes';
-import { isCssom, isElement, isHtml, isNode, realmOf } from '../../core/realm';
+import { isCssom, isElement, isHtml, isNode, isSvg, realmOf } from '../../core/realm';
 import { pageRulesRewritten } from '../css/matching/forced-pseudo';
 import { type CssomChange, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
+import { type Merge, mergeDeclarations, mergeList } from './merge';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
@@ -21,6 +22,8 @@ interface Active {
 interface Rewritten {
   original: string;
   applied: string;
+  /** What the rewrite gave the original, as last written: while the text still reads `applied`, it is not written again. */
+  target: string;
 }
 
 /**
@@ -40,10 +43,12 @@ interface Rewritten {
  * an insertRule() followed by getComputedStyle() in the same task sees the rewrite. The others are
  * seen by mutation observers and rewritten in a microtask after the change.
  *
- * Limits: sheets that cannot be read (cross-origin) are left as they are, and matchMedia() is not
- * affected. A <style> added in the same task as it is read is rewritten after that task's script,
- * and so is an element's style written in the task that reads it. Our writes are seen by the
- * page's own mutation observers.
+ * Limits: the rules of a sheet that cannot be read (cross-origin) are left as they are; its media is
+ * rewritten like any other. matchMedia() is not affected. A <style> added in the same task as it is
+ * read is rewritten after that task's script, and so is an element's style written in the task that
+ * reads it. A property the page writes by name on a rule's style (rule.style.color = …) is seen only
+ * once the CSS domain looks at the sheet. Our writes are seen by the page's own mutation observers,
+ * and the page reads the rewritten values, as it reads them from the CSSOM and the attributes.
  *
  * One for the page: a media rewrite and a value rewrite each, by name.
  */
@@ -126,26 +131,36 @@ export function shownCssText(style: CSSStyleDeclaration): string {
 
 /**
  * Puts `rewrite` of a text the page has in place. `record` is what was kept for the text, and
- * `current` what it reads now: the page's original is `record.original` while the text still reads
- * `record.applied`, else what it reads now (the page changed it). Returns whether a write was made
- * and the record to keep (none when the text is the page's own).
+ * `current` what it reads now: while the text still reads `record.applied`, the page's original is
+ * `record.original`; once the page changed it, the original is `merge` of the two (the page's change
+ * kept, the rest as it was written). Returns whether a write was made and the record to keep (none
+ * when the text is the page's own).
  */
 function fixText(
   record: Rewritten | undefined,
   current: string,
   rewrite: Rewrite | null,
+  merge: Merge,
   read: () => string,
   write: (text: string) => void
 ): { changed: boolean; record?: Rewritten } {
-  const original = record && record.applied === current ? record.original : current;
+  const original = !record
+    ? current
+    : record.applied === current
+      ? record.original
+      : merge(record.original, record.applied, current);
   const target = rewrite ? rewrite(original) : original;
   if (target === original) {
     if (current === original) return { changed: false };
     write(original);
     return { changed: true };
   }
+  // The text already reads what the rewrite gives: nothing to write (a browser may read it back
+  // differently from what was written, so a comparison with the written text would never agree).
+  if (record && record.applied === current && record.target === target) return { changed: false, record };
   if (current !== target) write(target);
-  return { changed: current !== target, record: { original, applied: read() } };
+  const applied = read();
+  return { changed: applied !== current, record: { original, applied, target } };
 }
 
 /** Rewrites a media query list through the CSSOM (ours, not a change of the page's to report). */
@@ -154,11 +169,14 @@ function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
     lists.get(list),
     list.mediaText,
     rewrite,
+    mergeList,
     () => list.mediaText,
     text => ownSet(list, 'mediaText', text)
   );
-  if (fixed.record) lists.set(list, fixed.record);
-  else lists.delete(list);
+  if (fixed.record) {
+    lists.set(list, fixed.record);
+    track(writtenLists, list);
+  } else lists.delete(list);
   return fixed.changed;
 }
 
@@ -168,13 +186,19 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
     styles.get(style),
     style.cssText,
     rewrite,
+    mergeDeclarations,
     () => style.cssText,
     text => ownSet(style, 'cssText', text)
   );
-  if (fixed.record) styles.set(style, fixed.record);
-  else styles.delete(style);
+  if (fixed.record) {
+    styles.set(style, fixed.record);
+    track(writtenStyles, style);
+  } else styles.delete(style);
   return fixed.changed;
 }
+
+/** How each attribute the emulation rewrites is merged back: a declaration block, or a list. */
+const merges = (name: string): Merge => (name === 'style' ? mergeDeclarations : mergeList);
 
 /** Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`). */
 function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boolean {
@@ -187,11 +211,60 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boole
     writtenAttribute(el, name),
     current,
     rewrite,
+    merges(name),
     () => el.getAttribute(name) ?? '',
-    text => quietMutations(() => el.setAttribute(name, text))
+    text => {
+      const before = el.getAttribute(name);
+      quietMutations(() => el.setAttribute(name, text), { target: el, name, before });
+    }
   );
   setWrittenAttribute(el, name, fixed.record);
+  if (fixed.record) track(writtenElements, el);
   return fixed.changed;
+}
+
+/*
+ * What was rewritten, held weakly. A sheet or an element the page took out of the page keeps its
+ * rewrite until the emulation ends, when it is restored though it is out of the page: a page that
+ * puts it back later sees the page's own text, not the emulation's.
+ */
+const writtenElements = new Set<WeakRef<Element>>();
+const writtenLists = new Set<WeakRef<MediaList>>();
+const writtenStyles = new Set<WeakRef<CSSStyleDeclaration>>();
+/** The reference of each object in one of the sets, so that it is in a set once. */
+let refs = new WeakMap<object, WeakRef<object>>();
+let sweepAt = 1024;
+
+/** Keeps `obj` in `set`, once; the dead references in it are swept as it grows. */
+function track<T extends object>(set: Set<WeakRef<T>>, obj: T): void {
+  if (refs.has(obj)) return;
+  if (set.size >= sweepAt) {
+    for (const ref of set) if (!ref.deref()) set.delete(ref);
+    sweepAt = Math.max(1024, set.size * 2);
+  }
+  const ref = new WeakRef(obj);
+  refs.set(obj, ref);
+  set.add(ref);
+}
+
+/** Restores what was rewritten and is still alive, wherever it is now, and forgets it. */
+function restoreWritten(): void {
+  for (const ref of writtenElements) {
+    const el = ref.deref();
+    if (el) for (const name of ['style', 'media', 'sizes']) fixAttribute(el, name, null);
+  }
+  for (const ref of writtenLists) {
+    const list = ref.deref();
+    if (list) fixMedia(list, null);
+  }
+  for (const ref of writtenStyles) {
+    const style = ref.deref();
+    if (style) fixStyle(style, null);
+  }
+  writtenElements.clear();
+  writtenLists.clear();
+  writtenStyles.clear();
+  refs = new WeakMap();
 }
 
 /** The elements whose attributes are rewritten: a `style`, the `media` of a <source>, the `sizes` of an <img> or <source>. */
@@ -290,7 +363,8 @@ const OBSERVED: MutationObserverInit = {
   attributeFilter: ['href', 'rel', 'disabled', 'media', 'type', 'style', 'sizes'],
 };
 
-const isSheetOwner = (node: Node | null) => isHtml(node, 'style') || isHtml(node, 'link');
+/** The elements that own a style sheet: a <style> (HTML or SVG) and a <link>. */
+const isSheetOwner = (node: Node | null) => isHtml(node, 'style') || isSvg(node, 'style') || isHtml(node, 'link');
 
 /** Whether mutations may have added or changed style sheets (or added shadow trees, which may have some). */
 function touchesSheets(records: MutationRecord[]): boolean {
@@ -339,13 +413,16 @@ function schedule() {
   });
 }
 
+/** The page's mutations: a change of a sheet schedules the whole page; the rest is rewritten at once. */
+function onRecords(records: MutationRecord[]): void {
+  if (touchesSheets(records)) schedule();
+  else fixChanged(records, current());
+}
+
 /** Starts watching while something is rewritten: the observers, the CSSOM hooks, the trees. */
 function startWatching(): Watching {
   return {
-    observer: new MutationObserver(records => {
-      if (touchesSheets(records)) schedule();
-      else fixChanged(records, current());
-    }),
+    observer: new MutationObserver(onRecords),
     observed: new Set(),
     stops: [watchAdopted(schedule, pageTrees), followTrees(schedule), watchCssom(onCssom, () => realmsOf(pageTrees()))],
   };
@@ -363,10 +440,25 @@ function stopWatching(): void {
 function update(): void {
   const changed = quietly(() => sync(current()));
   if (changed) pageRulesRewritten();
-  if (!rewriting()) return stopWatching();
+  if (!rewriting()) {
+    // What was rewritten and has left the page goes back too, as the page's own.
+    restoreWritten();
+    return stopWatching();
+  }
   const trees = pageTrees();
   watching ??= startWatching();
   watchRealms(trees.map(tree => realmOf(tree).document));
+  // The adopted sheets of trees that came since are watched too.
+  watchTrees(trees);
+  const now = new Set(trees);
+  if ([...watching.observed].some(tree => !now.has(tree))) {
+    // A tree the page took out is no longer observed: the observer is set again on those there are.
+    const pending = watching.observer.takeRecords();
+    if (pending.length) onRecords(pending);
+    watching.observer.disconnect();
+    for (const tree of watching.observed) if (!now.has(tree)) tree.removeEventListener('load', onLoad, true);
+    watching.observed.clear();
+  }
   for (const tree of trees) {
     if (watching.observed.has(tree)) continue;
     watching.observed.add(tree);

@@ -7,6 +7,8 @@ import { isElement } from '../realm';
 export interface Written {
   original: string;
   applied: string;
+  /** What the rewrite gave the original, as last written (domains/emulation/rewrite.ts). */
+  target: string;
 }
 
 /**
@@ -17,7 +19,10 @@ const writes = new WeakMap<Element, Map<string, Written>>();
 /** Whether anything was ever written: until then, nothing is shown differently. */
 let anyWritten = false;
 
-/** What the agent wrote into `el`'s attribute `name`, if it did and the page has not changed it since. */
+/**
+ * What the agent last wrote into `el`'s attribute `name`, if it did. The page may have changed the
+ * attribute since: the record is only what the page's value is compared with (`applied`).
+ */
 export function writtenAttribute(el: Element, name: string): Written | undefined {
   return writes.get(el)?.get(name);
 }

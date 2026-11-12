@@ -15,10 +15,13 @@ export function sinkMutations(observer: MutationObserver, deliver: Deliver): () 
 }
 
 /**
- * Runs `fn`, a write of the agent's own, so that no registered observer reports it. Records of the
- * page's changes not yet delivered are delivered first, as they are the page's.
+ * Runs `fn`, a write of the agent's own to the attribute `write.name` of `write.target`, which held
+ * `write.before`, so that no registered observer reports that write. Records of the page's changes
+ * not yet delivered are delivered first, as they are the page's; so are those made while `fn` ran (a
+ * custom element's reaction to the write), as only the write's own record is left out: the one that
+ * replaced `write.before`. The observers record the old value of each attribute change.
  */
-export function quietMutations<T>(fn: () => T): T {
+export function quietMutations<T>(fn: () => T, write: { target: Node; name: string; before: string | null }): T {
   if (!sinks.size) return fn();
   for (const [observer, deliver] of sinks) {
     const records = observer.takeRecords();
@@ -27,6 +30,11 @@ export function quietMutations<T>(fn: () => T): T {
   try {
     return fn();
   } finally {
-    for (const observer of sinks.keys()) observer.takeRecords();
+    for (const [observer, deliver] of sinks) {
+      const records = observer
+        .takeRecords()
+        .filter(r => !(r.target === write.target && r.attributeName === write.name && r.oldValue === write.before));
+      if (records.length) deliver(records);
+    }
   }
 }
