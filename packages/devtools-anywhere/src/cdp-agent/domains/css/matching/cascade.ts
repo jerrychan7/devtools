@@ -1,5 +1,13 @@
 import type { Protocol } from 'devtools-protocol';
-import { documentOf, isCssom, isElement, isHtmlElement, isShadowRoot, isSvgElement } from '../../../core/realm';
+import {
+  documentOf,
+  isCssom,
+  isElement,
+  isHtmlElement,
+  isShadowRoot,
+  isSvgElement,
+  realmOf,
+} from '../../../core/realm';
 import { containerMatches, parentOf } from '../../../core/style/container-query';
 import { type NodeRegistry, isPseudoType } from '../../../core/nodes/nodes';
 import { compareSpecificity, specificity, splitTopLevel } from '../../../core/style/selectors';
@@ -12,6 +20,8 @@ import { hasDefaultNamespace, matchInNamespaces, withoutNamedPrefix } from './na
 import { namespaceText } from '../sheets/text/pair';
 import type { UserAgentStyles } from '../user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
+import { ownSet } from '../sheets/watch/cssom-watch';
+import { shownAttribute } from '../../../core/nodes/written-attributes';
 import { ViewTransitionClasses, pseudoClassesMatch, pseudoMatches } from './pseudo-element';
 
 /** A style rule ready for matching: its selectors resolved and split, with forced pseudo-classes rewritten. */
@@ -42,6 +52,13 @@ type Kind = 'own' | 'host' | 'slotted';
 type Selector = Candidate['selectors'][number];
 
 /** Matches elements against the page's style rules, in cascade order. */
+/** A declaration block parsed from `text` alone, as in an element of the element's realm. */
+function parsedStyle(el: Element, text: string): CSSStyleDeclaration {
+  const style = realmOf(el).document.createElement('div').style;
+  ownSet(style, 'cssText', text);
+  return style;
+}
+
 export class Cascade {
   /**
    * The candidates of the request being answered: one request matches the element, its
@@ -396,11 +413,15 @@ export class Cascade {
   inlineStyle(el: Element): CSSStyle | undefined {
     if (!(isHtmlElement(el) || isSvgElement(el))) return undefined;
     // Like Chrome, declarations in the order of the style attribute, which the CSSOM does not keep.
-    const attribute = el.getAttribute('style');
+    // Where the emulation rewrote the attribute, the declarations are those the page wrote: parsed
+    // from its text, not read from the rewritten style.
+    const written = el.getAttribute('style');
+    const attribute = shownAttribute(el, 'style', written);
+    const style = attribute !== null && attribute !== written ? parsedStyle(el, attribute) : el.style;
     // None once the page removed it: an attribute of comments only held what the style holds now.
-    if (attribute !== null) sources.set(el.style, { text: attribute, applied: el.style.cssText });
-    else sources.delete(el.style);
-    return buildStyle(INLINE_PREFIX + this.nodes.backendIdOf(el), el.style, 0, 0);
+    if (attribute !== null) sources.set(style, { text: attribute, applied: style.cssText });
+    else sources.delete(style);
+    return buildStyle(INLINE_PREFIX + this.nodes.backendIdOf(el), style, 0, 0);
   }
 
   inheritedEntries(from: Element | null): Protocol.CSS.InheritedStyleEntry[] {

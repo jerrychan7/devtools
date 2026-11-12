@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { childTargets } from '../frames/child-targets';
 import type { FrameRegistry } from '../frames/frames';
+import { shownAttribute } from './written-attributes';
 import {
   contentDocumentOf,
   contentWindowOf,
@@ -65,11 +66,14 @@ export function closestOwn(node: Node): boolean {
 /** Pseudo-classes forced on an element (CSS.forcePseudoState); hidden from the client. */
 export const FORCE_ATTRIBUTE = 'data-devtools-anywhere-force';
 
-/** An element's attributes as sent to the client, without devtools-anywhere's own. */
+/**
+ * An element's attributes as sent to the client, without devtools-anywhere's own, and with those
+ * the emulation wrote shown as the page gave them.
+ */
 export const visibleAttributes = (el: Element) =>
   Array.from(el.attributes)
     .filter(a => a.name !== FORCE_ATTRIBUTE)
-    .flatMap(a => [a.name, a.value]);
+    .flatMap(a => [a.name, shownAttribute(el, a.name, a.value) ?? a.value]);
 
 /** Text children up to this length are sent along with their element, like Chrome does. */
 const MAX_INLINE_TEXT = 500;

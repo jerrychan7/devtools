@@ -35,7 +35,7 @@ const STYLE = `
 setUpAndTearDown(
   async () => {
     env = await launch();
-    t = await openPage(env, []);
+    t = await openPage(env, ['DOM.attributeModified', 'DOM.attributeRemoved']);
     await t.page.evaluate(style => {
       const s = document.createElement('style');
       s.textContent = style;
@@ -284,6 +284,89 @@ test('safe area insets, with fallbacks, shorthands and custom properties', async
 test('insets not set keep their real value', async () => {
   await both(...safeArea({ top: 8 }));
   await both(...safeArea({}));
+});
+
+/** What each side gives for `run`, run on each in turn: the two must give the same. */
+async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
+  const results: T[] = [];
+  for (const side of [t.chrome, t.ours]) results.push(await run(side));
+  const [chrome, ours] = results;
+  assert.deepEqual(ours, chrome);
+  return chrome as T;
+}
+
+const settle = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
+
+test('an inline style with env() is emulated, and so is a style the page writes', async () => {
+  await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="inl">inl</div>'));
+  const read = () =>
+    t.page.evaluate(() => {
+      const style = getComputedStyle(document.getElementById('inl') ?? document.body);
+      return { top: style.paddingTop, left: style.paddingLeft };
+    });
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 3 } });
+      await t.page.evaluate(() =>
+        document
+          .getElementById('inl')
+          ?.setAttribute(
+            'style',
+            'padding-top: env(safe-area-inset-top, 7px); padding-left: env(safe-area-inset-left, 9px)'
+          )
+      );
+      const first = await read();
+      // The page writes the style again: the new text is the original, rewritten in turn.
+      await t.page.evaluate(() =>
+        document.getElementById('inl')?.setAttribute('style', 'padding-top: env(safe-area-inset-top, 11px)')
+      );
+      const written = await read();
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      const cleared = await read();
+      return { first, written, cleared };
+    });
+    assert.deepEqual(r.first, { top: '5px', left: '3px' });
+    assert.equal(r.written.top, '5px');
+  } finally {
+    await t.page.evaluate(() => document.getElementById('inl')?.remove());
+  }
+});
+
+test('the page sees the style attribute it wrote, and the emulation makes no DOM change', async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="inl" style="padding-top: env(safe-area-inset-top, 7px)">inl</div>'
+    )
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#inl' });
+      await side.clear();
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      const during = await side.events('DOM.attributeModified');
+      const { attributes } = await side.send('DOM.getAttributes', { nodeId });
+      const { outerHTML } = await side.send('DOM.getOuterHTML', { nodeId });
+      const { inlineStyle } = await side.send('CSS.getInlineStylesForNode', { nodeId });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      const after = await side.events('DOM.attributeModified');
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      return { during, after, attributes, outerHTML, css: inlineStyle?.cssText };
+    });
+    assert.deepEqual(r.during, []);
+    assert.deepEqual(r.after, []);
+    assert.deepEqual(r.attributes.slice(2), ['style', 'padding-top: env(safe-area-inset-top, 7px)']);
+    assert.match(r.outerHTML, /style="padding-top: env\(safe-area-inset-top, 7px\)"/);
+    assert.equal(r.css, 'padding-top: env(safe-area-inset-top, 7px)');
+  } finally {
+    await t.page.evaluate(() => document.getElementById('inl')?.remove());
+  }
 });
 
 /**

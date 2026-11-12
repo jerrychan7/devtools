@@ -17,6 +17,8 @@ import {
   historyOf,
   patchOuterHTML,
 } from '../../core/nodes/history';
+import { sinkMutations } from '../../core/nodes/own-mutations';
+import { hasWritten, shownAttribute, shownCopy } from '../../core/nodes/written-attributes';
 import {
   type FrameOwner,
   isDocument,
@@ -262,7 +264,11 @@ function searchNodes(
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (isElement(node)) {
         if (node.localName.includes(needle)) found.add(node);
-        else if (Array.from(node.attributes).some(a => `${a.name}="${a.value}"`.toLowerCase().includes(needle)))
+        else if (
+          Array.from(node.attributes).some(a =>
+            `${a.name}="${shownAttribute(node, a.name, a.value) ?? a.value}"`.toLowerCase().includes(needle)
+          )
+        )
           found.add(node);
         const shadowRoot = shadowRootOf(node);
         if (shadowRoot) walk(shadowRoot);
@@ -296,9 +302,10 @@ function searchNodes(
 /** Markup of `node` as DOM.getOuterHTML returns it: without forced pseudo-class markers. */
 function outerHTML(node: Node): string {
   if (isElement(node)) {
-    if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`)) return node.outerHTML;
-    // Leave out forced pseudo-class markers.
-    const copy = node.cloneNode(true);
+    if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`) && !hasWritten(node))
+      return node.outerHTML;
+    // Leave out forced pseudo-class markers, and show the attributes the page gave.
+    const copy = shownCopy(node);
     if (!isElement(copy)) return node.outerHTML;
     for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
       el.removeAttribute(FORCE_ATTRIBUTE);
@@ -331,6 +338,8 @@ function loadsAnotherDocument(owner: FrameOwner, doc: Document): boolean {
 export function registerDom(ctx: Context) {
   const { session, nodes, objects } = ctx;
   let observer: MutationObserver | null = null;
+  /** Keeps the agent's own writes out of the observer's records (core/nodes/own-mutations.ts). */
+  let unsinkMutations: (() => void) | null = null;
   /** Each search's results: the page's nodes, then each merged frame's part (domains/dom/merged.ts). */
   const searches = new Map<string, { found: Node[]; parts: SearchPart[] }>();
   const merged = mergedDom(ctx);
@@ -537,7 +546,8 @@ export function registerDom(ctx: Context) {
       } else if (record.type === 'attributes' && targetId !== undefined && isElement(target)) {
         const name = record.attributeName;
         if (name === null || name === FORCE_ATTRIBUTE) continue;
-        const value = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
+        const written = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
+        const value = shownAttribute(target, name, written);
         if (value === null) session.emit('DOM.attributeRemoved', { nodeId: targetId, name });
         else session.emit('DOM.attributeModified', { nodeId: targetId, name, value });
       } else if (record.type === 'characterData' && targetId !== undefined) {
@@ -565,6 +575,8 @@ export function registerDom(ctx: Context) {
   function observe() {
     observer?.disconnect();
     observer = new MutationObserver(onMutations);
+    unsinkMutations?.();
+    unsinkMutations = sinkMutations(observer, onMutations);
     observer.observe(ctx.frames.top.document, OBSERVE);
     stopFrames ??= ctx.frames.onChange(onFrameChange);
     // A merged frame's document is its agent's: sent again when the frame links again (reloaded).
@@ -601,6 +613,8 @@ export function registerDom(ctx: Context) {
     disable() {
       observer?.disconnect();
       observer = null;
+      unsinkMutations?.();
+      unsinkMutations = null;
       stopFrames?.();
       stopFrames = null;
       changedFrames = null;
@@ -748,7 +762,8 @@ export function registerDom(ctx: Context) {
       const el = element(params);
       const renamed = el.ownerDocument.createElement(params.name);
       for (const attr of Array.from(el.attributes))
-        if (attr.name !== FORCE_ATTRIBUTE) renamed.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+        if (attr.name !== FORCE_ATTRIBUTE)
+          renamed.setAttributeNS(attr.namespaceURI, attr.name, shownAttribute(el, attr.name, attr.value) ?? attr.value);
       history.record(
         editReplace(
           el,
@@ -791,7 +806,7 @@ export function registerDom(ctx: Context) {
           merged.recordEdit(ns);
           return result;
         });
-      const copy = resolveNode(ctx, params).cloneNode(true);
+      const copy = shownCopy(resolveNode(ctx, params));
       // The copy is not forced into any pseudo-class state.
       if (isElement(copy))
         for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])

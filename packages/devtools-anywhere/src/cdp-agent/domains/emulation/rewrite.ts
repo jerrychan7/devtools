@@ -1,5 +1,7 @@
 import { adoptedOf, quietly, watchAdopted } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
+import { quietMutations } from '../../core/nodes/own-mutations';
+import { setWrittenAttribute, writtenAttribute } from '../../core/nodes/written-attributes';
 import { isCssom, isElement, isHtml, isNode, realmOf } from '../../core/realm';
 import { isCompanion, pageRulesRewritten } from '../css/matching/forced-pseudo';
 import { type CssomChange, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
@@ -28,12 +30,18 @@ interface Rewritten {
  * taken as the new original. The companions of forced pseudo-classes (CSS.forcePseudoState) copy
  * the rewritten rules, so they are rebuilt after a rewrite.
  *
+ * The `style` attributes of the page's elements are rewritten the same way, through setAttribute:
+ * the client is shown the attribute as the page wrote it (core/nodes/written-attributes.ts), and
+ * our writes are not reported as changes of the page's (core/nodes/own-mutations.ts).
+ *
  * The page's changes through the CSSOM are rewritten at once, in the call that made them, so that
  * an insertRule() followed by getComputedStyle() in the same task sees the rewrite. The others are
  * seen by mutation observers and rewritten in a microtask after the change.
  *
  * Limits: sheets that cannot be read (cross-origin) are left as they are, and matchMedia() is not
- * affected. A <style> added in the same task as it is read is rewritten after that task's script.
+ * affected. A <style> added in the same task as it is read is rewritten after that task's script,
+ * and so is an element's style written in the task that reads it. Our writes are seen by the
+ * page's own mutation observers.
  *
  * One for the page: a media rewrite and a value rewrite each, by name.
  */
@@ -128,6 +136,32 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
   return fixed.changed;
 }
 
+/** Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`). */
+function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boolean {
+  const current = el.getAttribute(name);
+  if (current === null) {
+    setWrittenAttribute(el, name, undefined);
+    return false;
+  }
+  const fixed = fixText(
+    writtenAttribute(el, name),
+    current,
+    rewrite,
+    () => el.getAttribute(name) ?? '',
+    text => quietMutations(() => el.setAttribute(name, text))
+  );
+  setWrittenAttribute(el, name, fixed.record);
+  return fixed.changed;
+}
+
+/** The elements whose attributes are rewritten: those with a `style`. */
+const ELEMENTS = '[style]';
+
+/** Rewrites the attributes of `el` that the emulation rewrites; returns whether a write was made. */
+function fixElement(el: Element, act: Active): boolean {
+  return fixAttribute(el, 'style', act.values);
+}
+
 /** Rewrites a rule through the CSSOM: its media, its declarations, and what it holds. */
 function fixRule(rule: CSSRule, act: Active): boolean {
   if (isCssom(rule, 'CSSImportRule')) {
@@ -162,13 +196,14 @@ function fixSheet(sheet: CSSStyleSheet, act: Active): boolean {
   return changed;
 }
 
-/** Rewrites every readable sheet of the page; returns whether anything was written. */
+/** Rewrites every readable sheet and element of the page; returns whether anything was written. */
 function sync(act: Active): boolean {
   let changed = false;
   for (const tree of pageTrees()) {
     for (const sheet of Array.from(tree.styleSheets))
       if (isCssom(sheet, 'CSSStyleSheet')) changed = fixSheet(sheet, act) || changed;
     for (const sheet of adoptedOf(tree)) changed = fixSheet(sheet, act) || changed;
+    for (const el of tree.querySelectorAll(ELEMENTS)) if (!closestOwn(el)) changed = fixElement(el, act) || changed;
   }
   return changed;
 }
@@ -204,7 +239,7 @@ const OBSERVED: MutationObserverInit = {
   childList: true,
   subtree: true,
   characterData: true,
-  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type'],
+  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type', 'style'],
 };
 
 const isSheetOwner = (node: Node | null) => isHtml(node, 'style') || isHtml(node, 'link');
@@ -219,6 +254,21 @@ function touchesSheets(records: MutationRecord[]): boolean {
     }
   }
   return false;
+}
+
+/** Rewrites the `style` the page set on elements, and the elements it added, at once (no sheet changed). */
+function fixChanged(records: MutationRecord[], act: Active): void {
+  for (const record of records) {
+    if (record.type === 'attributes') {
+      const target = record.target;
+      if (record.attributeName === 'style' && isElement(target) && !closestOwn(target)) fixElement(target, act);
+    } else
+      for (const node of Array.from(record.addedNodes)) {
+        if (!isElement(node) || closestOwn(node)) continue;
+        if (node.matches(ELEMENTS)) fixElement(node, act);
+        for (const el of node.querySelectorAll(ELEMENTS)) if (!closestOwn(el)) fixElement(el, act);
+      }
+  }
 }
 
 /** A <link> sheet (or an @import of a <style>) can only be read once loaded. */
@@ -241,6 +291,7 @@ function startWatching(): Watching {
   return {
     observer: new MutationObserver(records => {
       if (touchesSheets(records)) schedule();
+      else fixChanged(records, current());
     }),
     observed: new Set(),
     stops: [watchAdopted(schedule, pageTrees), followTrees(schedule), watchCssom(onCssom, () => realmsOf(pageTrees()))],
