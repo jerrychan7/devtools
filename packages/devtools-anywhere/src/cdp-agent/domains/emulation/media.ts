@@ -142,10 +142,13 @@ export function mediaRewrite(params: Protocol.Emulation.SetEmulatedMediaRequest)
   const type = asciiLower(params.media ?? '');
   const features = new Map<string, string>();
   for (const { name, value } of params.features ?? []) {
-    const v = emulatedValue(value);
     // Own properties only: `constructor` is not a feature. The name is compared as it is: Chrome takes
-    // `Prefers-Color-Scheme` for no feature.
-    if (Object.hasOwn(FEATURES, name) && v !== undefined && FEATURES[name]?.includes(v)) features.set(name, v);
+    // `Prefers-Color-Scheme` for no feature. A value Chrome does not read clears the one before it, so the
+    // feature keeps its real value, as it does without any emulation.
+    if (!Object.hasOwn(FEATURES, name)) continue;
+    const v = emulatedValue(value);
+    if (v !== undefined && FEATURES[name]?.includes(v)) features.set(name, v);
+    else features.delete(name);
   }
   if (!type && !features.size) return null;
   return text =>

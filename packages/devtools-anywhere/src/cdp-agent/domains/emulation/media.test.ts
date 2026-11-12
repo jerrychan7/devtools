@@ -173,6 +173,44 @@ test('prefers-contrast with a value, and a feature value is compared without cas
   ]);
 });
 
+test('a repeated feature takes its last value, and a value Chrome does not read clears the one before it', () => {
+  expectRewrites(
+    {
+      features: [
+        { name: 'prefers-color-scheme', value: 'light' },
+        { name: 'prefers-color-scheme', value: 'dark' },
+      ],
+    },
+    [
+      ['(prefers-color-scheme: dark)', TRUE],
+      ['(prefers-color-scheme: light)', FALSE],
+    ]
+  );
+  // Only that feature is cancelled: another one given in between keeps its value.
+  expectRewrites(
+    {
+      features: [
+        { name: 'prefers-color-scheme', value: 'light' },
+        { name: 'prefers-reduced-motion', value: 'reduce' },
+        { name: 'prefers-color-scheme', value: 'blue' },
+      ],
+    },
+    [
+      ['(prefers-reduced-motion: reduce)', TRUE],
+      ['(prefers-color-scheme: light)', '(prefers-color-scheme: light)'],
+    ]
+  );
+  for (const value of ['blue', ' light', '']) {
+    const params = {
+      features: [
+        { name: 'prefers-color-scheme', value: 'light' },
+        { name: 'prefers-color-scheme', value },
+      ],
+    };
+    assert.equal(mediaRewrite(params), null, JSON.stringify(value));
+  }
+});
+
 test('feature names are compared as they are: Chrome takes no other spelling of one', () => {
   for (const name of [
     'Prefers-Color-Scheme',
