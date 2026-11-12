@@ -297,6 +297,10 @@ async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
 
 const settle = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
 
+/** Waits for the browser to choose the images again (a <picture>'s source, an image's candidate): a few frames. */
+const settleImages = () =>
+  t.page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 100)))));
+
 test('an inline style with env() is emulated, and so is a style the page writes', async () => {
   await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="inl">inl</div>'));
   const read = () =>
@@ -329,6 +333,171 @@ test('an inline style with env() is emulated, and so is a style the page writes'
     assert.equal(r.written.top, '5px');
   } finally {
     await t.page.evaluate(() => document.getElementById('inl')?.remove());
+  }
+});
+
+/** A test image's URL: the fixture's own pixel, with a query that names the candidate. */
+const image = (name: string) => `/packages/devtools-anywhere/test-support/assets/pixel.png?${name}`;
+
+/** The query of the image the element with `id` shows now (`?name`), once it is chosen. */
+const shown = (id: string) =>
+  t.page.evaluate(id => {
+    const img = document.getElementById(id);
+    return img instanceof HTMLImageElement && img.currentSrc ? new URL(img.currentSrc).search : '';
+  }, id);
+
+/** The candidate an image shows, by the last letter of its query: `a` or `b`. */
+const chosen = async (id: string) => (await shown(id)).slice(-1);
+
+test('a <picture> source with a media query is chosen as the emulation has it', async () => {
+  await t.page.evaluate(
+    ([source, img]) =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<picture id="pic"><source id="pics" media="print" srcset="${source}"><img id="pici" src="${img}"></picture>`
+      ),
+    [image('pic-source'), image('pic-img')]
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await settleImages();
+      const base = await shown('pici');
+      await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+      await settleImages();
+      const printed = await shown('pici');
+      await side.send('Emulation.setEmulatedMedia', {});
+      await settleImages();
+      return { base, printed, cleared: await shown('pici') };
+    });
+    assert.deepEqual(r, { base: '?pic-img', printed: '?pic-source', cleared: '?pic-img' });
+  } finally {
+    await t.page.evaluate(() => document.getElementById('pic')?.remove());
+  }
+});
+
+test('a <source> media the page sets while emulated is its own once the emulation ends', async () => {
+  await t.page.evaluate(
+    ([source, img]) =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<picture id="pic2"><source id="pic2s" media="print" srcset="${source}"><img id="pic2i" src="${img}"></picture>`
+      ),
+    [image('pic2-source'), image('pic2-img')]
+  );
+  try {
+    const r = await sameOnBoth(async side => {
+      await settleImages();
+      await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+      await settleImages();
+      // The page changes the media while the emulation rewrites it: the new value is its own.
+      await t.page.evaluate(() => document.getElementById('pic2s')?.setAttribute('media', 'all'));
+      await settleImages();
+      await side.send('Emulation.setEmulatedMedia', {});
+      await settleImages();
+      const media = await t.page.evaluate(() => document.getElementById('pic2s')?.getAttribute('media'));
+      return { media, shown: await shown('pic2i') };
+    });
+    assert.deepEqual(r, { media: 'all', shown: '?pic2-source' });
+  } finally {
+    await t.page.evaluate(() => document.getElementById('pic2')?.remove());
+  }
+});
+
+test('the sizes of an <img> are read as the emulation has them, when the image is made', async () => {
+  // Made after the emulation, so the browser reads the sizes it is given; each side has its own candidates.
+  const make = (id: string) =>
+    t.page.evaluate(id => {
+      const img = document.createElement('img');
+      img.id = id;
+      img.sizes = '(prefers-color-scheme: light) 10px, 100px';
+      const url = (name: string) => `/packages/devtools-anywhere/test-support/assets/pixel.png?${id}-${name}`;
+      img.srcset = `${url('a')} 10w, ${url('b')} 100w`;
+      document.body.append(img);
+    }, id);
+  try {
+    const r = await sameOnBoth(async side => {
+      const tag = side === t.chrome ? 'chrome' : 'ours';
+      await make(`sz-base-${tag}`);
+      await settleImages();
+      const base = await chosen(`sz-base-${tag}`);
+      await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+      await make(`sz-light-${tag}`);
+      await settleImages();
+      const light = await chosen(`sz-light-${tag}`);
+      await side.send('Emulation.setEmulatedMedia', {});
+      await make(`sz-cleared-${tag}`);
+      await settleImages();
+      return { base, light, cleared: await chosen(`sz-cleared-${tag}`) };
+    });
+    // Without the emulation the browser's colour scheme is dark: the 100px slot, the larger candidate.
+    assert.deepEqual(r, { base: 'b', light: 'a', cleared: 'b' });
+  } finally {
+    await t.page.evaluate(() => document.querySelectorAll('img[id^="sz-"]').forEach(img => img.remove()));
+  }
+});
+
+test('a <link> or a <style> with a media query is emulated, and so is a rule of its sheet', async () => {
+  const read = () =>
+    t.page.evaluate(() => {
+      const style = getComputedStyle(document.getElementById('em') ?? document.body);
+      return { letter: style.letterSpacing, word: style.wordSpacing };
+    });
+  await t.page.evaluate(async () => {
+    const link = document.createElement('link');
+    link.id = 'lk';
+    link.rel = 'stylesheet';
+    link.media = 'print';
+    link.href = 'data:text/css,%23em%7Bletter-spacing%3A7px%7D';
+    const loaded = new Promise(r => link.addEventListener('load', r));
+    document.head.append(link);
+    await loaded;
+    const style = document.createElement('style');
+    style.id = 'sty';
+    style.media = 'print';
+    style.textContent = '#em { word-spacing: 9px }';
+    document.head.append(style);
+  });
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+      const printed = await read();
+      await side.send('Emulation.setEmulatedMedia', {});
+      return { printed, cleared: await read() };
+    });
+    assert.deepEqual(r.printed, { letter: '7px', word: '9px' });
+    assert.deepEqual(r.cleared, { letter: 'normal', word: '0px' });
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('lk')?.remove();
+      document.getElementById('sty')?.remove();
+    });
+  }
+});
+
+test('a <link> with a media query that loads under the emulation is emulated once loaded', async () => {
+  const read = () =>
+    t.page.evaluate(() => getComputedStyle(document.getElementById('app') ?? document.body).letterSpacing);
+  try {
+    const r = await sameOnBoth(async side => {
+      await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+      await t.page.evaluate(async () => {
+        const link = document.createElement('link');
+        link.id = 'lk2';
+        link.rel = 'stylesheet';
+        link.media = 'print';
+        link.href = '/packages/devtools-anywhere/test-support/assets/cross.css?delay=300';
+        const loaded = new Promise(r => link.addEventListener('load', r));
+        document.head.append(link);
+        await loaded;
+      });
+      const loaded = await read();
+      await side.send('Emulation.setEmulatedMedia', {});
+      await t.page.evaluate(() => document.getElementById('lk2')?.remove());
+      return { loaded, cleared: await read() };
+    });
+    assert.deepEqual(r, { loaded: '2px', cleared: 'normal' });
+  } finally {
+    await t.page.evaluate(() => document.getElementById('lk2')?.remove());
   }
 });
 

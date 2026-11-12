@@ -5,6 +5,7 @@ import { setWrittenAttribute, writtenAttribute } from '../../core/nodes/written-
 import { isCssom, isElement, isHtml, isNode, realmOf } from '../../core/realm';
 import { isCompanion, pageRulesRewritten } from '../css/matching/forced-pseudo';
 import { type CssomChange, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
+import { sizesRewrite } from './attributes';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
@@ -30,9 +31,10 @@ interface Rewritten {
  * taken as the new original. The companions of forced pseudo-classes (CSS.forcePseudoState) copy
  * the rewritten rules, so they are rebuilt after a rewrite.
  *
- * The `style` attributes of the page's elements are rewritten the same way, through setAttribute:
- * the client is shown the attribute as the page wrote it (core/nodes/written-attributes.ts), and
- * our writes are not reported as changes of the page's (core/nodes/own-mutations.ts).
+ * The `style` attributes of the page's elements, the `media` of its <source> elements and the
+ * `sizes` of its <img> and <source> elements are rewritten the same way, through setAttribute: the
+ * client is shown the attribute as the page wrote it (core/nodes/written-attributes.ts), and our
+ * writes are not reported as changes of the page's (core/nodes/own-mutations.ts).
  *
  * The page's changes through the CSSOM are rewritten at once, in the call that made them, so that
  * an insertRule() followed by getComputedStyle() in the same task sees the rewrite. The others are
@@ -154,12 +156,20 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null): boole
   return fixed.changed;
 }
 
-/** The elements whose attributes are rewritten: those with a `style`. */
-const ELEMENTS = '[style]';
+/** The elements whose attributes are rewritten: a `style`, the `media` of a <source>, the `sizes` of an <img> or <source>. */
+const ELEMENTS = '[style], source[media], img[sizes], source[sizes]';
 
-/** Rewrites the attributes of `el` that the emulation rewrites; returns whether a write was made. */
+/**
+ * Rewrites the attributes of `el` that the emulation rewrites; returns whether a write was made. A
+ * <picture>'s source is chosen again by the browser when its media changes, and an image's `sizes`
+ * is read when the image is chosen: both are set before that, as the page sets them.
+ */
 function fixElement(el: Element, act: Active): boolean {
-  return fixAttribute(el, 'style', act.values);
+  let changed = fixAttribute(el, 'style', act.values);
+  if (isHtml(el, 'source')) changed = fixAttribute(el, 'media', act.media) || changed;
+  if (isHtml(el, 'source') || isHtml(el, 'img'))
+    changed = fixAttribute(el, 'sizes', act.media && sizesRewrite(act.media)) || changed;
+  return changed;
 }
 
 /** Rewrites a rule through the CSSOM: its media, its declarations, and what it holds. */
@@ -239,7 +249,7 @@ const OBSERVED: MutationObserverInit = {
   childList: true,
   subtree: true,
   characterData: true,
-  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type', 'style'],
+  attributeFilter: ['href', 'rel', 'disabled', 'media', 'type', 'style', 'sizes'],
 };
 
 const isSheetOwner = (node: Node | null) => isHtml(node, 'style') || isHtml(node, 'link');
@@ -256,12 +266,17 @@ function touchesSheets(records: MutationRecord[]): boolean {
   return false;
 }
 
-/** Rewrites the `style` the page set on elements, and the elements it added, at once (no sheet changed). */
+/**
+ * Rewrites the attributes the page set on elements, and the elements it added, at once (no sheet
+ * changed): the `style`, `media` and `sizes` the emulation rewrites.
+ */
 function fixChanged(records: MutationRecord[], act: Active): void {
   for (const record of records) {
     if (record.type === 'attributes') {
       const target = record.target;
-      if (record.attributeName === 'style' && isElement(target) && !closestOwn(target)) fixElement(target, act);
+      const name = record.attributeName;
+      if (isElement(target) && !closestOwn(target) && (name === 'style' || name === 'media' || name === 'sizes'))
+        fixElement(target, act);
     } else
       for (const node of Array.from(record.addedNodes)) {
         if (!isElement(node) || closestOwn(node)) continue;
