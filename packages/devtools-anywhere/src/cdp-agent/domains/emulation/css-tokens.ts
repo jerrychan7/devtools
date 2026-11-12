@@ -1,9 +1,9 @@
 /**
  * Rewrites of CSS text found by its tokens (css-lexer.ts): the declarations of a block, the calls of
  * named functions, and the queries of a media query list. Comments and strings are read as CSS reads
- * them, and blocks match by their tokens. A declaration's property and a function's name are compared as
- * written, escapes included; the words of a media query are compared decoded (`decodeEscapes`). What a
- * hook does not change comes back byte for byte.
+ * them, and blocks match by their tokens. A declaration's property, a function's name and the words of a
+ * media query are compared decoded (`decodeEscapes`), as CSS compares them: `e\nv(` is a call of `env()`.
+ * What a hook does not change comes back byte for byte.
  */
 import { Tok, tokenize, type TokKind, type Tokens } from '../css/sheets/parse/css-lexer';
 
@@ -151,12 +151,15 @@ function spansOf(block: string): Span[] {
   return spans;
 }
 
-/** A property's name as written, ASCII-lowercased unless it is a custom property's (`--x`). */
-const propertyOf = (raw: string): string => (raw.startsWith('--') ? raw : asciiLower(raw));
+/** A property's name as CSS compares it: decoded, and ASCII-lowercased unless it is a custom property's (`--x`). */
+function propertyOf(raw: string): string {
+  const name = decodeEscapes(raw);
+  return name.startsWith('--') ? name : asciiLower(name);
+}
 
 /** A declaration of a block, as written. */
 export interface Declaration {
-  /** The property (ASCII-lowercased, except custom properties, `--x`). */
+  /** The property (decoded, ASCII-lowercased, except custom properties, `--x`). */
   name: string;
   /** The declaration's text, from its name to the end of its value. */
   text: string;
@@ -194,8 +197,8 @@ export function withoutTakenSemicolon(block: string): string {
 /**
  * Rewrites the values of the declarations of `block`, a declaration list (a style attribute, or a
  * CSSStyleDeclaration's cssText, without braces). Each top-level `name: value` is passed to `hook`
- * with its name (ASCII-lowercased, except custom properties, `--x`) and its value: the text after the
- * colon, without the whitespace and comments around it, `!important` included. A returned string
+ * with its name (decoded and ASCII-lowercased, except custom properties, `--x`) and its value: the text
+ * after the colon, without the whitespace and comments around it, `!important` included. A returned string
  * replaces that value. Declarations are split at top-level semicolons. A part with no name and colon,
  * or with no value (only whitespace and comments), is malformed and left alone, and so is everything
  * else in the block.
@@ -217,8 +220,8 @@ export function mapDeclarations(block: string, hook: DeclarationHook): string {
 }
 
 /**
- * Rewrites the calls of the functions in `text` whose name is one of `names` (compared ASCII-case-
- * insensitively, with escapes as written). Each call found is passed to `hook`, and a returned string
+ * Rewrites the calls of the functions in `text` whose name is one of `names` (compared decoded and ASCII-case-
+ * insensitively, as CSS compares them). Each call found is passed to `hook`, and a returned string
  * replaces its whole text. A call the hook replaces is not searched; any other call is, so a matching
  * call inside the arguments of another call is found. A call that is not closed runs to the end.
  */
@@ -232,7 +235,7 @@ export function mapFunctions(text: string, names: readonly string[], hook: Funct
   for (let i = 0; i < n; i++) {
     if ((kinds[i] ?? Tok.Eof) === Tok.Func) {
       // The token is `name(`: the name is what comes before its last character.
-      const name = asciiLower(text.slice(at(i), at(i + 1) - 1));
+      const name = asciiLower(decodeEscapes(text.slice(at(i), at(i + 1) - 1)));
       if (wanted.has(name)) {
         // A call that is not closed ends with the text: its closing token is the end of the tokens.
         const end = closing[i] ?? -1;

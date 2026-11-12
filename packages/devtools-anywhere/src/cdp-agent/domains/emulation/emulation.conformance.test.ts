@@ -798,3 +798,42 @@ test('a text the page writes over a rewritten one keeps its strings, comment mar
   assert.equal(r.during.ruleColor, 'rgb(1, 2, 3)');
   assert.deepEqual(r.after, r.during);
 });
+
+test('a name written with an escape is read as CSS reads it: env(), an inset and color-scheme', async () => {
+  // `e\nv(` is `env(`: a backslash before a letter that is no hex digit is that letter.
+  const r = await sameOnBoth(t, async side => {
+    await t.page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<style id="escs">#esc { padding-top: e\\nv(safe-area-inset-top, 7px) }</style><div id="esc">esc</div>' +
+          '<div id="esci" style="padding-top: E\\4e V(safe-area-inset-top, 7px)">esci</div>' +
+          '<div id="escn" style="padding-top: env(safe-area-inset-t\\op, 7px)">escn</div>' +
+          '<div id="escp" style="c\\olor-scheme: light dark; color: light-dark(rgb(1, 1, 1), rgb(2, 2, 2))">escp</div>'
+      );
+    });
+    const read = () =>
+      t.page.evaluate(() => {
+        const style = (id: string) => getComputedStyle(document.getElementById(id) ?? document.body);
+        return [...['esc', 'esci', 'escn'].map(id => style(id).paddingTop), style('escp').color];
+      });
+    try {
+      await insets(side, 33);
+      await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+      await nextTask();
+      const light = await read();
+      await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+      await nextTask();
+      const dark = await read();
+      await insets(side);
+      await side.send('Emulation.setEmulatedMedia', {});
+      await nextTask();
+      return { light, dark, after: await read() };
+    } finally {
+      await insets(side);
+      await side.send('Emulation.setEmulatedMedia', {});
+      await t.page.evaluate(() => document.querySelectorAll('[id^="esc"]').forEach(el => el.remove()));
+    }
+  });
+  assert.deepEqual(r.light, ['33px', '33px', '33px', 'rgb(1, 1, 1)']);
+  assert.deepEqual(r.dark, ['33px', '33px', '33px', 'rgb(2, 2, 2)']);
+});

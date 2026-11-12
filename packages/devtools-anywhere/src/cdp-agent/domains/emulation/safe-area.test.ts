@@ -152,8 +152,13 @@ test('an env() that is not closed at the end of the text is closed there', () =>
   expectRewrites([['padding: env(safe-area-inset-top', 'padding: var(--da-sai-top, env(safe-area-inset-top))']]);
 });
 
-test('an escaped character in the name is compared as written, not decoded', () => {
-  expectRewrites([['env(safe-area-inset-\\74 op)', 'env(safe-area-inset-\\74 op)']]);
+test('an escaped character in a name is decoded, as Chrome decodes it: the inset and the function', () => {
+  expectRewrites([
+    ['env(safe-area-inset-\\74 op)', 'var(--da-sai-top, env(safe-area-inset-\\74 op))'],
+    ['e\\nv(safe-area-inset-top, 7px)', 'var(--da-sai-top, env(safe-area-inset-top, 7px))'],
+    // The decoded name is compared in its case: an escaped capital is another name.
+    ['env(safe-area-inset-\\54 op)', 'env(safe-area-inset-\\54 op)'],
+  ]);
 });
 
 // The rewrite of a rewritten text is the text itself, and a page's own var() is only searched inside.

@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../../core/session';
 import { Tok, tokenize } from '../css/sheets/parse/css-lexer';
-import { mapFunctions } from './css-tokens';
+import { decodeEscapes, mapFunctions } from './css-tokens';
 import type { Rewrite } from './rewrite';
 
 /**
@@ -29,8 +29,8 @@ export const isEmulationProperty = (name: string): boolean => name.startsWith(PR
 /**
  * The name that the arguments of an `env()` start with, as written, when that name is the whole first
  * argument or is followed by a fallback (`,`): the tokens are read, so spaces and comments around it are
- * skipped. The name is compared as written, as Chrome compares it: an environment variable's name is
- * case-sensitive, where the function's name (`env`) is not.
+ * skipped. The name is given decoded, in the case it is written in, as Chrome compares it: an environment
+ * variable's name is case-sensitive, where the function's name (`env`) is not.
  */
 function nameOf(args: string): string | undefined {
   const { kinds, starts } = tokenize(args);
@@ -45,7 +45,7 @@ function nameOf(args: string): string | undefined {
   if (kind(first) !== Tok.Ident) return undefined;
   const next = skip(first + 1);
   if (next < n && kind(next) !== Tok.Comma) return undefined;
-  return args.slice(starts[first] ?? 0, starts[first + 1] ?? args.length);
+  return decodeEscapes(args.slice(starts[first] ?? 0, starts[first + 1] ?? args.length));
 }
 
 /**

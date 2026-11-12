@@ -563,8 +563,11 @@ function fixElement(el: Element, act: Active, paced = false): boolean {
   return changed;
 }
 
-/** A call of env() in a declaration block's text, whatever the case of its name (CSS compares function names so). */
-const ENV_CALL = /env\(/i;
+/**
+ * What a declaration block's text has when it may call env(): the name in any case (CSS compares function names
+ * so), or an escape, which the name may be written with (`e\nv(`).
+ */
+const ENV_CALL = /env\(|\\/i;
 
 /** Whether a declaration block's text uses env() or color-scheme, read through the natives (core/natives.ts). */
 const envOrScheme = (style: CSSStyleDeclaration): boolean => {

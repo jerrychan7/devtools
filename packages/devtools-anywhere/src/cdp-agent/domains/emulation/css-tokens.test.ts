@@ -124,6 +124,14 @@ test('a returned value replaces only the value; the rest is kept byte for byte',
   assert.equal(out, '  color :\tgreen /* c */ ;/* d */margin:0;;');
 });
 
+test('an escaped property is given decoded, a custom one in its case', () => {
+  const { calls } = declarations('c\\olor-SCHEME: light dark; --\\58: 1');
+  assert.deepEqual(calls, [
+    ['color-scheme', 'light dark'],
+    ['--X', '1'],
+  ]);
+});
+
 test('splitDeclarations: a semicolon or a comment mark in a string separates and hides nothing', () => {
   assert.deepEqual(splitDeclarations('content:"/*"; color:red; --x:"*/"'), [
     { name: 'content', text: 'content:"/*"', value: '"/*"' },
@@ -218,10 +226,14 @@ test('a name that only ends in the name, or starts with it, is another function'
   assert.deepEqual(calls, [['env', 'e', 'env(e)']]);
 });
 
-test('escaped names are compared as written, not decoded: \\65nv( is not env(', () => {
-  const { out, calls } = functions('\\65nv(c) env(d)');
-  assert.equal(out, '\\65nv(c) X');
-  assert.deepEqual(calls, [['env', 'd', 'env(d)']]);
+test('escaped names are compared decoded: \\65nv( and e\\nv( are env(', () => {
+  const { out, calls } = functions('\\65nv(c) e\\nv(d) \\65 NV(e) \\66nv(f)');
+  assert.equal(out, 'X X X \\66nv(f)');
+  assert.deepEqual(calls, [
+    ['env', 'c', '\\65nv(c)'],
+    ['env', 'd', 'e\\nv(d)'],
+    ['env', 'e', '\\65 NV(e)'],
+  ]);
 });
 
 test('a call the hook replaces is not searched; a call it declines is', () => {
