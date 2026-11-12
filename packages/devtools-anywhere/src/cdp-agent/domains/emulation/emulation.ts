@@ -3,8 +3,9 @@ import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 import { setForcedColors } from './forced-colors';
 import { injectOwnStyle } from './inject';
+import { matchMediaRewrite } from './match-media';
 import { MediaEmulation } from './media';
-import { rewriteColorScheme, rewriteMedia, rewriteValues } from './rewrite';
+import { onMediaRewriteChange, rewriteColorScheme, rewriteMedia, rewriteValues } from './rewrite';
 import { safeAreaCss, safeAreaRewrite } from './safe-area';
 import { useShadowRoots } from './trees';
 import { VISION, setVision, useVisionContext } from './vision';
@@ -55,6 +56,8 @@ export function registerEmulation(ctx: Context) {
   const { session } = ctx;
   useVisionContext(ctx.probe.top, ctx.shadowRoots);
   useShadowRoots(ctx.shadowRoots);
+  // What matchMedia() reports follows the media emulation in effect, whichever session changed it (probe/media.ts).
+  const stopMatchMedia = onMediaRewriteChange(() => ctx.probe.media?.set(matchMediaRewrite()));
   session.register('Emulation', {
     // Done by rewriting the media queries of the page's style sheets, the `media` of its <source> elements
     // and the `sizes` of its images (domains/emulation/rewrite.ts), and for forced colors by the palette and
@@ -81,6 +84,8 @@ export function registerEmulation(ctx: Context) {
     rewriteMedia('media', media.end(session));
     rewriteColorScheme(media.colorScheme());
     setForcedColors(media.forcedColors());
+    // Told of this change too, so that matchMedia() follows it; after that, this session's listener is not kept.
+    stopMatchMedia();
     for (const [what, owner] of owners) {
       if (owner !== session) continue;
       owners.delete(what);

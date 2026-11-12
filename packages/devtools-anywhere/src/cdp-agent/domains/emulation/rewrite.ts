@@ -53,7 +53,7 @@ interface Active {
  * wait grows while the page keeps answering (see the pacing note below).
  *
  * Limits: the rules of a sheet that cannot be read (cross-origin) are left as they are; its media is
- * rewritten like any other. matchMedia() is not affected. A <style> added in the same task as it is
+ * rewritten like any other. The queries matchMedia() gives get the same rewrite (match-media.ts). A <style> added in the same task as it is
  * read is rewritten after that task's script, and so is an element's style written in the task that
  * reads it. A property the page writes by name on a rule's style (rule.style.color = …) is seen only
  * once the CSS domain looks at the sheet, or at the next sync of the sheets. Our writes are seen by
@@ -102,8 +102,8 @@ const mediaListeners = new Set<() => void>();
  * The media rewrites now in effect, composed into one, or null when there are none: the text of a
  * media query as the emulation has it, as a `matchMedia()` of the page would see it (a matchMedia
  * hook calls it with the query's text, the query being whatever the page passed). Each call gives
- * a new function; it does the same for as long as the media rewrites do not change. No caller in
- * the agent yet: the matchMedia() task will use it.
+ * a new function; it does the same for as long as the media rewrites do not change. The probe's
+ * matchMedia() is given it (match-media.ts).
  *
  * @internal
  */

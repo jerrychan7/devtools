@@ -217,8 +217,8 @@ export function mediaRewrite(params: Protocol.Emulation.SetEmulatedMediaRequest)
 
 /**
  * `text`, a media query list, rewritten as mediaRewrite does for `params`, or unchanged when `params`
- * emulate nothing. It reads and writes no page state; nothing calls it. A matchMedia() hook would take the
- * page's rewrite instead (rewrite.ts, currentMediaRewrite), which follows the calls of every session.
+ * emulate nothing. It reads and writes no page state, and only the tests call it: the page's style sheets and
+ * matchMedia() take their rewrite from the calls of every session, composed (rewrite.ts, currentMediaRewrite).
  */
 export function rewriteMediaQuery(text: string, params: Protocol.Emulation.SetEmulatedMediaRequest): string {
   const rewrite = mediaRewrite(params);
