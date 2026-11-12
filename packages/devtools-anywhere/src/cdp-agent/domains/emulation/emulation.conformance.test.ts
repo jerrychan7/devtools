@@ -837,3 +837,88 @@ test('a name written with an escape is read as CSS reads it: env(), an inset and
   assert.deepEqual(r.light, ['33px', '33px', '33px', 'rgb(1, 1, 1)']);
   assert.deepEqual(r.dark, ['33px', '33px', '33px', 'rgb(2, 2, 2)']);
 });
+
+test('the rules nested in a style rule are emulated: media, safe area insets and color-scheme', async () => {
+  const CSS_TEXT = `
+    .nst { color: rgb(0, 0, 1); @media print { color: rgb(1, 0, 0) } }
+    .nsq { .nsr { padding-top: env(safe-area-inset-top, 7px) } }
+    .nsc { .nsd { color-scheme: light dark; color: light-dark(rgb(1, 1, 1), rgb(2, 2, 2)) } }
+  `;
+  const read = () =>
+    t.page.evaluate(() => {
+      const style = (cls: string) => getComputedStyle(document.querySelector(`.${cls}`) ?? document.body);
+      // Inserted into the style rule and read in the same task, then taken out again.
+      const rule = (document.getElementById('nsts') as HTMLStyleElement).sheet?.cssRules[0];
+      if (!(rule instanceof CSSStyleRule)) throw new Error('the style rule is not there');
+      const at = rule.insertRule('@media print { & { background-color: rgb(9, 0, 0) } }', 0);
+      const inserted = style('nst').backgroundColor;
+      rule.deleteRule(at);
+      return { color: style('nst').color, inserted, padding: style('nsr').paddingTop, scheme: style('nsd').color };
+    });
+  /** The rules of the three elements as the Styles pane shows them: their text and their media. */
+  const shown = async (side: Side) => {
+    const { root } = await side.send('DOM.getDocument', { depth: -1 });
+    const out: unknown[] = [];
+    for (const selector of ['.nst', '.nsr', '.nsd']) {
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+      out.push(
+        (matchedCSSRules ?? [])
+          .filter(m => m.rule.origin === 'regular')
+          .map(m => ({
+            selector: m.rule.selectorList.text,
+            text: m.rule.style.cssText,
+            properties: m.rule.style.cssProperties.map(p => `${p.name}: ${p.value}`),
+            media: m.rule.media?.map(q => q.text),
+          }))
+      );
+    }
+    return out;
+  };
+  const r = await sameOnBoth(t, async side => {
+    await t.page.evaluate(css => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<style id="nsts">${css}</style><div id="nstd"><div class="nst">nst</div>` +
+          '<div class="nsq"><div class="nsr">nsr</div></div><div class="nsc"><div class="nsd">nsd</div></div></div>'
+      );
+    }, CSS_TEXT);
+    try {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      await side.send('Emulation.setEmulatedMedia', {
+        media: 'print',
+        features: [{ name: 'prefers-color-scheme', value: 'light' }],
+      });
+      await insets(side, 33);
+      await nextTask();
+      // Shown before the page changes the sheet through the CSSOM, which serializes its text.
+      const styles = await shown(side);
+      const light = await read();
+      await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+      await nextTask();
+      const dark = await read();
+      await side.send('Emulation.setEmulatedMedia', {});
+      await insets(side);
+      await nextTask();
+      const text = await t.page.evaluate(() =>
+        Array.from((document.getElementById('nsts') as HTMLStyleElement).sheet?.cssRules ?? [], rule => rule.cssText)
+      );
+      return { light, dark, styles, text };
+    } finally {
+      await side.send('Emulation.setEmulatedMedia', {});
+      await insets(side);
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      await t.page.evaluate(() => document.querySelectorAll('#nsts, #nstd').forEach(el => el.remove()));
+    }
+  });
+  assert.deepEqual(r.light, {
+    color: 'rgb(1, 0, 0)',
+    inserted: 'rgb(9, 0, 0)',
+    padding: '33px',
+    scheme: 'rgb(1, 1, 1)',
+  });
+  assert.equal(r.dark.color, 'rgb(0, 0, 1)');
+  assert.equal(r.dark.scheme, 'rgb(2, 2, 2)');
+});

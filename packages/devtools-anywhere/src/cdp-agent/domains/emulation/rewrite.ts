@@ -589,7 +589,9 @@ function fixRule(rule: CSSRule, act: Active): boolean {
   // (styles.has), which is restored when the rewrite is gone.
   if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || envOrScheme(style)))
     changed = fixStyle(style, act.values) || changed;
-  if (isCssom(rule, 'CSSGroupingRule') || isCssom(rule, 'CSSKeyframesRule'))
+  // What the rule holds: the rules of a grouping rule or of @keyframes, and those nested in a style rule (their
+  // declarations between them included, which are rules of their own).
+  if ('cssRules' in rule)
     for (const inner of Array.from(nativeGet<CSSRuleList>(rule, 'cssRules'))) changed = fixRule(inner, act) || changed;
   return changed;
 }
