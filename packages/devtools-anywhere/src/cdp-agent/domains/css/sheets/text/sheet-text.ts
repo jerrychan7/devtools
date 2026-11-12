@@ -2,7 +2,7 @@
 // once against its CSSOM, made unknown or kept up to date as the page and the CSS domain change
 // the sheet, and paired with its rules when asked for (pair.ts, updated in place by splice.ts).
 import { isHtml } from '../../../../core/realm';
-import { type CssomChange, forgetSheet, ownEdit, recordPageChanges, settle } from '../watch/cssom-watch';
+import { forgetSheet, ownEdit, recordPageChanges, type RuleChange, settle } from '../watch/cssom-watch';
 import { type SheetSource, pair, tagOf } from './pair';
 import { type Pending, applied, respliced, retexted } from './splice';
 
@@ -99,7 +99,7 @@ export class SheetTexts {
    * CSSOM and paired is changed there alone when next asked for (`source`), as serializing it anew
    * would; any other is no longer known, as Chrome serializes a sheet changed so.
    */
-  pageChanged(sheet: CSSStyleSheet, change?: CssomChange): void {
+  pageChanged(sheet: CSSStyleSheet, change?: RuleChange): void {
     const rec = this.recorded.get(sheet);
     if (!change || !rec?.serialized || !rec.source || rec.seen !== this.unseenTimes || this.stale.has(sheet))
       return this.invalidate(sheet);

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from 'puppeteer-core';
 import { build } from 'esbuild';
 import { launch, setUpAndTearDown } from '../../../../../../test-support/conformance.ts';
-import type { CssomChange, ownCall, ownSet, ownStyle, recordPageChanges, settle, watchCssom } from './cssom-watch.ts';
+import type { RuleChange, ownCall, ownSet, ownStyle, recordPageChanges, settle, watchCssom } from './cssom-watch.ts';
 import type { Env } from '../../../../../../test-support/conformance.ts';
 
 // Bundled for the page: the sources import each other without extensions.
@@ -64,7 +64,7 @@ async function reports(css: string, steps: string[], inStyle = false): Promise<s
         sheet = style.sheet as CSSStyleSheet;
       } else sheet.replaceSync(css);
       let seen: string[] = [];
-      w.recordPageChanges((s: CSSStyleSheet, text: string | undefined, change: CssomChange | undefined) => {
+      w.recordPageChanges((s: CSSStyleSheet, text: string | undefined, change: RuleChange | undefined) => {
         if (s !== sheet) return;
         if (text !== undefined) seen.push('text');
         else if (!change) seen.push('none');
@@ -176,6 +176,30 @@ test("a rule's media list changed: the top-level rule it is in", async () => {
     ),
     [['rule 2'], ['rule 2'], ['rule 2'], ['rule 2'], ['rule 3'], ['rule 0'], ['rule 0'], [], []]
   );
+});
+
+test("a sheet's own media list is told to the listeners as media, with no text and no rule", async () => {
+  const told = await page.evaluate(() => {
+    const w = (globalThis as unknown as { __cssomWatch: { watchCssom: typeof watchCssom } }).__cssomWatch;
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync('.a{top:1px} @media print{.b{top:2px}}');
+    const told: string[] = [];
+    const stop = w.watchCssom(
+      (s, text, _by, change) => {
+        if (s === sheet) told.push(`${text === undefined ? 'no text' : 'text'} ${change?.kind ?? 'none'}`);
+      },
+      () => [window]
+    );
+    try {
+      sheet.media.mediaText = 'print';
+      sheet.media.appendMedium('screen');
+      sheet.media.deleteMedium('print');
+    } finally {
+      stop();
+    }
+    return told;
+  });
+  assert.deepEqual(told, ['no text media', 'no text media', 'no text media']);
 });
 
 test("a style's properties written by name: its top-level rule, once the page ran", async () => {

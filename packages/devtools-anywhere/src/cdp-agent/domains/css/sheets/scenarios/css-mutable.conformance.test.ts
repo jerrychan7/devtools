@@ -212,6 +212,9 @@ const NO_CHANGE: Step[] = [
       }
     },
   ],
+  // The sheet's own media list changes no rule: its text stays, and it is neither mutable nor told.
+  ['media', () => (sheetOf('media').media.mediaText = 'print')],
+  ['media-append', () => sheetOf('media-append').media.appendMedium('print')],
 ];
 
 const STYLES = [...STEPS.map(([k]) => k).filter(k => !/^[lic]-/.test(k)), ...NO_CHANGE.map(([k]) => k), 'plain'];

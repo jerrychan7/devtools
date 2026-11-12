@@ -35,7 +35,12 @@ const STYLE = `
 setUpAndTearDown(
   async () => {
     env = await launch();
-    t = await openPage(env, ['DOM.attributeModified', 'DOM.attributeRemoved']);
+    t = await openPage(env, [
+      'DOM.attributeModified',
+      'DOM.attributeRemoved',
+      'CSS.styleSheetAdded',
+      'CSS.styleSheetChanged',
+    ]);
     await t.page.evaluate(style => {
       const s = document.createElement('style');
       s.textContent = style;
@@ -812,4 +817,56 @@ test("a page wrapping the element's getAttribute and setAttribute does not see t
       document.getElementById('wrp')?.remove();
     });
   }
+});
+
+test("a sheet's own media list the page sets under the emulation is emulated in the same task", async () => {
+  // Each step changes the list, and reads #em's word spacing in the same task: print applies the rule.
+  // The list is not edited entry by entry (deleteMedium() of an entry the emulation rewrote finds none:
+  // the page reads the rewritten text), so the steps set it, and append to it.
+  const step = (id: string, how: 'set' | 'append', text: string) =>
+    t.page.evaluate(
+      ([id, how, text]) => {
+        const sheet = (document.getElementById(id) as HTMLLinkElement).sheet;
+        if (!sheet) throw new Error('the link has no sheet');
+        if (how === 'set') sheet.media.mediaText = text;
+        else sheet.media.appendMedium(text);
+        return getComputedStyle(document.getElementById('em') ?? document.body).wordSpacing;
+      },
+      [id, how, text] as const
+    );
+  const r = await sameOnBoth(async side => {
+    const id = side === t.chrome ? 'sml-chrome' : 'sml-ours';
+    await t.page.evaluate(async id => {
+      const link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      link.href = 'data:text/css,%23em%7Bword-spacing%3A9px%7D';
+      const loaded = new Promise(r => link.addEventListener('load', r));
+      document.head.append(link);
+      await loaded;
+    }, id);
+    await side.send('DOM.enable');
+    await side.send('CSS.enable');
+    await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+    // The link is the sheet with a data: URL. Only its events are counted: the setUp's <style>, whose @media
+    // rules the emulation rewrites, may be told of the rewrite too (a separate matter).
+    const linkId = (await side.events('CSS.styleSheetAdded')).find(e => e.header.sourceURL.startsWith('data:'))?.header
+      .styleSheetId;
+    assert.ok(linkId, 'the CSS domain knows the link');
+    await side.clear();
+    const words = [
+      await step(id, 'set', 'screen'),
+      await step(id, 'set', 'print'),
+      await step(id, 'append', 'screen'),
+      await step(id, 'set', 'screen'),
+    ];
+    // Chrome sends nothing for a change of the list alone, and so do we.
+    const changed = (await side.events('CSS.styleSheetChanged')).filter(e => e.styleSheetId === linkId);
+    await side.send('Emulation.setEmulatedMedia', {});
+    await side.send('CSS.disable');
+    await side.send('DOM.disable');
+    await t.page.evaluate(id => document.getElementById(id)?.remove(), id);
+    return { words, changed: changed.length };
+  });
+  assert.deepEqual(r, { words: ['0px', '9px', '9px', '0px'], changed: 0 });
 });

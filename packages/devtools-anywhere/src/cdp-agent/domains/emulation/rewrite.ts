@@ -335,7 +335,8 @@ function sync(act: Active): boolean {
 
 /**
  * A change of the page through the CSSOM, told by cssom-watch.ts in the call that made it: the rule
- * it changed (or the one it inserted) is rewritten at once; the whole sheet when that is not known.
+ * it changed (or the one it inserted) is rewritten at once; the sheet's own media list is, when that
+ * is what changed; the whole sheet when that is not known.
  */
 function onCssom(sheet: CSSStyleSheet, _text?: string, _by?: object, change?: CssomChange): void {
   if (!rewriting() || ownSheet(sheet)) return;
@@ -346,7 +347,7 @@ function onCssom(sheet: CSSStyleSheet, _text?: string, _by?: object, change?: Cs
   else if (change.kind === 'insert') {
     const rule: CSSRule | undefined = sheet.cssRules[change.index];
     if (rule) changed = fixRule(rule, act);
-  }
+  } else if (change.kind === 'media') changed = fixMedia(sheet.media, act.media);
   if (changed) pageRulesRewritten();
 }
 

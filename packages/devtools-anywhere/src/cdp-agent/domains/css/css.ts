@@ -649,7 +649,9 @@ export function registerCss(ctx: Context) {
       // Like Chrome, a change the page makes through the CSSOM keeps the sheet's id: its text is
       // the one given replace() or replaceSync(), or else serialized from the CSSOM.
       stopCssom = watchCssom(
-        (sheet, _text, by) => {
+        (sheet, _text, by, change) => {
+          // The sheet's own media list changed: Chrome sends nothing for that, and the text is the same.
+          if (change?.kind === 'media') return;
           // The text is recorded already, once for every session (sheet-text.ts). Another
           // session's edit: unlike Chrome (where the other sessions keep the text they had and
           // hear nothing), this one is sent styleSheetChanged to fetch it again.

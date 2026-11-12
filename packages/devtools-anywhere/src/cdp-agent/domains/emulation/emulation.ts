@@ -29,13 +29,14 @@ export function registerEmulation(ctx: Context) {
   useVisionContext(ctx.probe.top, ctx.shadowRoots);
   useShadowRoots(ctx.shadowRoots);
   session.register('Emulation', {
-    // Done by rewriting the @media conditions of the page's style sheets (domains/emulation/rewrite.ts).
+    // Done by rewriting the media queries of the page's style sheets, the `media` of its <source> elements
+    // and the `sizes` of its images (domains/emulation/rewrite.ts).
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
       const rewrite = mediaRewrite(params);
       rewriteMedia('media', rewrite);
       own(session, 'media', !!rewrite);
     },
-    // Done by rewriting env(safe-area-inset-*) in the page's style sheets.
+    // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes.
     setSafeAreaInsetsOverride({ insets }: Protocol.Emulation.SetSafeAreaInsetsOverrideRequest) {
       const rewrite = safeAreaRewrite(insets);
       rewriteValues('safeArea', rewrite);

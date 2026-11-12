@@ -11,9 +11,10 @@ import type { CssNatives } from '../../../../probe/types';
  * form (without the name). The CSS domain's own changes are not reported: made through the
  * native functions (`ownCall`, `ownSet`), past the hooks, or within `ownEdit`.
  *
- * A MediaList does not tell its rule: the `media` getters of rules note it (`rule.media` is the
- * same list each time), so a list taken before anyone watched goes unseen, as does the sheet's
- * own (`sheet.media`), which changes no rule.
+ * A MediaList does not tell its owner: the `media` getters of rules and of sheets note it
+ * (`rule.media` and `sheet.media` are the same list each time), so a list taken before anyone
+ * watched goes unseen. A change of a sheet's own list changes no rule: it is told as `media`
+ * (CssomChange), which no session reports as a change of the sheet.
  *
  * A style's properties by name (`rule.style.color = …`, `marginTop`) cannot be hooked: in Chrome
  * they are data properties of each CSSStyleDeclaration itself (some 750), no accessors of its
@@ -28,10 +29,17 @@ import type { CssNatives } from '../../../../probe/types';
  * its style, changed), or the index of a top-level rule inserted or deleted. None when not known:
  * the text changes everywhere (replace(), replaceSync()), or where is not told.
  */
-export type CssomChange =
+export type RuleChange =
   | { kind: 'rule'; rule: CSSRule }
   | { kind: 'insert'; index: number }
   | { kind: 'delete'; index: number };
+
+/**
+ * What a listener is told about a change: a change of the sheet's rules (RuleChange), or `media`,
+ * the sheet's own media list changed (`sheet.media`), which no rule's text holds: the sheet's text
+ * stays as it is, and Chrome sends no styleSheetChanged for it.
+ */
+export type CssomChange = RuleChange | { kind: 'media' };
 
 /**
  * `by`: the CSS domain session that made the change, for one of its own edits. `change`: where in
@@ -63,7 +71,7 @@ export function rulesChanged(sheet: CSSStyleSheet): boolean {
   return mutated.has(sheet);
 }
 
-type Recorder = (sheet: CSSStyleSheet, text?: string, change?: CssomChange) => void;
+type Recorder = (sheet: CSSStyleSheet, text?: string, change?: RuleChange) => void;
 
 /** Records a change of the page in the texts the sessions share, before they are told. */
 let record: Recorder = () => {};
@@ -73,7 +81,7 @@ export function recordPageChanges(fn: Recorder): void {
   record = fn;
 }
 
-function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange) {
+function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?: RuleChange) {
   if (!own) report(sheet, text, change);
 }
 
@@ -81,7 +89,7 @@ function notify(sheet: CSSStyleSheet | null | undefined, text?: string, change?:
  * Records and tells a change of the page, even from within the CSS domain's code (`settle`).
  * `counts`: Chrome would take the sheet as mutated (`rulesChanged`); its text is dropped either way.
  */
-function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?: CssomChange, counts = true) {
+function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?: RuleChange, counts = true) {
   if (!sheet || !listeners.size) return;
   changedAgain(sheet);
   if (counts) mutated.add(sheet);
@@ -94,6 +102,20 @@ function report(sheet: CSSStyleSheet | null | undefined, text?: string, change?:
   for (const listener of listeners)
     try {
       listener(sheet, text, undefined, change);
+    } catch {
+      // Ours, not the page's: its call goes on.
+    }
+}
+
+/**
+ * The page changed a sheet's own media list (`sheet.media`). No rule's text changed, so the text is
+ * not recorded and the sheet is not taken as mutated (`rulesChanged`): the listeners are told
+ * `media` alone, and a session reports nothing for it.
+ */
+function mediaChanged(sheet: CSSStyleSheet): void {
+  for (const listener of listeners)
+    try {
+      listener(sheet, undefined, undefined, { kind: 'media' });
     } catch {
       // Ours, not the page's: its call goes on.
     }
@@ -123,7 +145,7 @@ function gone(rule: CSSRule): boolean {
 }
 
 /** A change of what is in `rule`, or of `rule` itself, at its top-level rule. */
-function inRule(rule: unknown): CssomChange | undefined {
+function inRule(rule: unknown): RuleChange | undefined {
   const top = typeof rule === 'object' && rule !== null && 'parentRule' in rule ? topRuleOf(rule as CSSRule) : null;
   return top ? { kind: 'rule', rule: top } : undefined;
 }
@@ -646,8 +668,8 @@ export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclarat
   );
 }
 
-/** The rule each media list belongs to, noted when read (`rule.media`). */
-const mediaOwners = new WeakMap<object, CSSRule>();
+/** The rule or sheet each media list belongs to, noted when read (`rule.media`, `sheet.media`). */
+const mediaOwners = new WeakMap<object, CSSRule | CSSStyleSheet>();
 
 function install(realm: Window & typeof globalThis) {
   const changed: After = self => notify(sheetOf(self), undefined, inRule(self));
@@ -655,11 +677,11 @@ function install(realm: Window & typeof globalThis) {
   // Where a sheet's method inserted (insertRule's result; addRule's, -1, is none: its index or
   // the end) or deleted, as the browser took the arguments: the call returned, so they were good.
   // An index not known (`index`): no place.
-  const sheetLevel = (self: unknown, change: (sheet: CSSStyleSheet) => CssomChange | undefined) => {
+  const sheetLevel = (self: unknown, change: (sheet: CSSStyleSheet) => RuleChange | undefined) => {
     const sheet = sheetOf(self);
     if (sheet) notify(sheet, undefined, change(sheet));
   };
-  const at = (kind: 'insert' | 'delete', i: number | undefined): CssomChange | undefined =>
+  const at = (kind: 'insert' | 'delete', i: number | undefined): RuleChange | undefined =>
     i === undefined ? undefined : { kind, index: i };
   hook(sheetProto, 'insertRule', (self, _args, result) =>
     sheetLevel(self, () => ({ kind: 'insert', index: Number(result) }))
@@ -750,12 +772,27 @@ function install(realm: Window & typeof globalThis) {
   }
   if (realm.MediaList) {
     const listChanged: After = self => {
-      const rule = typeof self === 'object' && self !== null ? mediaOwners.get(self) : undefined;
-      if (rule) notify(sheetOf(rule), undefined, inRule(rule));
+      const owner = typeof self === 'object' && self !== null ? mediaOwners.get(self) : undefined;
+      if (isCssom(owner, 'CSSStyleSheet')) mediaChanged(owner);
+      else if (owner) notify(sheetOf(owner), undefined, inRule(owner));
     };
     hook(realm.MediaList.prototype, 'mediaText', listChanged, 'set');
     for (const name of ['appendMedium', 'deleteMedium']) hook(realm.MediaList.prototype, name, listChanged);
   }
+  // A sheet's own media list, noted when read as a rule's is (`sheet.media` is the same list each time).
+  // It is an attribute of StyleSheet, the prototype of CSSStyleSheet's, not of CSSStyleSheet itself. The
+  // prototype is taken from there, not from the global StyleSheet, which a page may have replaced.
+  const styleSheetProto: unknown = Object.getPrototypeOf(sheetProto);
+  if (typeof styleSheetProto === 'object' && styleSheetProto !== null)
+    hook(
+      styleSheetProto,
+      'media',
+      (self, _args, list) => {
+        if (typeof list === 'object' && list !== null) mediaOwners.set(list, self as CSSStyleSheet);
+      },
+      'get',
+      true
+    );
   hook(sheetProto, 'replaceSync', (self, args) => notify(sheetOf(self), textOf(args[0])));
   hook(sheetProto, 'replace', (self, args, result) => {
     const sheet = sheetOf(self);
@@ -804,8 +841,10 @@ function uninstall() {
 
 /**
  * Calls `listener` with each sheet the page changes, and the text it replaces one with, in the call
- * that made the change (so before the page's call returns): a listener may change the sheet in turn
- * through ownSet() or ownCall(), which are not reported.
+ * that made the change (so before the page's call returns). The exceptions: replace() is told once its
+ * promise resolves, and a property the page writes by name on a rule's style is told when the CSS
+ * domain settles the styles it took (see settle()). A sheet's own media list is told in the call, as
+ * `media`. A listener may change the sheet in turn through ownSet() or ownCall(), which are not reported.
  */
 export function watchCssom(listener: Listener, realms: () => (Window & typeof globalThis)[]): () => void {
   listeners.add(listener);
