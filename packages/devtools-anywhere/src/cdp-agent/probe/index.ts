@@ -427,18 +427,20 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
     typeof options === 'boolean' ? options : !!options?.capture;
 
   proto.addEventListener = function (this: EventTarget, type, listener, options) {
-    add.call(this, type, listener, options);
     // Unqualified calls like addEventListener('load', f) run on the global object.
     const target: EventTarget = this ?? globalThis;
     const opts = typeof options === 'object' ? options : undefined;
-    if (!listener || opts?.signal?.aborted) return;
     const capture = captureOf(options);
     let found = listeners.get(target);
+    if (
+      !listener ||
+      opts?.signal?.aborted ||
+      found?.some(r => r.type === type && r.listener === listener && r.capture === capture)
+    )
+      return add.call(this, type, listener, options);
     if (!found) listeners.set(target, (found = []));
     const list = found;
-    if (list.some(r => r.type === type && r.listener === listener && r.capture === capture)) return;
     const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once };
-    list.push(record);
     // A method keeps its name through minification, so browser DevTools attached to the
     // page (which also list this helper) show what it is.
     const forget = {
@@ -448,7 +450,16 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
       },
     }.devtoolsAnywhereForget;
     const signal = opts?.signal;
+    // Before the page's listener: where this one runs, that one runs next, even if it stops the event for the
+    // listeners after it. Added after it, a listener that did so would leave this one on the target.
     if (record.once) add.call(target, type, forget, { capture, once: true });
+    try {
+      add.call(this, type, listener, options);
+    } catch (e) {
+      if (record.once) remove.call(target, type, forget, { capture });
+      throw e;
+    }
+    list.push(record);
     if (signal) add.call(signal, 'abort', forget, { once: true });
     if (record.once || signal)
       cleanups.set(record, () => {

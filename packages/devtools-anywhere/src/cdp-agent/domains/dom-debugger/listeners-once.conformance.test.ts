@@ -31,3 +31,25 @@ test('removing a once listener also removes the helper that forgets it', async (
   const { listeners } = await t.chrome.send('DOMDebugger.getEventListeners', { objectId: result.objectId });
   assert.deepEqual(listeners, []);
 });
+
+test('a once listener that stops its event for the listeners after it is forgotten, and leaves no helper', async () => {
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'once-stopped';
+    document.body.append(el);
+    el.addEventListener('transitionend', e => e.stopImmediatePropagation(), { once: true });
+    el.dispatchEvent(new Event('transitionend'));
+  });
+  const listed = async (side: typeof t.chrome) => {
+    const { result } = await side.send('Runtime.evaluate', {
+      expression: "document.getElementById('once-stopped')",
+      objectGroup: 'test',
+    });
+    assert.ok(result.objectId);
+    const { listeners } = await side.send('DOMDebugger.getEventListeners', { objectId: result.objectId });
+    return listeners.map(listener => listener.type);
+  };
+  // Chrome lists what the element really has: the helper the probe adds for a once listener would be there.
+  assert.deepEqual(await listed(t.chrome), []);
+  assert.deepEqual(await listed(t.ours), []);
+});
