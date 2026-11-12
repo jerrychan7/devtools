@@ -25,6 +25,7 @@ const {
   splitDeclarations,
   splitLast,
   splitMediaQueries,
+  splitPriority,
   trimWhitespace,
 } = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
@@ -197,6 +198,24 @@ test('comments before the name and before the colon are skipped', () => {
 test('a block that is not closed runs to the end of the list', () => {
   const { calls } = declarations('a: f(b; c: d');
   assert.deepEqual(calls, [['a', 'f(b; c: d']]);
+});
+
+test('splitPriority: !important in any case, with the spaces and comments before and inside it', () => {
+  assert.deepEqual(splitPriority('red !important'), { value: 'red', priority: ' !important' });
+  assert.deepEqual(splitPriority('env(a, 1px)!IMPORTANT'), { value: 'env(a, 1px)', priority: '!IMPORTANT' });
+  assert.deepEqual(splitPriority('red /* a */ ! /* b */ Important'), {
+    value: 'red',
+    priority: ' /* a */ ! /* b */ Important',
+  });
+  assert.deepEqual(splitPriority('red !i\\6dportant'), {
+    value: 'red',
+    priority: ' !i\\6dportant',
+  });
+});
+
+test('splitPriority: a value without the priority at its end is whole', () => {
+  for (const value of ['red', 'important', '"!important"', 'f(!important)', 'red !important x', 'red important', ''])
+    assert.deepEqual(splitPriority(value), { value, priority: '' });
 });
 
 test('escaped semicolons and colons in a value do not separate it', () => {

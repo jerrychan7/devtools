@@ -572,15 +572,32 @@ export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
  * serialized from the rule later holds this write as well.
  */
 export function ownSet(self: object, name: string, value: unknown): void {
+  ownWrite(self, () =>
+    viaOwn(
+      self,
+      `set:${name}`,
+      fn => void Reflect.apply(fn, self, [value]),
+      () => void Reflect.set(self, name, value)
+    )
+  );
+}
+
+/** Sets the property `name` of `style` (setProperty()), the agent's own write, told to nobody: like `ownSet`. */
+export function ownSetProperty(style: CSSStyleDeclaration, name: string, value: string, priority: string): void {
+  ownWrite(style, () => ownCall(style, 'setProperty', name, value, priority));
+}
+
+/** Removes the property `name` of `style` (removeProperty()), the agent's own write: like `ownSetProperty`. */
+export function ownRemoveProperty(style: CSSStyleDeclaration, name: string): void {
+  ownWrite(style, () => ownCall(style, 'removeProperty', name));
+}
+
+/** Makes `write`, a write of the agent's own to `self`, as `ownSet` says. */
+function ownWrite(self: object, write: () => void): void {
   settle();
   const taken = isCssom(self, 'CSSStyleDeclaration') ? takenStyle(self) : undefined;
   const pending = taken !== undefined && taken.text !== taken.style.cssText;
-  viaOwn(
-    self,
-    `set:${name}`,
-    fn => void Reflect.apply(fn, self, [value]),
-    () => void Reflect.set(self, name, value)
-  );
+  write();
   if (taken && !pending) taken.text = taken.style.cssText;
 }
 

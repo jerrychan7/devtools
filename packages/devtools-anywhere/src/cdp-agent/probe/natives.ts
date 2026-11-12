@@ -38,6 +38,8 @@ export const NATIVE_KEYS: readonly string[] = [
   'value:item',
   'value:getPropertyValue',
   'value:getPropertyPriority',
+  'value:setProperty',
+  'value:removeProperty',
   'value:getAttribute',
   'value:setAttribute',
   'value:removeAttribute',

@@ -195,6 +195,32 @@ export function withoutTakenSemicolon(block: string): string {
 }
 
 /**
+ * A declaration's value as written, split into the value and its priority: `!important` in any case, with the
+ * whitespace and comments before it and inside it (empty for none).
+ */
+export function splitPriority(value: string): { value: string; priority: string } {
+  const { kinds, starts } = tokenize(value);
+  const kind = (i: number) => kinds[i] ?? Tok.Eof;
+  const text = (i: number) => value.slice(starts[i] ?? 0, starts[i + 1] ?? value.length);
+  /** The last token before `i` that is not whitespace or a comment, or -1. */
+  const before = (i: number) => {
+    let j = i - 1;
+    while (j >= 0 && insignificant(kind(j))) j--;
+    return j;
+  };
+  const word = before(kinds.length);
+  const bang = before(word);
+  const important =
+    bang >= 0 &&
+    kind(word) === Tok.Ident &&
+    asciiLower(decodeEscapes(text(word))) === 'important' &&
+    text(bang) === '!';
+  if (!important) return { value, priority: '' };
+  const end = starts[before(bang) + 1] ?? 0;
+  return { value: value.slice(0, end), priority: value.slice(end) };
+}
+
+/**
  * Rewrites the values of the declarations of `block`, a declaration list (a style attribute, or a
  * CSSStyleDeclaration's cssText, without braces). Each top-level `name: value` is passed to `hook`
  * with its name (decoded and ASCII-lowercased, except custom properties, `--x`) and its value: the text

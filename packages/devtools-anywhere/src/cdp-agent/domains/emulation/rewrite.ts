@@ -19,8 +19,8 @@ import {
 } from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
 import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
-import { asciiLower, withoutTakenSemicolon } from './css-tokens';
-import { type Merge, mergeDeclarations, mergeList, sameDeclarations } from './merge';
+import { asciiLower } from './css-tokens';
+import { type Merge, mergeDeclarations, mergeList, sameDeclarations, serialized, writeDeclarations } from './merge';
 import { mediaLists, type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
@@ -290,8 +290,8 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
     rewrite,
     DECLARATIONS,
     () => nativeGet<string>(style, 'cssText'),
-    // The texts are the browser's serializations, or made of one: its last semicolon is not a value's to take.
-    text => ownSet(style, 'cssText', withoutTakenSemicolon(text))
+    // The texts are the browser's serializations, or made of one: written a declaration at a time where they can be.
+    text => writeDeclarations(style, text)
   );
   if (fixed.record) {
     styles.set(style, fixed.record);
@@ -322,16 +322,19 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
     current,
     () => ownCall<string | null>(el, 'getAttribute', name) ?? '',
     text => {
-      const before = ownCall<string | null>(el, 'getAttribute', name);
-      // A style attribute the browser serialized, whose last semicolon the text parsed again would take into a value
-      // (withoutTakenSemicolon), is written as the page wrote it, through the CSSOM: the browser serializes it again.
-      const closed = name === 'style' ? withoutTakenSemicolon(text) : text;
-      const style = closed === text ? undefined : ownGet<CSSStyleDeclaration | undefined>(el, 'style');
-      const serialized = style && nativeGet<string>(style, 'cssText') === before ? style : undefined;
-      quietMutations(
-        () => (serialized ? ownSet(serialized, 'cssText', closed) : ownCall(el, 'setAttribute', name, text)),
-        { target: el, name, before }
-      );
+      // Each write is one of the attribute, and none of them is the client's to hear of.
+      const quiet = (set: () => void) =>
+        quietMutations(set, { target: el, name, before: ownCall<string | null>(el, 'getAttribute', name) });
+      // A style attribute that reads as the browser serializes one (`serialized`), and is the text of the element's
+      // style: the CSSOM wrote it last. The text parsed again is not always that block: a value left open takes the
+      // semicolon and the declarations after it, and a longhand written into a shorthand loses its place
+      // (writeDeclarations). So it is written through the element's style, a declaration at a time.
+      // The style is not read for any other text: the browser parses the next attribute set on an element whose
+      // style was read in another order (the `!important` declarations last).
+      const style =
+        name === 'style' && serialized(current) ? ownGet<CSSStyleDeclaration | undefined>(el, 'style') : undefined;
+      if (style && nativeGet<string>(style, 'cssText') === current) writeDeclarations(style, text, quiet);
+      else quiet(() => ownCall(el, 'setAttribute', name, text));
       wroteAt(el, name);
     }
   );
