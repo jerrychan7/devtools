@@ -1010,3 +1010,76 @@ test("a rule's declaration the page read before the emulation is no change of it
     });
   }
 });
+
+/** What the page writes to #wr, an element with an inline style, and to the one rule of #wr-sheet. */
+const WRITES: Record<string, string> = {
+  // A function that is not closed, in a rule: the semicolon the browser writes after it is not its own.
+  rule: `rule.style.cssText = 'padding-left: env(safe-area-inset-left, 2px); color:red; --x: foo(a;b'`,
+  inline: `el.style.cssText = 'padding-left: env(safe-area-inset-left, 2px); --x: foo(a;b'`,
+  // A comment that is not closed, and empty declarations: the attribute is the page's text, byte for byte.
+  comment: `el.setAttribute('style', 'color:red; padding-left: env(safe-area-inset-left, 2px); /* x; background-color: blue')`,
+  empties: `el.setAttribute('style', ';;color:red;; ;padding-left: env(safe-area-inset-left, 2px);;')`,
+  // A style the page sets as text after an edit of one property: the browser's text, its last semicolon included.
+  cssom: `el.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px); margin: 0');
+    el.style.setProperty('color', 'red');
+    await new Promise(resolve => setTimeout(resolve));
+    el.style.cssText = 'padding-top: env(safe-area-inset-top, 9px); --x: "/*;*/"'`,
+  // A property set after the attribute: the env() takes its value back as the page wrote it.
+  edited: `el.setAttribute('style', 'PADDING-TOP:env(safe-area-inset-top, 7px);;color:blue');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    el.style.setProperty('margin', '1px')`,
+};
+const read = () =>
+  t.page.evaluate(() => {
+    const el = document.getElementById('wr');
+    const sheet = document.getElementById('wr-sheet');
+    const rule = sheet instanceof HTMLStyleElement ? sheet.sheet?.cssRules[0] : undefined;
+    const style = getComputedStyle(el ?? document.body);
+    return {
+      attribute: el?.getAttribute('style'),
+      rule: rule instanceof CSSStyleRule ? rule.style.cssText : null,
+      x: style.getPropertyValue('--x'),
+      padding: `${style.paddingTop} ${style.paddingLeft}`,
+    };
+  });
+for (const [name, write] of Object.entries(WRITES))
+  test(`a text the page writes under the emulation reads as in Chrome once the emulation ends (${name})`, async () => {
+    const r = await sameOnBoth(t, async side => {
+      await t.page.evaluate(() => {
+        document.body.insertAdjacentHTML(
+          'beforeend',
+          '<div id="wr" class="wr" style="padding-top: env(safe-area-inset-top, 1px)">wr</div>'
+        );
+        const style = document.createElement('style');
+        style.id = 'wr-sheet';
+        style.textContent = '.wr { padding-left: env(safe-area-inset-left, 1px) }';
+        document.head.appendChild(style);
+      });
+      try {
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 6 } });
+        await settle();
+        await t.page.evaluate(
+          `(async () => {
+          const el = document.getElementById('wr');
+          const rule = document.getElementById('wr-sheet').sheet.cssRules[0];
+          ${write}
+        })()`
+        );
+        // Longer than the wait of a rewrite the page's writes hold back.
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const during = await read();
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+        await settle();
+        // The attribute and the rule read the emulation's text while it runs: only the values are compared then.
+        return { during: { x: during.x, padding: during.padding }, after: await read() };
+      } finally {
+        await t.page.evaluate(() => document.querySelectorAll('#wr, #wr-sheet').forEach(el => el.remove()));
+      }
+    });
+    if (name === 'comment')
+      assert.equal(
+        r.after.attribute,
+        'color:red; padding-left: env(safe-area-inset-left, 2px); /* x; background-color: blue'
+      );
+    if (name === 'rule') assert.equal(r.after.x, 'foo(a;b');
+  });

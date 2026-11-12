@@ -578,6 +578,46 @@ test('the sizes of an <img> are read as the emulation has them, when the image i
   }
 });
 
+test("an image's sizes are split as CSS splits them: a comma in a comment, a length right after its condition", async () => {
+  const SIZES = [
+    '/* , */ (prefers-color-scheme: light) /* a, b */ 10px, 100px',
+    '(prefers-color-scheme: light)10px, 100px',
+  ];
+  const make = (id: string, sizes: string) =>
+    t.page.evaluate(
+      ([id, sizes]) => {
+        const img = document.createElement('img');
+        img.id = id;
+        img.sizes = sizes;
+        const url = (name: string) => `/packages/devtools-anywhere/test-support/assets/pixel.png?${id}-${name}`;
+        img.srcset = `${url('a')} 10w, ${url('b')} 100w`;
+        document.body.append(img);
+      },
+      [id, sizes] as const
+    );
+  try {
+    const r = await sameOnBoth(t, async side => {
+      const tag = side === t.chrome ? 'chrome' : 'ours';
+      const out: string[] = [];
+      for (const [i, sizes] of SIZES.entries()) {
+        await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+        await make(`szc-dark-${i}-${tag}`, sizes);
+        out.push(await until(() => chosen(`szc-dark-${i}-${tag}`), 'b'));
+        await side.send('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-color-scheme', value: 'light' }],
+        });
+        await make(`szc-light-${i}-${tag}`, sizes);
+        out.push(await until(() => chosen(`szc-light-${i}-${tag}`), 'a'));
+      }
+      await side.send('Emulation.setEmulatedMedia', { features: [] });
+      return out;
+    });
+    assert.deepEqual(r, ['b', 'a', 'b', 'a']);
+  } finally {
+    await t.page.evaluate(() => document.querySelectorAll('img[id^="szc-"]').forEach(img => img.remove()));
+  }
+});
+
 test('a <link> or a <style> with a media query is emulated, and so is a rule of its sheet', async () => {
   const read = () =>
     t.page.evaluate(() => {
@@ -701,4 +741,60 @@ test("a sheet's own media list the page sets under the emulation is emulated in 
     }
   });
   assert.deepEqual(r, { words: ['0px', '9px', '9px', '0px'], changed: 0 });
+});
+
+/** A task of the page later: the emulation's observers have rewritten what the page wrote. */
+const nextTask = () => t.page.evaluate(() => new Promise(r => setTimeout(r)));
+
+const insets = (side: Side, top?: number) =>
+  side.send('Emulation.setSafeAreaInsetsOverride', { insets: top === undefined ? {} : { top } });
+
+test('a text the page writes over a rewritten one keeps its strings, comment marks in them included', async () => {
+  const TEXT = 'content: "/*"; color: rgb(1, 2, 3); --x: "*/"';
+  const read = () =>
+    t.page.evaluate(() => {
+      const el = document.getElementById('cm');
+      const rule = (document.getElementById('cms') as HTMLStyleElement).sheet?.cssRules[0];
+      if (!el || !(rule instanceof CSSStyleRule)) throw new Error('the element and its rule are not there');
+      const ruled = getComputedStyle(document.getElementById('cm2') ?? document.body);
+      return {
+        attribute: el.getAttribute('style'),
+        color: getComputedStyle(el).color,
+        x: getComputedStyle(el).getPropertyValue('--x'),
+        rule: rule.style.cssText,
+        ruleColor: ruled.color,
+        ruleX: ruled.getPropertyValue('--x'),
+      };
+    });
+  const r = await sameOnBoth(t, async side => {
+    await t.page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<style id="cms">#cm2 { padding-top: env(safe-area-inset-top, 7px) }</style>' +
+          '<div id="cm" style="padding-top: env(safe-area-inset-top, 7px)">cm</div><div id="cm2">cm2</div>'
+      );
+    });
+    try {
+      await insets(side, 5);
+      await nextTask();
+      // Both texts are rewritten now: the page writes another over each, by the attribute and by the CSSOM.
+      await t.page.evaluate(text => {
+        document.getElementById('cm')?.setAttribute('style', text);
+        const rule = (document.getElementById('cms') as HTMLStyleElement).sheet?.cssRules[0];
+        if (rule instanceof CSSStyleRule) rule.style.cssText = text;
+      }, TEXT);
+      await nextTask();
+      const during = await read();
+      await insets(side);
+      await nextTask();
+      return { during, after: await read() };
+    } finally {
+      await insets(side);
+      await t.page.evaluate(() => document.querySelectorAll('#cm, #cm2, #cms').forEach(el => el.remove()));
+    }
+  });
+  assert.equal(r.during.attribute, TEXT);
+  assert.equal(r.during.color, 'rgb(1, 2, 3)');
+  assert.equal(r.during.ruleColor, 'rgb(1, 2, 3)');
+  assert.deepEqual(r.after, r.during);
 });

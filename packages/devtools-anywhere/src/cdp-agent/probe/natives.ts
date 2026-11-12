@@ -53,9 +53,10 @@ export const NATIVE_KEYS: readonly string[] = [
 
 /**
  * The interfaces whose functions of `NATIVE_KEYS` are taken. A style sheet's `media` and `ownerNode` are the
- * StyleSheet interface's, which CSSStyleSheet inherits, so StyleSheet is among them.
+ * StyleSheet interface's, which CSSStyleSheet inherits, so StyleSheet is among them; an element's `style` is its
+ * HTMLElement, SVGElement or MathMLElement interface's.
  */
-const INTERFACES = /^(CSS\w*|StyleSheet|Element|MediaList|Document|DocumentFragment|ShadowRoot)$/;
+const INTERFACES = /^(CSS\w*|StyleSheet|(HTML|SVG|MathML)?Element|MediaList|Document|DocumentFragment|ShadowRoot)$/;
 
 /** The functions taken: by the top window's prototype, and by interface name (for the objects of other realms). */
 export interface NativeTable {

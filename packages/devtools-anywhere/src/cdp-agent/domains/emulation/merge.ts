@@ -1,6 +1,6 @@
 import { frames } from '../../core/frames/frames';
-import { splitTopLevel } from '../../core/style/selectors';
 import { ownCall, ownSet } from '../css/sheets/watch/cssom-watch';
+import { mapDeclarations, splitDeclarations, splitMediaQueries } from './css-tokens';
 
 /**
  * The original of a text the page changed while the emulation had rewritten it, from the original
@@ -12,31 +12,11 @@ import { ownCall, ownSet } from '../css/sheets/watch/cssom-watch';
  */
 export type Merge = (original: string, applied: string, current: string) => string;
 
-interface Declaration {
-  name: string;
-  text: string;
-  /** The text after the colon, without the white space around it (`!important` included). */
-  value: string;
-}
-
-/** A comment, which a declaration block may have in it (the CSSOM drops it, the rewrite keeps it). */
-const COMMENT = /\/\*[\s\S]*?\*\//g;
-
 /**
- * The declarations of a declaration block, by name (lower case, except a custom property's, which
- * is case-sensitive), with their text. A part without a colon is no declaration.
+ * The declarations of a declaration block, by name, with their text: split by the block's tokens (css-tokens.ts),
+ * so that a semicolon or a comment mark in a string is none of the block's.
  */
-function declarationsOf(block: string): Declaration[] {
-  const out: Declaration[] = [];
-  for (const part of splitTopLevel(block.replace(COMMENT, ''), ';')) {
-    const text = part.trim();
-    const colon = text.indexOf(':');
-    if (colon <= 0) continue;
-    const name = text.slice(0, colon).trim();
-    out.push({ name: name.startsWith('--') ? name : name.toLowerCase(), text, value: text.slice(colon + 1).trim() });
-  }
-  return out;
-}
+const declarationsOf = splitDeclarations;
 
 /**
  * The value of each declaration of `block`, as the browser reads it once parsed: a value written back
@@ -78,24 +58,22 @@ function sameReading(a: Reading, b: Reading, name: string): boolean {
 }
 
 /**
- * Declaration blocks: a declaration whose value is still the one the rewrite gave it takes the
- * original declaration of its name back; the others are the page's, as it wrote them. A block the
+ * Declaration blocks: a declaration whose value is still the one the rewrite gave it takes the value the
+ * original declares for its name back; everything else is the page's, as it wrote it, byte for byte (what is
+ * between its declarations included: a comment, an empty declaration, the last semicolon). A block the
  * browser writes back with an empty value in it (the longhands of a shorthand whose value is pending,
  * a var() or an env(), which it cannot write whole) is kept as the browser wrote it: written back as
  * text, the empty declarations would drop the values they stand for, and the sides they set.
  */
 export const mergeDeclarations: Merge = (original, applied, current) => {
-  const declared = declarationsOf(current);
-  if (declared.some(d => d.value === '')) return current;
-  const kept = new Map(declarationsOf(original).map(d => [d.name, d.text] as const));
+  if (declarationsOf(current).some(d => d.value === '')) return current;
+  const kept = new Map(declarationsOf(original).map(d => [d.name, d.value] as const));
   const was = readingOf(applied);
   const now = readingOf(current);
-  return declared
-    .map(d => {
-      const own = kept.get(d.name);
-      return own !== undefined && sameReading(was, now, d.name) ? own : d.text;
-    })
-    .join('; ');
+  return mapDeclarations(current, name => {
+    const own = kept.get(name);
+    return own && sameReading(was, now, name) ? own : null;
+  });
 };
 
 /**
@@ -139,13 +117,14 @@ function alignment(a: string[], b: string[]): number[] {
 }
 
 /**
- * Lists separated by commas (media queries, the entries of `sizes`): an entry the page did not change
- * takes back the original entry it was rewritten from, wherever it now is in the list.
+ * Lists separated by commas (media queries, the entries of `sizes`), split at the commas CSS splits them at
+ * (css-tokens.ts): an entry the page did not change takes back the original entry it was rewritten from,
+ * wherever it now is in the list.
  */
 export const mergeList: Merge = (original, applied, current) => {
-  const kept = splitTopLevel(original, ',');
-  const shown = splitTopLevel(applied, ',').map(part => part.trim());
-  const now = splitTopLevel(current, ',');
+  const kept = splitMediaQueries(original);
+  const shown = splitMediaQueries(applied).map(part => part.trim());
+  const now = splitMediaQueries(current);
   const from = alignment(
     shown,
     now.map(part => part.trim())

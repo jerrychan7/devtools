@@ -2,7 +2,10 @@ import type { Protocol } from 'devtools-protocol';
 
 type Specificity = Protocol.CSS.Specificity;
 
-/** Splits on top-level occurrences of `separator`, ignoring those inside (), [], quotes and escapes. */
+/**
+ * Splits on top-level occurrences of `separator`, ignoring those inside (), [], quotes and escapes. A closing
+ * bracket that closes nothing is a character like any other, as in CSS: the separators after it still split.
+ */
 export function splitTopLevel(text: string, separator: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -15,7 +18,7 @@ export function splitTopLevel(text: string, separator: string): string[] {
       if (ch === quote) quote = '';
     } else if (ch === '"' || ch === "'") quote = ch;
     else if (ch === '(' || ch === '[') depth++;
-    else if (ch === ')' || ch === ']') depth--;
+    else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
     else if (ch === separator && depth === 0) {
       parts.push(text.slice(start, i));
       start = i + 1;

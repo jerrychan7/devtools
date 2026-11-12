@@ -95,16 +95,21 @@ function* outside(kinds: Tokens['kinds'], closing: Int32Array): Generator<number
   }
 }
 
+/** A declaration of a block: where its name and its value are in the block's text. */
+interface Span {
+  nameStart: number;
+  nameEnd: number;
+  /** The value: the text after the colon, without the whitespace and comments around it. Empty for none. */
+  valueStart: number;
+  valueEnd: number;
+}
+
 /**
- * Rewrites the values of the declarations of `block`, a declaration list (a style attribute, or a
- * CSSStyleDeclaration's cssText, without braces). Each top-level `name: value` is passed to `hook`
- * with its name (ASCII-lowercased, except custom properties, `--x`) and its value: the text after the
- * colon, without the whitespace and comments around it, `!important` included. A returned string
- * replaces that value. Declarations are split at top-level semicolons. A part with no name and colon,
- * or with no value (only whitespace and comments), is malformed and left alone, and so is everything
- * else in the block.
+ * The declarations of `block`, a declaration list (a style attribute, or a CSSStyleDeclaration's cssText,
+ * without braces), split at its top-level semicolons: not those in a block, a function, a string, a comment
+ * or an escape. A part that does not start with a name and a colon is no declaration.
  */
-export function mapDeclarations(block: string, hook: DeclarationHook): string {
+function spansOf(block: string): Span[] {
   const { kinds, starts } = tokenize(block);
   const n = kinds.length;
   const closing = closingIndices(kinds);
@@ -116,9 +121,8 @@ export function mapDeclarations(block: string, hook: DeclarationHook): string {
     while (j < end && insignificant(kind(j))) j++;
     return j;
   };
-  let out = '';
-  let kept = 0;
-  /** Rewrites the declaration made of the tokens from `from` up to `end`. */
+  const spans: Span[] = [];
+  /** The declaration made of the tokens from `from` up to `end`. */
   const declaration = (from: number, end: number) => {
     const nameAt = skip(from, end);
     if (nameAt >= end || kind(nameAt) !== Tok.Ident) return;
@@ -127,13 +131,14 @@ export function mapDeclarations(block: string, hook: DeclarationHook): string {
     const valueAt = skip(colonAt + 1, end);
     let valueEnd = end;
     while (valueEnd > valueAt && insignificant(kind(valueEnd - 1))) valueEnd--;
-    if (valueAt >= valueEnd) return;
-    const raw = block.slice(at(nameAt), at(nameAt + 1));
-    const property = raw.startsWith('--') ? raw : asciiLower(raw);
-    const value = hook(property, block.slice(at(valueAt), at(valueEnd)));
-    if (value === null) return;
-    out += block.slice(kept, at(valueAt)) + value;
-    kept = at(valueEnd);
+    // No value: an empty one, where the colon ends.
+    const empty = valueAt >= valueEnd;
+    spans.push({
+      nameStart: at(nameAt),
+      nameEnd: at(nameAt + 1),
+      valueStart: empty ? at(colonAt + 1) : at(valueAt),
+      valueEnd: empty ? at(colonAt + 1) : at(valueEnd),
+    });
   };
   let from = 0;
   for (const i of outside(kinds, closing)) {
@@ -143,6 +148,71 @@ export function mapDeclarations(block: string, hook: DeclarationHook): string {
     }
   }
   declaration(from, n);
+  return spans;
+}
+
+/** A property's name as written, ASCII-lowercased unless it is a custom property's (`--x`). */
+const propertyOf = (raw: string): string => (raw.startsWith('--') ? raw : asciiLower(raw));
+
+/** A declaration of a block, as written. */
+export interface Declaration {
+  /** The property (ASCII-lowercased, except custom properties, `--x`). */
+  name: string;
+  /** The declaration's text, from its name to the end of its value. */
+  text: string;
+  /** The text after the colon, without the whitespace and comments around it (`!important` included); empty for none. */
+  value: string;
+}
+
+/**
+ * The declarations of `block`, a declaration list, in order: each top-level `name: value`, one with no value
+ * included (the browser writes the longhands of a pending shorthand so). A semicolon or a comment mark in a
+ * string, a comment or a block is not one of the list's.
+ */
+export function splitDeclarations(block: string): Declaration[] {
+  return spansOf(block).map(span => ({
+    name: propertyOf(block.slice(span.nameStart, span.nameEnd)),
+    text: block.slice(span.nameStart, span.valueEnd),
+    value: block.slice(span.valueStart, span.valueEnd),
+  }));
+}
+
+/**
+ * `block`, a declaration list as the CSSOM serializes it, without its last semicolon where that one is not the
+ * list's own. The browser writes a custom property's value (or a value with a var()) as it was written, and a
+ * semicolon after it: where the value leaves a function, a block or a string open, the text parsed again takes that
+ * semicolon into the value.
+ */
+export function withoutTakenSemicolon(block: string): string {
+  if (!block.endsWith(';')) return block;
+  const { kinds } = tokenize(block);
+  let last = -1;
+  for (const i of outside(kinds, closingIndices(kinds))) last = i;
+  return last === kinds.length - 1 && kinds[last] === Tok.Semi ? block : block.slice(0, -1);
+}
+
+/**
+ * Rewrites the values of the declarations of `block`, a declaration list (a style attribute, or a
+ * CSSStyleDeclaration's cssText, without braces). Each top-level `name: value` is passed to `hook`
+ * with its name (ASCII-lowercased, except custom properties, `--x`) and its value: the text after the
+ * colon, without the whitespace and comments around it, `!important` included. A returned string
+ * replaces that value. Declarations are split at top-level semicolons. A part with no name and colon,
+ * or with no value (only whitespace and comments), is malformed and left alone, and so is everything
+ * else in the block.
+ */
+export function mapDeclarations(block: string, hook: DeclarationHook): string {
+  let out = '';
+  let kept = 0;
+  for (const span of spansOf(block)) {
+    if (span.valueStart >= span.valueEnd) continue;
+    const value = hook(
+      propertyOf(block.slice(span.nameStart, span.nameEnd)),
+      block.slice(span.valueStart, span.valueEnd)
+    );
+    if (value === null) continue;
+    out += block.slice(kept, span.valueStart) + value;
+    kept = span.valueEnd;
+  }
   return out + block.slice(kept);
 }
 
@@ -181,8 +251,9 @@ export function mapFunctions(text: string, names: readonly string[], hook: Funct
 }
 
 /**
- * Splits a media query list at its top-level commas: not those in parentheses or another block, in a
- * function, a string, a comment or an escape. The parts are returned as written, spaces included.
+ * Splits a list (media queries, the entries of `sizes`, the layers of a background) at its top-level commas:
+ * not those in parentheses or another block, in a function, a string, a comment or an escape. The parts are
+ * returned as written, spaces included.
  */
 export function splitMediaQueries(text: string): string[] {
   const { kinds, starts } = tokenize(text);
@@ -216,4 +287,31 @@ export function trimWhitespace(text: string): string {
   const endsToken = kinds[last] === Tok.BadStr || (kinds[last] === Tok.Delim && text[starts[last] ?? 0] === '\\');
   if (to < n && to > from && endsToken) to = n;
   return text.slice(starts[from] ?? text.length, starts[to] ?? text.length);
+}
+
+/**
+ * The last component value of `text` and what comes before it, as [start, end) ranges of the text, without the
+ * whitespace and comments around each: the length of a `sizes` entry and its media condition. A block or a
+ * function with what it holds is one component. Null where the text has no two such parts.
+ */
+export function splitLast(text: string): { before: [number, number]; last: [number, number] } | null {
+  const { kinds, starts } = tokenize(text);
+  const closing = closingIndices(kinds);
+  const at = (i: number) => starts[i] ?? text.length;
+  /** The top-level components that are not whitespace or comments: the token each starts and ends with. */
+  const parts: [number, number][] = [];
+  for (let i = 0; i < kinds.length; i++) {
+    const kind = kinds[i] ?? Tok.Eof;
+    if (insignificant(kind) || kind === Tok.Eof) continue;
+    // A block that is not closed runs to the end of the text.
+    const closed = closing[i] ?? -1;
+    const end = !CLOSING.has(kind) ? i : closed < 0 ? kinds.length - 1 : closed;
+    parts.push([i, end]);
+    i = end;
+  }
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  const beforeLast = parts[parts.length - 2];
+  if (!first || !last || !beforeLast) return null;
+  return { before: [at(first[0]), at(beforeLast[1] + 1)], last: [at(last[0]), at(last[1] + 1)] };
 }

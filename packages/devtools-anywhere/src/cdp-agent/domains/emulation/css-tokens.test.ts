@@ -17,7 +17,16 @@ const bundled = await build({
   platform: 'neutral',
   write: false,
 });
-const { asciiLower, decodeEscapes, mapDeclarations, mapFunctions, splitMediaQueries, trimWhitespace } = (await import(
+const {
+  asciiLower,
+  decodeEscapes,
+  mapDeclarations,
+  mapFunctions,
+  splitDeclarations,
+  splitLast,
+  splitMediaQueries,
+  trimWhitespace,
+} = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 )) as typeof Tokens;
 
@@ -113,6 +122,32 @@ test('a returned value replaces only the value; the rest is kept byte for byte',
     ['margin', '0'],
   ]);
   assert.equal(out, '  color :\tgreen /* c */ ;/* d */margin:0;;');
+});
+
+test('splitDeclarations: a semicolon or a comment mark in a string separates and hides nothing', () => {
+  assert.deepEqual(splitDeclarations('content:"/*"; color:red; --x:"*/"'), [
+    { name: 'content', text: 'content:"/*"', value: '"/*"' },
+    { name: 'color', text: 'color:red', value: 'red' },
+    { name: '--x', text: '--x:"*/"', value: '"*/"' },
+  ]);
+  assert.deepEqual(splitDeclarations(' /* a; b: c */ COLOR : red /* d */ !important ; x; padding-top: ; margin:;'), [
+    { name: 'color', text: 'COLOR : red /* d */ !important', value: 'red /* d */ !important' },
+    { name: 'padding-top', text: 'padding-top:', value: '' },
+    { name: 'margin', text: 'margin:', value: '' },
+  ]);
+});
+
+test('splitLast: the last component and what is before it, blocks and functions whole', () => {
+  const parts = (text: string) => {
+    const split = splitLast(text);
+    return split && [text.slice(...split.before), text.slice(...split.last)];
+  };
+  assert.deepEqual(parts(' (min-width: 600px) and (color)  50vw '), ['(min-width: 600px) and (color)', '50vw']);
+  assert.deepEqual(parts('/* , */ (a) /* b c */ calc(1px + 2px) /* d */'), ['(a)', 'calc(1px + 2px)']);
+  assert.deepEqual(parts('(a)50vw'), ['(a)', '50vw']);
+  assert.deepEqual(parts('(a) calc(1px + 2px'), ['(a)', 'calc(1px + 2px']);
+  assert.equal(parts('calc(1px + 2px)'), null);
+  assert.equal(parts(' /* a b */ '), null);
 });
 
 test('a comment inside a value is part of it; comments around it are not', () => {

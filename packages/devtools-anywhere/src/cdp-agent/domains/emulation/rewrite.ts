@@ -9,6 +9,7 @@ import {
   type CssomChange,
   cssSupports,
   ownCall,
+  ownGet,
   ownSet,
   ownStyle,
   watchCssom,
@@ -16,7 +17,7 @@ import {
 } from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
 import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
-import { asciiLower } from './css-tokens';
+import { asciiLower, withoutTakenSemicolon } from './css-tokens';
 import { type Merge, mergeDeclarations, mergeList, sameDeclarations } from './merge';
 import { mediaLists, type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
@@ -265,7 +266,8 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
     rewrite,
     DECLARATIONS,
     () => nativeGet<string>(style, 'cssText'),
-    text => ownSet(style, 'cssText', text)
+    // The texts are the browser's serializations, or made of one: its last semicolon is not a value's to take.
+    text => ownSet(style, 'cssText', withoutTakenSemicolon(text))
   );
   if (fixed.record) {
     styles.set(style, fixed.record);
@@ -297,7 +299,15 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
     () => ownCall<string | null>(el, 'getAttribute', name) ?? '',
     text => {
       const before = ownCall<string | null>(el, 'getAttribute', name);
-      quietMutations(() => ownCall(el, 'setAttribute', name, text), { target: el, name, before });
+      // A style attribute the browser serialized, whose last semicolon the text parsed again would take into a value
+      // (withoutTakenSemicolon), is written as the page wrote it, through the CSSOM: the browser serializes it again.
+      const closed = name === 'style' ? withoutTakenSemicolon(text) : text;
+      const style = closed === text ? undefined : ownGet<CSSStyleDeclaration | undefined>(el, 'style');
+      const serialized = style && nativeGet<string>(style, 'cssText') === before ? style : undefined;
+      quietMutations(
+        () => (serialized ? ownSet(serialized, 'cssText', closed) : ownCall(el, 'setAttribute', name, text)),
+        { target: el, name, before }
+      );
       wroteAt(el, name);
     }
   );
