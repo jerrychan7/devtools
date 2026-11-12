@@ -17,7 +17,7 @@ import {
 import { sizesRewrite } from './attributes';
 import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
 import { asciiLower } from './css-tokens';
-import { type Merge, mergeDeclarations, mergeList } from './merge';
+import { type Merge, mergeDeclarations, mergeList, sameDeclarations } from './merge';
 import { mediaLists, type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
@@ -151,9 +151,21 @@ export function rewriteColorScheme(preference: Preference | undefined): void {
 }
 
 /**
+ * How a text is merged back and compared: a declaration block (a style attribute, a style's text), or a list (media
+ * queries, sizes). `same` tells whether two texts say the same thing, so that a text is written only where what it says
+ * changes: a declaration block is compared by the values the browser reads for its names, its spacing aside.
+ */
+interface Kind {
+  merge: Merge;
+  same: (a: string, b: string) => boolean;
+}
+const DECLARATIONS: Kind = { merge: mergeDeclarations, same: sameDeclarations };
+const LISTS: Kind = { merge: mergeList, same: (a, b) => a === b };
+
+/**
  * Puts `rewrite` of a text the page has in place. `record` is what was kept for the text, and
  * `current` what it reads now: while the text still reads `record.applied`, the page's original is
- * `record.original`; once the page changed it, the original is `merge` of the two (the page's change
+ * `record.original`; once the page changed it, the original is `kind.merge` of the two (the page's change
  * kept, the rest as it was written). Returns whether a write was made and the record to keep (none
  * when the text is the page's own).
  */
@@ -161,27 +173,64 @@ function fixText(
   record: Rewritten | undefined,
   current: string,
   rewrite: Rewrite | null,
-  merge: Merge,
+  kind: Kind,
   read: () => string,
   write: (text: string) => void
 ): { changed: boolean; record?: Rewritten } {
+  return applyText(planText(record, current, rewrite, kind), current, read, write);
+}
+
+/** What fixText does with the page's text now: see planText. */
+interface Plan {
+  original: string;
+  target: string;
+  /** The text to write, or undefined where the text reads so already. */
+  write: string | undefined;
+  /** The record to keep as it is, where the text already reads what the rewrite gives. */
+  keep: Rewritten | undefined;
+}
+
+/**
+ * The decision fixText makes, without making it: the original of the page's text, what the rewrite gives it, and
+ * what to write. The pacing (holdBack) asks the same question, so that a change which makes the rewrite write is a
+ * revert whatever the rewrite makes of the text itself.
+ */
+function planText(record: Rewritten | undefined, current: string, rewrite: Rewrite | null, kind: Kind): Plan {
   const original = !record
     ? current
     : record.applied === current
       ? record.original
-      : merge(record.original, record.applied, current);
+      : kind.merge(record.original, record.applied, current);
   const target = rewrite ? rewrite(original) : original;
-  if (target === original) {
-    if (current === original) return { changed: false };
-    write(original);
-    return { changed: true };
-  }
+  if (target === original)
+    return { original, target, write: current === original ? undefined : original, keep: undefined };
   // The text already reads what the rewrite gives: nothing to write (a browser may read it back
   // differently from what was written, so a comparison with the written text would never agree).
-  if (record && record.applied === current && record.target === target) return { changed: false, record };
-  if (current !== target) write(target);
+  if (record && record.applied === current && record.target === target)
+    return { original, target, write: undefined, keep: record };
+  // A text that says the same as the one the page has, in other spacing, is not written: the browser keeps its own
+  // serialization. An edit of other declarations of the attribute is then no change of the rewrite's to make, and
+  // no revert (see the pacing note).
+  const write = current !== target && !kind.same(current, target) ? target : undefined;
+  return { original, target, write, keep: undefined };
+}
+
+/** Makes the write `plan` says, reads the text back, and gives whether it changed and the record to keep. */
+function applyText(
+  plan: Plan,
+  current: string,
+  read: () => string,
+  write: (text: string) => void
+): { changed: boolean; record?: Rewritten } {
+  if (plan.keep) return { changed: false, record: plan.keep };
+  if (plan.target === plan.original) {
+    if (plan.write === undefined) return { changed: false };
+    write(plan.write);
+    return { changed: true };
+  }
+  if (plan.write !== undefined) write(plan.write);
   const applied = read();
-  return { changed: applied !== current, record: { original, applied, target } };
+  return { changed: applied !== current, record: { original: plan.original, applied, target: plan.target } };
 }
 
 /** Rewrites a media query list through the CSSOM (ours, not a change of the page's to report). */
@@ -190,7 +239,7 @@ function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
     mediaLists.get(list),
     nativeGet<string>(list, 'mediaText'),
     rewrite,
-    mergeList,
+    LISTS,
     () => nativeGet<string>(list, 'mediaText'),
     text => ownSet(list, 'mediaText', text)
   );
@@ -207,7 +256,7 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
     styles.get(style),
     nativeGet<string>(style, 'cssText'),
     rewrite,
-    mergeDeclarations,
+    DECLARATIONS,
     () => nativeGet<string>(style, 'cssText'),
     text => ownSet(style, 'cssText', text)
   );
@@ -218,8 +267,8 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
   return fixed.changed;
 }
 
-/** How each attribute the emulation rewrites is merged back: a declaration block, or a list. */
-const merges = (name: string): Merge => (name === 'style' ? mergeDeclarations : mergeList);
+/** How each attribute the emulation rewrites is merged back and compared: a declaration block, or a list. */
+const kindOf = (name: string): Kind => (name === 'style' ? DECLARATIONS : LISTS);
 
 /**
  * Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`).
@@ -233,12 +282,11 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
     return false;
   }
   const record = writtenAttribute(el, name);
-  if (paced && rewrite && holdBack(el, name, current, record, rewrite)) return false;
-  const fixed = fixText(
-    record,
+  const plan = planText(record, current, rewrite, kindOf(name));
+  if (paced && rewrite && holdBack(el, name, current, record, plan.write !== undefined)) return false;
+  const fixed = applyText(
+    plan,
     current,
-    rewrite,
-    merges(name),
     () => ownCall<string | null>(el, 'getAttribute', name) ?? '',
     text => {
       const before = ownCall<string | null>(el, 'getAttribute', name);
@@ -259,16 +307,21 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
  * ends. So the rewrite of an attribute the page changed waits when the page changed it in the turn of
  * our last write; each answer in a turn doubles the wait, from two frames up to MAX_WAIT frames.
  *
- * A page that answers from a task of its own (a timer its observer sets) is taken for an answer in the turn only
- * if the timer runs before the turn closes. Observers run their callbacks in creation order: a page observer created
- * before ours runs first, so the timer it queues comes before our turn timer, and runs while the turn is open.
- * Otherwise it is a revert: a change after the turn has closed to a text that the rewrite would change again, such
- * as one with env(), or a media list written in another form. Once the page has changed a text, the emulation takes
- * the page's text as its original (fixText's merge), so a value the page keeps putting back is the original from
- * then on, and it is a revert all the same. A revert answers one of our writes, so each write is counted once. The
- * reverts of an attribute within REVERT_WINDOW are counted; above REVERT_LIMIT of them, each revert doubles the wait,
- * as an answer in the turn does. Until then a revert is written at once, whatever it puts back. The writes an
- * emulation change makes are never held back.
+ * A page that answers from a task of its own (a timer its observer sets) is taken for an answer in the turn when its
+ * observer queues the timer in the checkpoint of our write: the turn closes with a timer queued by a microtask after
+ * that checkpoint (turnOf), which comes after the timers its observers queue there, whichever observer was made
+ * first (a page that clears that timer ends the turn TURN_MAX ms after it began). (Observers run their callbacks in
+ * creation order, so before that fix a page observer made before ours queued its timer ahead of the turn's, and one
+ * made after it did not.) Otherwise it is a revert: a change after the
+ * turn has closed that makes the rewrite write over it (planText): a text whose values the rewrite changes, as with
+ * env() or a media list written in another form, or one whose original the change merges into reads as another text,
+ * which the rewrite then writes, and the page puts back, forever. A text whose declared values are the page's, as the
+ * browser reads them, is written by neither side, so an edit of other declarations of an attribute is no revert.
+ * Once the page has changed a text, the emulation takes the page's text as its original (fixText's merge), so a value
+ * the page keeps putting back is the original from then on, and it is a revert all the same. A revert answers one of
+ * our writes, so each write is counted once. The reverts of an attribute within REVERT_WINDOW are counted; above
+ * REVERT_LIMIT of them, each revert doubles the wait, as an answer in the turn does. Until then a revert is written at
+ * once, whatever it puts back. The writes an emulation change makes are never held back.
  */
 const MAX_WAIT = 64;
 /** The reverts of an attribute's rewrite are counted within this many ms, and more than REVERT_LIMIT back it off. */
@@ -289,17 +342,39 @@ interface Pace {
 }
 const paces = new WeakMap<Element, Map<string, Pace>>();
 
-/** The turn of the page's script our writes are made in: a timer closes it, so one task's writes share it. */
+/**
+ * The turn of the page's script our writes are made in: a timer closes it, so one task's writes share it. The page can
+ * clear that timer (a loop over timer ids clears it too), so a turn also ends TURN_MAX ms after it began: the page's
+ * later changes are then not taken for answers in it, for ever.
+ */
 let turnOpen = false;
 let turnNo = 0;
+let turnBegan = 0;
+const TURN_MAX = 1000;
+
+/** Whether the turn `turnNo` is open: its timer has not run, and it has not lasted TURN_MAX ms. */
+const turnIsOpen = (): boolean => turnOpen && windowOf().now() - turnBegan < TURN_MAX;
+
 function turnOf(): number {
-  if (!turnOpen) {
+  if (!turnIsOpen()) {
+    // A turn still marked open here has run past TURN_MAX, its timer cleared by the page or not yet run: its writes are
+    // not answers in the new turn.
+    if (turnOpen) turnNo++;
     turnOpen = true;
-    Reflect.apply(windowOf().timeout, globalThis, [closeTurn, 0]);
+    turnBegan = windowOf().now();
+    const no = turnNo;
+    // The timer is queued by a microtask, which runs after the page's observers have run their callbacks in this
+    // checkpoint: a timer one of them queues then comes before the close, whichever observer was made first.
+    queue(() => Reflect.apply(windowOf().timeout, globalThis, [() => closeTurn(no), 0]));
   }
   return turnNo;
 }
-const closeTurn = () => {
+
+/** Calls `fn` in a microtask, as the probe took it (natives). */
+const queue = (fn: () => void) => Reflect.apply(windowOf().microtask, globalThis, [fn]);
+/** Closes the turn `no`, if that is still the open one: a timer of an earlier turn does not close a later one. */
+const closeTurn = (no: number) => {
+  if (!turnOpen || no !== turnNo) return;
   turnOpen = false;
   turnNo++;
 };
@@ -361,18 +436,19 @@ function revertsTooOften(pace: Pace): boolean {
 /**
  * Whether the rewrite of `el`'s attribute `name` that the page's change to `text` calls for is held
  * for frames, rather than made now (see the pacing note above). `record` is what was written last, and
- * `rewrite` is what the attribute is rewritten with.
+ * `writes` is whether the rewrite writes the change (planText): that is what a revert is.
  */
-function holdBack(el: Element, name: string, text: string, record: Written | undefined, rewrite: Rewrite): boolean {
+function holdBack(el: Element, name: string, text: string, record: Written | undefined, writes: boolean): boolean {
   const pace = paces.get(el)?.get(name);
   if (!pace) return false;
   // The page's text is what was written: there is nothing to rewrite.
   if (record && text === record.applied) return false;
-  const answered = turnOpen && pace.turn === turnNo;
-  // A revert: a change after the turn has closed, to a text the rewrite would change again. Counted, whether it is
-  // the original (which the page's changes make the emulation's original) or another text. Our record of the last
-  // write is not needed for it: a clear of the style drops that record.
-  const reverted = !answered && rewrite(text) !== text;
+  const answered = turnIsOpen() && pace.turn === turnNo;
+  // A revert: a change after the turn has closed that the rewrite writes over, whether it is the original (which the
+  // page's changes make the emulation's original) or another text, and whether or not the rewrite changes the text
+  // itself: the original the change merges into may read differently (planText). Our record of the last write is not
+  // needed for it: a clear of the style drops that record.
+  const reverted = !answered && writes;
   if (reverted) countRevert(pace);
   const backingOff = revertsTooOften(pace);
   if (!answered && !reverted) {
@@ -625,7 +701,7 @@ const onLoad = (event: Event) => {
 function schedule() {
   if (scheduled) return;
   scheduled = true;
-  queueMicrotask(() => {
+  queue(() => {
     scheduled = false;
     update(true);
   });

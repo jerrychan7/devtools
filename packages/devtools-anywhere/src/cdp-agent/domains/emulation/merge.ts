@@ -77,6 +77,19 @@ export const mergeDeclarations: Merge = (original, applied, current) => {
 };
 
 /**
+ * Whether two declaration blocks declare the same names with the same values, as the browser reads them (valuesOf),
+ * whatever their text. A value the browser reads as empty is never the same as another: a shorthand whose longhands
+ * differ (an env() or a var() on one of them, say) reads so, and what it declares is then not in the values at all.
+ */
+export const sameDeclarations = (a: string, b: string): boolean => {
+  const left = valuesOf(a);
+  const right = valuesOf(b);
+  if (left.size !== right.size) return false;
+  for (const [name, value] of left) if (value === '' || right.get(name) !== value) return false;
+  return true;
+};
+
+/**
  * For each entry of `b`, the index of the entry of `a` it matches in a longest common subsequence of
  * both (-1 for none): which entries of a list the page kept, when it added or removed some of them.
  */

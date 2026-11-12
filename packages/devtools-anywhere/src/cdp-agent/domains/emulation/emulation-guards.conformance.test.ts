@@ -564,3 +564,280 @@ test('a page guard that puts back the original value in each new task is backed 
     }
   }
 });
+
+/**
+ * The restores a timer guard makes in the first frame after the page changes its element, for one order of the two
+ * observers: the guard made before the emulation (its observer is older than the rewrite's), or after it. The guard
+ * answers the rewrite in a timer of its own, queued by its observer. A rewrite answered in the turn is held for
+ * frames, so one restore falls in that frame; a revert is written at once, so the restores run on in it.
+ */
+async function restoreBurst(guardFirst: boolean, n: number): Promise<number> {
+  const id = `order-${n}`;
+  const ORIGINAL = 'padding-top: env(safe-area-inset-top, 7px)';
+  const FIXED = 'padding-top: env(safe-area-inset-top, 9px)';
+  const guard = (id: string, fixed: string) => {
+    const el = document.getElementById(id);
+    if (!el) throw new Error('no element');
+    const state = { armed: false, frames: [] as number[] };
+    const observer = new MutationObserver(() =>
+      setTimeout(() => {
+        if (!state.armed || el.getAttribute('style') === fixed) return;
+        state.frames.push(Reflect.get(window, 'pacingFrames') as number);
+        el.setAttribute('style', fixed);
+      }, 0)
+    );
+    observer.observe(el, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'orderGuard', { observer, state });
+  };
+  try {
+    // Counts the frames the page runs, until the test stops this loop: a loop of an earlier call of the test then ends
+    // at its next frame, whatever the calls in between (each loop has a number of its own).
+    await t.page.evaluate(() => {
+      const loop = ((Reflect.get(window, 'pacingLoops') as number | undefined) ?? 0) + 1;
+      Reflect.set(window, 'pacingLoops', loop);
+      Reflect.set(window, 'pacingLoop', loop);
+      Reflect.set(window, 'pacingFrames', 0);
+      const frame = () => {
+        if (Reflect.get(window, 'pacingLoop') !== loop) return;
+        Reflect.set(window, 'pacingFrames', (Reflect.get(window, 'pacingFrames') as number) + 1);
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+    await t.page.evaluate(
+      (id: string, original: string) => {
+        const el = document.createElement('div');
+        el.id = id;
+        el.setAttribute('style', original);
+        el.textContent = id;
+        document.body.append(el);
+      },
+      id,
+      ORIGINAL
+    );
+    if (guardFirst) await t.page.evaluate(guard, id, FIXED);
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    if (!guardFirst) await t.page.evaluate(guard, id, FIXED);
+    // The rewrite of the emulation's own write settles before the page's change: the guard is armed for that one.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const framesBefore = await t.page.evaluate(() => Reflect.get(window, 'pacingFrames') as number);
+    await t.page.evaluate(
+      (id: string, original: string) => {
+        const { state } = Reflect.get(window, 'orderGuard') as { state: { armed: boolean } };
+        state.armed = true;
+        document.getElementById(id)?.setAttribute('style', original);
+      },
+      id,
+      ORIGINAL
+    );
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const { frames, framesAfter } = await t.page.evaluate(() => ({
+      frames: (Reflect.get(window, 'orderGuard') as { state: { frames: number[] } }).state.frames.slice(),
+      framesAfter: Reflect.get(window, 'pacingFrames') as number,
+    }));
+    // Held answers wait for frames: a page that runs none would show nothing of them.
+    assert.ok(framesAfter - framesBefore >= 3, `${framesAfter - framesBefore} frames in 300 ms`);
+    assert.ok(frames.length >= 2, `${frames.length} restores of the guard`);
+    let burst = 1;
+    while (burst < frames.length && frames[burst] === frames[0]) burst++;
+    return burst;
+  } finally {
+    await t.page.evaluate(id => {
+      (Reflect.get(window, 'orderGuard') as { observer?: MutationObserver } | undefined)?.observer?.disconnect();
+      document.getElementById(id)?.remove();
+      Reflect.set(window, 'pacingLoop', 0);
+    }, id);
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+  }
+}
+
+test("a timer guard's restores are answers in the turn of the rewrite, whichever observer was made first", async () => {
+  // Answers are held (the next write comes a frame or more later), so one restore falls in the first frame; a revert
+  // is written at once, and the restores run on in it. Both orders must give the answer.
+  const older = await restoreBurst(true, 1);
+  const newer = await restoreBurst(false, 2);
+  assert.equal(older, 1, 'the restores in the first frame with the guard made first');
+  assert.equal(newer, 1, 'the restores in the first frame with the emulation made first');
+});
+
+test('a timer guard that puts back another spelling of a value the emulation rewrites is backed off', async () => {
+  // The guard's text has no light and dark in it, so the rewrite leaves it alone; the rewrite then writes the value
+  // back in its own spelling, and the guard puts its spelling back, in a timer of its own, again and again.
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'spelling';
+    el.setAttribute('style', 'color-scheme: light dark');
+    el.textContent = 'spelling';
+    document.body.append(el);
+    const state = { restores: 0 };
+    const guard = new MutationObserver(() =>
+      setTimeout(() => {
+        if (el.getAttribute('style') === 'color-scheme:dark') return;
+        state.restores++;
+        el.setAttribute('style', 'color-scheme:dark');
+      }, 0)
+    );
+    guard.observe(el, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'spellingGuard', { guard, state });
+  });
+  try {
+    await t.ours.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const restores = await t.page.evaluate(
+      () => (Reflect.get(window, 'spellingGuard') as { state: { restores: number } }).state.restores
+    );
+    // One restore is the page's answer to the emulation's write, and the rewrite does not write the spelling again.
+    assert.equal(restores, 1, `${restores} restores in a second`);
+    await t.page.evaluate(() =>
+      (Reflect.get(window, 'spellingGuard') as { guard: MutationObserver }).guard.disconnect()
+    );
+    const scheme = await until(
+      () => t.page.evaluate(() => getComputedStyle(document.getElementById('spelling') ?? document.body).colorScheme),
+      'dark',
+      8000
+    );
+    assert.equal(scheme, 'dark');
+  } finally {
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'spellingGuard') as { guard: MutationObserver }).guard.disconnect();
+        document.getElementById('spelling')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setEmulatedMedia', {});
+    }
+  }
+});
+
+test('a page edit of other declarations in a rewritten style attribute is not written again', async () => {
+  // A CSSOM edit makes the browser write the attribute back in its own serialization: the same declarations as the
+  // rewrite would write, in another text. Nothing changes in the values, so the rewrite writes nothing, and the
+  // edit is no revert that backs the rewrites off.
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'edits';
+    el.setAttribute('style', 'padding-top: env(safe-area-inset-top, 7px)');
+    el.textContent = 'edits';
+    document.body.append(el);
+    const state = { records: 0 };
+    const counter = new MutationObserver(records => {
+      state.records += records.length;
+    });
+    counter.observe(el, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'editCounter', { counter, state });
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await t.page.evaluate(() => {
+      (Reflect.get(window, 'editCounter') as { state: { records: number } }).state.records = 0;
+    });
+    const EDITS = 8;
+    for (let i = 1; i <= EDITS; i++) {
+      // Each edit is a task of its own, as a page's animation frame is.
+      await t.page.evaluate(i => {
+        document.getElementById('edits')?.style.setProperty('transform', `translate(${i}px)`);
+      }, i);
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const records = await t.page.evaluate(
+      () => (Reflect.get(window, 'editCounter') as { state: { records: number } }).state.records
+    );
+    // Each edit is one record of the page's; a write of the emulation's would add one more.
+    assert.equal(records, EDITS, `${records} records of the attribute for ${EDITS} edits`);
+    // And the rewrite still applies: the inset is 5px, not the 7px the env() falls back to.
+    const padding = await t.page.evaluate(
+      () => getComputedStyle(document.getElementById('edits') ?? document.body).paddingTop
+    );
+    assert.equal(padding, '5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'editCounter') as { counter: MutationObserver }).counter.disconnect();
+        document.getElementById('edits')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
+test('a page that clears every timer id does not hold the rewrites of its later changes', async () => {
+  // The emulation closes the turn of its writes with a timer. A page that clears every timer id, as a guard may do
+  // from a microtask after the emulation's write (here, the guard's observer comes after the emulation's), clears
+  // that timer too. The turn must end all the same, or the page's later changes are taken for answers in the turn and
+  // held for frames, the fallback of env() showing meanwhile.
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'cleared';
+    el.setAttribute('style', 'padding-top: 1px');
+    el.textContent = 'cleared';
+    document.body.append(el);
+    const guard = new MutationObserver(() => {
+      queueMicrotask(() =>
+        queueMicrotask(() => {
+          const last = window.setTimeout(() => {}, 0);
+          for (let id = 0; id <= last; id++) clearTimeout(id);
+        })
+      );
+    });
+    guard.observe(el, { attributes: true, attributeFilter: ['style'] });
+    Reflect.set(window, 'clearedGuard', guard);
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await t.page.evaluate(() => {
+      const el = document.getElementById('cleared');
+      if (el) el.style.paddingTop = 'env(safe-area-inset-top, 7px)';
+    });
+    // Longer than a turn can last: the page's next change is not one of the turn's answers.
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    const padding = await t.page.evaluate(() => {
+      const el = document.getElementById('cleared');
+      const frame = new Promise<string>(resolve =>
+        requestAnimationFrame(() => resolve(getComputedStyle(el ?? document.body).paddingTop))
+      );
+      if (el) el.style.paddingTop = 'env(safe-area-inset-top, 9px)';
+      return frame;
+    });
+    assert.equal(padding, '5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => {
+        (Reflect.get(window, 'clearedGuard') as MutationObserver).disconnect();
+        document.getElementById('cleared')?.remove();
+      });
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});
+
+test('a shorthand the rewrite changes keeps its rewrite when a longhand after it is set', async () => {
+  // The page's text has a shorthand with an env(), and a longhand after it that sets one of its sides. Chrome then reads
+  // the shorthand's value as empty, as its longhands no longer share one value, so the values alone do not tell the
+  // rewrite that its target differs from the page's text: the declarations as the browser serializes them do.
+  await t.page.evaluate(() => {
+    const el = document.createElement('div');
+    el.id = 'shorthand';
+    el.setAttribute('style', 'padding: env(safe-area-inset-top, 7px) 0; padding-left: 3px');
+    el.textContent = 'shorthand';
+    document.body.append(el);
+  });
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    const padding = await until(
+      () => t.page.evaluate(() => getComputedStyle(document.getElementById('shorthand') ?? document.body).paddingTop),
+      '5px',
+      3000
+    );
+    assert.equal(padding, '5px');
+  } finally {
+    try {
+      await t.page.evaluate(() => document.getElementById('shorthand')?.remove());
+    } finally {
+      await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  }
+});

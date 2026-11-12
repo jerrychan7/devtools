@@ -1,4 +1,4 @@
-import { nativeGet, nativeSet } from '../natives';
+import { nativeGet, nativeSet, windowOf } from '../natives';
 import { isCssom, realmOf } from '../realm';
 
 /**
@@ -54,14 +54,16 @@ function notify(tree: Tree) {
   touched.add(tree);
   if (pending) return;
   pending = true;
-  queueMicrotask(() => {
-    pending = false;
-    const trees = touched;
-    touched = new Set();
-    let any = false;
-    for (const tree of trees) if (changed(tree)) any = true;
-    if (any) for (const listener of listeners) listener();
-  });
+  Reflect.apply(windowOf().microtask, globalThis, [
+    () => {
+      pending = false;
+      const trees = touched;
+      touched = new Set();
+      let any = false;
+      for (const tree of trees) if (changed(tree)) any = true;
+      if (any) for (const listener of listeners) listener();
+    },
+  ]);
 }
 
 /** Hooks the prototypes of a realm (a window's globals). */
