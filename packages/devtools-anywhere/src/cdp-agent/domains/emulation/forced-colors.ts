@@ -1,7 +1,7 @@
-import { nativeCall } from '../../core/natives';
+import { computedStyle, nativeCall } from '../../core/natives';
 import { FORCED_COLORS_ATTRIBUTE, OWN_ATTRIBUTE } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
-import { isShadowRoot, styleOf } from '../../core/realm';
+import { isShadowRoot } from '../../core/realm';
 import { splitMediaQueries } from './css-tokens';
 import { injectOwnStyle, scanElements, type Visit } from './inject';
 import { pageTrees } from './trees';
@@ -14,7 +14,9 @@ import { pageTrees } from './trees';
  * is a url() image. Here the palette is own `!important` rules in every tree of the page (inject.ts), and
  * the elements are marked with an attribute the rules read. The marks are written when an element is
  * scanned, and taken away with the emulation. Chrome's form controls are repainted by their theme, which
- * we do not do: they are only recoloured.
+ * we do not do: they are only recoloured. The page's values are read, and the marks written, through the
+ * browser's own functions (core/natives.ts), which a page's wrappers of them do not see. The walk up the tree
+ * (parentOf) is not: it reads the page's `assignedSlot`, `parentElement`, `parentNode` and `host` as they are.
  */
 
 /** The name of the style sheet and of the scan, in inject.ts. */
@@ -112,8 +114,9 @@ const PALETTE = [
 
 /**
  * The element above `el` in the flat tree, which is the one styles are inherited along: the slot it is assigned
- * to, else its parent, or the host of its shadow root. A slot of a closed shadow root is not told to the page
- * (`assignedSlot` is null), so an element in one is taken as its parent's child.
+ * to, else its parent, or the host of its shadow root. A slot of a closed shadow root is not exposed to the page
+ * (`assignedSlot` is null), so an element in one is taken as its parent's child. The tree is read through the
+ * accessors the page has, as the rest of the agent reads it: a wrapper the page puts over them sees these reads.
  */
 const parentOf = (el: Element): Element | null =>
   el.assignedSlot ?? el.parentElement ?? (isShadowRoot(el.parentNode) ? el.parentNode.host : null);
@@ -128,7 +131,7 @@ let keeps = new WeakMap<Element, boolean>();
 function keepsColors(el: Element): boolean {
   const known = keeps.get(el);
   if (known !== undefined) return known;
-  const value = styleOf(el).getPropertyValue('forced-color-adjust');
+  const value = nativeCall<string>(computedStyle(el), 'getPropertyValue', 'forced-color-adjust');
   let kept = value === 'none';
   if (value === 'preserve-parent-color') {
     const parent = parentOf(el);
@@ -201,12 +204,12 @@ function mark(el: Element, value: string | null): boolean {
 const visit: Visit = el => {
   const cleared = mark(el, null);
   if (keepsColors(el)) return mark(el, KEPT) || cleared;
-  const style = styleOf(el);
+  const style = computedStyle(el);
   const tokens: string[] = [];
-  const steps = Math.round(alphaOf(style.getPropertyValue('background-color')) * STEPS);
+  const steps = Math.round(alphaOf(nativeCall<string>(style, 'getPropertyValue', 'background-color')) * STEPS);
   if (steps === STEPS) tokens.push(CANVAS_TOKEN);
   else if (steps > 0) tokens.push(`${CANVAS_TOKEN}-${steps * (100 / STEPS)}`);
-  if (losesImages(style.getPropertyValue('background-image'))) tokens.push(NO_IMAGE);
+  if (losesImages(nativeCall<string>(style, 'getPropertyValue', 'background-image'))) tokens.push(NO_IMAGE);
   return mark(el, tokens.length ? tokens.join(' ') : null) || cleared;
 };
 
@@ -220,7 +223,8 @@ function unmarkAll(): void {
   refs = new WeakMap();
   sweepAt = 1024;
   for (const tree of pageTrees())
-    for (const el of Array.from(tree.querySelectorAll(`[${FORCED_COLORS_ATTRIBUTE}]`))) mark(el, null);
+    for (const el of nativeCall<NodeListOf<Element>>(tree, 'querySelectorAll', `[${FORCED_COLORS_ATTRIBUTE}]`))
+      mark(el, null);
 }
 
 let active = false;

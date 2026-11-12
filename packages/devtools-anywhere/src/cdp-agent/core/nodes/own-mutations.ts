@@ -4,6 +4,8 @@
  * {@link quietMutations} keeps them out of what these observers see, after giving them the
  * changes the page made so far.
  */
+import { takeRecords } from '../natives';
+
 type Deliver = (records: MutationRecord[]) => void;
 
 const sinks = new Map<MutationObserver, Deliver>();
@@ -24,16 +26,16 @@ export function sinkMutations(observer: MutationObserver, deliver: Deliver): () 
 export function quietMutations<T>(fn: () => T, write: { target: Node; name: string; before: string | null }): T {
   if (!sinks.size) return fn();
   for (const [observer, deliver] of sinks) {
-    const records = observer.takeRecords();
+    const records = takeRecords(observer);
     if (records.length) deliver(records);
   }
   try {
     return fn();
   } finally {
     for (const [observer, deliver] of sinks) {
-      const records = observer
-        .takeRecords()
-        .filter(r => !(r.target === write.target && r.attributeName === write.name && r.oldValue === write.before));
+      const records = takeRecords(observer).filter(
+        r => !(r.target === write.target && r.attributeName === write.name && r.oldValue === write.before)
+      );
       if (records.length) deliver(records);
     }
   }

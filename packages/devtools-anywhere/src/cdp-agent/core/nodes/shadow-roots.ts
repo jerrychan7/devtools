@@ -1,4 +1,5 @@
 import type { FrameRegistry } from '../frames/frames';
+import { disconnect, microtask, nativeCall, newObserver, observe, takeRecords } from '../natives';
 import { isOwn } from './nodes';
 import { documentOf, isDocument, isElement, isNode, isShadowRoot } from '../realm';
 
@@ -76,7 +77,7 @@ export class ShadowRootTracker {
     if (this.#notifying || !this.#staleListeners.size) return;
     this.#notifying = true;
     // Not from within roots(), which drops the list on the records it takes.
-    queueMicrotask(() => {
+    microtask(() => {
       this.#notifying = false;
       this.#staleListeners.forEach(listener => listener());
     });
@@ -85,7 +86,7 @@ export class ShadowRootTracker {
   /** Starts keeping the list up to date; returns a function that stops (once per call). */
   acquire(): () => void {
     if (!this.#users++) {
-      this.#observer = new MutationObserver(records => this.#changed(records));
+      this.#observer = newObserver(records => this.#changed(records));
       this.#observed = new WeakSet();
       this.#stop = [
         this.#frames.onChange(() => {
@@ -121,7 +122,7 @@ export class ShadowRootTracker {
       if (released) return;
       released = true;
       if (--this.#users) return;
-      this.#observer?.disconnect();
+      if (this.#observer) disconnect(this.#observer);
       this.#observer = null;
       this.#stop.forEach(stop => stop());
       this.#stop = [];
@@ -134,7 +135,7 @@ export class ShadowRootTracker {
   /** The shadow roots, walked again only when the cached list is stale (see the class). */
   roots(): ShadowRoot[] {
     // Changes not yet delivered to the observer would leave a stale list.
-    const pending = this.#observer?.takeRecords();
+    const pending = this.#observer && takeRecords(this.#observer);
     if (pending?.length) this.#changed(pending);
     if (this.#cache) return this.#cache;
     const roots: ShadowRoot[] = [];
@@ -162,7 +163,7 @@ export class ShadowRootTracker {
   #watch(tree: Document | ShadowRoot) {
     if (!this.#observer || this.#observed.has(tree)) return;
     this.#observed.add(tree);
-    this.#observer.observe(tree, { childList: true, subtree: true });
+    observe(this.#observer, tree, { childList: true, subtree: true });
     if (isShadowRoot(tree) || tree.readyState === 'complete') return;
     // `readystatechange` comes just before DOMContentLoaded, then just before load (on the window).
     tree.addEventListener('readystatechange', this.#ready);
@@ -193,7 +194,12 @@ export class ShadowRootTracker {
     if (!isElement(node)) return false;
     const walker = documentOf(node).createTreeWalker(node, NodeFilter.SHOW_ELEMENT);
     for (let n: Node | null = node; n; n = walker.nextNode())
-      if (isElement(n) && !isOwn(n) && (this.#shadowRootOf(n) || n.matches('template[shadowrootmode]'))) return true;
+      if (
+        isElement(n) &&
+        !isOwn(n) &&
+        (this.#shadowRootOf(n) || nativeCall<boolean>(n, 'matches', 'template[shadowrootmode]'))
+      )
+        return true;
     return false;
   }
 }

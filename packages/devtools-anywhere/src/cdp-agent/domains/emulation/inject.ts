@@ -1,3 +1,4 @@
+import { disconnect, nativeCall, newObserver, observe, takeRecords } from '../../core/natives';
 import { hideAdopted } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { documentOf, isElement, realmOf } from '../../core/realm';
@@ -10,7 +11,8 @@ import { followTrees, pageTrees, type Tree } from './trees';
  * (the frames' documents and their shadow roots), following the trees as they come and go while
  * one is active. The sheets are adopted hidden from the page (`hideAdopted`): the page does not see
  * them in `adoptedStyleSheets`, and the CSS domain does not list them. The scans never visit
- * devtools-anywhere's own elements.
+ * devtools-anywhere's own elements. The queries and the observer are the browser's own (core/natives.ts), not
+ * what the page may have put over them; a sheet is made by the constructor its document's window has.
  *
  * Pacing. A visit may write to the page (a mark on the element), which the page's own mutation observers see. A
  * page that answers such a write by adding elements, in the same turn of its script (core/turn.ts: at once, in a
@@ -116,7 +118,7 @@ function visitElement(el: Element, scan: Scan): void {
 
 /** Visits each element of `root` and below for `scan`. */
 function visitAll(root: ParentNode, scan: Scan): void {
-  for (const el of root.querySelectorAll('*')) visitElement(el, scan);
+  for (const el of nativeCall<NodeListOf<Element>>(root, 'querySelectorAll', '*')) visitElement(el, scan);
 }
 
 /** The sheet of `injection` for `tree`'s document, made in that document's realm with its text. */
@@ -151,25 +153,25 @@ function sync(): void {
       }
   }
   if (!scans.size) {
-    observer?.disconnect();
+    if (observer) disconnect(observer);
     observer = null;
     observed.clear();
     return;
   }
-  observer ??= new MutationObserver(onRecords);
+  const watching = (observer ??= newObserver(onRecords));
   const fresh = trees.filter(tree => !observed.has(tree));
   if ([...observed].some(tree => !now.has(tree))) {
     // A tree the page took out is no longer observed: the observer is set again on those there are,
     // and the records taken before are handled after that, so that what they make is observed too.
-    const pending = observer.takeRecords();
-    observer.disconnect();
+    const pending = takeRecords(watching);
+    disconnect(watching);
     for (const tree of observed) if (!now.has(tree)) observed.delete(tree);
-    for (const tree of observed) observer.observe(tree, OBSERVED);
+    for (const tree of observed) observe(watching, tree, OBSERVED);
     if (pending.length) onRecords(pending);
   }
   for (const tree of fresh) {
     observed.add(tree);
-    observer.observe(tree, OBSERVED);
+    observe(watching, tree, OBSERVED);
     for (const scan of scans.values()) visitAll(tree, scan);
   }
 }

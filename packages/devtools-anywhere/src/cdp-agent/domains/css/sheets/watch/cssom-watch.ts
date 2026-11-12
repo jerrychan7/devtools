@@ -1,4 +1,4 @@
-import { type Native, viaNative } from '../../../../core/natives';
+import { microtask, type Native, viaNative } from '../../../../core/natives';
 import { isCssom, realmOf } from '../../../../core/realm';
 import type { CssNatives } from '../../../../probe/types';
 
@@ -507,7 +507,7 @@ export function settle(): void {
   if (!suspects.size || settled) return;
   settled = true;
   taken = 0;
-  queueMicrotask(() => (settled = false));
+  microtask(() => (settled = false));
   const changed: CSSRule[] = [];
   for (const [rule, entry] of suspects) {
     const top = topRuleOf(rule);

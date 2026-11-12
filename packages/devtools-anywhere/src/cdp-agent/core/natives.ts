@@ -35,6 +35,36 @@ export function windowOf(): TopNatives {
 }
 
 /**
+ * Calls `fn` in a microtask, queued by the browser's own function. Outside a browser (a unit test of a module
+ * importing this one) there are no natives, and the global one is called.
+ */
+export function microtask(fn: () => void): void {
+  if (top) Reflect.apply(top.microtask, globalThis, [fn]);
+  else queueMicrotask(fn);
+}
+
+/** A mutation observer made by the browser's own constructor, whatever the page has put over `MutationObserver`. */
+export const newObserver = (callback: MutationCallback): MutationObserver => new (windowOf().MO)(callback);
+
+/** `observer.observe(target, options)`, by the browser's own function. */
+export const observe = (observer: MutationObserver, target: Node, options: MutationObserverInit): void =>
+  void Reflect.apply(windowOf().observe, observer, [target, options]);
+
+/** `observer.takeRecords()`, by the browser's own function. */
+export const takeRecords = (observer: MutationObserver): MutationRecord[] =>
+  Reflect.apply(windowOf().takeRecords, observer, []);
+
+/** `observer.disconnect()`, by the browser's own function. */
+export const disconnect = (observer: MutationObserver): void => void Reflect.apply(windowOf().disconnect, observer, []);
+
+/**
+ * The computed style of `el`, by the browser's own `getComputedStyle`, called on the window of the element's
+ * document: Web IDL takes the window the function is called on, whichever realm the function is of.
+ */
+export const computedStyle = (el: Element): CSSStyleDeclaration =>
+  Reflect.apply(windowOf().computed, el.ownerDocument.defaultView ?? globalThis, [el]);
+
+/**
  * The native function `self`'s `part:name` is, up its prototypes: the top window's own, or, in another
  * realm, the top window's of the interface the prototype names (`Symbol.toStringTag`), if it has `name`
  * of its own. The page may rename a prototype: a function that then refuses `self` is given up (`viaNative`).

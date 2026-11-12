@@ -1,5 +1,6 @@
 import { childTargets } from './child-targets';
 import { EXECUTION_CONTEXT_ID, FRAME_ID, LOADER_ID } from '../context';
+import { disconnect, newObserver, observe, takeRecords } from '../natives';
 import { closestOwn, isOwn } from '../nodes/nodes';
 import {
   type FrameOwner,
@@ -362,7 +363,7 @@ export class FrameRegistry {
   onChange(listener: (change: FrameChange) => void): () => void {
     this.#listeners.add(listener);
     if (!this.#observer) {
-      this.#observer = new MutationObserver(records => {
+      this.#observer = newObserver(records => {
         this.#noteInsertions(records);
         if (touchesFrames(records, this.shadowRootOf)) this.sync();
         else if (this.#watchedRoots.size && records.some(r => r.removedNodes.length)) this.#releaseRoots();
@@ -373,7 +374,7 @@ export class FrameRegistry {
     return () => {
       this.#listeners.delete(listener);
       if (this.#listeners.size || !this.#observer) return;
-      this.#observer.disconnect();
+      disconnect(this.#observer);
       this.#observer = null;
       for (const frame of this) frame.document.removeEventListener('load', this.#onLoad, true);
       for (const root of this.#watchedRoots) root.removeEventListener('load', this.#onLoad, true);
@@ -387,7 +388,7 @@ export class FrameRegistry {
    */
   #watch(root: Document | ShadowRoot): void {
     if (!this.#observer) return;
-    this.#observer.observe(root, { childList: true, subtree: true });
+    observe(this.#observer, root, { childList: true, subtree: true });
     root.addEventListener('load', this.#onLoad, true);
     if (isShadowRoot(root)) this.#watchedRoots.add(root);
   }
@@ -440,7 +441,7 @@ export class FrameRegistry {
    */
   sync(): void {
     // Insertions not yet delivered to the observer: another observer's callback may sync first.
-    if (this.#observer) this.#noteInsertions(this.#observer.takeRecords());
+    if (this.#observer) this.#noteInsertions(takeRecords(this.#observer));
     this.#releaseRoots();
     this.#syncChildren(this.top);
   }

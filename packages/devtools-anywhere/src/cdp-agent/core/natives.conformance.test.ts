@@ -75,6 +75,38 @@ function wrapNatives(): void {
   wrap(window, 'setTimeout');
 }
 
+/**
+ * Runs in the page after wrapNatives: wraps what the scan of forced colors calls besides, the queries of documents
+ * and shadow roots, the computed style, the mutation observer and its methods, and the microtasks. Apart from
+ * wrapNatives, as the other domains make observers and microtasks of their own, which these wrappers would see.
+ */
+function wrapScan(): void {
+  const record = (name: string) => {
+    if (Reflect.get(window, '__natWatch') === true) window.__natCalls.push(name);
+  };
+  const wrap = (owner: object, name: string, as = name) => {
+    const original: unknown = Reflect.get(owner, name);
+    if (typeof original !== 'function') return;
+    Reflect.set(owner, name, function (this: unknown, ...args: unknown[]) {
+      record(as);
+      return Reflect.apply(original, this, args);
+    });
+  };
+  wrap(Document.prototype, 'querySelectorAll', 'document.querySelectorAll');
+  wrap(DocumentFragment.prototype, 'querySelectorAll', 'fragment.querySelectorAll');
+  wrap(window, 'getComputedStyle');
+  wrap(window, 'queueMicrotask');
+  for (const name of ['observe', 'disconnect', 'takeRecords']) wrap(MutationObserver.prototype, name);
+  wrap(CSSStyleDeclaration.prototype, 'getPropertyValue');
+  const Native = MutationObserver;
+  window.MutationObserver = class extends Native {
+    constructor(callback: MutationCallback) {
+      record('MutationObserver');
+      super(callback);
+    }
+  };
+}
+
 /** Loads the probe, then the wrappers, before the fixture and the bundle. */
 async function wrappedBeforeGoto(page: Page): Promise<void> {
   await page.evaluateOnNewDocument(await readFile(PROBE_BUNDLE, 'utf8'));
@@ -212,5 +244,68 @@ test('a rewrite the page keeps putting back is paced, with no call of the agent 
     void document.getElementById('target')?.getAttribute('style');
   });
   assert.deepEqual(await watch(t, false), ['requestAnimationFrame', 'setTimeout', 'getAttribute']);
+  await t.page.close();
+});
+
+test('the scan and the sheets of forced colors call no page wrapper', async () => {
+  assert.ok(env);
+  const t = await openPage(env, [], async page => {
+    await wrappedBeforeGoto(page);
+    await page.evaluateOnNewDocument(wrapScan);
+  });
+  const FORCED = { features: [{ name: 'forced-colors', value: 'active' }] };
+  const color = (id: string) =>
+    t.page.evaluate(id => getComputedStyle(document.getElementById(id) ?? document.body).color, id);
+  await t.page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<p id="fc-kept" style="forced-color-adjust: none; color: rgb(1, 2, 3)">kept</p><div id="fc-host"></div>'
+    );
+    const root = document.getElementById('fc-host')?.attachShadow({ mode: 'open' });
+    if (root) root.innerHTML = '<p style="background: linear-gradient(red, blue)">shadow</p>';
+  });
+  await watch(t, true);
+  await t.ours.send('Emulation.setEmulatedMedia', FORCED);
+  // An element the page adds meanwhile is scanned through the observer, in a microtask of the agent's.
+  await t.page.evaluate(() => {
+    window.__natWatch = false;
+    document.body.insertAdjacentHTML('beforeend', '<p id="fc-added" style="color: rgb(4, 5, 6)">added</p>');
+    window.__natWatch = true;
+  });
+  // The test waits in Node, which makes no call of the page's.
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const seen = await watch(t, false);
+  const during = [await color('fc-kept'), await color('fc-added')];
+  await watch(t, true);
+  await t.ours.send('Emulation.setEmulatedMedia', { features: [] });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const cleared = await watch(t, false);
+  // Forced colors did paint: the kept element has its colour, the added one the palette's text.
+  assert.deepEqual(during, ['rgb(1, 2, 3)', 'rgb(255, 255, 255)']);
+  assert.deepEqual([seen, cleared], [[], []]);
+
+  // The wrappers do record the page's own calls.
+  await watch(t, true);
+  await t.page.evaluate(() => {
+    void document.querySelectorAll('p');
+    void document.getElementById('fc-host')?.shadowRoot?.querySelectorAll('p');
+    void getComputedStyle(document.body).getPropertyValue('color');
+    queueMicrotask(() => undefined);
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(document.body, { childList: true });
+    void observer.takeRecords();
+    observer.disconnect();
+  });
+  assert.deepEqual(await watch(t, false), [
+    'document.querySelectorAll',
+    'fragment.querySelectorAll',
+    'getComputedStyle',
+    'getPropertyValue',
+    'queueMicrotask',
+    'MutationObserver',
+    'observe',
+    'takeRecords',
+    'disconnect',
+  ]);
   await t.page.close();
 });

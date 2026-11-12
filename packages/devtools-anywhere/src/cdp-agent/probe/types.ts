@@ -236,6 +236,7 @@ export interface TopNatives {
   raf: typeof requestAnimationFrame;
   timeout: typeof setTimeout;
   microtask: typeof queueMicrotask;
+  computed: typeof getComputedStyle;
   /** `performance.now`, bound to `performance`. */
   now: () => number;
 }
@@ -288,9 +289,9 @@ export interface Probe {
   /**
    * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener`, `MutationObserver` and its `observe`,
    * `disconnect` and `takeRecords`, `attachShadow`, `setAttribute`, `matches`, `requestAnimationFrame`,
-   * `setTimeout`, `queueMicrotask` and `performance.now`, taken before the probe's hooks and the page's code: the
-   * vision deficiency mask goes on top and follows the top layer without the page seeing or changing it, and the
-   * agent's frames, timers and observers are not the page's. Undefined from an older probe.
+   * `setTimeout`, `queueMicrotask`, `getComputedStyle` and `performance.now`, taken before the probe's hooks and
+   * the page's code: the vision deficiency mask goes on top and follows the top layer without the page seeing or
+   * changing it, and the agent's frames, timers and observers are not the page's. Undefined from an older probe.
    */
   top?: TopNatives | undefined;
   /**

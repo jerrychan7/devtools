@@ -109,6 +109,7 @@ export function captureTop(): TopNatives {
     raf: requestAnimationFrame,
     timeout: setTimeout,
     microtask: queueMicrotask,
+    computed: getComputedStyle,
     // Bound now, as the browser's performance: a page may replace `window.performance`, not the function taken.
     now: performance.now.bind(performance),
   };

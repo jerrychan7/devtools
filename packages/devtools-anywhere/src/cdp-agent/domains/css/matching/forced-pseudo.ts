@@ -2,7 +2,7 @@ import { hideAdopted, quietly } from '../../../core/nodes/adopted';
 import { frames } from '../../../core/frames/frames';
 import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../../core/nodes/nodes';
-import { nativeCall } from '../../../core/natives';
+import { microtask, nativeCall } from '../../../core/natives';
 import { ownStyle } from '../sheets/watch/cssom-watch';
 
 /** A document or shadow root: what style sheets apply to. */
@@ -227,7 +227,7 @@ class SharedForcedPseudoClasses {
   schedule() {
     if (this.scheduled) return;
     this.scheduled = true;
-    queueMicrotask(() => {
+    microtask(() => {
       this.scheduled = false;
       quietly(() => this.rebuild());
     });
