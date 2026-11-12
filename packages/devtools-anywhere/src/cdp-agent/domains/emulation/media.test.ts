@@ -132,7 +132,33 @@ test('color-gamut: a screen that shows p3 shows srgb too', () => {
     ['(color-gamut: srgb)', TRUE],
     ['(color-gamut: p3)', TRUE],
     ['(color-gamut: rec2020)', FALSE],
-    ['(color-gamut: display-p3)', FALSE],
+  ]);
+});
+
+test('a value the feature does not have is unknown, so the browser decides it', () => {
+  // Unknown is neither true nor false: `not` of it is not true, and `or` with a true condition is true.
+  expectRewrites({ features: [{ name: 'color-gamut', value: 'p3' }] }, [
+    ['(color-gamut: display-p3)', '(color-gamut: display-p3)'],
+    ['not (color-gamut: display-p3)', 'not (color-gamut: display-p3)'],
+    ['(color-gamut: display-p3) or (color)', '(color-gamut: display-p3) or (color)'],
+  ]);
+  expectRewrites({ features: [{ name: 'prefers-color-scheme', value: 'dark' }] }, [
+    ['(prefers-color-scheme: blue)', '(prefers-color-scheme: blue)'],
+    ['not (prefers-color-scheme: no-preference)', 'not (prefers-color-scheme: no-preference)'],
+    ['(prefers-color-scheme: blue) and (prefers-color-scheme: dark)', `(prefers-color-scheme: blue) and ${TRUE}`],
+  ]);
+});
+
+test('color-gamut under rec2020 holds for every gamut, and under srgb for srgb alone', () => {
+  expectRewrites({ features: [{ name: 'color-gamut', value: 'rec2020' }] }, [
+    ['(color-gamut: srgb)', TRUE],
+    ['(color-gamut: p3)', TRUE],
+    ['(color-gamut: rec2020)', TRUE],
+  ]);
+  expectRewrites({ features: [{ name: 'color-gamut', value: 'srgb' }] }, [
+    ['(color-gamut: srgb)', TRUE],
+    ['(color-gamut: p3)', FALSE],
+    ['(color-gamut: rec2020)', FALSE],
   ]);
 });
 
@@ -215,9 +241,10 @@ test('a feature value that is not a single identifier is left alone', () => {
 });
 
 test('names and values compare ASCII letters only: a Kelvin sign is not a k', () => {
-  // The sign lowercases to k in Unicode, but it is not an ASCII letter, so the value is not `dark`.
+  // The sign lowercases to k in Unicode, but it is not an ASCII letter: the value is not `dark`, so it is
+  // a value the feature does not have, and is left to the browser.
   expectRewrites({ features: [{ name: 'prefers-color-scheme', value: 'dark' }] }, [
-    ['(prefers-color-scheme: darK)', FALSE],
+    ['(prefers-color-scheme: dar\u{212A})', '(prefers-color-scheme: dar\u{212A})'],
   ]);
 });
 

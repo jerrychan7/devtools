@@ -42,8 +42,9 @@ function holds(name: string, value: string, wanted: string | undefined): boolean
  * `all`), and NO_TYPE otherwise; with no emulated type, no type is changed. The type is the first
  * identifier, or the one after `not` or `only`, when the identifier after it is `and` or nothing; a
  * query of another form has no type to change. A feature is `(name)` or `(name: value)` with a single
- * identifier as its value, and it becomes TRUE or FALSE when the emulation sets it. A block of any other
- * form is left as it is, but a feature inside it is still rewritten.
+ * identifier as its value, and it becomes TRUE or FALSE when the emulation sets it; a value the feature
+ * does not have makes its block unknown, so the block is left as it is. A block of any other form is left
+ * as it is, but a feature inside it is still rewritten.
  */
 function rewriteQuery(query: string, type: string, features: ReadonlyMap<string, string>): string {
   const { kinds, starts } = tokenize(query);
@@ -84,6 +85,8 @@ function rewriteQuery(query: string, type: string, features: ReadonlyMap<string,
     const value = word(valueAt);
     const close = skip(valueAt + 1);
     if (value === undefined || !closes(close)) return null;
+    // A value the feature does not have is unknown, not false, and `not` keeps it unknown: left to the browser.
+    if (!FEATURES[key]?.includes(value)) return null;
     return { end: close, becomes: holds(key, emulated, value) ? TRUE : FALSE };
   };
 
