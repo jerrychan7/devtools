@@ -15,6 +15,8 @@ export type Merge = (original: string, applied: string, current: string) => stri
 interface Declaration {
   name: string;
   text: string;
+  /** The text after the colon, without the white space around it (`!important` included). */
+  value: string;
 }
 
 /** A comment, which a declaration block may have in it (the CSSOM drops it, the rewrite keeps it). */
@@ -31,7 +33,7 @@ function declarationsOf(block: string): Declaration[] {
     const colon = text.indexOf(':');
     if (colon <= 0) continue;
     const name = text.slice(0, colon).trim();
-    out.push({ name: name.startsWith('--') ? name : name.toLowerCase(), text });
+    out.push({ name: name.startsWith('--') ? name : name.toLowerCase(), text, value: text.slice(colon + 1).trim() });
   }
   return out;
 }
@@ -55,13 +57,18 @@ function valuesOf(block: string): Map<string, string> {
 
 /**
  * Declaration blocks: a declaration whose value is still the one the rewrite gave it takes the
- * original declaration of its name back; the others are the page's, as it wrote them.
+ * original declaration of its name back; the others are the page's, as it wrote them. A block the
+ * browser writes back with an empty value in it (the longhands of a shorthand whose value is pending,
+ * a var() or an env(), which it cannot write whole) is kept as the browser wrote it: written back as
+ * text, the empty declarations would drop the values they stand for, and the sides they set.
  */
 export const mergeDeclarations: Merge = (original, applied, current) => {
+  const declared = declarationsOf(current);
+  if (declared.some(d => d.value === '')) return current;
   const kept = new Map(declarationsOf(original).map(d => [d.name, d.text] as const));
   const was = valuesOf(applied);
   const now = valuesOf(current);
-  return declarationsOf(current)
+  return declared
     .map(d => {
       const own = kept.get(d.name);
       return own !== undefined && was.get(d.name) === now.get(d.name) ? own : d.text;
