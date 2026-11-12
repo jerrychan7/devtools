@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
-import { mediaRewrite } from './media';
+import { MediaEmulation } from './media';
 import { rewriteMedia, rewriteValues } from './rewrite';
 import { safeAreaRewrite } from './safe-area';
 import { useShadowRoots } from './trees';
@@ -9,7 +9,8 @@ import { VISION, setVision, useVisionContext } from './vision';
 
 /**
  * What each emulation is set to by which session: like Chrome's, it is the page's, the last
- * session to set it wins, and it ends with the session that set it.
+ * session to set it wins, and it ends with the session that set it. The media features are not
+ * here: each session keeps its own, and the others' stay (`media`).
  */
 const owners = new Map<string, object>();
 
@@ -19,10 +20,12 @@ function own(owner: object, what: string, active: boolean) {
 }
 
 const RESETS: Record<string, () => void> = {
-  media: () => rewriteMedia('media', null),
   safeArea: () => rewriteValues('safeArea', null),
   vision: () => setVision('none'),
 };
+
+/** The media emulation of the page, as the sessions have set it (media.ts). */
+const media = new MediaEmulation();
 
 export function registerEmulation(ctx: Context) {
   const { session } = ctx;
@@ -32,9 +35,7 @@ export function registerEmulation(ctx: Context) {
     // Done by rewriting the media queries of the page's style sheets, the `media` of its <source> elements
     // and the `sizes` of its images (domains/emulation/rewrite.ts).
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
-      const rewrite = mediaRewrite(params);
-      rewriteMedia('media', rewrite);
-      own(session, 'media', !!rewrite);
+      rewriteMedia('media', media.set(session, params));
     },
     // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes.
     setSafeAreaInsetsOverride({ insets }: Protocol.Emulation.SetSafeAreaInsetsOverrideRequest) {
@@ -50,6 +51,8 @@ export function registerEmulation(ctx: Context) {
     },
   });
   session.onReset(() => {
+    // The session ends as a call with nothing, as Chrome's does: whoever set the media type, it goes.
+    rewriteMedia('media', media.end(session));
     for (const [what, owner] of owners) {
       if (owner !== session) continue;
       owners.delete(what);

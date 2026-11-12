@@ -269,7 +269,7 @@ test('the emulation reports its media rewrite to the stable API, as it is set an
     const [print, screen] = (await state()) ?? [];
     assert.equal(print, 'all');
     assert.notEqual(screen, 'screen');
-    await page.evaluate(() => window.__session?.call('Emulation.setEmulatedMedia', {}));
+    await page.evaluate(() => window.__session?.call('Emulation.setEmulatedMedia', { media: '' }));
     told++;
     assert.equal(await state(), null);
     assert.equal(await page.evaluate(() => Reflect.get(window, 'told')), told);

@@ -4,12 +4,12 @@ import { asciiLower, decodeEscapes, splitMediaQueries, trimWhitespace } from './
 import type { Rewrite } from './rewrite';
 
 /**
- * The media features Emulation.setEmulatedMedia can set here, with their values. Chrome ignores
- * a value it does not know (the feature keeps its real value), and so do we, with names too. But such
- * a value given after a known one for the same feature cancels it: Chrome keeps only the last value
- * given for a name. A query names the same values: one with another value is unknown, and is left as
- * it is (rewriteQuery). prefers-reduced-data is not one of them: Chrome 157 does not emulate it (set to
- * either value, it matches nothing), so its queries are not rewritten.
+ * The media features Emulation.setEmulatedMedia can set here, with their values. Chrome ignores a name it
+ * does not know. A value it does not know takes its feature back to the real value, whichever call set it
+ * (MediaEmulation). Within one call, the last value given for a name decides. A query names the same
+ * values: one with another value is unknown, and is left as it is (rewriteQuery). prefers-reduced-data is
+ * not one of them: Chrome 157 does not emulate it (set to either value, it matches nothing), so its queries
+ * are not rewritten.
  */
 const FEATURES: Record<string, string[]> = {
   'prefers-color-scheme': ['light', 'dark'],
@@ -135,34 +135,79 @@ function emulatedValue(value: string): string | undefined {
 }
 
 /**
- * The rewrite of media query lists for Emulation.setEmulatedMedia's params, or null when they
- * emulate nothing: each query for the emulated media type (`print`) has its type made `all`, and
- * the queries for another type one matching nothing; each emulated feature is made a condition
- * that holds or not, as it would with the emulated value.
+ * The value a feature takes from a value given to it, or undefined when Chrome does not read the value as one
+ * the feature has: an unknown name is no feature at all. The name is compared as it is: Chrome takes
+ * `Prefers-Color-Scheme` for no feature, and `constructor` is none either (an own property of FEATURES only).
  */
-export function mediaRewrite(params: Protocol.Emulation.SetEmulatedMediaRequest): Rewrite | null {
-  const type = asciiLower(params.media ?? '');
-  const features = new Map<string, string>();
-  for (const { name, value } of params.features ?? []) {
-    // Own properties only: `constructor` is not a feature. The name is compared as it is: Chrome takes
-    // `Prefers-Color-Scheme` for no feature. A value Chrome does not read clears the one before it, so the
-    // feature keeps its real value, as it does without any emulation.
-    if (!Object.hasOwn(FEATURES, name)) continue;
-    const v = emulatedValue(value);
-    if (v !== undefined && FEATURES[name]?.includes(v)) features.set(name, v);
-    else features.delete(name);
+function featureValue(name: string, value: string): string | undefined {
+  if (!Object.hasOwn(FEATURES, name)) return undefined;
+  const v = emulatedValue(value);
+  return v !== undefined && FEATURES[name]?.includes(v) ? v : undefined;
+}
+
+/**
+ * The media emulation of a page, as Chrome keeps it for Emulation.setEmulatedMedia: one media type, and one
+ * value per feature name, shared by the page's sessions. A call of a session sets the media type to its
+ * `media` (none when it is omitted, as `media: ''`: the same), and replaces the features that session set:
+ * the names it set before are taken back, whichever session set them since, and the features of the call
+ * are set, the last value of a name deciding (a value Chrome does not read takes its name back). The
+ * features of the other sessions stay. A session that ends is a call with nothing: its features are taken
+ * back, and the media type is none, whichever session set it. Measured on Chrome 157 with several sessions.
+ */
+export class MediaEmulation {
+  #type = '';
+  readonly #features = new Map<string, string>();
+  /** The feature names each session's last call gave: its next call, or its end, takes them back. */
+  readonly #names = new WeakMap<object, string[]>();
+
+  /** Applies a call of `session` with `params`; returns the rewrite now in effect, or null for none. */
+  set(session: object, params: Protocol.Emulation.SetEmulatedMediaRequest): Rewrite | null {
+    this.#type = asciiLower(params.media ?? '');
+    for (const name of this.#names.get(session) ?? []) this.#features.delete(name);
+    const names: string[] = [];
+    for (const { name, value } of params.features ?? []) {
+      names.push(name);
+      const v = featureValue(name, value);
+      if (v === undefined) this.#features.delete(name);
+      else this.#features.set(name, v);
+    }
+    this.#names.set(session, names);
+    return rewriteOf(this.#type, this.#features);
   }
+
+  /** `session` ends, as a call with nothing: returns the rewrite now in effect, or null for none. */
+  end(session: object): Rewrite | null {
+    return this.set(session, {});
+  }
+}
+
+/**
+ * The rewrite of media query lists for a media type and feature values, or null when they emulate nothing:
+ * each query for the emulated media type (`print`) has its type made `all`, and the queries for another type
+ * one matching nothing; each emulated feature is made a condition that holds or not, as it would with the
+ * emulated value. The values are copied: a later change of the page's media emulation does not change it.
+ */
+function rewriteOf(type: string, features: ReadonlyMap<string, string>): Rewrite | null {
   if (!type && !features.size) return null;
+  const values = new Map(features);
   return text =>
     splitMediaQueries(text)
-      .map(query => rewriteQuery(trimWhitespace(query), type, features))
+      .map(query => rewriteQuery(trimWhitespace(query), type, values))
       .join(', ');
 }
 
 /**
+ * The rewrite of media query lists for `params` as the only call a page has had, or null when they emulate
+ * nothing (see MediaEmulation for calls that follow each other).
+ */
+export function mediaRewrite(params: Protocol.Emulation.SetEmulatedMediaRequest): Rewrite | null {
+  return new MediaEmulation().set({}, params);
+}
+
+/**
  * `text`, a media query list, rewritten as mediaRewrite does for `params`, or unchanged when `params`
- * emulate nothing. It reads and writes no page state, so a matchMedia() hook can use it; nothing calls
- * it yet.
+ * emulate nothing. It reads and writes no page state; nothing calls it. A matchMedia() hook would take the
+ * page's rewrite instead (rewrite.ts, currentMediaRewrite), which follows the calls of every session.
  */
 export function rewriteMediaQuery(text: string, params: Protocol.Emulation.SetEmulatedMediaRequest): string {
   const rewrite = mediaRewrite(params);

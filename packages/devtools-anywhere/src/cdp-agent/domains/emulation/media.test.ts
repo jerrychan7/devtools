@@ -18,7 +18,7 @@ const bundled = await build({
   platform: 'neutral',
   write: false,
 });
-const { mediaRewrite, rewriteMediaQuery } = (await import(
+const { MediaEmulation, mediaRewrite, rewriteMediaQuery } = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 )) as typeof Media;
 
@@ -410,4 +410,78 @@ test('rewriteMediaQuery rewrites a query list, and returns it unchanged when not
   );
   assert.equal(rewriteMediaQuery('  screen ,(color)  ', {}), '  screen ,(color)  ');
   assert.equal(rewriteMediaQuery('(prefers-color-scheme: dark)', { media: '' }), '(prefers-color-scheme: dark)');
+});
+
+// Several sessions (MediaEmulation): a session's call replaces what it set, and the page has one media type.
+// Each session is an object of its own.
+
+const LIGHT = { name: 'prefers-color-scheme', value: 'light' };
+const REDUCE = { name: 'prefers-reduced-motion', value: 'reduce' };
+const MORE = { name: 'prefers-contrast', value: 'more' };
+const LESS = { name: 'prefers-contrast', value: 'less' };
+const UNCHANGED_LIGHT = '(prefers-color-scheme: light)';
+
+test('a call keeps the features another session set, and takes back those its own session set', () => {
+  const emulation = new MediaEmulation();
+  const first = {};
+  const second = {};
+  emulation.set(first, { features: [LIGHT] });
+  // The second session omits its features: the first one's stay.
+  const kept = emulation.set(second, { media: 'print' });
+  assert.equal(kept?.(UNCHANGED_LIGHT), TRUE);
+  assert.equal(kept?.('print'), 'all');
+  // The second session omits its media: the type goes, and the first one's feature stays.
+  const reduced = emulation.set(second, { features: [REDUCE] });
+  assert.equal(reduced?.(UNCHANGED_LIGHT), TRUE);
+  assert.equal(reduced?.('print'), 'print');
+  // The first session takes its feature back: the second one's stays.
+  const taken = emulation.set(first, { features: [] });
+  assert.equal(taken?.(UNCHANGED_LIGHT), UNCHANGED_LIGHT);
+  assert.equal(taken?.('(prefers-reduced-motion: reduce)'), TRUE);
+});
+
+test("the media type is the last call's, whichever session made it: a call without one clears it", () => {
+  const emulation = new MediaEmulation();
+  emulation.set({}, { media: 'print' });
+  const cleared = emulation.set({}, { features: [LIGHT] });
+  assert.equal(cleared?.('print'), 'print');
+  assert.equal(cleared?.(UNCHANGED_LIGHT), TRUE);
+});
+
+test('a session that ends takes back its features, and the media type whichever session set it', () => {
+  const emulation = new MediaEmulation();
+  const first = {};
+  const second = {};
+  emulation.set(first, { features: [REDUCE] });
+  assert.ok(emulation.set(second, { media: 'print' }));
+  assert.equal(emulation.end(first), null);
+  // A session that never called ends the same way.
+  emulation.set(second, { media: 'print' });
+  assert.equal(emulation.end({}), null);
+});
+
+test('a call takes back a feature name another session set since, as Chrome does', () => {
+  const emulation = new MediaEmulation();
+  emulation.set({}, { features: [MORE] });
+  const second = {};
+  emulation.set(second, { features: [LESS] });
+  const rewrite = emulation.set(second, { features: [REDUCE] });
+  assert.equal(rewrite?.('(prefers-contrast: more)'), '(prefers-contrast: more)');
+  assert.equal(rewrite?.('(prefers-contrast: less)'), '(prefers-contrast: less)');
+  assert.equal(rewrite?.('(prefers-reduced-motion: reduce)'), TRUE);
+});
+
+test('a value Chrome does not read takes its feature back, whichever session set it', () => {
+  const emulation = new MediaEmulation();
+  emulation.set({}, { features: [LIGHT] });
+  const blue = { name: 'prefers-color-scheme', value: 'blue' };
+  assert.equal(emulation.set({}, { features: [blue] }), null);
+});
+
+test('a rewrite a call returns keeps its values: a later call does not change it', () => {
+  const emulation = new MediaEmulation();
+  const session = {};
+  const before = emulation.set(session, { features: [LIGHT] });
+  emulation.set(session, { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+  assert.equal(before?.(UNCHANGED_LIGHT), TRUE);
 });

@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
+import type { CDPSession } from 'puppeteer-core';
 import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
@@ -88,7 +89,7 @@ async function both<T>(
 const media = (params: Protocol.Emulation.SetEmulatedMediaRequest) =>
   [
     (side: Side) => side.send('Emulation.setEmulatedMedia', params),
-    (side: Side) => side.send('Emulation.setEmulatedMedia', {}),
+    (side: Side) => side.send('Emulation.setEmulatedMedia', { media: '', features: [] }),
     measure,
   ] as const;
 
@@ -134,7 +135,7 @@ test('unknown features and values are ignored', async () => {
 test('clearing restores the page', async () => {
   const before = await measure();
   await t.ours.send('Emulation.setEmulatedMedia', { media: 'print' });
-  await t.ours.send('Emulation.setEmulatedMedia', {});
+  await t.ours.send('Emulation.setEmulatedMedia', { media: '' });
   assert.deepEqual(await measure(), before);
 });
 
@@ -153,7 +154,7 @@ test('emulated media apply to sheets added later', async () => {
     side => side.send('Emulation.setEmulatedMedia', { media: 'print' }).then(add),
     side =>
       side
-        .send('Emulation.setEmulatedMedia', {})
+        .send('Emulation.setEmulatedMedia', { media: '' })
         .then(() => t.page.evaluate(() => document.getElementById('later')?.remove())),
     read
   );
@@ -181,7 +182,7 @@ test('a rule the page inserts through the CSSOM is emulated in the same task', a
   try {
     const r = await both(
       side => side.send('Emulation.setEmulatedMedia', { media: 'print' }),
-      side => side.send('Emulation.setEmulatedMedia', {}),
+      side => side.send('Emulation.setEmulatedMedia', { media: '' }),
       read
     );
     assert.equal(r.left, 'rgb(1, 2, 3)');
@@ -207,7 +208,7 @@ test('a constructed sheet replaced with replaceSync is emulated in the same task
     });
   const r = await both(
     side => side.send('Emulation.setEmulatedMedia', { media: 'print' }),
-    side => side.send('Emulation.setEmulatedMedia', {}),
+    side => side.send('Emulation.setEmulatedMedia', { media: '' }),
     read
   );
   assert.equal(r.print, 'rgb(7, 7, 7)');
@@ -227,7 +228,7 @@ test('the Styles pane shows the media query as written', async () => {
   for (const side of [t.chrome, t.ours]) {
     await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
     results.push(await shown(side));
-    await side.send('Emulation.setEmulatedMedia', {});
+    await side.send('Emulation.setEmulatedMedia', { features: [] });
     await side.send('CSS.disable');
   }
   assert.deepEqual(results[1], results[0]);
@@ -249,12 +250,190 @@ test('a forced :hover in an emulated @media', async () => {
       const { root } = await side.send('DOM.getDocument', {});
       const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#em' });
       await side.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] });
-      await side.send('Emulation.setEmulatedMedia', {});
+      await side.send('Emulation.setEmulatedMedia', { features: [] });
       await side.send('CSS.disable');
     },
     measure
   );
   assert.equal(r.decoration, 'rgb(7, 0, 0)');
+});
+
+const LIGHT: Protocol.Emulation.MediaFeature = { name: 'prefers-color-scheme', value: 'light' };
+const REDUCE: Protocol.Emulation.MediaFeature = { name: 'prefers-reduced-motion', value: 'reduce' };
+const NO_PREFERENCE: Protocol.Emulation.MediaFeature = { name: 'prefers-reduced-motion', value: 'no-preference' };
+
+test('omitted media and features are cleared, as media "" and features [] clear them', async () => {
+  const r = await sameOnBoth(async side => {
+    const seen: Awaited<ReturnType<typeof measure>>[] = [];
+    await side.send('Emulation.setEmulatedMedia', { media: 'print', features: [LIGHT] });
+    seen.push(await measure());
+    // The features are omitted: the call takes back those this session set.
+    await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+    seen.push(await measure());
+    // The media is omitted: the call takes back the media type.
+    await side.send('Emulation.setEmulatedMedia', { features: [LIGHT] });
+    seen.push(await measure());
+    await side.send('Emulation.setEmulatedMedia', { media: '', features: [] });
+    seen.push(await measure());
+    return seen;
+  });
+  const [both, printOnly, lightOnly, cleared] = r;
+  assert.equal(both?.color, 'rgb(1, 0, 0)');
+  assert.equal(both?.background, 'rgb(0, 3, 0)');
+  assert.equal(printOnly?.background, 'rgb(0, 3, 0)');
+  assert.notEqual(printOnly?.color, 'rgb(1, 0, 0)');
+  assert.equal(lightOnly?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(lightOnly?.background, 'rgb(0, 3, 0)');
+  assert.notEqual(cleared?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(cleared?.background, 'rgb(0, 3, 0)');
+});
+
+/** One step of `twoSessions`: a call of one of a side's two sessions (0 or 1), or the end of one. */
+type Step = { call: 0 | 1; params: Protocol.Emulation.SetEmulatedMediaRequest } | { end: 0 | 1 };
+
+/** A side's two sessions for `twoSessions`: a call of one, and the end of one as its client going does. */
+interface Pair {
+  call(which: 0 | 1, params: Protocol.Emulation.SetEmulatedMediaRequest): Promise<unknown>;
+  end(which: 0 | 1): Promise<unknown>;
+}
+
+/** Two sessions of `side` on the page: Chrome's own CDP sessions, or two of our agent (`window.__sessions`). */
+async function pairOf(side: Side): Promise<Pair> {
+  if (side === t.chrome) {
+    const cdp: [CDPSession, CDPSession] = [await t.page.createCDPSession(), await t.page.createCDPSession()];
+    return {
+      call: (which, params) => cdp[which].send('Emulation.setEmulatedMedia', params),
+      end: which => cdp[which].detach(),
+    };
+  }
+  await t.page.evaluate(() => {
+    window.__sessions = [window.DevtoolsAnywhere.createCdpSession(), window.DevtoolsAnywhere.createCdpSession()];
+  });
+  return {
+    call: (which, params) =>
+      t.page.evaluate(
+        (which, params) => window.__sessions?.[which]?.call('Emulation.setEmulatedMedia', params),
+        which,
+        params
+      ),
+    end: which => t.page.evaluate(which => window.__sessions?.[which]?.reset(), which),
+  };
+}
+
+/**
+ * Plays `steps` on each side with two sessions of its own, and reads the page after each step: the two sides
+ * must read the same. Both sessions end after the steps, so that nothing is left emulated.
+ */
+async function twoSessions<T>(steps: readonly Step[], read: () => Promise<T>): Promise<T[]> {
+  return sameOnBoth(async side => {
+    const pair = await pairOf(side);
+    const ended = new Set<0 | 1>();
+    const end = async (which: 0 | 1) => {
+      if (ended.has(which)) return;
+      ended.add(which);
+      await pair.end(which);
+    };
+    try {
+      const seen: T[] = [];
+      for (const step of steps) {
+        if ('end' in step) await end(step.end);
+        else await pair.call(step.call, step.params);
+        seen.push(await read());
+      }
+      return seen;
+    } finally {
+      await end(0);
+      await end(1);
+    }
+  });
+}
+
+test('features another session set are kept by a call of its own that omits them', async () => {
+  const r = await twoSessions(
+    [
+      { call: 0, params: { features: [LIGHT] } },
+      // Its features omitted: the light of the first session stays, and the print type is on.
+      { call: 1, params: { media: 'print' } },
+      // Its media omitted: the print type goes, and the light stays.
+      { call: 1, params: { features: [REDUCE] } },
+      // The first session takes its light back: the reduced motion of the second one stays.
+      { call: 0, params: { features: [] } },
+    ],
+    measure
+  );
+  const [first, printed, reduced, taken] = r;
+  assert.equal(first?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(first?.background, 'rgb(0, 3, 0)');
+  assert.equal(printed?.color, 'rgb(1, 0, 0)');
+  assert.equal(printed?.background, 'rgb(0, 3, 0)');
+  assert.equal(reduced?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(reduced?.background, 'rgb(0, 3, 0)');
+  assert.equal(reduced?.borderLeft, 'rgb(0, 0, 5)');
+  assert.notEqual(taken?.color, 'rgb(1, 0, 0)');
+  assert.equal(taken?.borderLeft, 'rgb(0, 0, 5)');
+});
+
+test("a session's end takes back its features, and the media type whichever session set it", async () => {
+  // The light scheme is read on its own: the reduced motion rule of the page is for the screen only.
+  const r = await twoSessions(
+    [{ call: 0, params: { features: [LIGHT] } }, { call: 1, params: { media: 'print' } }, { end: 0 }],
+    measure
+  );
+  const [, printed, ended] = r;
+  assert.equal(printed?.color, 'rgb(1, 0, 0)');
+  assert.equal(printed?.background, 'rgb(0, 3, 0)');
+  assert.notEqual(ended?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(ended?.background, 'rgb(0, 3, 0)');
+});
+
+test('a session that never called takes the media type back when it ends', async () => {
+  const r = await twoSessions([{ call: 1, params: { media: 'print' } }, { end: 0 }], measure);
+  const [printed, ended] = r;
+  assert.equal(printed?.background, 'rgb(0, 3, 0)');
+  assert.notEqual(ended?.background, 'rgb(0, 3, 0)');
+});
+
+test('a call takes back a feature name another session set since, and does not restore the value it hid', async () => {
+  const r = await twoSessions(
+    [
+      { call: 0, params: { features: [REDUCE] } },
+      { call: 1, params: { features: [NO_PREFERENCE] } },
+      { call: 1, params: { features: [LIGHT] } },
+    ],
+    measure
+  );
+  const [first, overwritten, taken] = r;
+  assert.equal(first?.borderLeft, 'rgb(0, 0, 5)');
+  assert.notEqual(overwritten?.borderLeft, 'rgb(0, 0, 5)');
+  assert.equal(taken?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(taken?.borderLeft, 'rgb(0, 0, 5)');
+});
+
+test('a call takes back a feature name it set before, even where another session has set it since', async () => {
+  const r = await twoSessions(
+    [
+      { call: 0, params: { features: [NO_PREFERENCE] } },
+      { call: 1, params: { features: [REDUCE] } },
+      { call: 0, params: { features: [] } },
+    ],
+    measure
+  );
+  const [first, since, taken] = r;
+  assert.notEqual(first?.borderLeft, 'rgb(0, 0, 5)');
+  assert.equal(since?.borderLeft, 'rgb(0, 0, 5)');
+  assert.notEqual(taken?.borderLeft, 'rgb(0, 0, 5)');
+});
+
+test('a value Chrome does not read takes its feature back, whichever session set it', async () => {
+  const r = await twoSessions(
+    [
+      { call: 0, params: { features: [LIGHT] } },
+      { call: 1, params: { features: [{ name: 'prefers-color-scheme', value: 'blue' }] } },
+    ],
+    measure
+  );
+  assert.equal(r[0]?.color, 'rgb(1, 0, 0)');
+  assert.notEqual(r[1]?.color, 'rgb(1, 0, 0)');
 });
 
 const safeArea = (insets: Protocol.Emulation.SafeAreaInsets) =>
@@ -379,7 +558,7 @@ test('a <picture> source with a media query is chosen as the emulation has it', 
       const base = await until(() => shown('pici'), '?pic-img');
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
       const printed = await until(() => shown('pici'), '?pic-source');
-      await side.send('Emulation.setEmulatedMedia', {});
+      await side.send('Emulation.setEmulatedMedia', { media: '' });
       return { base, printed, cleared: await until(() => shown('pici'), '?pic-img') };
     });
     assert.deepEqual(r, { base: '?pic-img', printed: '?pic-source', cleared: '?pic-img' });
@@ -405,7 +584,7 @@ test('a <source> media the page sets while emulated is its own once the emulatio
       // The page sets another media while the emulation rewrites this one: the page's value is its own.
       await t.page.evaluate(() => document.getElementById('pic2s')?.setAttribute('media', 'screen'));
       const during = await until(() => shown('pic2i'), '?pic2-img');
-      await side.send('Emulation.setEmulatedMedia', {});
+      await side.send('Emulation.setEmulatedMedia', { media: '' });
       const cleared = await until(() => shown('pic2i'), '?pic2-source');
       const media = await t.page.evaluate(() => document.getElementById('pic2s')?.getAttribute('media'));
       return { printed, during, cleared, media };
@@ -437,7 +616,7 @@ test('the sizes of an <img> are read as the emulation has them, when the image i
       await side.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
       await make(`sz-light-${tag}`);
       const light = await until(() => chosen(`sz-light-${tag}`), 'a');
-      await side.send('Emulation.setEmulatedMedia', {});
+      await side.send('Emulation.setEmulatedMedia', { features: [] });
       await make(`sz-cleared-${tag}`);
       // Cleared, the browser's own scheme is back, whichever it is: compared with Chrome's, not assumed.
       return { base, light, cleared: await steady(() => chosen(`sz-cleared-${tag}`)) };
@@ -474,7 +653,7 @@ test('a <link> or a <style> with a media query is emulated, and so is a rule of 
     const r = await sameOnBoth(async side => {
       await side.send('Emulation.setEmulatedMedia', { media: 'print' });
       const printed = await read();
-      await side.send('Emulation.setEmulatedMedia', {});
+      await side.send('Emulation.setEmulatedMedia', { media: '' });
       return { printed, cleared: await read() };
     });
     assert.deepEqual(r.printed, { letter: '7px', word: '9px' });
@@ -504,7 +683,7 @@ test('a <link> with a media query that loads under the emulation is emulated onc
         await loaded;
       });
       const loaded = await read();
-      await side.send('Emulation.setEmulatedMedia', {});
+      await side.send('Emulation.setEmulatedMedia', { media: '' });
       await t.page.evaluate(() => document.getElementById('lk2')?.remove());
       return { loaded, cleared: await read() };
     });
