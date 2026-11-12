@@ -8,6 +8,7 @@ import { pageRulesRewritten } from '../css/matching/forced-pseudo';
 import {
   type CssomChange,
   cssSupports,
+  onMediaEdit,
   ownCall,
   ownGet,
   ownSet,
@@ -257,6 +258,28 @@ function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
   } else mediaLists.delete(list);
   return fixed.changed;
 }
+
+/**
+ * The page is about to edit `list` entry by entry (appendMedium(), deleteMedium()): a list the emulation rewrote is
+ * given the page's own entries for the call, so that the entry the page names is there, or is not, as in Chrome,
+ * and what the call leaves is the page's list. Returns what rewrites the list again once the call is through.
+ */
+function editMedia(list: object): (() => void) | undefined {
+  if (!isMediaList(list)) return undefined;
+  const record = mediaLists.get(list);
+  const applied = nativeGet<string>(list, 'mediaText');
+  if (!record || record.applied !== applied) return undefined;
+  ownSet(list, 'mediaText', record.original);
+  mediaLists.delete(list);
+  return () => {
+    fixMedia(list, current().media);
+    // The companions of the forced states copy the list: they are made again where it reads another text.
+    if (nativeGet<string>(list, 'mediaText') !== applied) pageRulesRewritten();
+  };
+}
+
+/** A media list, of any realm: one the emulation may have a record of. */
+const isMediaList = (value: object): value is MediaList => mediaLists.has(value as MediaList);
 
 /** Rewrites a declaration block through the CSSOM (ours, not a change of the page's to report). */
 function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean {
@@ -737,10 +760,16 @@ function onRecords(records: MutationRecord[]): void {
 
 /** Starts watching while something is rewritten: the observers, the CSSOM hooks, the trees. */
 function startWatching(): Watching {
+  onMediaEdit(editMedia);
   return {
     observer: new (windowOf().MO)(onRecords),
     observed: new Set(),
-    stops: [watchAdopted(schedule, pageTrees), followTrees(schedule), watchCssom(onCssom, () => realmsOf(pageTrees()))],
+    stops: [
+      watchAdopted(schedule, pageTrees),
+      followTrees(schedule),
+      watchCssom(onCssom, () => realmsOf(pageTrees())),
+      () => onMediaEdit(null),
+    ],
   };
 }
 

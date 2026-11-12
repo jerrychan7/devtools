@@ -48,6 +48,8 @@ export type CssomChange = RuleChange | { kind: 'media' };
  */
 type Listener = (sheet: CSSStyleSheet, text?: string, by?: object, change?: CssomChange) => void;
 type After = (self: unknown, args: unknown[], result: unknown) => void;
+/** Runs before the native function, outside the agent's own code; what it returns runs once that is through. */
+type Before = (self: unknown) => (() => void) | void;
 /** What of a property is hooked: a method, or an accessor's getter or setter. */
 type Part = 'value' | 'get' | 'set';
 
@@ -380,7 +382,15 @@ function validPriority(value: unknown): boolean {
  * Hooks a method, or with `part`, an accessor's setter or getter, calling `after` past the native
  * one, while some session watches and, but with `always`, outside the agent's own code.
  */
-function hook(proto: object, name: string, after: After, part: Part = 'value', always = false, onThrow = false) {
+function hook(
+  proto: object,
+  name: string,
+  after: After,
+  part: Part = 'value',
+  always = false,
+  onThrow = false,
+  before?: Before
+) {
   let hooked = natives.get(proto);
   const key = `${part}:${name}`;
   if (hooked?.has(key)) return;
@@ -398,13 +408,30 @@ function hook(proto: object, name: string, after: After, part: Part = 'value', a
             // Ours, not the page's: its call went through.
           }
       };
+      // What `before` prepared is finished once the native function is through, whether it threw or not.
+      let finish: (() => void) | void = undefined;
+      if (before && listeners.size && !own)
+        try {
+          finish = before(self);
+        } catch {
+          // Ours, not the page's: its call goes on.
+        }
+      const finished = () => {
+        try {
+          finish?.();
+        } catch {
+          // Ours, not the page's: its call went through.
+        }
+      };
       let result: unknown;
       try {
         result = Reflect.apply(f, self, args);
       } catch (e) {
+        finished();
         if (onThrow) tell(undefined);
         throw e;
       }
+      finished();
       tell(result);
       return result;
     },
@@ -605,6 +632,19 @@ export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclarat
   );
 }
 
+/**
+ * Called with a media list the page is about to edit entry by entry (appendMedium(), deleteMedium()), before the
+ * browser's function: the emulation, which rewrote the list, puts the page's own entries back for the call, so
+ * that the entry the page names is found as in Chrome. What it returns runs once the call is through, whether it
+ * threw or not, before the change is told.
+ */
+let mediaEdit: ((list: object) => (() => void) | void) | null = null;
+
+/** Sets (or with null, removes) what prepares a media list for the page's edit of its entries. */
+export function onMediaEdit(prepare: ((list: object) => (() => void) | void) | null): void {
+  mediaEdit = prepare;
+}
+
 /** The rule or sheet each media list belongs to, noted when read (`rule.media`, `sheet.media`). */
 const mediaOwners = new WeakMap<object, CSSRule | CSSStyleSheet>();
 
@@ -714,7 +754,10 @@ function install(realm: Window & typeof globalThis) {
       else if (owner) notify(sheetOf(owner), undefined, inRule(owner));
     };
     hook(realm.MediaList.prototype, 'mediaText', listChanged, 'set');
-    for (const name of ['appendMedium', 'deleteMedium']) hook(realm.MediaList.prototype, name, listChanged);
+    // The page edits the list entry by entry: it is given the entries it wrote for the call (`mediaEdit`).
+    const editing: Before = self => (typeof self === 'object' && self !== null ? mediaEdit?.(self) : undefined);
+    for (const name of ['appendMedium', 'deleteMedium'])
+      hook(realm.MediaList.prototype, name, listChanged, 'value', false, false, editing);
   }
   // A sheet's own media list, noted when read as a rule's is (`sheet.media` is the same list each time).
   // It is an attribute of StyleSheet, the prototype of CSSStyleSheet's, not of CSSStyleSheet itself. The

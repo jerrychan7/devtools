@@ -685,15 +685,15 @@ test('a <link> with a media query that loads under the emulation is emulated onc
 
 test("a sheet's own media list the page sets under the emulation is emulated in the same task", async () => {
   // Each step changes the list, and reads #em's word spacing in the same task: print applies the rule.
-  // The list is not edited entry by entry (deleteMedium() of an entry the emulation rewrote finds none:
-  // the page reads the rewritten text), so the steps set it, and append to it.
-  const step = (id: string, how: 'set' | 'append', text: string) =>
+  // The steps set it, and edit it entry by entry: an entry the page wrote is deleted by the text it wrote.
+  const step = (id: string, how: 'set' | 'append' | 'delete', text: string) =>
     t.page.evaluate(
       ([id, how, text]) => {
         const sheet = (document.getElementById(id) as HTMLLinkElement).sheet;
         if (!sheet) throw new Error('the link has no sheet');
         if (how === 'set') sheet.media.mediaText = text;
-        else sheet.media.appendMedium(text);
+        else if (how === 'append') sheet.media.appendMedium(text);
+        else sheet.media.deleteMedium(text);
         return getComputedStyle(document.getElementById('em') ?? document.body).wordSpacing;
       },
       [id, how, text] as const
@@ -723,6 +723,8 @@ test("a sheet's own media list the page sets under the emulation is emulated in 
         await step(id, 'set', 'screen'),
         await step(id, 'set', 'print'),
         await step(id, 'append', 'screen'),
+        await step(id, 'delete', 'print'),
+        await step(id, 'append', 'print'),
         await step(id, 'set', 'screen'),
       ];
       // A change told a moment late would be counted too: the events of the moment after the steps are waited for.
@@ -740,7 +742,7 @@ test("a sheet's own media list the page sets under the emulation is emulated in 
       }
     }
   });
-  assert.deepEqual(r, { words: ['0px', '9px', '9px', '0px'], changed: 0 });
+  assert.deepEqual(r, { words: ['0px', '9px', '9px', '0px', '9px', '0px'], changed: 0 });
 });
 
 /** A task of the page later: the emulation's observers have rewritten what the page wrote. */
@@ -921,4 +923,51 @@ test('the rules nested in a style rule are emulated: media, safe area insets and
   });
   assert.equal(r.dark.color, 'rgb(0, 0, 1)');
   assert.equal(r.dark.scheme, 'rgb(2, 2, 2)');
+});
+
+test("a rule's media list the page edits entry by entry under the emulation is edited as the page wrote it", async () => {
+  const r = await sameOnBoth(t, async side => {
+    await t.page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<style id="mls">@media screen { #mle { word-spacing: 9px } }</style><div id="mle">mle</div>'
+      );
+    });
+    try {
+      await side.send('Emulation.setEmulatedMedia', { media: 'print' });
+      await nextTask();
+      const during = await t.page.evaluate(() => {
+        const rule = (document.getElementById('mls') as HTMLStyleElement).sheet?.cssRules[0];
+        if (!(rule instanceof CSSMediaRule)) throw new Error('the media rule is not there');
+        const list = rule.media;
+        const word = () => getComputedStyle(document.getElementById('mle') ?? document.body).wordSpacing;
+        const out: unknown[] = [word()];
+        const attempt = (run: () => unknown) => {
+          try {
+            out.push(run() ?? null);
+          } catch (e) {
+            out.push((e as Error).name);
+          }
+          out.push(word());
+        };
+        attempt(() => list.appendMedium('print'));
+        attempt(() => list.deleteMedium('screen'));
+        attempt(() => list.deleteMedium('screen'));
+        attempt(() => list.appendMedium('(min-width: 1px)'));
+        attempt(() => list.appendMedium('print'));
+        return out;
+      });
+      await side.send('Emulation.setEmulatedMedia', {});
+      await nextTask();
+      const after = await t.page.evaluate(() => {
+        const rule = (document.getElementById('mls') as HTMLStyleElement).sheet?.cssRules[0];
+        return rule instanceof CSSMediaRule ? rule.media.mediaText : null;
+      });
+      return { during, after };
+    } finally {
+      await side.send('Emulation.setEmulatedMedia', {});
+      await t.page.evaluate(() => document.querySelectorAll('#mls, #mle').forEach(el => el.remove()));
+    }
+  });
+  assert.equal(r.after, 'print, (min-width: 1px)');
 });
