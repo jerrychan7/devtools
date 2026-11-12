@@ -265,6 +265,20 @@ test('CSS escapes in a feature name and value are decoded too', () => {
   ]);
 });
 
+test('the parts of a list are trimmed as CSS trims them, so that no part reads into the next', () => {
+  expectRewrites({ media: 'print' }, [
+    ['"a\n, print', '"a\n, all'],
+    ['print ', NO_TYPE],
+    ['﻿print', NO_TYPE],
+    ['print\u000b', 'print\u000b'],
+    ['  print  ,  screen  ', `all, ${NO_TYPE}`],
+  ]);
+  expectRewrites({ features: [{ name: 'prefers-color-scheme', value: 'dark' }] }, [
+    ['x\\ , (prefers-color-scheme: dark)', `x\\ , ${TRUE}`],
+    ['a\\\n, (prefers-color-scheme: dark)', `a\\\n, ${TRUE}`],
+  ]);
+});
+
 test('a feature value that is not a single identifier is left alone', () => {
   expectRewrites({ features: [{ name: 'prefers-contrast', value: 'more' }] }, [
     ['(prefers-contrast: 1)', '(prefers-contrast: 1)'],

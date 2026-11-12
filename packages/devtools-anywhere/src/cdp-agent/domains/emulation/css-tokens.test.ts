@@ -17,7 +17,7 @@ const bundled = await build({
   platform: 'neutral',
   write: false,
 });
-const { asciiLower, decodeEscapes, mapDeclarations, mapFunctions, splitMediaQueries } = (await import(
+const { asciiLower, decodeEscapes, mapDeclarations, mapFunctions, splitMediaQueries, trimWhitespace } = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 )) as typeof Tokens;
 
@@ -273,4 +273,21 @@ test('commas in parentheses, functions, brackets, strings, comments, urls and es
 test('a parenthesis that is not closed takes the rest of the list, a stray one does not', () => {
   assert.deepEqual(splitMediaQueries('(a, b'), ['(a, b']);
   assert.deepEqual(splitMediaQueries('a), b'), ['a)', ' b']);
+});
+
+test('trimWhitespace removes the whitespace at the ends, and only what CSS takes for whitespace', () => {
+  assert.equal(trimWhitespace('  print \t\n'), 'print');
+  assert.equal(trimWhitespace('/* a */ print /* b */ '), '/* a */ print /* b */');
+  assert.equal(trimWhitespace('print '), 'print ');
+  assert.equal(trimWhitespace('﻿print'), '﻿print');
+  assert.equal(trimWhitespace('print\u000b'), 'print\u000b');
+  assert.equal(trimWhitespace(' \n '), '');
+  assert.equal(trimWhitespace(''), '');
+});
+
+test('trimWhitespace keeps an escaped space, and the whitespace after a bad string or a backslash', () => {
+  assert.equal(trimWhitespace('x\\ '), 'x\\ ');
+  assert.equal(trimWhitespace('"a\n'), '"a\n');
+  assert.equal(trimWhitespace('a\\\n  '), 'a\\\n  ');
+  assert.equal(trimWhitespace('a\\\r\n'), 'a\\\r\n');
 });

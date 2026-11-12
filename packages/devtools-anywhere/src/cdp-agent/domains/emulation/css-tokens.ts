@@ -198,3 +198,22 @@ export function splitMediaQueries(text: string): string[] {
   parts.push(text.slice(from));
   return parts;
 }
+
+/**
+ * `text` without the whitespace at either end, as CSS sees whitespace: the whitespace tokens, not the
+ * characters JS trims. A space that an escape takes (`x\ `) is part of its identifier and stays. So does
+ * the whitespace after a bad string or a backslash, which ends that token: without it, the comma that
+ * follows would be read as part of the token.
+ */
+export function trimWhitespace(text: string): string {
+  const { kinds, starts } = tokenize(text);
+  const n = kinds.length;
+  let from = 0;
+  while (from < n && kinds[from] === Tok.Ws) from++;
+  let to = n;
+  while (to > from && kinds[to - 1] === Tok.Ws) to--;
+  const last = to - 1;
+  const endsToken = kinds[last] === Tok.BadStr || (kinds[last] === Tok.Delim && text[starts[last] ?? 0] === '\\');
+  if (to < n && to > from && endsToken) to = n;
+  return text.slice(starts[from] ?? text.length, starts[to] ?? text.length);
+}

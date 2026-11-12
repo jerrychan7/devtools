@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { Tok, tokenize } from '../css/sheets/parse/css-lexer';
-import { asciiLower, decodeEscapes, splitMediaQueries } from './css-tokens';
+import { asciiLower, decodeEscapes, splitMediaQueries, trimWhitespace } from './css-tokens';
 import type { Rewrite } from './rewrite';
 
 /**
@@ -130,7 +130,7 @@ export function mediaRewrite(params: Protocol.Emulation.SetEmulatedMediaRequest)
   if (!type && !features.size) return null;
   return text =>
     splitMediaQueries(text)
-      .map(query => rewriteQuery(query.trim(), type, features))
+      .map(query => rewriteQuery(trimWhitespace(query), type, features))
       .join(', ');
 }
 
