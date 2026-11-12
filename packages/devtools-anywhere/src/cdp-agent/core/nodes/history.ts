@@ -1,6 +1,7 @@
 import { FORCE_ATTRIBUTE, isOwn } from './nodes';
 import { shownAttribute } from './written-attributes';
 import { documentOf, isDocument, isElement, isHtml, isShadowRoot } from '../realm';
+import { nativeCall, nativeGet } from '../natives';
 
 /** An edit that can be taken back and done again. */
 export interface Action {
@@ -88,7 +89,7 @@ type Attributes = Map<string, { namespace: string | null; value: string }>;
 /** The attributes as the page wrote them (those the emulation rewrote shown as before it), so that an undo restores the page's. */
 function snapshotAttributes(el: Element): Attributes {
   return new Map(
-    Array.from(el.attributes, a => [
+    Array.from(nativeGet<NamedNodeMap>(el, 'attributes'), a => [
       a.name,
       { namespace: a.namespaceURI, value: shownAttribute(el, a.name, a.value) ?? a.value },
     ])
@@ -96,9 +97,9 @@ function snapshotAttributes(el: Element): Attributes {
 }
 
 function applyAttributes(el: Element, from: Attributes, to: Attributes) {
-  for (const name of from.keys()) if (!to.has(name)) el.removeAttribute(name);
+  for (const name of from.keys()) if (!to.has(name)) nativeCall(el, 'removeAttribute', name);
   for (const [name, { namespace, value }] of to)
-    if (from.get(name)?.value !== value) el.setAttributeNS(namespace, name, value);
+    if (from.get(name)?.value !== value) nativeCall(el, 'setAttributeNS', namespace, name, value);
 }
 
 /** Does `edit` to the attributes of `el` and returns how to undo it. */
@@ -209,18 +210,21 @@ function replaceChild(parent: Node, node: Node, old: Node): Action {
 }
 
 function setAttribute(el: Element, name: string, value: string): Action {
-  const old = el.getAttribute(name);
+  const old = nativeCall<string | null>(el, 'getAttribute', name);
   const action = {
-    undo: () => (old === null ? el.removeAttribute(name) : el.setAttribute(name, old)),
-    redo: () => el.setAttribute(name, value),
+    undo: () => (old === null ? nativeCall(el, 'removeAttribute', name) : nativeCall(el, 'setAttribute', name, old)),
+    redo: () => nativeCall(el, 'setAttribute', name, value),
   };
   action.redo();
   return action;
 }
 
 function removeAttribute(el: Element, name: string): Action {
-  const old = shownAttribute(el, name, el.getAttribute(name)) ?? '';
-  const action = { undo: () => el.setAttribute(name, old), redo: () => el.removeAttribute(name) };
+  const old = shownAttribute(el, name, nativeCall<string | null>(el, 'getAttribute', name)) ?? '';
+  const action = {
+    undo: () => nativeCall(el, 'setAttribute', name, old),
+    redo: () => nativeCall(el, 'removeAttribute', name),
+  };
   action.redo();
   return action;
 }
@@ -259,7 +263,7 @@ function hash(s: string): string {
 
 /** devtools-anywhere's own attribute is neither compared nor patched; the page's values are, as written. */
 const patchedAttributes = (el: Element) =>
-  Array.from(el.attributes)
+  Array.from(nativeGet<NamedNodeMap>(el, 'attributes'))
     .filter(a => a.name !== FORCE_ATTRIBUTE)
     .map(a => ({ name: a.name, value: shownAttribute(el, a.name, a.value) ?? a.value }));
 

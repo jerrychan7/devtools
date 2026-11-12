@@ -802,6 +802,60 @@ test("a page wrapping the element's getAttribute and setAttribute does not see t
   }
 });
 
+test("a page wrapping the element's getAttribute and setAttribute does not see the copy of a rewritten element", async () => {
+  await t.page.evaluate(() =>
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="cpy" style="padding-top: env(safe-area-inset-top, 7px)">cpy</div>'
+    )
+  );
+  // Wrapped after the agent has taken its natives: the calls made on the copy of #cpy are recorded.
+  await t.page.evaluate(() => {
+    const seen: string[] = [];
+    const names = ['getAttribute', 'setAttribute'] as const;
+    const originals = names.map(name => Object.getOwnPropertyDescriptor(Element.prototype, name));
+    Reflect.set(window, 'copied', { seen, originals });
+    names.forEach((name, i) => {
+      const native: unknown = originals[i]?.value;
+      if (typeof native !== 'function') throw new Error(`no ${name}`);
+      Object.defineProperty(Element.prototype, name, {
+        configurable: true,
+        writable: true,
+        value(this: Element, ...args: unknown[]) {
+          if (this.id === 'cpy') seen.push(`${name} ${args.join(' ')}`);
+          return Reflect.apply(native, this, args);
+        },
+      });
+    });
+  });
+  try {
+    // DOM.getOuterHTML of a rewritten element copies it, with the attributes the page gave (shownCopy).
+    const r = await sameOnBoth(async side => {
+      await side.send('DOM.enable');
+      const { root } = await side.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#cpy' });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await settle();
+      const { outerHTML } = await side.send('DOM.getOuterHTML', { nodeId });
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await side.send('DOM.disable');
+      return outerHTML;
+    });
+    assert.match(r, /style="padding-top: env\(safe-area-inset-top, 7px\)"/);
+    const seen = await t.page.evaluate(() => (Reflect.get(window, 'copied') as { seen: string[] }).seen);
+    assert.deepEqual(seen, []);
+  } finally {
+    await t.page.evaluate(() => {
+      const { originals } = Reflect.get(window, 'copied') as { originals: (PropertyDescriptor | undefined)[] };
+      ['getAttribute', 'setAttribute'].forEach((name, i) => {
+        const descriptor = originals[i];
+        if (descriptor) Object.defineProperty(Element.prototype, name, descriptor);
+      });
+      document.getElementById('cpy')?.remove();
+    });
+  }
+});
+
 test('a page guard that puts back the style it had does not loop with the emulation', async () => {
   await t.page.evaluate(() =>
     document.body.insertAdjacentHTML(

@@ -1,4 +1,5 @@
 import { isElement } from '../realm';
+import { nativeCall } from '../natives';
 
 /**
  * An attribute the agent wrote into one of the page's elements (the emulation's rewrites, see
@@ -78,7 +79,8 @@ export function shownCopy(node: Node): Node {
     const target = copies[i];
     if (!target) return;
     for (const [name, record] of writes.get(source) ?? [])
-      if (target.getAttribute(name) === record.applied) target.setAttribute(name, record.original);
+      if (nativeCall<string | null>(target, 'getAttribute', name) === record.applied)
+        nativeCall(target, 'setAttribute', name, record.original);
   });
   return copy;
 }

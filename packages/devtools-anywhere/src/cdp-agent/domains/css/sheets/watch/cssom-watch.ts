@@ -1,3 +1,4 @@
+import { type Native, viaNative } from '../../../../core/natives';
 import { isCssom, realmOf } from '../../../../core/realm';
 import type { CssNatives } from '../../../../probe/types';
 
@@ -8,8 +9,8 @@ import type { CssNatives } from '../../../../probe/types';
  * (`mediaText`, appendMedium(), deleteMedium()), hooked on the prototypes of each realm while
  * someone watches (like adopted.ts). The hooks are proxies of the native functions: their name,
  * length and that they cannot be constructed stay the same, and `toString()` keeps the native
- * form (without the name). The CSS domain's own changes are not reported: made through the
- * native functions (`ownCall`, `ownSet`), past the hooks, or within `ownEdit`.
+ * form (without the name). The agent's own changes are not reported, the CSS domain's and the
+ * emulation's: made through the native functions (`ownCall`, `ownSet`), past the hooks, or within `ownEdit`.
  *
  * A MediaList does not tell its owner: the `media` getters of rules and of sheets note it
  * (`rule.media` and `sheet.media` are the same list each time), so a list taken before anyone
@@ -377,7 +378,7 @@ function validPriority(value: unknown): boolean {
 
 /**
  * Hooks a method, or with `part`, an accessor's setter or getter, calling `after` past the native
- * one, while some session watches and, but with `always`, outside the CSS domain's own code.
+ * one, while some session watches and, but with `always`, outside the agent's own code.
  */
 function hook(proto: object, name: string, after: After, part: Part = 'value', always = false, onThrow = false) {
   let hooked = natives.get(proto);
@@ -511,109 +512,23 @@ export function forgetSheet(sheet: CSSStyleSheet): void {
 }
 
 /**
- * What the agent calls itself, as `part:name`: the CSS domain's changes of the CSSOM, and the
- * attributes of elements the emulation rewrites (domains/emulation/rewrite.ts), which the page's
- * wrappers of `getAttribute` and `setAttribute` must not see.
+ * `viaNative` for the agent's own calls (the CSS domain's, and the emulation's through them): where the
+ * page's native function is not known, the function the page has is called within `ownEdit`, so that the
+ * hooks do not report it as a change.
  */
-const OWN_KEYS = [
-  'value:insertRule',
-  'value:deleteRule',
-  'value:replaceSync',
-  'set:cssText',
-  'set:selectorText',
-  'set:keyText',
-  'set:mediaText',
-  'get:style',
-  // Read by the CSS domain on sheets of its own (style.ts `styleTextFits`).
-  'get:cssRules',
-  'get:length',
-  'value:item',
-  'get:selectorText',
-  'value:getPropertyValue',
-  'value:getAttribute',
-  'value:setAttribute',
-];
-type Native = (...args: unknown[]) => unknown;
-
-/**
- * The functions of `OWN_KEYS` on the top window's interface prototypes, by prototype and by
- * interface name: taken when the agent loads, before our hooks replace them. They are the native
- * ones unless a page script that ran before the agent replaced them already; those are called
- * then, as they were before. Web IDL checks the interface, not the realm: the top page's take an
- * iframe's objects too.
- */
-const topNatives = new Map<object, Map<string, Native>>();
-const ownNatives = new Map<string, Map<string, Native>>();
-for (const name of Object.getOwnPropertyNames(globalThis)) {
-  if (!/^(CSS\w*|Element|MediaList)$/.test(name)) continue;
-  const proto: unknown = (Reflect.get(globalThis, name) as { prototype?: unknown } | undefined)?.prototype;
-  if (typeof proto !== 'object' || proto === null) continue;
-  const found = new Map<string, Native>();
-  for (const key of OWN_KEYS) {
-    const [part, prop] = key.split(':') as [Part, string];
-    const fn: unknown = Object.getOwnPropertyDescriptor(proto, prop)?.[part];
-    if (typeof fn === 'function') found.set(key, fn as Native);
-  }
-  if (!found.size) continue;
-  topNatives.set(proto, found);
-  ownNatives.set(name, found);
-}
-/** The native function found for each prototype and `part:name` (null: none). */
-const nativeCache = new WeakMap<object, Map<string, Native | null>>();
-
-/**
- * The native function `self`'s `part:name` is, up its prototypes: the top window's own, or, in
- * another realm, the top window's of the interface the prototype names (`Symbol.toStringTag`),
- * if it has `name` of its own. The page may rename a prototype: a function that then refuses
- * `self` is given up (`viaNative`).
- */
-function nativeOf(self: object, key: string): Native | null {
-  const proto: unknown = Object.getPrototypeOf(self);
-  if (typeof proto !== 'object' || proto === null) return null;
-  let cached = nativeCache.get(proto);
-  if (!cached) nativeCache.set(proto, (cached = new Map()));
-  let fn = cached.get(key);
-  if (fn !== undefined) return fn;
-  fn = null;
-  const [part, prop] = key.split(':') as [Part, string];
-  for (let p: unknown = proto; !fn && typeof p === 'object' && p !== null; p = Object.getPrototypeOf(p)) {
-    const top = topNatives.get(p);
-    if (top) {
-      fn = top.get(key) ?? null;
-      continue;
-    }
-    if (typeof Object.getOwnPropertyDescriptor(p, prop)?.[part] !== 'function') continue;
-    const tag: unknown = Object.getOwnPropertyDescriptor(p, Symbol.toStringTag)?.value;
-    fn = (typeof tag === 'string' && ownNatives.get(tag)?.get(key)) || null;
-  }
-  cached.set(key, fn);
-  return fn;
+function viaOwn<T>(self: object, key: string, native: (fn: Native) => T, otherwise: () => T): T {
+  return viaNative(self, key, native, () => ownEdit(otherwise));
 }
 
 /**
- * Runs `native` with `self`'s native function for `key`, or `otherwise` within `ownEdit` when
- * there is none, or when it refuses `self` (a TypeError: an interface the page renamed).
- */
-function viaNative<T>(self: object, key: string, native: (fn: Native) => T, otherwise: () => T): T {
-  const fn = nativeOf(self, key);
-  if (fn)
-    try {
-      return native(fn);
-    } catch (e) {
-      if (!(e instanceof TypeError) && (e as { name?: unknown } | null)?.name !== 'TypeError') throw e;
-      nativeCache.get(Object.getPrototypeOf(self) as object)?.set(key, null);
-    }
-  return ownEdit(otherwise);
-}
-
-/**
- * Calls `self`'s method `name` (insertRule(), deleteRule(), replaceSync()), the CSS domain's own
- * change: the native function, past the hooks. The hooks do nothing for it (`own`); called
+ * Calls `self`'s method `name` (insertRule(), deleteRule(), replaceSync(), or an attribute method that
+ * the emulation's rewrites call), the agent's own change: the native function, past the hooks. The hooks do
+ * nothing for it (`own`); called
  * thousands of times when a sheet's text is set rule by rule. Through `ownEdit` for a method with
  * no native function known.
  */
 export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
-  return viaNative(
+  return viaOwn(
     self,
     `value:${name}`,
     fn => Reflect.apply(fn, self, args) as T,
@@ -623,7 +538,7 @@ export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
 
 /** Sets `self`'s `name` (`cssText`, `selectorText`, `keyText`, `mediaText`), like `ownCall`. */
 export function ownSet(self: object, name: string, value: unknown): void {
-  viaNative(
+  viaOwn(
     self,
     `set:${name}`,
     fn => void Reflect.apply(fn, self, [value]),
@@ -633,7 +548,7 @@ export function ownSet(self: object, name: string, value: unknown): void {
 
 /** `self`'s `name` read through the native getter, like `ownCall`. */
 export function ownGet<T>(self: object, name: string): T {
-  return viaNative(
+  return viaOwn(
     self,
     `get:${name}`,
     fn => Reflect.apply(fn, self, []) as T,
@@ -642,9 +557,9 @@ export function ownGet<T>(self: object, name: string): T {
 }
 
 /**
- * The top window's CSSStyleSheet, taken when the agent loads, as `OWN_KEYS` are: a sheet of the CSS
- * domain's own. The native one when the agent loads before the page's scripts (the probe, the
- * Service Worker); a page that replaced it before then has its own called, as for `OWN_KEYS`.
+ * The top window's CSSStyleSheet, taken when the agent loads, as the natives of core/natives.ts are: a
+ * sheet of the CSS domain's own. The native one when the agent loads before the page's scripts (the probe,
+ * the Service Worker); a page that replaced it before then has its own called, as for those natives.
  */
 const TopSheet = CSSStyleSheet;
 export const ownSheet = (): CSSStyleSheet => new TopSheet();
@@ -658,9 +573,9 @@ const protoOf = Object.getPrototypeOf;
 export const isOwnStyleRule = (rule: unknown): rule is CSSStyleRule =>
   typeof rule === 'object' && rule !== null && TopStyleRule !== undefined && protoOf(rule) === TopStyleRule;
 
-/** A rule's style, read by the CSS domain (not taken by the page): through the native getter. */
+/** A rule's style, read by the agent (the CSS domain's, and the emulation's): through the native getter. */
 export function ownStyle(rule: { style: CSSStyleDeclaration }): CSSStyleDeclaration {
-  return viaNative(
+  return viaOwn(
     rule,
     'get:style',
     fn => Reflect.apply(fn, rule, []) as CSSStyleDeclaration,
@@ -883,7 +798,7 @@ export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefi
     }
 }
 
-/** Runs `fn`, the CSS domain's own change, without reporting it. */
+/** Runs `fn`, the agent's own change (the CSS domain's, or the emulation's), without reporting it. */
 export function ownEdit<T>(fn: () => T): T {
   own++;
   try {
