@@ -576,9 +576,9 @@ export function ownGet<T>(self: object, name: string): T {
 // Guarded, as TopStyleRule below is: the module is loaded where there is no CSSOM too (unit tests of the
 // modules using it), and ownSheet() throws where there is none.
 /**
- * The top window's CSSStyleSheet, taken when the agent loads, as the natives of core/natives.ts are: a
- * sheet of the CSS domain's own. The native one when the agent loads before the page's scripts (the probe,
- * the Service Worker); a page that replaced it before then has its own called, as for those natives.
+ * The top window's CSSStyleSheet, taken when the agent loads: a sheet of the CSS domain's own. The native one
+ * when the agent loads before the page's scripts (the probe, the Service Worker); a page that replaced it before
+ * then has its own called. Not one of the probe's natives (probe/natives.ts): a constructor, not a method.
  */
 const TopSheet: typeof CSSStyleSheet | undefined = typeof CSSStyleSheet === 'function' ? CSSStyleSheet : undefined;
 export const ownSheet = (): CSSStyleSheet => {

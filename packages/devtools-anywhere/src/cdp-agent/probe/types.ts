@@ -1,3 +1,5 @@
+import type { NativeTable } from './natives';
+
 /** Global key the probe is installed under, so the CDP agent can find an earlier probe. */
 export const PROBE_KEY = '__devtoolsAnywhereProbe__';
 
@@ -227,10 +229,14 @@ export interface TopNatives {
   MO: typeof MutationObserver;
   observe: MutationObserver['observe'];
   disconnect: MutationObserver['disconnect'];
+  takeRecords: MutationObserver['takeRecords'];
   attach: Element['attachShadow'];
   setAttr: Element['setAttribute'];
   matches: Element['matches'];
   raf: typeof requestAnimationFrame;
+  timeout: typeof setTimeout;
+  /** `performance.now`, called with `performance` as `this`. */
+  now: () => number;
 }
 
 /** @internal */
@@ -279,12 +285,18 @@ export interface Probe {
    */
   css?: CssNatives | undefined;
   /**
-   * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener`, `MutationObserver` and
-   * its `observe` and `disconnect`, `attachShadow`, `setAttribute`, `matches` and
-   * `requestAnimationFrame` taken before the probe's hooks and the page's code: the vision deficiency mask goes on top
-   * and follows the top layer without the page seeing or changing it. Undefined from an older probe.
+   * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener`, `MutationObserver` and its `observe`,
+   * `disconnect` and `takeRecords`, `attachShadow`, `setAttribute`, `matches`, `requestAnimationFrame`,
+   * `setTimeout` and `performance.now`, taken before the probe's hooks and the page's code: the vision deficiency
+   * mask goes on top and follows the top layer without the page seeing or changing it, and the agent's frames,
+   * timers and observers are not the page's. Undefined from an older probe.
    */
   top?: TopNatives | undefined;
+  /**
+   * The functions of the page's interfaces the agent calls (natives.ts), taken before the page's code, as `top`
+   * is. Undefined from an older probe.
+   */
+  natives?: NativeTable | undefined;
   /**
    * What matchMedia() reports while media is emulated (Emulation.setEmulatedMedia): `set` gives the rewrite of
    * the page's media queries (null for none), and the query lists whose results change get a change event in

@@ -5,6 +5,7 @@ import { mergedFrames, NS_STRIDE, nsPrefix } from './core/frames/merged-frames';
 import { NodeRegistry, setNodeIdBase } from './core/nodes/nodes';
 import { ObjectRegistry, setObjectIdPrefix } from './core/objects';
 import { setSheetIdPrefix } from './domains/css/sheets/sheet-registry';
+import { useNatives } from './core/natives';
 import { viewProbe } from './core/probe-view';
 import { realmOf } from './core/realm';
 import { CdpSession } from './core/session';
@@ -141,6 +142,8 @@ const MAX_CONSOLE_MESSAGES = 1000;
  */
 export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   const probe = installProbe();
+  // The functions the probe took before the page's code: the agent calls those, not the page's wrappers.
+  useNatives(probe);
   // The session sets how much the probe keeps: V8 keeps the last 1000 console messages; like
   // Chrome, requests and WebSockets are not limited in number, only their bodies in bytes (set
   // by each session's probe view).

@@ -4,6 +4,7 @@
 import { frames } from '../../core/frames/frames';
 import { OWN_ATTRIBUTE, closestOwn, isOwn, markOwn, ownPopovers } from '../../core/nodes/nodes';
 import type { ShadowRootTracker } from '../../core/nodes/shadow-roots';
+import { captureTop } from '../../probe/natives';
 import type { TopNatives } from '../../probe/types';
 
 /** The SVG filters Chrome puts on the page for each vision deficiency. */
@@ -29,19 +30,7 @@ function matrix(rgb: string): string {
  * hooks, so that our listeners are not listed as the page's either), else those found when this
  * module loaded.
  */
-let natives: TopNatives = {
-  show: HTMLElement.prototype.showPopover,
-  hide: HTMLElement.prototype.hidePopover,
-  listen: EventTarget.prototype.addEventListener,
-  unlisten: EventTarget.prototype.removeEventListener,
-  MO: MutationObserver,
-  observe: MutationObserver.prototype.observe,
-  disconnect: MutationObserver.prototype.disconnect,
-  attach: Element.prototype.attachShadow,
-  setAttr: Element.prototype.setAttribute,
-  matches: Element.prototype.matches,
-  raf: requestAnimationFrame,
-};
+let natives: TopNatives = captureTop();
 
 /** The shadow roots of the frames' documents, whose popovers and dialogs the page toggles too. */
 let shadowRoots: ShadowRootTracker | undefined;

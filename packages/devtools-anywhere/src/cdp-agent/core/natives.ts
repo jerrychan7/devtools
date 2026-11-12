@@ -1,74 +1,38 @@
 /**
  * The page's own functions that the agent calls past the page's wrappers. A page may replace a method
- * the agent calls (`getAttribute`, a CSSOM method) with a wrapper of its own, which would then see the
- * agent's calls and the values they carry: so the agent calls the function the browser has instead,
- * taken when the agent loads, before the page's code runs (the probe takes `setAttribute` earlier still).
+ * the agent calls (`getAttribute`, a CSSOM method) or a window function it calls (`requestAnimationFrame`)
+ * with a wrapper of its own, which would then see the agent's calls and the values they carry: so the agent
+ * calls the function the browser has instead. The probe takes them before the page's code runs
+ * (probe/natives.ts), and `useNatives` gives them to the agent; the functions found when this module loads
+ * stay in use where there is no probe (an older one, or a page that ran code before the agent loaded).
  * Here, so that the agent's core can call them as well as its domains.
  */
+import { captureNatives, captureTop, type Native, type NativeTable, type Part } from '../probe/natives';
+import type { Probe, TopNatives } from '../probe/types';
 
-/** A function of the page's interfaces, called with the object as `this`. */
-export type Native = (...args: unknown[]) => unknown;
+export type { Native };
 
-/** What of a property is taken: a method (`value`), or an accessor's getter (`get`) or setter (`set`). */
-type Part = 'value' | 'get' | 'set';
-
-/**
- * What the agent calls, as `part:name`, on the interfaces `INTERFACES` matches. The CSSOM's are the
- * CSS domain's changes and reads of style sheets (domains/css/sheets/watch/cssom-watch.ts). The
- * attributes are those of elements the emulation rewrites (domains/emulation/rewrite.ts) and that the
- * DOM history reads and writes (core/nodes/history.ts, written-attributes.ts).
- */
-const OWN_KEYS = [
-  'value:insertRule',
-  'value:deleteRule',
-  'value:replaceSync',
-  'set:cssText',
-  'set:selectorText',
-  'set:keyText',
-  'set:mediaText',
-  'get:style',
-  // Read by the CSS domain on sheets of its own (style.ts `styleTextFits`).
-  'get:cssRules',
-  'get:length',
-  'value:item',
-  'get:selectorText',
-  'value:getPropertyValue',
-  // Read by the emulation's merge of declaration blocks (domains/emulation/merge.ts).
-  'value:getPropertyPriority',
-  'value:getAttribute',
-  'value:setAttribute',
-  'value:removeAttribute',
-  'value:setAttributeNS',
-  'get:attributes',
-];
-
-/** The interfaces whose functions of `OWN_KEYS` are taken: the CSSOM's, and Element's. */
-const INTERFACES = /^(CSS\w*|Element|MediaList)$/;
-
-/**
- * The functions of `OWN_KEYS` on the top window's interface prototypes, by prototype and by interface
- * name: taken when the agent loads, before anything the page runs can replace them. They are the native
- * ones unless a page script that ran before the agent replaced them already; those are called then, as
- * they were before. Web IDL checks the interface, not the realm: the top page's take an iframe's objects too.
- */
-const topNatives = new Map<object, Map<string, Native>>();
-const ownNatives = new Map<string, Map<string, Native>>();
-for (const name of Object.getOwnPropertyNames(globalThis)) {
-  if (!INTERFACES.test(name)) continue;
-  const proto: unknown = (Reflect.get(globalThis, name) as { prototype?: unknown } | undefined)?.prototype;
-  if (typeof proto !== 'object' || proto === null) continue;
-  const found = new Map<string, Native>();
-  for (const key of OWN_KEYS) {
-    const [part, prop] = key.split(':') as [Part, string];
-    const fn: unknown = Object.getOwnPropertyDescriptor(proto, prop)?.[part];
-    if (typeof fn === 'function') found.set(key, fn as Native);
-  }
-  if (!found.size) continue;
-  topNatives.set(proto, found);
-  ownNatives.set(name, found);
-}
+/** The page's interfaces' functions in use: the probe's, else those found when this module loaded. */
+let table: NativeTable = captureNatives();
+/** The window's functions in use (`windowOf`): none outside a browser (a unit test of a module importing this one). */
+let top: TopNatives | undefined = typeof MutationObserver === 'function' ? captureTop() : undefined;
 /** The native function found for each prototype and `part:name` (null: none). */
-const nativeCache = new WeakMap<object, Map<string, Native | null>>();
+let nativeCache = new WeakMap<object, Map<string, Native | null>>();
+
+/** Takes the functions the probe saved before the page's code (`probe.natives`, `probe.top`), where it has them. */
+export function useNatives(probe: Probe): void {
+  if (probe.natives) {
+    table = probe.natives;
+    nativeCache = new WeakMap();
+  }
+  if (probe.top) top = probe.top;
+}
+
+/** The window's functions the agent calls: frames, timers, the clock, the observers and the listeners. */
+export function windowOf(): TopNatives {
+  if (!top) throw new TypeError('the window natives are not there: this is not a browser');
+  return top;
+}
 
 /**
  * The native function `self`'s `part:name` is, up its prototypes: the top window's own, or, in another
@@ -85,14 +49,14 @@ function nativeOf(self: object, key: string): Native | null {
   fn = null;
   const [part, prop] = key.split(':') as [Part, string];
   for (let p: unknown = proto; !fn && typeof p === 'object' && p !== null; p = Object.getPrototypeOf(p)) {
-    const top = topNatives.get(p);
-    if (top) {
-      fn = top.get(key) ?? null;
+    const found = table.byProto.get(p);
+    if (found) {
+      fn = found.get(key) ?? null;
       continue;
     }
     if (typeof Object.getOwnPropertyDescriptor(p, prop)?.[part] !== 'function') continue;
     const tag: unknown = Object.getOwnPropertyDescriptor(p, Symbol.toStringTag)?.value;
-    fn = (typeof tag === 'string' && ownNatives.get(tag)?.get(key)) || null;
+    fn = (typeof tag === 'string' && table.byName.get(tag)?.get(key)) || null;
   }
   cached.set(key, fn);
   return fn;
@@ -134,5 +98,15 @@ export function nativeGet<T>(self: object, name: string): T {
     `get:${name}`,
     fn => Reflect.apply(fn, self, []) as T,
     () => Reflect.get(self, name) as T
+  );
+}
+
+/** `self`'s `name` assigned through the page's native setter, like `nativeCall`. */
+export function nativeSet(self: object, name: string, value: unknown): void {
+  viaNative(
+    self,
+    `set:${name}`,
+    fn => void Reflect.apply(fn, self, [value]),
+    () => void Reflect.set(self, name, value)
   );
 }

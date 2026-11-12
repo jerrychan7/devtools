@@ -6,6 +6,7 @@
 // probe exists, so every API is hooked exactly once either way.
 import { hookMedia, mediaState } from './media';
 import { hookNetwork, keep, now, type NetworkSink } from './network';
+import { captureNatives, captureTop } from './natives';
 import {
   PROBE_KEY,
   type ListenerRecord,
@@ -14,7 +15,6 @@ import {
   type ProbeRequest,
   type SocketRecord,
   type ToolRecord,
-  type TopNatives,
 } from './types';
 
 import { isShellPage, readShellConfig, writeShellDocument } from './shell';
@@ -54,19 +54,8 @@ export function installProbe(): Probe {
   const animProto = w.Animation?.prototype;
   const own = (name: string) => Object.getOwnPropertyDescriptor(animProto, name);
   // Before hookListeners() and hookShadowRoots() below.
-  const natives: TopNatives = {
-    show: HTMLElement.prototype.showPopover,
-    hide: HTMLElement.prototype.hidePopover,
-    listen: EventTarget.prototype.addEventListener,
-    unlisten: EventTarget.prototype.removeEventListener,
-    MO: MutationObserver,
-    observe: MutationObserver.prototype.observe,
-    disconnect: MutationObserver.prototype.disconnect,
-    attach: Element.prototype.attachShadow,
-    setAttr: Element.prototype.setAttribute,
-    matches: Element.prototype.matches,
-    raf: requestAnimationFrame,
-  };
+  const natives = captureTop();
+  const table = captureNatives();
   const media = mediaState(natives);
   const probe: Probe = {
     version: 1,
@@ -124,6 +113,7 @@ export function installProbe(): Probe {
     },
     css: w.CSS && { CSS: w.CSS, supports: w.CSS.supports },
     top: natives,
+    natives: table,
     media: { set: media.set },
     listeners: new WeakMap(),
     ownUrls: new Set(),

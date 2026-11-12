@@ -1,4 +1,5 @@
 {
+  "core/natives.ts": 1,
   "core/nodes/history.ts": 1,
   "domains/css/style.ts": 1,
   "domains/css/user-agent/user-agent.ts": 1,
