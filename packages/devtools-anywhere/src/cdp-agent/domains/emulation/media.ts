@@ -125,11 +125,13 @@ function rewriteQuery(query: string, type: string, features: ReadonlyMap<string,
  * lowercased. What follows it is ignored; a value that starts with whitespace, or with no identifier, is none.
  */
 function emulatedValue(value: string): string | undefined {
-  const { kinds, starts } = tokenize(value);
+  // As CSS reads it (CSS Syntax 3.3), a NUL is U+FFFD, a name character: it belongs to the identifier.
+  const text = value.replaceAll('\u0000', '\uFFFD');
+  const { kinds, starts } = tokenize(text);
   let i = 0;
   while (kinds[i] === Tok.Comment) i++;
   if (kinds[i] !== Tok.Ident) return undefined;
-  return asciiLower(decodeEscapes(value.slice(starts[i], starts[i + 1] ?? value.length)));
+  return asciiLower(decodeEscapes(text.slice(starts[i], starts[i + 1] ?? text.length)));
 }
 
 /**

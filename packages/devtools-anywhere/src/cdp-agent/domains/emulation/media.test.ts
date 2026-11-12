@@ -231,13 +231,27 @@ test('a feature value is read as Chrome reads it: its first identifier, escapes 
     ['light dark', true],
     ['/**/light', true],
     ['dark light', false],
+    ['light)', true],
+    ['light!important', true],
+    ['light/**/dark', true],
   ];
   for (const [value, light] of cases) {
     expectRewrites({ features: [{ name: 'prefers-color-scheme', value }] }, [
       ['(prefers-color-scheme: light)', light ? TRUE : FALSE],
     ]);
   }
-  for (const value of [' light', '\tlight', 'light\\', 'l\\69ght\\20', 'light\u00a0', '']) {
+  for (const value of [
+    ' light',
+    '\tlight',
+    '\flight',
+    'light\\',
+    'l\\69ght\\20',
+    'light\u00a0',
+    'light\u0000',
+    '\u0000light',
+    'light\u0000dark',
+    '',
+  ]) {
     assert.equal(mediaRewrite({ features: [{ name: 'prefers-color-scheme', value }] }), null, JSON.stringify(value));
   }
 });
