@@ -54,12 +54,22 @@ test('an inset not set is wrapped too, so that its value stays the real one', ()
   ]);
 });
 
-test('a function around env(), and spacing and case in the name and arguments', () => {
+test('a function around env(), and spacing in the name and arguments', () => {
   expectRewrites([
     ['calc(env(safe-area-inset-top) + 1px)', 'calc(var(--da-sai-top, env(safe-area-inset-top)) + 1px)'],
-    ['ENV(SAFE-AREA-INSET-TOP)', 'var(--da-sai-top, env(SAFE-AREA-INSET-TOP))'],
     ['env( safe-area-inset-top )', 'var(--da-sai-top, env( safe-area-inset-top ))'],
-    ['ENV( SAFE-AREA-INSET-TOP , 7px )', 'var(--da-sai-top, env( SAFE-AREA-INSET-TOP , 7px ))'],
+    ['ENV(safe-area-inset-top)', 'var(--da-sai-top, env(safe-area-inset-top))'],
+  ]);
+});
+
+// The function's name is ASCII case-insensitive; an environment variable's name is case-sensitive, as Chrome reads it
+// (a name in other case is not an inset, and its fallback is the value).
+test('the case of the environment variable name matters, the function name does not', () => {
+  expectRewrites([
+    ['ENV(SAFE-AREA-INSET-TOP)', 'ENV(SAFE-AREA-INSET-TOP)'],
+    ['env(Safe-Area-Inset-Top, 7px)', 'env(Safe-Area-Inset-Top, 7px)'],
+    ['ENV( SAFE-AREA-INSET-TOP , 7px )', 'ENV( SAFE-AREA-INSET-TOP , 7px )'],
+    ['ENV(safe-area-inset-top, 7px)', 'var(--da-sai-top, env(safe-area-inset-top, 7px))'],
   ]);
 });
 
@@ -195,8 +205,6 @@ test('unwrapping leaves the other var() calls alone', () => {
 test('the style sheet sets a custom property for each inset set, in px, and none for the others', () => {
   assert.equal(safeAreaCss({}), null);
   assert.equal(safeAreaCss({ top: 5 }), ':root{--da-sai-top:5px}');
-  // A negative inset is written as it is. Chrome makes its env() unavailable, so the fallback applies there: a known
-  // difference (docs/limitations.md), not Chrome's behaviour.
   assert.equal(safeAreaCss({ rightMax: 0, bottom: -3 }), ':root{--da-sai-bottom:-3px;--da-sai-max-right:0px}');
   assert.equal(
     safeAreaCss({ top: 1, topMax: 2, left: 3, leftMax: 4, bottom: 5, bottomMax: 6, right: 7, rightMax: 8 }),

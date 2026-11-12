@@ -642,6 +642,69 @@ test('an inset that is not an int32 fails, as Chrome fails it', async () => {
   assert.notEqual(r.paddingTop, '0px');
 });
 
+test("an environment variable's name is case-sensitive, as in Chrome, and the function's name is not", async () => {
+  // A name in other case is not an inset: its fallback applies, or nothing does without one. The function's name
+  // may be in any case. Each value is what Chrome gives under a top inset of 9px.
+  const sheetRules: [string, string][] = [
+    ['cs-a', 'ENV(safe-area-inset-top, 5px)'],
+    ['cs-b', 'env(SAFE-AREA-INSET-TOP, 5px)'],
+    ['cs-c', 'env(SAFE-AREA-INSET-TOP)'],
+    ['cs-d', 'Env(safe-area-inset-top, 5px)'],
+    ['cs-e', 'env(Safe-Area-Inset-Top, 5px)'],
+  ];
+  const inlines: [string, string][] = [
+    ['ci-a', 'ENV(safe-area-inset-top, 5px)'],
+    ['ci-b', 'env(SAFE-AREA-INSET-TOP, 5px)'],
+    ['ci-c', 'env(SAFE-AREA-INSET-TOP)'],
+  ];
+  const ids = [...sheetRules, ...inlines].map(([id]) => id);
+  await t.page.evaluate(
+    ({ sheetRules, inlines }) => {
+      const style = document.createElement('style');
+      style.id = 'case-sheet';
+      style.textContent = sheetRules.map(([id, value]) => `#${id} { padding-top: ${value} }`).join('\n');
+      document.head.appendChild(style);
+      const elements = [
+        ...sheetRules.map(([id]) => `<div id="${id}">c</div>`),
+        ...inlines.map(([id, value]) => `<div id="${id}" style="padding-top: ${value}">c</div>`),
+      ];
+      document.body.insertAdjacentHTML('beforeend', elements.join(''));
+    },
+    { sheetRules, inlines }
+  );
+  try {
+    const r = await sameOnBoth(t, async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 9 } });
+      await settle();
+      const values = await t.page.evaluate(
+        ids =>
+          ids.map(id => ({ id, padding: getComputedStyle(document.getElementById(id) ?? document.body).paddingTop })),
+        ids
+      );
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      return values;
+    });
+    assert.deepEqual(
+      r.map(({ id, padding }) => [id, padding]),
+      [
+        ['cs-a', '9px'],
+        ['cs-b', '5px'],
+        ['cs-c', '0px'],
+        ['cs-d', '9px'],
+        ['cs-e', '5px'],
+        ['ci-a', '9px'],
+        ['ci-b', '5px'],
+        ['ci-c', '0px'],
+      ]
+    );
+  } finally {
+    await t.page.evaluate(ids => {
+      document.getElementById('case-sheet')?.remove();
+      for (const id of ids) document.getElementById(id)?.remove();
+    }, ids);
+  }
+});
+
 test('an env() that is not an inset keeps its fallback, and an inset inside it is emulated', async () => {
   await t.page.evaluate(() => {
     const style = document.createElement('style');

@@ -468,6 +468,9 @@ function fixElement(el: Element, act: Active, paced = false): boolean {
   return changed;
 }
 
+/** A call of env() in a declaration block's text, whatever the case of its name (CSS compares function names so). */
+const ENV_CALL = /env\(/i;
+
 /** Rewrites a rule through the CSSOM: its media, its declarations, and what it holds. */
 function fixRule(rule: CSSRule, act: Active): boolean {
   if (isCssom(rule, 'CSSImportRule')) {
@@ -479,7 +482,10 @@ function fixRule(rule: CSSRule, act: Active): boolean {
   const style: unknown = 'style' in rule ? ownStyle(rule as CSSRule & { style: CSSStyleDeclaration }) : null;
   // A block using env() or color-scheme is read again on every change, and so is one this rewrote before
   // (styles.has), which is restored when the rewrite is gone.
-  if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || /env\(|color-scheme/.test(style.cssText)))
+  if (
+    isCssom(style, 'CSSStyleDeclaration') &&
+    (styles.has(style) || ENV_CALL.test(style.cssText) || /color-scheme/.test(style.cssText))
+  )
     changed = fixStyle(style, act.values) || changed;
   if (isCssom(rule, 'CSSGroupingRule') || isCssom(rule, 'CSSKeyframesRule'))
     for (const inner of Array.from(rule.cssRules)) changed = fixRule(inner, act) || changed;
