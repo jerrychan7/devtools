@@ -279,6 +279,15 @@ test('the parts of a list are trimmed as CSS trims them, so that no part reads i
   ]);
 });
 
+test('layer is a keyword, not a media type, so a query with it is left to the browser', () => {
+  expectRewrites({ media: 'print' }, [
+    ['layer', 'layer'],
+    ['not layer', 'not layer'],
+    ['only layer', 'only layer'],
+    ['print, layer', 'all, layer'],
+  ]);
+});
+
 test('a feature value that is not a single identifier is left alone', () => {
   expectRewrites({ features: [{ name: 'prefers-contrast', value: 'more' }] }, [
     ['(prefers-contrast: 1)', '(prefers-contrast: 1)'],

@@ -25,8 +25,8 @@ const TRUE = '(min-width: 0px)';
 const FALSE = '(not (min-width: 0px))';
 /** A media type no medium is: put in place of the types other than the emulated one. */
 const NO_TYPE = 'devtools-anywhere-none';
-/** Words that are never a media type. */
-const KEYWORDS = new Set(['and', 'not', 'only', 'or']);
+/** Words that are never a media type: `layer` too, as the media type production leaves it out (Media Queries 4). */
+const KEYWORDS = new Set(['and', 'layer', 'not', 'only', 'or']);
 
 /** Whether `(name: wanted)` holds where the feature `name` is `value`. */
 function holds(name: string, value: string, wanted: string | undefined): boolean {
