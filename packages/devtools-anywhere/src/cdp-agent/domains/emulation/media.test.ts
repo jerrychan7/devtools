@@ -168,9 +168,40 @@ test('prefers-contrast with a value, and a feature value is compared without cas
     ['(prefers-contrast: less)', FALSE],
     ['(prefers-contrast)', TRUE],
   ]);
-  expectRewrites({ features: [{ name: 'Prefers-Color-Scheme', value: 'DARK' }] }, [
+  expectRewrites({ features: [{ name: 'prefers-color-scheme', value: 'DARK' }] }, [
     ['(prefers-color-scheme: dark)', TRUE],
   ]);
+});
+
+test('feature names are compared as they are: Chrome takes no other spelling of one', () => {
+  for (const name of [
+    'Prefers-Color-Scheme',
+    'PREFERS-COLOR-SCHEME',
+    'prefers-color-schem\\65',
+    ' prefers-color-scheme',
+  ]) {
+    assert.equal(mediaRewrite({ features: [{ name, value: 'dark' }] }), null, name);
+  }
+});
+
+test('a feature value is read as Chrome reads it: its first identifier, escapes decoded, the rest ignored', () => {
+  const cases: [string, boolean][] = [
+    ['light', true],
+    ['LIGHT ', true],
+    ['\\6c ight', true],
+    ['light light', true],
+    ['light dark', true],
+    ['/**/light', true],
+    ['dark light', false],
+  ];
+  for (const [value, light] of cases) {
+    expectRewrites({ features: [{ name: 'prefers-color-scheme', value }] }, [
+      ['(prefers-color-scheme: light)', light ? TRUE : FALSE],
+    ]);
+  }
+  for (const value of [' light', '\tlight', 'light\\', 'l\\69ght\\20', 'light ', '']) {
+    assert.equal(mediaRewrite({ features: [{ name: 'prefers-color-scheme', value }] }), null, JSON.stringify(value));
+  }
 });
 
 test('features that are not emulated, and ranges, are left alone', () => {

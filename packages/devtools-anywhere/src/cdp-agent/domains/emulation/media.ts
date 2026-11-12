@@ -5,9 +5,11 @@ import type { Rewrite } from './rewrite';
 
 /**
  * The media features Emulation.setEmulatedMedia can set here, with their values. Chrome ignores
- * a value it does not know (the feature keeps its real value); so do we, and with names too.
- * prefers-reduced-data is not one of them: Chrome 157 does not emulate it (set to either value, it
- * matches nothing), so its queries are left to the browser.
+ * a value it does not know (the feature keeps its real value), and so do we, with names too. But such
+ * a value given after a known one for the same feature cancels it: Chrome keeps only the last value
+ * given for a name. A query names the same values: one with another value is unknown, and is left as
+ * it is (rewriteQuery). prefers-reduced-data is not one of them: Chrome 157 does not emulate it (set to
+ * either value, it matches nothing), so its queries are not rewritten.
  */
 const FEATURES: Record<string, string[]> = {
   'prefers-color-scheme': ['light', 'dark'],
@@ -28,13 +30,15 @@ const NO_TYPE = 'devtools-anywhere-none';
 /** Words that are never a media type: `layer` too, as the media type production leaves it out (Media Queries 4). */
 const KEYWORDS = new Set(['and', 'layer', 'not', 'only', 'or']);
 
-/** Whether `(name: wanted)` holds where the feature `name` is `value`. */
+/**
+ * Whether `(name: wanted)` holds where the feature `name` is `value`. `wanted` is one of the feature's values
+ * (rewriteQuery checks it first), and so is `value` (mediaRewrite does), so both have a place in the order.
+ */
 function holds(name: string, value: string, wanted: string | undefined): boolean {
   if (wanted === undefined) return !FALSE_IN_BOOLEAN.has(value);
   if (name !== 'color-gamut') return wanted === value;
   const order = FEATURES[name] ?? [];
-  const at = order.indexOf(wanted);
-  return at >= 0 && at <= order.indexOf(value);
+  return order.indexOf(wanted) <= order.indexOf(value);
 }
 
 /**
@@ -74,7 +78,10 @@ function rewriteQuery(query: string, type: string, features: ReadonlyMap<string,
   const isType = type !== '' && name !== undefined && !KEYWORDS.has(name) && (next >= n || word(next) === 'and');
   const typeText = name === 'all' || name === type ? 'all' : NO_TYPE;
 
-  /** The feature block whose `(` is token `open`, if the emulation sets it: its last token, and what it becomes. */
+  /**
+   * The feature block whose `(` is token `open`, if the emulation sets it and the block names one of its
+   * values: its last token, and what it becomes.
+   */
   const feature = (open: number): { end: number; becomes: string } | null => {
     const nameAt = skip(open + 1);
     const key = word(nameAt);
@@ -113,6 +120,19 @@ function rewriteQuery(query: string, type: string, features: ReadonlyMap<string,
 }
 
 /**
+ * The value that Emulation.setEmulatedMedia gives a feature, read as Chrome reads it: the first identifier of
+ * the value, once the comments before it are skipped, with its escapes decoded and its ASCII letters
+ * lowercased. What follows it is ignored; a value that starts with whitespace, or with no identifier, is none.
+ */
+function emulatedValue(value: string): string | undefined {
+  const { kinds, starts } = tokenize(value);
+  let i = 0;
+  while (kinds[i] === Tok.Comment) i++;
+  if (kinds[i] !== Tok.Ident) return undefined;
+  return asciiLower(decodeEscapes(value.slice(starts[i], starts[i + 1] ?? value.length)));
+}
+
+/**
  * The rewrite of media query lists for Emulation.setEmulatedMedia's params, or null when they
  * emulate nothing: each query for the emulated media type (`print`) has its type made `all`, and
  * the queries for another type one matching nothing; each emulated feature is made a condition
@@ -122,10 +142,10 @@ export function mediaRewrite(params: Protocol.Emulation.SetEmulatedMediaRequest)
   const type = asciiLower(params.media ?? '');
   const features = new Map<string, string>();
   for (const { name, value } of params.features ?? []) {
-    const key = asciiLower(name);
-    const v = asciiLower(value);
-    // Own properties only: `constructor` is not a feature.
-    if (Object.hasOwn(FEATURES, key) && FEATURES[key]?.includes(v)) features.set(key, v);
+    const v = emulatedValue(value);
+    // Own properties only: `constructor` is not a feature. The name is compared as it is: Chrome takes
+    // `Prefers-Color-Scheme` for no feature.
+    if (Object.hasOwn(FEATURES, name) && v !== undefined && FEATURES[name]?.includes(v)) features.set(name, v);
   }
   if (!type && !features.size) return null;
   return text =>
