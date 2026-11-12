@@ -199,7 +199,7 @@ test('a feature value is read as Chrome reads it: its first identifier, escapes 
       ['(prefers-color-scheme: light)', light ? TRUE : FALSE],
     ]);
   }
-  for (const value of [' light', '\tlight', 'light\\', 'l\\69ght\\20', 'light ', '']) {
+  for (const value of [' light', '\tlight', 'light\\', 'l\\69ght\\20', 'light\u00a0', '']) {
     assert.equal(mediaRewrite({ features: [{ name: 'prefers-color-scheme', value }] }), null, JSON.stringify(value));
   }
 });
@@ -299,8 +299,9 @@ test('CSS escapes in a feature name and value are decoded too', () => {
 test('the parts of a list are trimmed as CSS trims them, so that no part reads into the next', () => {
   expectRewrites({ media: 'print' }, [
     ['"a\n, print', '"a\n, all'],
-    ['print ', NO_TYPE],
-    ['﻿print', NO_TYPE],
+    ['print\u00a0', NO_TYPE],
+    ['\ufeffprint', NO_TYPE],
+    ['print\ufeff', NO_TYPE],
     ['print\u000b', 'print\u000b'],
     ['  print  ,  screen  ', `all, ${NO_TYPE}`],
   ]);

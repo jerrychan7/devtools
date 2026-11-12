@@ -278,8 +278,8 @@ test('a parenthesis that is not closed takes the rest of the list, a stray one d
 test('trimWhitespace removes the whitespace at the ends, and only what CSS takes for whitespace', () => {
   assert.equal(trimWhitespace('  print \t\n'), 'print');
   assert.equal(trimWhitespace('/* a */ print /* b */ '), '/* a */ print /* b */');
-  assert.equal(trimWhitespace('print '), 'print ');
-  assert.equal(trimWhitespace('﻿print'), '﻿print');
+  assert.equal(trimWhitespace('print\u00a0'), 'print\u00a0');
+  assert.equal(trimWhitespace('\ufeffprint'), '\ufeffprint');
   assert.equal(trimWhitespace('print\u000b'), 'print\u000b');
   assert.equal(trimWhitespace(' \n '), '');
   assert.equal(trimWhitespace(''), '');

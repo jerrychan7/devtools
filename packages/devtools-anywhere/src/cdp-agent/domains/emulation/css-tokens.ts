@@ -36,10 +36,10 @@ export function decodeEscapes(text: string): string {
   return text.replace(
     /\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|([\s\S])|$)/g,
     (_escape: string, hex: string | undefined, char: string | undefined) => {
-      if (hex === undefined) return char ?? '�';
+      if (hex === undefined) return char ?? '\uFFFD';
       const code = parseInt(hex, 16);
       const valid = code !== 0 && (code < 0xd800 || code > 0xdfff) && code <= 0x10ffff;
-      return valid ? String.fromCodePoint(code) : '�';
+      return valid ? String.fromCodePoint(code) : '\uFFFD';
     }
   );
 }
