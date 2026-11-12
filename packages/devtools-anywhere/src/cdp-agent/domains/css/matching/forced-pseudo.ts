@@ -2,6 +2,7 @@ import { hideAdopted, quietly } from '../../../core/nodes/adopted';
 import { frames } from '../../../core/frames/frames';
 import { isCssom, isShadowRoot, realmOf } from '../../../core/realm';
 import { FORCE_ATTRIBUTE } from '../../../core/nodes/nodes';
+import { nativeCall } from '../../../core/natives';
 import { ownStyle } from '../sheets/watch/cssom-watch';
 
 /** A document or shadow root: what style sheets apply to. */
@@ -118,8 +119,8 @@ class SharedForcedPseudoClasses {
   /** Puts the marker attribute in line with what is forced on `el`. */
   private mark(el: Element) {
     const classes = this.forced.get(el);
-    if (classes) el.setAttribute(FORCE_ATTRIBUTE, [...classes].join(' '));
-    else el.removeAttribute(FORCE_ATTRIBUTE);
+    if (classes) nativeCall(el, 'setAttribute', FORCE_ATTRIBUTE, [...classes].join(' '));
+    else nativeCall(el, 'removeAttribute', FORCE_ATTRIBUTE);
   }
 
   /** Forgets `owner`'s elements of `elements` (all of them by default). */
@@ -136,7 +137,7 @@ class SharedForcedPseudoClasses {
   /** Forgets `el` for every session. */
   private forget(el: Element) {
     for (const owner of this.owners.keys()) this.release(owner, [el]);
-    el.removeAttribute(FORCE_ATTRIBUTE);
+    nativeCall(el, 'removeAttribute', FORCE_ATTRIBUTE);
   }
 
   /** Whether `sheet` is one of our companions rather than a sheet of the page. */

@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { childTargets } from '../frames/child-targets';
 import type { FrameRegistry } from '../frames/frames';
+import { nativeGet } from '../natives';
 import { shownAttribute } from './written-attributes';
 import {
   contentDocumentOf,
@@ -81,7 +82,7 @@ export const HIDDEN_SELECTOR = HIDDEN_ATTRIBUTES.map(name => `[${name}]`).join('
  * the emulation wrote shown as the page gave them.
  */
 export const visibleAttributes = (el: Element) =>
-  Array.from(el.attributes)
+  Array.from(nativeGet<NamedNodeMap>(el, 'attributes'))
     .filter(a => !HIDDEN_ATTRIBUTES.includes(a.name))
     .flatMap(a => [a.name, shownAttribute(el, a.name, a.value) ?? a.value]);
 

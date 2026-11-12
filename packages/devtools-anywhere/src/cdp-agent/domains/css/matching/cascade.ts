@@ -22,6 +22,7 @@ import type { UserAgentStyles } from '../user-agent/user-agent';
 import { type CSSStyle, INLINE_PREFIX, buildStyle, sources, splitPseudoElement } from '../style';
 import { ownSet } from '../sheets/watch/cssom-watch';
 import { shownAttribute } from '../../../core/nodes/written-attributes';
+import { nativeCall } from '../../../core/natives';
 import { ViewTransitionClasses, pseudoClassesMatch, pseudoMatches } from './pseudo-element';
 
 /** A style rule ready for matching: its selectors resolved and split, with forced pseudo-classes rewritten. */
@@ -415,7 +416,7 @@ export class Cascade {
     // Like Chrome, declarations in the order of the style attribute, which the CSSOM does not keep.
     // Where the emulation rewrote the attribute, the declarations are those the page wrote: parsed
     // from its text, not read from the rewritten style.
-    const written = el.getAttribute('style');
+    const written = nativeCall<string | null>(el, 'getAttribute', 'style');
     const attribute = shownAttribute(el, 'style', written);
     const style = attribute !== null && attribute !== written ? parsedStyle(el, attribute) : el.style;
     // None once the page removed it: an attribute of comments only held what the style holds now.

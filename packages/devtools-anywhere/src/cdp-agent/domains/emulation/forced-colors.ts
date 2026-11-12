@@ -1,3 +1,4 @@
+import { nativeCall } from '../../core/natives';
 import { FORCED_COLORS_ATTRIBUTE, OWN_ATTRIBUTE } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
 import { isShadowRoot, styleOf } from '../../core/realm';
@@ -177,13 +178,13 @@ function track(el: Element): void {
  * the agent's: no DOM event of the client reports it.
  */
 function mark(el: Element, value: string | null): void {
-  const before = el.getAttribute(FORCED_COLORS_ATTRIBUTE);
+  const before = nativeCall<string | null>(el, 'getAttribute', FORCED_COLORS_ATTRIBUTE);
   if (value !== null) track(el);
   if (before === value) return;
   quietMutations(
     () => {
-      if (value === null) el.removeAttribute(FORCED_COLORS_ATTRIBUTE);
-      else el.setAttribute(FORCED_COLORS_ATTRIBUTE, value);
+      if (value === null) nativeCall(el, 'removeAttribute', FORCED_COLORS_ATTRIBUTE);
+      else nativeCall(el, 'setAttribute', FORCED_COLORS_ATTRIBUTE, value);
     },
     { target: el, name: FORCED_COLORS_ATTRIBUTE, before }
   );

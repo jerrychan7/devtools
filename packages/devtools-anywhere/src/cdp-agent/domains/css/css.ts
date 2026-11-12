@@ -15,6 +15,7 @@ import { type Context, type MatchingStyle } from '../../core/context';
 import { OWN_ATTRIBUTE, PSEUDO_TYPES, isOwn, markOwn, PseudoElement, type PseudoType } from '../../core/nodes/nodes';
 import { parentOf } from '../../core/style/container-query';
 import { CdpError } from '../../core/session';
+import { nativeCall } from '../../core/natives';
 import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
 import { historyOf, type Action } from '../../core/nodes/history';
@@ -359,14 +360,14 @@ export function registerCss(ctx: Context) {
       const el = ctx.nodes.getByBackendId(Number(edit.styleSheetId.slice(INLINE_PREFIX.length)));
       if (!isNode(el) || !(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Node not found');
       // As the page wrote it: an undo gives the page's text back, not the one the emulation rewrote.
-      const old = shownAttribute(el, 'style', el.getAttribute('style'));
+      const old = shownAttribute(el, 'style', nativeCall<string | null>(el, 'getAttribute', 'style'));
       const oldSource = sources.get(el.style);
       if (!styleTextFits(edit.text)) throw new CdpError(INVALID_STYLE); // As Chrome, as for a rule's.
       perform(
-        () => setStyleText(el.style, edit.text, () => el.setAttribute('style', edit.text)),
+        () => setStyleText(el.style, edit.text, () => nativeCall(el, 'setAttribute', 'style', edit.text)),
         () => {
-          if (old === null) el.removeAttribute('style');
-          else el.setAttribute('style', old);
+          if (old === null) nativeCall(el, 'removeAttribute', 'style');
+          else nativeCall(el, 'setAttribute', 'style', old);
           if (oldSource) sources.set(el.style, oldSource);
           else sources.delete(el.style);
         }
@@ -926,7 +927,7 @@ export function registerCss(ctx: Context) {
       let sheet = force ? null : sheets.inspectorOf(doc);
       if (!sheet) {
         const style = doc.createElement('style');
-        style.setAttribute(OWN_ATTRIBUTE, 'inspector-stylesheet');
+        nativeCall(style, 'setAttribute', OWN_ATTRIBUTE, 'inspector-stylesheet');
         markOwn(style);
         (doc.head ?? doc.documentElement).appendChild(style);
         // A connected <style> always has a sheet.
@@ -1078,10 +1079,10 @@ export function registerCss(ctx: Context) {
     setEffectivePropertyValueForNode(params: Protocol.CSS.SetEffectivePropertyValueForNodeRequest) {
       const el = element(params.nodeId);
       if (!(isHtmlElement(el) || isSvgElement(el))) throw new CdpError('Element has no inline style');
-      const old = shownAttribute(el, 'style', el.getAttribute('style'));
+      const old = shownAttribute(el, 'style', nativeCall<string | null>(el, 'getAttribute', 'style'));
       perform(
         () => el.style.setProperty(params.propertyName, params.value),
-        () => (old === null ? el.removeAttribute('style') : el.setAttribute('style', old))
+        () => (old === null ? nativeCall(el, 'removeAttribute', 'style') : nativeCall(el, 'setAttribute', 'style', old))
       );
     },
   });
