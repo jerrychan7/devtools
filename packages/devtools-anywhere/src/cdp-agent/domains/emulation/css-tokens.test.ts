@@ -17,7 +17,7 @@ const bundled = await build({
   platform: 'neutral',
   write: false,
 });
-const { asciiLower, mapDeclarations, mapFunctions, splitMediaQueries } = (await import(
+const { asciiLower, decodeEscapes, mapDeclarations, mapFunctions, splitMediaQueries } = (await import(
   `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]?.text ?? '').toString('base64')}`
 )) as typeof Tokens;
 
@@ -47,6 +47,50 @@ function functions(
 
 test('asciiLower lowercases ASCII letters only', () => {
   assert.equal(asciiLower('ENV-AbKÉ'), 'env-abKÉ');
+});
+
+test('decodeEscapes: one to six hex digits, and the one whitespace after them, are one code point', () => {
+  assert.equal(decodeEscapes('\\61ll'), 'all');
+  assert.equal(decodeEscapes('\\61 ll'), 'all');
+  assert.equal(decodeEscapes('\\61\tll'), 'all');
+  assert.equal(decodeEscapes('\\61\nll'), 'all');
+  assert.equal(decodeEscapes('\\61\rll'), 'all');
+  assert.equal(decodeEscapes('\\61\r\nll'), 'all');
+  assert.equal(decodeEscapes('\\61\fll'), 'all');
+  assert.equal(decodeEscapes('\\61  ll'), 'a ll');
+  assert.equal(decodeEscapes('\\000061ll'), 'all');
+  assert.equal(decodeEscapes('\\0000061ll'), '\u00061ll');
+  assert.equal(decodeEscapes('\\1F600'), '\u{1F600}');
+  assert.equal(decodeEscapes('\\41g'), 'Ag');
+});
+
+test('decodeEscapes: zero, a surrogate or a code point past U+10FFFF is U+FFFD', () => {
+  assert.equal(decodeEscapes('\\0'), '\uFFFD');
+  assert.equal(decodeEscapes('\\0 a'), '\uFFFDa');
+  assert.equal(decodeEscapes('\\D800x'), '\uFFFDx');
+  assert.equal(decodeEscapes('\\dfff'), '\uFFFD');
+  assert.equal(decodeEscapes('\\110000'), '\uFFFD');
+  assert.equal(decodeEscapes('\\10FFFF'), '\u{10FFFF}');
+});
+
+test('decodeEscapes: the code points on either side of the surrogates are kept', () => {
+  assert.equal(decodeEscapes('\\D7FF'), '\uD7FF');
+  assert.equal(decodeEscapes('\\E000'), '\uE000');
+});
+
+test('decodeEscapes: another escaped character stands for itself; a backslash at the end is U+FFFD', () => {
+  assert.equal(decodeEscapes('a\\,b'), 'a,b');
+  assert.equal(decodeEscapes('\\-\\-x'), '--x');
+  assert.equal(decodeEscapes('\\\\'), '\\');
+  assert.equal(decodeEscapes('\\\u00e9'), '\u00e9');
+  assert.equal(decodeEscapes('\\\u{1F600}'), '\u{1F600}');
+  assert.equal(decodeEscapes('a\\'), 'a\uFFFD');
+});
+
+test('decodeEscapes: an escape is decoded once, and text without a backslash is kept', () => {
+  assert.equal(decodeEscapes('\\5c 61'), '\\61');
+  assert.equal(decodeEscapes('print'), 'print');
+  assert.equal(decodeEscapes(''), '');
 });
 
 test('the hook gets each declaration with its property and its trimmed value', () => {

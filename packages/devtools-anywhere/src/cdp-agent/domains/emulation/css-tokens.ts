@@ -1,8 +1,9 @@
 /**
  * Rewrites of CSS text found by its tokens (css-lexer.ts): the declarations of a block, the calls of
  * named functions, and the queries of a media query list. Comments and strings are read as CSS reads
- * them, and blocks match by their tokens. Escapes are not decoded: a name is compared as written. What
- * a hook does not change comes back byte for byte.
+ * them, and blocks match by their tokens. A declaration's property and a function's name are compared as
+ * written, escapes included; the words of a media query are compared decoded (`decodeEscapes`). What a
+ * hook does not change comes back byte for byte.
  */
 import { Tok, tokenize, type TokKind, type Tokens } from '../css/sheets/parse/css-lexer';
 
@@ -21,6 +22,26 @@ export type FunctionHook = (name: string, args: string, whole: string) => string
 /** `text` with its ASCII letters lowercased: CSS compares names so, and other letters are left alone. */
 export function asciiLower(text: string): string {
   return text.replace(/[A-Z]+/g, letters => letters.toLowerCase());
+}
+
+/**
+ * `text`, an identifier as written, with its escapes decoded as CSS Syntax decodes them (§4.3.7): a
+ * backslash and one to six hex digits are the code point they name, with one whitespace after them as
+ * part of the escape (CR LF is one); zero, a surrogate or a code point past U+10FFFF is U+FFFD. A
+ * backslash before any other character is that character, and one at the end of the text is U+FFFD.
+ * Meant for identifier tokens, where a backslash always starts a valid escape.
+ */
+export function decodeEscapes(text: string): string {
+  if (!text.includes('\\')) return text;
+  return text.replace(
+    /\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|([\s\S])|$)/g,
+    (_escape: string, hex: string | undefined, char: string | undefined) => {
+      if (hex === undefined) return char ?? '�';
+      const code = parseInt(hex, 16);
+      const valid = code !== 0 && (code < 0xd800 || code > 0xdfff) && code <= 0x10ffff;
+      return valid ? String.fromCodePoint(code) : '�';
+    }
+  );
 }
 
 /** The kinds of token that open a block, by the kind of the token that closes it. */

@@ -1,6 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { Tok, tokenize } from '../css/sheets/parse/css-lexer';
-import { asciiLower, splitMediaQueries } from './css-tokens';
+import { asciiLower, decodeEscapes, splitMediaQueries } from './css-tokens';
 import type { Rewrite } from './rewrite';
 
 /**
@@ -57,8 +57,11 @@ function rewriteQuery(query: string, type: string, features: ReadonlyMap<string,
     while (kind(j) === Tok.Ws || kind(j) === Tok.Comment) j++;
     return j;
   };
-  /** The ASCII-lowercase text of the identifier token `i`, or undefined when that token is not one. */
-  const word = (i: number) => (kind(i) === Tok.Ident ? asciiLower(text(i)) : undefined);
+  /**
+   * The text of the identifier token `i` with its escapes decoded and its ASCII letters lowercased, or
+   * undefined when that token is not an identifier: how CSS compares the words of a media query.
+   */
+  const word = (i: number) => (kind(i) === Tok.Ident ? asciiLower(decodeEscapes(text(i))) : undefined);
   /** Whether the token `i` closes a block: a `)`, or the end of the query, where CSS closes it. */
   const closes = (i: number) => i >= n || kind(i) === Tok.RParen;
 

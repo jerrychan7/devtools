@@ -212,8 +212,9 @@ test('a media type and a feature together, and several features', () => {
   );
 });
 
-// Where the text is read as CSS reads it: comments and escapes are not parts of a query, a value that
-// is not one identifier is left alone, and a block that is open at the end is closed there.
+// Where the text is read as CSS reads it: comments are not parts of a query, the words of a query are
+// decoded (escapes included), a value that is not one identifier is left alone, and a block that is open
+// at the end of the query is closed there.
 
 test('a comment is not a query, a feature or a type', () => {
   expectRewrites({ media: 'print' }, [
@@ -231,6 +232,37 @@ test('a comment is not a query, a feature or a type', () => {
 
 test('an escaped character is part of its name, not a delimiter', () => {
   expectRewrites({ media: 'print' }, [['a\\,print', NO_TYPE]]);
+});
+
+test('CSS escapes are decoded before a word is compared: \\61ll is all', () => {
+  expectRewrites({ media: 'print' }, [
+    ['\\61ll', 'all'],
+    ['\\61 ll', 'all'],
+    ['pr\\69nt', 'all'],
+    ['\\50RINT and (color)', 'all and (color)'],
+    ['not \\70rint', 'not all'],
+    ['\\6eot screen', `\\6eot ${NO_TYPE}`],
+    ['print \\61nd (color)', 'all \\61nd (color)'],
+    ['\\6fnly print', '\\6fnly all'],
+  ]);
+  // Hex digits are greedy: \65e is one escape, so this is scr, U+065E and n, not screen.
+  expectRewrites({ media: 'screen' }, [
+    ['scr\\65 en', 'all'],
+    ['scr\\65en', NO_TYPE],
+  ]);
+});
+
+test('CSS escapes in a feature name and value are decoded too', () => {
+  expectRewrites({ features: [{ name: 'prefers-color-scheme', value: 'dark' }] }, [
+    ['(prefers-color-schem\\65: dark)', TRUE],
+    ['(\\70refers-color-scheme: d\\61rk)', TRUE],
+    ['(prefers-color-scheme: \\6c ight)', FALSE],
+    // The escaped colon is a character of the name, so this is another feature.
+    ['(prefers-color-scheme\\3a dark)', '(prefers-color-scheme\\3a dark)'],
+  ]);
+  expectRewrites({ features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }, [
+    ['(\\70refers-reduced-motion)', FALSE],
+  ]);
 });
 
 test('a feature value that is not a single identifier is left alone', () => {
