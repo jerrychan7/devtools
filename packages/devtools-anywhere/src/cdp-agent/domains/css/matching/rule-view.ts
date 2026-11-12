@@ -4,7 +4,7 @@ import { queriedAxes } from '../../../core/style/container-query';
 import type { NodeRegistry } from '../../../core/nodes/nodes';
 import { specificity, splitTopLevel } from '../../../core/style/selectors';
 import type { TreeScope } from './forced-pseudo';
-import { shownMedia } from '../../emulation/rewrite';
+import { shownMedia } from '../../emulation/shown-style';
 import { type StyleRule, ancestorsOf, mediaList, resolveSelector, ruleType, scopeText, selectorLabel } from './rules';
 import type { SheetRegistry, Styled } from '../sheets/sheet-registry';
 import { rangeOf, selectorSpans, selectorText, sourceStyle } from '../sheets/text/ranges';

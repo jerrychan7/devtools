@@ -453,6 +453,131 @@ test("the Styles pane shows the env() a sheet's rule wrote, not the inset it is 
   for (const value of shown) assert.equal(value, 'env(safe-area-inset-top, 7px)');
 });
 
+test('a rule inside @media keeps the env() the page wrote, in the Styles pane and the sheet text', async () => {
+  const css = '@media (min-width: 1px) { #sa-media { padding-top: env(safe-area-inset-top, 7px) } }';
+  await t.page.evaluate(text => {
+    const style = document.createElement('style');
+    style.id = 'sa-media-css';
+    style.textContent = text;
+    document.head.append(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="sa-media"></div>');
+  }, css);
+  try {
+    const shown = await sameOnBoth(async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      try {
+        const { root } = await side.send('DOM.getDocument', {});
+        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-media' });
+        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+        const matched = (matchedCSSRules ?? []).filter(m => m.rule.origin === 'regular');
+        const values = matched.flatMap(m =>
+          m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
+        );
+        const sheetId = matched[0]?.rule.styleSheetId;
+        const text = sheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId: sheetId })).text : undefined;
+        return { values, text };
+      } finally {
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      }
+    });
+    assert.ok(shown.values.length > 0);
+    for (const value of shown.values) assert.equal(value, 'env(safe-area-inset-top, 7px)');
+    assert.equal(shown.text, css);
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('sa-media-css')?.remove();
+      document.getElementById('sa-media')?.remove();
+    });
+  }
+});
+
+test('a rule nested in a rule with env() shows the change the page made to it before CSS was enabled', async () => {
+  await t.page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'sa-nested-css';
+    style.textContent = '.sa-nest { padding-top: env(safe-area-inset-top, 7px); .sa-nest-c { color: red } }';
+    document.head.append(style);
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div id="sa-nest" class="sa-nest"><span id="sa-nest-c" class="sa-nest-c">x</span></div>'
+    );
+    // Before anything watches the sheet: the change is not seen, and must not be lost once it is.
+    const parent = style.sheet?.cssRules[0] as CSSGroupingRule | undefined;
+    const child = parent?.cssRules[0] as CSSStyleRule | undefined;
+    if (child) child.style.color = 'blue';
+  });
+  try {
+    const colors = await sameOnBoth(async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      try {
+        const { root } = await side.send('DOM.getDocument', {});
+        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-nest-c' });
+        const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+        // Distinct values: a declaration of a sheet served from the CSSOM may be listed twice (the same on
+        // both sides without the emulation), which is not what this test is about.
+        return [
+          ...new Set(
+            (matchedCSSRules ?? [])
+              .filter(m => m.rule.origin === 'regular')
+              .flatMap(m => m.rule.style.cssProperties.filter(p => p.name === 'color').map(p => p.value))
+          ),
+        ];
+      } finally {
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      }
+    });
+    assert.deepEqual(colors, ['blue']);
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('sa-nested-css')?.remove();
+      document.getElementById('sa-nest')?.remove();
+    });
+  }
+});
+
+test('a @keyframes rule with env() is served as the page wrote it, in the sheet text', async () => {
+  const css = '@keyframes sa-slide { from { top: env(safe-area-inset-top, 7px) } to { top: 0 } }';
+  await t.page.evaluate(text => {
+    const style = document.createElement('style');
+    style.id = 'sa-keyframes-css';
+    style.textContent = text;
+    document.head.append(style);
+    document.body.insertAdjacentHTML('beforeend', '<div id="sa-kf" style="animation: sa-slide 1s"></div>');
+  }, css);
+  try {
+    const text = await sameOnBoth(async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      try {
+        const { root } = await side.send('DOM.getDocument', {});
+        const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa-kf' });
+        const { cssKeyframesRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+        const sheetId = cssKeyframesRules?.[0]?.keyframes[0]?.styleSheetId;
+        return sheetId ? (await side.send('CSS.getStyleSheetText', { styleSheetId: sheetId })).text : undefined;
+      } finally {
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      }
+    });
+    assert.equal(text, css);
+  } finally {
+    await t.page.evaluate(() => {
+      document.getElementById('sa-keyframes-css')?.remove();
+      document.getElementById('sa-kf')?.remove();
+    });
+  }
+});
+
 /** What each side gives for `run`, run on each in turn: the two must give the same. */
 async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
   const results: T[] = [];

@@ -1,6 +1,7 @@
-// The page's own declaration blocks, where the emulation rewrote them: what each block was written as, for showing.
-// rewrite.ts keeps the records. The CSS text modules that read them are loaded outside a page too, so this
-// module reads no DOM when it loads, and the copy shownStyle makes is parsed by the native CSSOM.
+// The page's own declaration blocks and media query lists, where the emulation rewrote them: what each was
+// written as, for showing. rewrite.ts keeps the records. The CSS text modules that read them are loaded outside
+// a page too, so this module reads no DOM when it loads, and the copy shownStyle makes is parsed by the native
+// CSSOM.
 import { ownCall, ownGet, ownSheet, ownStyle } from '../css/sheets/watch/cssom-watch';
 
 /** A text the page had, and what it was rewritten to: `applied` as it reads after the write. */
@@ -14,10 +15,19 @@ export interface Rewritten {
 /** The records of the declaration blocks the emulation rewrote, held weakly (rewrite.ts keeps them). */
 export const styles = new WeakMap<CSSStyleDeclaration, Rewritten>();
 
+/** The records of the media query lists the emulation rewrote, held weakly (rewrite.ts keeps them). */
+export const mediaLists = new WeakMap<MediaList, Rewritten>();
+
 /** A declaration block as the page wrote it, for showing (and for an edit to undo to): the original of a rewritten one. */
 export function shownCssText(style: CSSStyleDeclaration): string {
   const rewritten = styles.get(style);
   return rewritten && rewritten.applied === style.cssText ? rewritten.original : style.cssText;
+}
+
+/** A media query list as the page wrote it, for showing: the original of a rewritten one. */
+export function shownMedia(list: MediaList): string {
+  const rewritten = mediaLists.get(list);
+  return rewritten && rewritten.applied === list.mediaText ? rewritten.original : list.mediaText;
 }
 
 /**
@@ -26,6 +36,8 @@ export function shownCssText(style: CSSStyleDeclaration): string {
  * parsed natively, so no rewrite applies to it.
  */
 export function shownStyle(style: CSSStyleDeclaration): CSSStyleDeclaration {
+  // Never rewritten: the text the page wrote is the one it has.
+  if (!styles.has(style)) return style;
   const original = shownCssText(style);
   if (original === style.cssText) return style;
   const sheet = ownSheet();

@@ -17,7 +17,7 @@ import { sizesRewrite } from './attributes';
 import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
 import { asciiLower } from './css-tokens';
 import { type Merge, mergeDeclarations, mergeList } from './merge';
-import { type Rewritten, styles } from './shown-style';
+import { mediaLists, type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
@@ -65,8 +65,6 @@ interface Active {
  */
 const mediaRewrites = new Map<string, Rewrite>();
 const valueRewrites = new Map<string, Rewrite>();
-/** The records of the lists rewritten: a sheet let go takes its records with it (`styles`: shown-style.ts). */
-const lists = new WeakMap<MediaList, Rewritten>();
 
 const apply = (rewrites: Map<string, Rewrite>, text: string) => {
   let out = text;
@@ -150,12 +148,6 @@ export function rewriteColorScheme(preference: Preference | undefined): void {
   rewriteValues('colorScheme', scheme && schemeDeclarations(scheme));
 }
 
-/** A media query list as the page wrote it, for showing: the original of a rewritten one. */
-export function shownMedia(list: MediaList): string {
-  const rewritten = lists.get(list);
-  return rewritten && rewritten.applied === list.mediaText ? rewritten.original : list.mediaText;
-}
-
 /**
  * Puts `rewrite` of a text the page has in place. `record` is what was kept for the text, and
  * `current` what it reads now: while the text still reads `record.applied`, the page's original is
@@ -193,7 +185,7 @@ function fixText(
 /** Rewrites a media query list through the CSSOM (ours, not a change of the page's to report). */
 function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
   const fixed = fixText(
-    lists.get(list),
+    mediaLists.get(list),
     list.mediaText,
     rewrite,
     mergeList,
@@ -201,9 +193,9 @@ function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
     text => ownSet(list, 'mediaText', text)
   );
   if (fixed.record) {
-    lists.set(list, fixed.record);
+    mediaLists.set(list, fixed.record);
     track(writtenLists, list);
-  } else lists.delete(list);
+  } else mediaLists.delete(list);
   return fixed.changed;
 }
 

@@ -2,9 +2,10 @@
 // once against its CSSOM, made unknown or kept up to date as the page and the CSS domain change
 // the sheet, and paired with its rules when asked for (pair.ts, updated in place by splice.ts).
 import { isHtml } from '../../../../core/realm';
-import { shownCssText } from '../../../emulation/shown-style';
+import { mediaLists, shownCssText, shownMedia, styles } from '../../../emulation/shown-style';
 import { forgetSheet, ownEdit, ownStyle, recordPageChanges, type RuleChange, settle } from '../watch/cssom-watch';
-import { type SheetSource, pair, tagOf } from './pair';
+import { type SheetSource, childRules, pair, tagOf } from './pair';
+import { Tok, tokenize } from '../parse/css-lexer';
 import { type Pending, applied, respliced, retexted } from './splice';
 
 interface Recorded {
@@ -46,22 +47,100 @@ function sameRules(parsed: CSSRuleList, rules: CSSRule[]): boolean {
 }
 
 /**
- * Whether `rule` is the rule `parsed` was read as. The emulation rewrites the values of some declarations
- * (domains/emulation/rewrite.ts), so a rule whose declarations it rewrote is compared by what the page wrote
- * (shownCssText): two values the page wrote may be rewritten to the same text, and a change of the page that
- * the rewrite hides is not taken as no change.
+ * Whether `rule` is the rule `parsed` was read as. The emulation rewrites the values of some declarations and
+ * the media of some rules (domains/emulation/rewrite.ts), so a rule it rewrote is compared by what the page
+ * wrote (shownCssText, shownMedia), and the rules nested in it by this same test: two values the page wrote may
+ * be rewritten to the same text, and a change of the page that the rewrite hides, in a declaration or in a
+ * nested rule, is not taken as no change. So a rule the emulation holds a record for is never taken as the same by
+ * its text alone: the text may read the same after a change of the page that the rewrite gives its own value.
  */
 function sameRule(rule: CSSRule, parsed: CSSRule): boolean {
-  if (rule.cssText === parsed.cssText) return true;
-  if (tagOf(rule) !== 'CSSStyleRule' || tagOf(parsed) !== 'CSSStyleRule') return false;
-  const style = ownStyle(rule as CSSStyleRule);
-  // Not rewritten: the rule is not the same, as before.
-  const shown = shownCssText(style);
-  return (
-    shown !== style.cssText &&
-    (rule as CSSStyleRule).selectorText === (parsed as CSSStyleRule).selectorText &&
-    shown === ownStyle(parsed as CSSStyleRule).cssText
-  );
+  if (rule.cssText === parsed.cssText && !rewritten(rule)) return true;
+  const tag = tagOf(rule);
+  if (tag !== tagOf(parsed)) return false;
+  if (tag === 'CSSMediaRule') {
+    return (
+      shownMedia((rule as CSSMediaRule).media) === (parsed as CSSMediaRule).media.mediaText && sameNested(rule, parsed)
+    );
+  }
+  // A rule whose prelude is its name, or a group's condition: the prelude is compared whole, prefix included.
+  if (tag === 'CSSKeyframesRule' || GROUPS.has(tag)) {
+    const prelude = preludeOf(rule);
+    return prelude !== undefined && prelude === preludeOf(parsed) && sameNested(rule, parsed);
+  }
+  const head = headOf(rule);
+  if (head === undefined || head !== headOf(parsed)) return false;
+  if (
+    'style' in rule &&
+    shownCssText(ownStyle(rule as CSSRule & { style: CSSStyleDeclaration })) !==
+      ownStyle(parsed as CSSRule & { style: CSSStyleDeclaration }).cssText
+  )
+    return false;
+  return sameNested(rule, parsed);
+}
+
+/** Whether the emulation holds a record for `rule`, or for a rule nested in it: a rewritten block or a media list. */
+function rewritten(rule: CSSRule): boolean {
+  if (tagOf(rule) === 'CSSMediaRule' && mediaLists.has((rule as CSSMediaRule).media)) return true;
+  if ('style' in rule && styles.has(ownStyle(rule as CSSRule & { style: CSSStyleDeclaration }))) return true;
+  return Array.from(childRules(rule)).some(child => rewritten(child));
+}
+
+/**
+ * The text that names a rule before its declarations and its nested rules (a selector, a key, a name), or
+ * undefined for a kind of rule that is not compared.
+ */
+function headOf(rule: CSSRule): string | undefined {
+  switch (tagOf(rule)) {
+    case 'CSSStyleRule':
+    case 'CSSPageRule':
+      return (rule as CSSStyleRule | CSSPageRule).selectorText;
+    case 'CSSKeyframeRule':
+      return (rule as CSSKeyframeRule).keyText;
+    case 'CSSMarginRule':
+    case 'CSSPositionTryRule':
+      return (rule as CSSRule & { name: string }).name;
+    case 'CSSFontFaceRule':
+    case 'CSSNestedDeclarations':
+      return '';
+    default:
+      return undefined;
+  }
+}
+
+/** The rules that group others under a prelude the emulation does not rewrite (a media rule's is `shownMedia`). */
+const GROUPS = new Set([
+  'CSSSupportsRule',
+  'CSSLayerBlockRule',
+  'CSSContainerRule',
+  'CSSScopeRule',
+  'CSSStartingStyleRule',
+]);
+
+/**
+ * The text of a rule before the brace that opens its block, as the CSS lexer reads it: a brace in a string, or in
+ * the parentheses and brackets of the prelude (`@supports (--x: {a})`), does not open the block.
+ */
+function preludeOf(rule: CSSRule): string | undefined {
+  const text = rule.cssText;
+  const { kinds, starts } = tokenize(text);
+  let depth = 0;
+  for (let i = 0; i < kinds.length; i++) {
+    const kind = kinds[i];
+    if (kind === Tok.LBrace && depth === 0) return text.slice(0, starts[i] ?? text.length);
+    if (kind === Tok.Func || kind === Tok.LParen || kind === Tok.LBracket || kind === Tok.LBrace) depth++;
+    else if (kind === Tok.RParen || kind === Tok.RBracket || kind === Tok.RBrace) depth--;
+  }
+  return undefined;
+}
+
+/** Whether the rules nested in `rule` are those nested in `parsed`, each as `sameRule` tells. */
+function sameNested(rule: CSSRule, parsed: CSSRule): boolean {
+  const rules = childRules(rule);
+  const expected = childRules(parsed);
+  if (rules.length !== expected.length) return false;
+  for (let i = 0; i < rules.length; i++) if (!sameRule(rules[i] as CSSRule, expected[i] as CSSRule)) return false;
+  return true;
 }
 
 /**
