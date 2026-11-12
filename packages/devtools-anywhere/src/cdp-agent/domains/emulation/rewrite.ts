@@ -1,3 +1,4 @@
+import { nativeCall, nativeGet, windowOf } from '../../core/natives';
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
@@ -53,9 +54,10 @@ interface Active {
  * wait grows while the page keeps answering (see the pacing note below).
  *
  * Limits: the rules of a sheet that cannot be read (cross-origin) are left as they are; its media is
- * rewritten like any other. The queries matchMedia() gives get the same rewrite (match-media.ts). A <style> added in the same task as it is
- * read is rewritten after that task's script, and so is an element's style written in the task that
- * reads it. A property the page writes by name on a rule's style (rule.style.color = …) is seen only
+ * rewritten like any other. The queries matchMedia() gives get the same rewrite (match-media.ts). A <style>
+ * added in the same task as it is read is rewritten after that task's script, and so is an element's style
+ * written in the task that reads it. A property the page writes by name on a rule's style (rule.style.color = …)
+ * is seen only
  * once the CSS domain looks at the sheet, or at the next sync of the sheets. Our writes are seen by
  * the page's own mutation observers, and the page reads the rewritten values, as it reads them from
  * the CSSOM and the attributes.
@@ -186,10 +188,10 @@ function fixText(
 function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
   const fixed = fixText(
     mediaLists.get(list),
-    list.mediaText,
+    nativeGet<string>(list, 'mediaText'),
     rewrite,
     mergeList,
-    () => list.mediaText,
+    () => nativeGet<string>(list, 'mediaText'),
     text => ownSet(list, 'mediaText', text)
   );
   if (fixed.record) {
@@ -203,10 +205,10 @@ function fixMedia(list: MediaList, rewrite: Rewrite | null): boolean {
 function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean {
   const fixed = fixText(
     styles.get(style),
-    style.cssText,
+    nativeGet<string>(style, 'cssText'),
     rewrite,
     mergeDeclarations,
-    () => style.cssText,
+    () => nativeGet<string>(style, 'cssText'),
     text => ownSet(style, 'cssText', text)
   );
   if (fixed.record) {
@@ -279,7 +281,7 @@ interface Pace {
   wait: number;
   /** Whether a rewrite is due and waiting for its frame: the page's text is rewritten then. */
   held: boolean;
-  /** When the counted reverts of the rewrite were made (by `readClock`), those within REVERT_WINDOW. */
+  /** When the counted reverts of the rewrite were made (by the probe's clock), those within REVERT_WINDOW. */
   reverts: number[];
   /** Our writes to the attribute so far, and the write the last counted revert answered. */
   writes: number;
@@ -293,7 +295,7 @@ let turnNo = 0;
 function turnOf(): number {
   if (!turnOpen) {
     turnOpen = true;
-    Reflect.apply(setTimer, globalThis, [closeTurn, 0]);
+    Reflect.apply(windowOf().timeout, globalThis, [closeTurn, 0]);
   }
   return turnNo;
 }
@@ -302,11 +304,10 @@ const closeTurn = () => {
   turnNo++;
 };
 
-/* The frames, timers and clock as the agent found them: a page may replace them later (a fake clock, say). */
-const requestFrame = requestAnimationFrame;
-const setTimer = setTimeout;
-const perf = performance;
-const readClock = perf.now;
+/*
+ * The frames, timers and clock are the probe's (windowOf), not the page's: a page may replace them (a fake clock,
+ * say), and the agent's own frames and timers must not be the page's to see or to run.
+ */
 
 /** Calls `fn` at the next frame, or after 50 ms where frames do not come (a page in the background). */
 function nextFrame(fn: () => void): void {
@@ -316,8 +317,8 @@ function nextFrame(fn: () => void): void {
     ran = true;
     fn();
   };
-  Reflect.apply(requestFrame, globalThis, [run]);
-  Reflect.apply(setTimer, globalThis, [run, 50]);
+  Reflect.apply(windowOf().raf, globalThis, [run]);
+  Reflect.apply(windowOf().timeout, globalThis, [run, 50]);
 }
 
 /** Calls `fn` after `frames` frames. */
@@ -344,14 +345,14 @@ function wroteAt(el: Element, name: string): void {
 function countRevert(pace: Pace): void {
   if (pace.revertOf === pace.writes) return;
   pace.revertOf = pace.writes;
-  pace.reverts.push(Reflect.apply(readClock, perf, []) as number);
+  pace.reverts.push(windowOf().now());
 }
 
 /** Whether the reverts of `pace`'s rewrite within REVERT_WINDOW, as of now, are more than REVERT_LIMIT. */
 function revertsTooOften(pace: Pace): boolean {
   // A held rewrite keeps the decision it was held with: its reverts do not age out while it waits.
   if (!pace.held) {
-    const now = Reflect.apply(readClock, perf, []) as number;
+    const now = windowOf().now();
     pace.reverts = pace.reverts.filter(at => now - at < REVERT_WINDOW);
   }
   return pace.reverts.length > REVERT_LIMIT;
@@ -450,7 +451,8 @@ function restoreWritten(): void {
 const ELEMENTS = '[style], source[media], img[sizes], source[sizes], meta';
 
 /** A <meta name="color-scheme">, whose content is a color-scheme value (the name is ASCII case-insensitive). */
-const isColorSchemeMeta = (el: Element) => asciiLower(el.getAttribute('name') ?? '') === 'color-scheme';
+const isColorSchemeMeta = (el: Element) =>
+  asciiLower(nativeCall<string | null>(el, 'getAttribute', 'name') ?? '') === 'color-scheme';
 
 /**
  * Rewrites the attributes of `el` that the emulation rewrites; returns whether a write was made. A
@@ -471,37 +473,45 @@ function fixElement(el: Element, act: Active, paced = false): boolean {
 /** A call of env() in a declaration block's text, whatever the case of its name (CSS compares function names so). */
 const ENV_CALL = /env\(/i;
 
+/** Whether a declaration block's text uses env() or color-scheme, read through the natives (core/natives.ts). */
+const envOrScheme = (style: CSSStyleDeclaration): boolean => {
+  const text = nativeGet<string>(style, 'cssText');
+  return ENV_CALL.test(text) || /color-scheme/.test(text);
+};
+
 /** Rewrites a rule through the CSSOM: its media, its declarations, and what it holds. */
 function fixRule(rule: CSSRule, act: Active): boolean {
   if (isCssom(rule, 'CSSImportRule')) {
-    let changed = fixMedia(rule.media, act.media);
-    if (rule.styleSheet) changed = fixSheet(rule.styleSheet, act) || changed;
+    let changed = fixMedia(nativeGet<MediaList>(rule, 'media'), act.media);
+    const sheet = nativeGet<CSSStyleSheet | null>(rule, 'styleSheet');
+    if (sheet) changed = fixSheet(sheet, act) || changed;
     return changed;
   }
-  let changed = isCssom(rule, 'CSSMediaRule') ? fixMedia(rule.media, act.media) : false;
+  let changed = isCssom(rule, 'CSSMediaRule') ? fixMedia(nativeGet<MediaList>(rule, 'media'), act.media) : false;
   const style: unknown = 'style' in rule ? ownStyle(rule as CSSRule & { style: CSSStyleDeclaration }) : null;
   // A block using env() or color-scheme is read again on every change, and so is one this rewrote before
   // (styles.has), which is restored when the rewrite is gone.
-  if (
-    isCssom(style, 'CSSStyleDeclaration') &&
-    (styles.has(style) || ENV_CALL.test(style.cssText) || /color-scheme/.test(style.cssText))
-  )
+  if (isCssom(style, 'CSSStyleDeclaration') && (styles.has(style) || envOrScheme(style)))
     changed = fixStyle(style, act.values) || changed;
   if (isCssom(rule, 'CSSGroupingRule') || isCssom(rule, 'CSSKeyframesRule'))
-    for (const inner of Array.from(rule.cssRules)) changed = fixRule(inner, act) || changed;
+    for (const inner of Array.from(nativeGet<CSSRuleList>(rule, 'cssRules'))) changed = fixRule(inner, act) || changed;
   return changed;
 }
 
 /** Whether a sheet is not the page's to rewrite: one of ours (a companion of the forced states, an injected one). */
-const ownSheet = (sheet: CSSStyleSheet) => isHiddenSheet(sheet) || (!!sheet.ownerNode && !!closestOwn(sheet.ownerNode));
+const ownSheet = (sheet: CSSStyleSheet) => {
+  if (isHiddenSheet(sheet)) return true;
+  const owner = nativeGet<Node | null>(sheet, 'ownerNode');
+  return !!owner && !!closestOwn(owner);
+};
 
 /** Rewrites a sheet: its media, and its rules. */
 function fixSheet(sheet: CSSStyleSheet, act: Active): boolean {
   if (ownSheet(sheet)) return false;
-  let changed = fixMedia(sheet.media, act.media);
+  let changed = fixMedia(nativeGet<MediaList>(sheet, 'media'), act.media);
   let rules: CSSRuleList;
   try {
-    rules = sheet.cssRules;
+    rules = nativeGet<CSSRuleList>(sheet, 'cssRules');
   } catch {
     return changed; // A cross-origin sheet.
   }
@@ -517,10 +527,10 @@ function fixSheet(sheet: CSSStyleSheet, act: Active): boolean {
 function sync(act: Active, paced = false): boolean {
   let changed = false;
   for (const tree of pageTrees()) {
-    for (const sheet of Array.from(tree.styleSheets))
+    for (const sheet of Array.from(nativeGet<StyleSheetList>(tree, 'styleSheets')))
       if (isCssom(sheet, 'CSSStyleSheet')) changed = fixSheet(sheet, act) || changed;
     for (const sheet of adoptedOf(tree)) changed = fixSheet(sheet, act) || changed;
-    for (const el of tree.querySelectorAll(ELEMENTS))
+    for (const el of nativeCall<NodeListOf<Element>>(tree, 'querySelectorAll', ELEMENTS))
       if (!closestOwn(el)) changed = fixElement(el, act, paced) || changed;
   }
   return changed;
@@ -539,9 +549,9 @@ function onCssom(sheet: CSSStyleSheet, _text?: string, _by?: object, change?: Cs
   if (!change) changed = fixSheet(sheet, act);
   else if (change.kind === 'rule') changed = fixRule(change.rule, act);
   else if (change.kind === 'insert') {
-    const rule: CSSRule | undefined = sheet.cssRules[change.index];
+    const rule: CSSRule | undefined = nativeGet<CSSRuleList>(sheet, 'cssRules')[change.index];
     if (rule) changed = fixRule(rule, act);
-  } else if (change.kind === 'media') changed = fixMedia(sheet.media, act.media);
+  } else if (change.kind === 'media') changed = fixMedia(nativeGet<MediaList>(sheet, 'media'), act.media);
   if (changed) pageRulesRewritten();
 }
 
@@ -575,7 +585,7 @@ function touchesSheets(records: MutationRecord[]): boolean {
     if (isSheetOwner(record.target) || isSheetOwner(record.target.parentNode)) return true;
     for (const node of Array.from(record.addedNodes)) {
       if (!isElement(node) || closestOwn(node)) continue;
-      if (isSheetOwner(node) || node.querySelector('style, link')) return true;
+      if (isSheetOwner(node) || nativeCall<Element | null>(node, 'querySelector', 'style, link')) return true;
     }
   }
   return false;
@@ -599,8 +609,9 @@ function fixChanged(records: MutationRecord[], act: Active): void {
     } else
       for (const node of Array.from(record.addedNodes)) {
         if (!isElement(node) || closestOwn(node)) continue;
-        if (node.matches(ELEMENTS)) fixElement(node, act, true);
-        for (const el of node.querySelectorAll(ELEMENTS)) if (!closestOwn(el)) fixElement(el, act, true);
+        if (nativeCall<boolean>(node, 'matches', ELEMENTS)) fixElement(node, act, true);
+        for (const el of nativeCall<NodeListOf<Element>>(node, 'querySelectorAll', ELEMENTS))
+          if (!closestOwn(el)) fixElement(el, act, true);
       }
   }
 }
@@ -629,7 +640,7 @@ function onRecords(records: MutationRecord[]): void {
 /** Starts watching while something is rewritten: the observers, the CSSOM hooks, the trees. */
 function startWatching(): Watching {
   return {
-    observer: new MutationObserver(onRecords),
+    observer: new (windowOf().MO)(onRecords),
     observed: new Set(),
     stops: [watchAdopted(schedule, pageTrees), followTrees(schedule), watchCssom(onCssom, () => realmsOf(pageTrees()))],
   };
@@ -637,8 +648,8 @@ function startWatching(): Watching {
 
 function stopWatching(): void {
   if (!watching) return;
-  watching.observer.disconnect();
-  for (const tree of watching.observed) tree.removeEventListener('load', onLoad, true);
+  Reflect.apply(windowOf().disconnect, watching.observer, []);
+  for (const tree of watching.observed) Reflect.apply(windowOf().unlisten, tree, ['load', onLoad, true]);
   for (const stop of watching.stops) stop();
   watching = null;
 }
@@ -663,16 +674,17 @@ function update(paced = false): void {
   const now = new Set(trees);
   if ([...watching.observed].some(tree => !now.has(tree))) {
     // A tree the page took out is no longer observed: the observer is set again on those there are.
-    const pending = watching.observer.takeRecords();
+    const pending: MutationRecord[] = Reflect.apply(windowOf().takeRecords, watching.observer, []);
     if (pending.length) onRecords(pending);
-    watching.observer.disconnect();
-    for (const tree of watching.observed) if (!now.has(tree)) tree.removeEventListener('load', onLoad, true);
+    Reflect.apply(windowOf().disconnect, watching.observer, []);
+    for (const tree of watching.observed)
+      if (!now.has(tree)) Reflect.apply(windowOf().unlisten, tree, ['load', onLoad, true]);
     watching.observed.clear();
   }
   for (const tree of trees) {
     if (watching.observed.has(tree)) continue;
     watching.observed.add(tree);
-    watching.observer.observe(tree, OBSERVED);
-    tree.addEventListener('load', onLoad, true);
+    Reflect.apply(windowOf().observe, watching.observer, [tree, OBSERVED]);
+    Reflect.apply(windowOf().listen, tree, ['load', onLoad, true]);
   }
 }

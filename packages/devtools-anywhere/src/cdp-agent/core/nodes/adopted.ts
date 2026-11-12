@@ -1,4 +1,5 @@
-import { isCssom, isShadowRoot, realmOf } from '../realm';
+import { nativeGet, nativeSet } from '../natives';
+import { isCssom, realmOf } from '../realm';
 
 /**
  * Notices changes to `adoptedStyleSheets` soon after they happen. Assigning goes through the
@@ -28,36 +29,13 @@ let touched = new Set<Tree>();
 /** Each tree's sheets as last seen. */
 let seen = new WeakMap<Tree, CSSStyleSheet[]>();
 
-const protoOf = (tree: Tree) => {
-  const realm = realmOf(tree);
-  return isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
-};
-
-/** The accessors of `adoptedStyleSheets` that the agent's own reads and writes call (see nativeOf). */
-type Native = { get: (this: Tree) => unknown; set: (this: Tree, v: unknown) => void };
 /**
- * The native accessors of each prototype's `adoptedStyleSheets`, taken the first time the agent needs
- * them (null: the prototype has none). The agent's own reads and writes call these, not whatever the
- * page has put over the accessor since: a wrapper would see the sheets the agent hides.
+ * The native accessors of `adoptedStyleSheets` are what the agent's own reads and writes call (core/natives.ts):
+ * the probe's, taken before the page's code, so that a wrapper the page puts over them does not see the sheets
+ * the agent hides.
  */
-const nativeAccessors = new WeakMap<object, Native | null>();
-function nativeOf(proto: object): Native | null {
-  let native = nativeAccessors.get(proto);
-  if (native === undefined) {
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
-    native = descriptor?.get && descriptor.set ? { get: descriptor.get, set: descriptor.set } : null;
-    nativeAccessors.set(proto, native);
-  }
-  return native;
-}
-// The top window's accessors are taken when the agent loads, so that a wrapper the page puts over them
-// later is not what the agent calls. (Other realms, the frames', are taken at their first use.)
-if (typeof Document === 'function') nativeOf(Document.prototype);
-if (typeof ShadowRoot === 'function') nativeOf(ShadowRoot.prototype);
-
 function read(tree: Tree): CSSStyleSheet[] {
-  const native = nativeOf(protoOf(tree));
-  const value: unknown = native ? native.get.call(tree) : tree.adoptedStyleSheets;
+  const value: unknown = nativeGet(tree, 'adoptedStyleSheets');
   return Array.isArray(value) ? value.filter((s): s is CSSStyleSheet => isCssom(s, 'CSSStyleSheet')) : [];
 }
 
@@ -89,8 +67,6 @@ function notify(tree: Tree) {
 /** Hooks the prototypes of a realm (a window's globals). */
 function install(realm: Window & typeof globalThis) {
   for (const proto of [realm.Document.prototype, realm.ShadowRoot.prototype]) {
-    // Taken before the hook goes over the accessor (see nativeOf).
-    nativeOf(proto);
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'adoptedStyleSheets');
     const get = descriptor?.get;
     const set = descriptor?.set;
@@ -161,11 +137,14 @@ export function quietly<T>(fn: () => T): T {
 }
 
 /**
- * The native accessors of a tree's `adoptedStyleSheets` (see nativeOf): what the agent's own reads and
- * writes call, so that a wrapper the page put over them since does not see our own changes.
+ * The native accessors of a tree's `adoptedStyleSheets` (core/natives.ts): what the agent's own reads and writes
+ * call, so that a wrapper the page put over them since does not see our own changes.
  */
-export function nativeAdopted(tree: Tree): Native | null {
-  return nativeOf(protoOf(tree));
+export function nativeAdopted(tree: Tree): { get: () => unknown; set: (value: unknown) => void } {
+  return {
+    get: () => nativeGet(tree, 'adoptedStyleSheets'),
+    set: value => nativeSet(tree, 'adoptedStyleSheets', value),
+  };
 }
 
 /** The adopted style sheets of a tree, read without notifying. */
@@ -199,13 +178,9 @@ function countHidden(sheet: CSSStyleSheet, by: number): void {
  * away from the end: adopting it again repairs that.
  */
 export function hideAdopted(tree: Tree, sheet: CSSStyleSheet): () => void {
-  const realm = realmOf(tree);
-  const proto = isShadowRoot(tree) ? realm.ShadowRoot.prototype : realm.Document.prototype;
-  // The native accessors (nativeOf): a wrapper the page put over the prototype's is not called with the
+  // The native accessors (core/natives.ts): a wrapper the page put over the prototype's is not called with the
   // sheets hidden here. The page's own reads and assignments are still told to the watchers, as the
   // prototype's hook tells them.
-  const native = nativeOf(proto);
-  if (!native) return () => {};
   let hidden = hiddenIn.get(tree);
   if (!hidden) {
     const sheets = new Set<CSSStyleSheet>();
@@ -215,13 +190,13 @@ export function hideAdopted(tree: Tree, sheet: CSSStyleSheet): () => void {
       configurable: true,
       enumerable: true,
       get: (): CSSStyleSheet[] => {
-        const value: unknown = native.get.call(tree);
+        const value: unknown = nativeGet(tree, 'adoptedStyleSheets');
         notify(tree);
         return Array.isArray(value) ? value.filter(s => !sheets.has(s)) : [];
       },
       set: (value: CSSStyleSheet[]) => {
         const rest = Array.from(value).filter(s => !sheets.has(s));
-        native.set.call(tree, [...rest, ...sheets]);
+        nativeSet(tree, 'adoptedStyleSheets', [...rest, ...sheets]);
         notify(tree);
       },
     });
@@ -233,19 +208,21 @@ export function hideAdopted(tree: Tree, sheet: CSSStyleSheet): () => void {
   // Our own reads and writes go around the page's hooks (nativeAdopted): a sheet the page assigned in
   // the same task is still the page's change, and is not taken as seen here.
   quietly(() => {
-    const value: unknown = native.get.call(tree);
+    const value: unknown = nativeGet(tree, 'adoptedStyleSheets');
     const current = Array.isArray(value) ? (value as CSSStyleSheet[]) : [];
     const wanted = [...current.filter(s => !sheets.has(s)), ...sheets];
-    if (wanted.length !== current.length || wanted.some((s, i) => s !== current[i])) native.set.call(tree, wanted);
+    if (wanted.length !== current.length || wanted.some((s, i) => s !== current[i]))
+      nativeSet(tree, 'adoptedStyleSheets', wanted);
   });
   return () => {
     if (!sheets.delete(sheet)) return;
     countHidden(sheet, -1);
     quietly(() => {
-      const value: unknown = native.get.call(tree);
+      const value: unknown = nativeGet(tree, 'adoptedStyleSheets');
       if (Array.isArray(value) && value.includes(sheet))
-        native.set.call(
+        nativeSet(
           tree,
+          'adoptedStyleSheets',
           value.filter(s => s !== sheet)
         );
     });

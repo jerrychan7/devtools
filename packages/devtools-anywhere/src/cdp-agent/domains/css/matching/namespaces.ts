@@ -59,7 +59,7 @@ export function matchInNamespaces(els: Element[], tree: TreeScope, sheets: InNam
   const none = () => sheets.map(s => els.map(() => s.rules.map(() => false)));
   const accessors = nativeAdopted(tree);
   const first = els[0];
-  if (!accessors || !first) return none();
+  if (!first) return none();
   const realm = realmOf(first);
   const name = (k: number, i: number) => `--devtools-anywhere-ns-${k}-${i}`;
   const compound = (el: Element) => `*|${CSS.escape(el.localName)}`;
