@@ -88,11 +88,11 @@ type Attributes = Map<string, { namespace: string | null; value: string }>;
 
 /** The attributes as the page wrote them (those the emulation rewrote shown as before it), so that an undo restores the page's. */
 function snapshotAttributes(el: Element): Attributes {
+  // devtools-anywhere's own attributes are not the page's: an undo leaves them as they are.
   return new Map(
-    Array.from(nativeGet<NamedNodeMap>(el, 'attributes'), a => [
-      a.name,
-      { namespace: a.namespaceURI, value: shownAttribute(el, a.name, a.value) ?? a.value },
-    ])
+    Array.from(nativeGet<NamedNodeMap>(el, 'attributes'))
+      .filter(a => !HIDDEN_ATTRIBUTES.includes(a.name))
+      .map(a => [a.name, { namespace: a.namespaceURI, value: shownAttribute(el, a.name, a.value) ?? a.value }])
   );
 }
 

@@ -266,8 +266,10 @@ function searchNodes(
       if (isElement(node)) {
         if (node.localName.includes(needle)) found.add(node);
         else if (
-          Array.from(node.attributes).some(a =>
-            `${a.name}="${shownAttribute(node, a.name, a.value) ?? a.value}"`.toLowerCase().includes(needle)
+          Array.from(node.attributes).some(
+            a =>
+              !HIDDEN_ATTRIBUTES.includes(a.name) &&
+              `${a.name}="${shownAttribute(node, a.name, a.value) ?? a.value}"`.toLowerCase().includes(needle)
           )
         )
           found.add(node);
