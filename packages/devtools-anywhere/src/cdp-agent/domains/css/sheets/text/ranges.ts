@@ -5,6 +5,7 @@ import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
+import { shownStyle } from '../../../emulation/shown-style';
 import { type CSSStyle, type Written, styleOf } from '../../style';
 import { type SheetSource, childRules } from './pair';
 import { reportedComment } from './commented';
@@ -297,7 +298,8 @@ export function sourceStyle(
     // Only the run's last declaration may run to its end.
     written.push(...writtenOf(text, o, part.decls, to, range, p === parts.length - 1));
   });
-  return styleOf(styleSheetId, decl, written, text.slice(from, to), rangeOf(source, from, to));
+  // The longhands the style holds are the page's own, where the emulation rewrote the declarations.
+  return styleOf(styleSheetId, shownStyle(decl), written, text.slice(from, to), rangeOf(source, from, to));
 }
 
 /**
@@ -312,7 +314,7 @@ export function textStyle(
   line: number,
   column: number
 ): CSSStyle {
-  return styleOf(styleSheetId, decl, textWritten(text, line, column), text, textRange(text, line, column));
+  return styleOf(styleSheetId, shownStyle(decl), textWritten(text, line, column), text, textRange(text, line, column));
 }
 
 /** The range of `text` starting at `line` and `column`. */

@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
+import { shownStyle } from '../emulation/shown-style';
 import { isOwnStyleRule, ownCall, ownGet, ownSet, ownSheet, ownStyle } from './sheets/watch/cssom-watch';
 import { textStyle } from './sheets/text/ranges';
 
@@ -188,16 +189,19 @@ export function styleOf(
 /**
  * A style on `line` from `column`: as the text it was given writes it (`textStyle`), while that
  * text is still what it holds; otherwise (no text, or the page changed the style since) its
- * declarations serialized as `name: value;` separated by spaces, the text the client edits.
+ * declarations serialized as `name: value;` separated by spaces, the text the client edits. Where the
+ * emulation rewrote the declarations, those are the page's own (shownStyle).
  */
 export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line: number, column: number): CSSStyle {
   const source = sources.get(decl);
   const current = source && source.applied === decl.cssText ? source.text : undefined;
   // Like Chrome, the text as written, each declaration with its range in it.
   if (current !== undefined) return textStyle(styleSheetId, decl, current, line, column);
+  // The declarations as the page wrote them, where the emulation rewrote them (domains/emulation/rewrite.ts).
+  const shown = shownStyle(decl);
   let text = '';
   const written: Written[] = [];
-  for (const raw of splitTopLevel(decl.cssText, ';')) {
+  for (const raw of splitTopLevel(shown.cssText, ';')) {
     const colon = raw.indexOf(':');
     if (colon < 0) continue;
     const name = raw.slice(0, colon).trim();
@@ -218,7 +222,7 @@ export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line
       range: { startLine: line, startColumn: start, endLine: line, endColumn: start + propertyText.length },
     });
   }
-  return styleOf(styleSheetId, decl, written, text, {
+  return styleOf(styleSheetId, shown, written, text, {
     startLine: line,
     startColumn: column,
     endLine: line,

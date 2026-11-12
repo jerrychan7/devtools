@@ -7,6 +7,7 @@ import { pageRulesRewritten } from '../css/matching/forced-pseudo';
 import { type CssomChange, ownCall, ownSet, ownStyle, watchCssom, watchRealms } from '../css/sheets/watch/cssom-watch';
 import { sizesRewrite } from './attributes';
 import { type Merge, mergeDeclarations, mergeList } from './merge';
+import { type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
@@ -16,14 +17,6 @@ export type Rewrite = (text: string) => string;
 interface Active {
   media: Rewrite | null;
   values: Rewrite | null;
-}
-
-/** A text the page had, and what it was rewritten to: `applied` as it reads after the write. */
-interface Rewritten {
-  original: string;
-  applied: string;
-  /** What the rewrite gave the original, as last written: while the text still reads `applied`, it is not written again. */
-  target: string;
 }
 
 /**
@@ -60,9 +53,8 @@ interface Rewritten {
  */
 const mediaRewrites = new Map<string, Rewrite>();
 const valueRewrites = new Map<string, Rewrite>();
-/** The records of the lists and declaration blocks rewritten: a sheet let go takes its records with it. */
+/** The records of the lists rewritten: a sheet let go takes its records with it (`styles`: shown-style.ts). */
 const lists = new WeakMap<MediaList, Rewritten>();
-const styles = new WeakMap<CSSStyleDeclaration, Rewritten>();
 
 const apply = (rewrites: Map<string, Rewrite>, text: string) => {
   let out = text;
@@ -128,12 +120,6 @@ export function rewriteValues(name: string, rewrite: Rewrite | null): void {
 export function shownMedia(list: MediaList): string {
   const rewritten = lists.get(list);
   return rewritten && rewritten.applied === list.mediaText ? rewritten.original : list.mediaText;
-}
-
-/** A declaration block as the page wrote it, for showing (and for an edit to undo to): the original of a rewritten one. */
-export function shownCssText(style: CSSStyleDeclaration): string {
-  const rewritten = styles.get(style);
-  return rewritten && rewritten.applied === style.cssText ? rewritten.original : style.cssText;
 }
 
 /**

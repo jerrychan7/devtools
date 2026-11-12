@@ -431,6 +431,28 @@ test('insets not set keep their real value', async () => {
   await both(...safeArea({}));
 });
 
+test("the Styles pane shows the env() a sheet's rule wrote, not the inset it is rewritten to", async () => {
+  const shown = await sameOnBoth(async side => {
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5 } });
+    await side.send('DOM.enable');
+    await side.send('CSS.enable');
+    try {
+      const { root } = await side.send('DOM.getDocument', {});
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#sa' });
+      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+      return (matchedCSSRules ?? []).flatMap(m =>
+        m.rule.style.cssProperties.filter(p => p.name === 'padding-top').map(p => p.value)
+      );
+    } finally {
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    }
+  });
+  assert.ok(shown.length > 0);
+  for (const value of shown) assert.equal(value, 'env(safe-area-inset-top, 7px)');
+});
+
 /** What each side gives for `run`, run on each in turn: the two must give the same. */
 async function sameOnBoth<T>(run: (side: Side) => Promise<T>): Promise<T> {
   const results: T[] = [];

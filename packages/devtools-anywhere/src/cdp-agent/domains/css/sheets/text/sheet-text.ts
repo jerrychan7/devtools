@@ -2,7 +2,8 @@
 // once against its CSSOM, made unknown or kept up to date as the page and the CSS domain change
 // the sheet, and paired with its rules when asked for (pair.ts, updated in place by splice.ts).
 import { isHtml } from '../../../../core/realm';
-import { forgetSheet, ownEdit, recordPageChanges, type RuleChange, settle } from '../watch/cssom-watch';
+import { shownCssText } from '../../../emulation/shown-style';
+import { forgetSheet, ownEdit, ownStyle, recordPageChanges, type RuleChange, settle } from '../watch/cssom-watch';
 import { type SheetSource, pair, tagOf } from './pair';
 import { type Pending, applied, respliced, retexted } from './splice';
 
@@ -39,9 +40,28 @@ function sameRules(parsed: CSSRuleList, rules: CSSRule[]): boolean {
   for (let i = 0, j = 0; i < rules.length; i++) {
     const rule = rules[i] as CSSRule;
     if (imports && tagOf(rule) === 'CSSImportRule') continue;
-    if (rule.cssText !== (parsed[j++] as CSSRule).cssText) return false;
+    if (!sameRule(rule, parsed[j++] as CSSRule)) return false;
   }
   return true;
+}
+
+/**
+ * Whether `rule` is the rule `parsed` was read as. The emulation rewrites the values of some declarations
+ * (domains/emulation/rewrite.ts), so a rule whose declarations it rewrote is compared by what the page wrote
+ * (shownCssText): two values the page wrote may be rewritten to the same text, and a change of the page that
+ * the rewrite hides is not taken as no change.
+ */
+function sameRule(rule: CSSRule, parsed: CSSRule): boolean {
+  if (rule.cssText === parsed.cssText) return true;
+  if (tagOf(rule) !== 'CSSStyleRule' || tagOf(parsed) !== 'CSSStyleRule') return false;
+  const style = ownStyle(rule as CSSStyleRule);
+  // Not rewritten: the rule is not the same, as before.
+  const shown = shownCssText(style);
+  return (
+    shown !== style.cssText &&
+    (rule as CSSStyleRule).selectorText === (parsed as CSSStyleRule).selectorText &&
+    shown === ownStyle(parsed as CSSStyleRule).cssText
+  );
 }
 
 /**
