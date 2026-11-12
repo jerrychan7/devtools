@@ -71,21 +71,24 @@ function sameReading(a: Reading, b: Reading, name: string): boolean {
 }
 
 /**
- * Declaration blocks: a declaration whose value is still the one the rewrite gave it takes the value the
- * original declares for its name back; everything else is the page's, as it wrote it, byte for byte (what is
- * between its declarations included: a comment, an empty declaration, the last semicolon). A block the
- * browser writes back with an empty value in it (the longhands of a shorthand whose value is pending,
- * a var() or an env(), which it cannot write whole) is kept as the browser wrote it: written back as
- * text, the empty declarations would drop the values they stand for, and the sides they set.
+ * Declaration blocks: a declaration the rewrite changed, whose value is still the one the rewrite gave it, takes
+ * the value the original declares for its name back, with the priority as the text has it now; everything else is
+ * the page's, as the text has it, byte for byte (what is between its declarations included: a comment, an empty
+ * declaration, the last semicolon). So a text the browser serialized since stays as the browser wrote it, and one
+ * the page set stays as it set it. A block the browser writes back with an empty value in it (the longhands of a
+ * shorthand whose value is pending, a var() or an env(), which it cannot write whole) is kept as the browser wrote
+ * it: written back as text, the empty declarations would drop the values they stand for, and the sides they set.
  */
 export const mergeDeclarations: Merge = (original, applied, current) => {
   if (declarationsOf(current).some(d => d.value === '')) return current;
   const kept = new Map(declarationsOf(original).map(d => [d.name, d.value] as const));
+  const own = readingOf(original);
   const was = readingOf(applied);
   const now = readingOf(current);
-  return mapDeclarations(current, name => {
-    const own = kept.get(name);
-    return own && sameReading(was, now, name) ? own : null;
+  return mapDeclarations(current, (name, value) => {
+    const mine = kept.get(name);
+    if (mine === undefined || sameReading(own, was, name) || !sameReading(was, now, name)) return null;
+    return splitPriority(mine).value + splitPriority(value).priority;
   });
 };
 

@@ -76,6 +76,14 @@ const WRITES: Record<string, string> = {
     rect.setAttribute('style', 'padding-top: env(safe-area-inset-top, 1px); --x: f(a');
     await new Promise(resolve => setTimeout(resolve, 50));
     rect.style.setProperty('color', 'blue')`,
+  // A declaration the emulation did not change keeps the text the browser wrote for it, not the page's.
+  serialized: `el.setAttribute('style', 'padding-top: env(safe-area-inset-top, 1px); color: rgb(1,0,0)');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    el.style.setProperty('margin-left', '2px')`,
+  // The priority of a declaration the emulation changed is written as the browser writes it.
+  priority: `el.setAttribute('style', 'padding-top: env(safe-area-inset-top, 1px) !IMPORTANT; color:red');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    el.style.setProperty('margin-left', '2px')`,
   // A rule the sheet's text gave an !important declaration before a plain one keeps the order of the two, changed
   // by the page or not: its text set whole would be read with the !important one last.
   ruleOrder: `second.style.setProperty('color', 'blue')`,
@@ -175,6 +183,13 @@ const BLOCKS: Record<string, string> = {
   border: `border: ${T} solid red; overflow-wrap: break-word; border-inline-start-width: 2px`,
   inset: `inset-inline-start: ${L}; position: relative; top: ${T}; inline-size: ${L}; color: red; height: 9px`,
   margins: `margin-block: ${T}; margin-left: ${L}; overflow-wrap: break-word; margin-inline-end: ${L}`,
+  // A physical longhand after the logical one, which the browser writes into the shorthand before both: the
+  // block's text no longer tells the order the cascade goes by.
+  paddingAround: `padding: 1px; padding-inline-start: ${L}; padding-left: 2px`,
+  marginAround: `margin: 1px; margin-inline-start: ${L}; margin-left: 2px`,
+  insetAround: `position: relative; inset: 1px; inset-inline-start: ${L}; left: 2px`,
+  shorthandAfter: `padding-inline-start: ${L}; padding: 1px; padding-left: 2px; color: red`,
+  shorthandImportant: `padding: 1px !important; padding-inline-start: ${L} !important; padding-left: 2px !important`,
   // A shorthand whose value is pending: its sides have no value of their own to set.
   pendingAround: `--x: 1px; padding: var(--x); padding-inline-start: ${L}; padding-left: 2px`,
   pendingAfter: `--x: 1px; padding-inline-start: ${L}; overflow-wrap: break-word; padding: var(--x) 3px`,
