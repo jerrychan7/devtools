@@ -1,6 +1,7 @@
 import { hideAdopted } from '../../core/nodes/adopted';
 import { closestOwn } from '../../core/nodes/nodes';
 import { documentOf, isElement, realmOf } from '../../core/realm';
+import { afterFrames, inTurn, MAX_WAIT, task, turnOf } from '../../core/turn';
 import { ownCall } from '../css/sheets/watch/cssom-watch';
 import { followTrees, pageTrees, type Tree } from './trees';
 
@@ -10,6 +11,22 @@ import { followTrees, pageTrees, type Tree } from './trees';
  * one is active. The sheets are adopted hidden from the page (`hideAdopted`): the page does not see
  * them in `adoptedStyleSheets`, and the CSS domain does not list them. The scans never visit
  * devtools-anywhere's own elements.
+ *
+ * Pacing. A visit may write to the page (a mark on the element), which the page's own mutation observers see. A
+ * page that answers such a write by adding elements, in the same turn of its script (core/turn.ts: at once, in a
+ * microtask or in a timer of no delay), would have them visited and written at once, which it answers again, and no
+ * task ever ends. So the elements a document gets in the turn of a scan's last write there are held for frames
+ * before they are visited: each batch held so waits twice the frames of the one before, from two frames up to
+ * MAX_WAIT frames, and the answers that come while a batch is held join it, with no longer a wait.
+ *
+ * An addition in a turn of the page's own is visited at once and ends the doubling; one that comes so while a visit
+ * is held ends the doubling too (the next batch waits two frames again), but is visited with what is held, after the
+ * frames that batch still waits. So a page that adds elements on its own, some of them in
+ * the turn of a write by chance (a frame callback of the page's that runs after the one a held visit ran in), has
+ * them held for two frames at most. An answer from a later task of the page's (a frame callback, a timer with a
+ * delay) is not told from an addition of its own, and is visited at once: such a page goes on adding at its own pace
+ * (docs/limitations.md). The pace is kept per document, so that a frame answering the marks does not hold the scan
+ * of another.
  */
 
 /** A sheet injected by name: its text, and per tree the function that takes it out again. */
@@ -20,9 +37,12 @@ interface Injection {
   into: Map<Tree, () => void>;
 }
 
+/** What a scan does with an element: it returns true where it wrote to the page (see the pacing note). */
+export type Visit = (el: Element) => boolean | void;
+
 /** A scan by name: its visit, and the elements it has visited (each is visited once by a scan). */
 interface Scan {
-  visit: (el: Element) => void;
+  visit: Visit;
   seen: WeakSet<Element>;
 }
 
@@ -32,6 +52,25 @@ const scans = new Map<string, Scan>();
 let observer: MutationObserver | null = null;
 const observed = new Set<Tree>();
 let stopFollowing: (() => void) | null = null;
+/**
+ * How the visits of the elements added to a document are paced: the turn of the scans' last write there, the frames
+ * of the next wait, and the elements added while a visit is held (null while none is), which are visited when it
+ * runs. They are held weakly: the page may have dropped them by then.
+ */
+interface Pace {
+  wroteIn: number;
+  wait: number;
+  held: WeakRef<Element>[] | null;
+}
+
+/** The pace of each document; a new map once the last scan stops, which drops the waits and what is held. */
+let paces = new WeakMap<Document, Pace>();
+
+function paceOf(doc: Document): Pace {
+  let pace = paces.get(doc);
+  if (!pace) paces.set(doc, (pace = { wroteIn: -1, wait: 1, held: null }));
+  return pace;
+}
 
 /**
  * Puts a style sheet with `css` in every tree of the page under `name`, replacing the one it had
@@ -49,11 +88,15 @@ export function injectOwnStyle(name: string, css: string | null): void {
  * Calls `visit` once for each element of the page, in every tree: those there now, and those added
  * later (through a mutation observer). `null` stops it. Setting a `visit` (replacing the one before)
  * visits the elements there now again, each once for that visit. devtools-anywhere's own elements are
- * never visited.
+ * never visited. A visit that writes to the page returns true: the elements the page adds in answer are
+ * visited some frames later (see the pacing note).
  */
-export function scanElements(name: string, visit: ((el: Element) => void) | null): void {
-  if (!visit) scans.delete(name);
-  else {
+export function scanElements(name: string, visit: Visit | null): void {
+  if (!visit) {
+    scans.delete(name);
+    // The next scans start with no wait, and with nothing held: a hold that is still to run finds its pace gone.
+    if (!scans.size) paces = new WeakMap();
+  } else {
     // The trees observed already get the new visit now; the trees sync finds new get every scan.
     const now = new Set(pageTrees());
     const known = [...observed].filter(tree => now.has(tree));
@@ -68,7 +111,7 @@ export function scanElements(name: string, visit: ((el: Element) => void) | null
 function visitElement(el: Element, scan: Scan): void {
   if (closestOwn(el) || scan.seen.has(el)) return;
   scan.seen.add(el);
-  scan.visit(el);
+  if (scan.visit(el) === true) paceOf(documentOf(el)).wroteIn = turnOf();
 }
 
 /** Visits each element of `root` and below for `scan`. */
@@ -131,16 +174,54 @@ function sync(): void {
   }
 }
 
-/** Visits the elements added to the trees, for each scan. */
-function onRecords(records: MutationRecord[]): void {
-  for (const record of records)
-    for (const node of Array.from(record.addedNodes)) {
-      if (!isElement(node)) continue;
-      for (const scan of scans.values()) {
-        visitElement(node, scan);
-        visitAll(node, scan);
-      }
+/** Visits `added`, elements added to the trees, and what is below them, for each scan. */
+function visitAdded(added: Element[]): void {
+  for (const el of added)
+    for (const scan of scans.values()) {
+      visitElement(el, scan);
+      visitAll(el, scan);
     }
+}
+
+/**
+ * The elements added to the trees are visited for each scan: at once, or, where their document got them in the turn
+ * of a scan's last write there, after a wait that doubles with each such answer (see the pacing note).
+ */
+function onRecords(records: MutationRecord[]): void {
+  const byDocument = new Map<Document, Element[]>();
+  for (const record of records) {
+    const added = Array.from(record.addedNodes).filter(isElement);
+    if (!added.length) continue;
+    const doc = documentOf(record.target);
+    const before = byDocument.get(doc);
+    if (before) before.push(...added);
+    else byDocument.set(doc, added);
+  }
+  for (const [doc, added] of byDocument) {
+    const pace = paceOf(doc);
+    const answer = inTurn(pace.wroteIn);
+    if (!answer) pace.wait = 1;
+    // A visit is held already: it takes these too, when it runs.
+    if (pace.held) pace.held.push(...added.map(el => new WeakRef(el)));
+    else if (!answer) visitAdded(added);
+    else hold(doc, pace, added);
+  }
+}
+
+/** Holds the visit of `added`, the answer of `doc` to a write, for twice the frames of the wait before. */
+function hold(doc: Document, pace: Pace, added: Element[]): void {
+  pace.wait = Math.min(MAX_WAIT, pace.wait * 2);
+  const batch = (pace.held = added.map(el => new WeakRef(el)));
+  // The visit runs in a task of its own after the frames, not in the frame callback: what the page's frame
+  // callbacks add after that one would be in the turn of its writes.
+  afterFrames(pace.wait, () =>
+    task(() => {
+      // The scans stopped since (and may run again): the ones that run now have visited these, or will.
+      if (paces.get(doc) !== pace) return;
+      pace.held = null;
+      visitAdded(batch.map(ref => ref.deref()).filter(el => el !== undefined));
+    })
+  );
 }
 
 /** Keeps the trees in step with the page while something is injected or scanned; stops when nothing is. */

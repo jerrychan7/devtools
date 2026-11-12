@@ -3,7 +3,7 @@ import { FORCED_COLORS_ATTRIBUTE, OWN_ATTRIBUTE } from '../../core/nodes/nodes';
 import { quietMutations } from '../../core/nodes/own-mutations';
 import { isShadowRoot, styleOf } from '../../core/realm';
 import { splitMediaQueries } from './css-tokens';
-import { injectOwnStyle, scanElements } from './inject';
+import { injectOwnStyle, scanElements, type Visit } from './inject';
 import { pageTrees } from './trees';
 
 /*
@@ -175,12 +175,13 @@ function track(el: Element): void {
 
 /**
  * Sets the mark of `el` to `value` (tokens separated by spaces), or takes it away with null. The write is
- * the agent's: no DOM event of the client reports it.
+ * the agent's: no DOM event of the client reports it. Returns whether it wrote: the page's own observers see
+ * a write.
  */
-function mark(el: Element, value: string | null): void {
+function mark(el: Element, value: string | null): boolean {
   const before = nativeCall<string | null>(el, 'getAttribute', FORCED_COLORS_ATTRIBUTE);
   if (value !== null) track(el);
-  if (before === value) return;
+  if (before === value) return false;
   quietMutations(
     () => {
       if (value === null) nativeCall(el, 'removeAttribute', FORCED_COLORS_ATTRIBUTE);
@@ -188,24 +189,26 @@ function mark(el: Element, value: string | null): void {
     },
     { target: el, name: FORCED_COLORS_ATTRIBUTE, before }
   );
+  return true;
 }
 
 /**
  * Marks `el` with what forced colors does to it. Marks it already has are taken away first: a clone of a
  * marked element carries them, and the palette's rules for them would change what is read (a gradient the
- * `no-image` mark hides reads as none). The page's values are read after that.
+ * `no-image` mark hides reads as none). The page's values are read after that. Returns whether a mark was
+ * written or taken away, which the scan paces its next visits by (inject.ts).
  */
-function visit(el: Element): void {
-  mark(el, null);
-  if (keepsColors(el)) return mark(el, KEPT);
+const visit: Visit = el => {
+  const cleared = mark(el, null);
+  if (keepsColors(el)) return mark(el, KEPT) || cleared;
   const style = styleOf(el);
   const tokens: string[] = [];
   const steps = Math.round(alphaOf(style.getPropertyValue('background-color')) * STEPS);
   if (steps === STEPS) tokens.push(CANVAS_TOKEN);
   else if (steps > 0) tokens.push(`${CANVAS_TOKEN}-${steps * (100 / STEPS)}`);
   if (losesImages(style.getPropertyValue('background-image'))) tokens.push(NO_IMAGE);
-  mark(el, tokens.length ? tokens.join(' ') : null);
-}
+  return mark(el, tokens.length ? tokens.join(' ') : null) || cleared;
+};
 
 /** Takes the marks off every element marked: those in the page, and those the page took out and kept. */
 function unmarkAll(): void {

@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
+import type { Frame } from 'puppeteer-core';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 import { agreement, decodePng, mismatches, type Box, type Pixels } from '../../../../test-support/png-pixels.ts';
 
@@ -379,6 +380,65 @@ test('the marks of an element the page took out are taken away when forced color
   }
 });
 
+test('a page that adds an element for each attribute change it sees does not loop with the marks', async ctx => {
+  /** The page's observer adds a gradient to #loop for each attribute record there, up to `LIMIT` of them. */
+  const LIMIT = 200;
+  const loop = async (side: Side) => {
+    await t.page.evaluate(limit => {
+      const box = document.createElement('div');
+      box.id = 'loop';
+      document.body.append(box);
+      let added = 0;
+      const observer = new MutationObserver(records => {
+        for (let i = 0; i < records.length && added < limit; i++) {
+          added++;
+          box.insertAdjacentHTML('beforeend', '<i style="background: linear-gradient(red, blue)">i</i>');
+        }
+      });
+      observer.observe(box, { attributes: true, subtree: true });
+      Reflect.set(window, '__loop', { stop: () => observer.disconnect(), added: () => added });
+    }, LIMIT);
+    const images = () =>
+      t.page.evaluate(() =>
+        Array.from(document.querySelectorAll('#loop i'), el => getComputedStyle(el).backgroundImage)
+      );
+    await side.send('Emulation.setEmulatedMedia', FORCED);
+    try {
+      await t.page.evaluate(() =>
+        document
+          .getElementById('loop')
+          ?.insertAdjacentHTML('beforeend', '<i style="background: linear-gradient(red, blue)">i</i>')
+      );
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const added = await t.page.evaluate(() => {
+        const state = Reflect.get(window, '__loop') as { stop(): void; added(): number };
+        state.stop();
+        return state.added();
+      });
+      // The page adds no more: every gradient there is taken away, the held ones within the longest wait.
+      const start = Date.now();
+      let left = await images();
+      while (left.some(image => image !== 'none') && Date.now() - start < 3000) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        left = await images();
+      }
+      return { added, gradients: left.filter(image => image !== 'none').length };
+    } finally {
+      await t.page.evaluate(() => document.getElementById('loop')?.remove());
+      await side.send('Emulation.setEmulatedMedia', CLEAR);
+      await settle();
+    }
+  };
+  const chrome = await loop(t.chrome);
+  const ours = await loop(t.ours);
+  // Chrome writes nothing the page sees. Our marks are attributes, which this page answers: the scan waits
+  // longer each time, so the page adds a few elements in two seconds, not all it would.
+  ctx.diagnostic(`answers in the observer's callback: ${ours.added} in two seconds`);
+  assert.deepEqual(chrome, { added: 0, gradients: 0 });
+  assert.equal(ours.gradients, 0);
+  assert.ok(ours.added >= 1 && ours.added <= 12, `the page added ${ours.added} elements`);
+});
+
 test('an element slotted into a shadow tree keeps the colors of the element its slot is in', async () => {
   const colors = async (side: Side) => {
     await t.page.evaluate(() => {
@@ -405,4 +465,280 @@ test('an element slotted into a shadow tree keeps the colors of the element its 
   const chrome = await colors(t.chrome);
   assert.deepEqual(await colors(t.ours), chrome);
   assert.equal(chrome[0], 'rgb(0, 136, 0)');
+});
+
+/** A gradient, which forced colors take away: ours marks the element for it. */
+const GRADIENT = '<i style="background: linear-gradient(red, blue)">i</i>';
+
+/**
+ * How a page answers a mark: in a microtask, a frame callback, a MessageChannel message, a scheduler.postTask()
+ * callback, or a timer of that many ms.
+ */
+type Answer = 'microtask' | 'frame' | 'message' | 'postTask' | number;
+
+/**
+ * A page whose observer answers each attribute record of #loop with one more gradient there, `how`, up to 500 of
+ * them: how many it has added two seconds after the first one, and how many gradients are left some time after it
+ * stopped answering.
+ */
+async function answers(side: Side, how: Answer): Promise<{ added: number; gradients: number }> {
+  await t.page.evaluate(how => {
+    const box = document.createElement('div');
+    box.id = 'loop';
+    document.body.append(box);
+    let added = 0;
+    const add = () => {
+      if (added++ < 500) box.insertAdjacentHTML('beforeend', '<i style="background: linear-gradient(red, blue)">i</i>');
+    };
+    const channel = new MessageChannel();
+    channel.port1.onmessage = add;
+    const scheduler = Reflect.get(window, 'scheduler') as { postTask(task: () => void): Promise<void> };
+    const observer = new MutationObserver(records => {
+      for (let i = 0; i < records.length; i++) {
+        if (how === 'microtask') queueMicrotask(add);
+        else if (how === 'frame') requestAnimationFrame(add);
+        else if (how === 'message') channel.port2.postMessage(null);
+        else if (how === 'postTask') void scheduler.postTask(add);
+        else setTimeout(add, how);
+      }
+    });
+    observer.observe(box, { attributes: true, subtree: true });
+    Reflect.set(window, '__loop', { stop: () => observer.disconnect(), added: () => added });
+  }, how);
+  await side.send('Emulation.setEmulatedMedia', FORCED);
+  try {
+    await t.page.evaluate(html => document.getElementById('loop')?.insertAdjacentHTML('beforeend', html), GRADIENT);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const added = await t.page.evaluate(() => {
+      const state = Reflect.get(window, '__loop') as { stop(): void; added(): number };
+      state.stop();
+      return state.added();
+    });
+    // The page adds no more: every gradient there is taken away, the held ones within the longest wait.
+    const images = () =>
+      t.page.evaluate(() =>
+        Array.from(document.querySelectorAll('#loop i'), el => getComputedStyle(el).backgroundImage)
+      );
+    const start = Date.now();
+    let left = await images();
+    while (left.some(image => image !== 'none') && Date.now() - start < 3000) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      left = await images();
+    }
+    return { added, gradients: left.filter(image => image !== 'none').length };
+  } finally {
+    await t.page.evaluate(() => document.getElementById('loop')?.remove());
+    await side.send('Emulation.setEmulatedMedia', CLEAR);
+    await settle();
+  }
+}
+
+test('a page that answers the marks in a microtask or a task of no delay is backed off', async ctx => {
+  const names = { microtask: 'a microtask', 0: 'a timer of no delay', message: 'a message', postTask: 'postTask()' };
+  for (const how of ['microtask', 0, 'message', 'postTask'] as const) {
+    // Chrome writes nothing the page sees, so the page adds nothing. Ours marks, which this page answers in the
+    // turn of the mark: the scan waits longer each time.
+    assert.deepEqual(await answers(t.chrome, how), { added: 0, gradients: 0 });
+    const ours = await answers(t.ours, how);
+    ctx.diagnostic(`answers from ${names[how]}: ${ours.added} in two seconds`);
+    assert.equal(ours.gradients, 0);
+    assert.ok(ours.added >= 1 && ours.added <= 12, `the page added ${ours.added} elements`);
+  }
+});
+
+test('a page that answers the marks from a later frame or timer goes on at its own pace', async ctx => {
+  // docs/limitations.md says so: an answer from a later task of the page's is not told from an addition of its
+  // own, so it is marked at once, which the page answers again, about once a frame or once a timer.
+  for (const [how, most] of [
+    ['frame', 260],
+    [50, 45],
+  ] as const) {
+    assert.deepEqual(await answers(t.chrome, how), { added: 0, gradients: 0 });
+    const ours = await answers(t.ours, how);
+    ctx.diagnostic(
+      `answers from ${how === 'frame' ? 'a frame callback' : `a ${how} ms timer`}: ${ours.added} in two seconds`
+    );
+    assert.equal(ours.gradients, 0);
+    assert.ok(ours.added > 12 && ours.added <= most, `the page added ${ours.added} elements`);
+  }
+});
+
+/** How a page adds gradients of its own: each step is run in turn, in one document. */
+type Step = 'once' | 'microtasks' | 'timers' | 'frames-100' | 'frames-1';
+
+/**
+ * Runs `steps` in the document of `frame` (the top page's, or the iframe's): 2000 gradients added at once, in 20
+ * microtasks or 20 timers of no delay of 100 each, 100 in each of 20 frames, or one in each frame for three
+ * seconds. Gives, per step, the most frames an element waited for its mark: 0 where it is marked in the frame it
+ * was added in. An element left unmarked two seconds after the last step counts as Infinity.
+ */
+const waited = (frame: Frame, steps: Step[]): Promise<number[]> =>
+  frame.evaluate(
+    async (steps, html) => {
+      const MARK = 'data-devtools-anywhere-forced-colors';
+      const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      const box = document.createElement('div');
+      box.id = 'bulk';
+      document.body.append(box);
+      // The frame each element was added in, and the frames it waited: the marks are seen as they are written.
+      let now = 0;
+      let counting = true;
+      const tick = () => {
+        now++;
+        if (counting) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      const born = new Map<Node, { at: number; step: number }>();
+      const longest = steps.map(() => 0);
+      const marks = new MutationObserver(records => {
+        for (const { target } of records) {
+          const was = born.get(target);
+          if (!was) continue;
+          born.delete(target);
+          longest[was.step] = Math.max(longest[was.step] ?? 0, now - was.at);
+        }
+      });
+      marks.observe(box, { attributes: true, attributeFilter: [MARK], subtree: true });
+      const add = (step: number, count: number) => {
+        const from = box.children.length;
+        box.insertAdjacentHTML('beforeend', html.repeat(count));
+        for (let i = from; i < box.children.length; i++) born.set(box.children[i] as Node, { at: now, step });
+      };
+      for (const [step, how] of steps.entries()) {
+        if (how === 'once') add(step, 2000);
+        else if (how === 'microtasks')
+          for (let i = 0; i < 20; i++) {
+            await Promise.resolve();
+            add(step, 100);
+          }
+        else if (how === 'timers')
+          await Promise.all(
+            Array.from({ length: 20 }, () => new Promise<void>(resolve => setTimeout(() => resolve(add(step, 100)), 0)))
+          );
+        else {
+          const [frames, count] = how === 'frames-100' ? [20, 100] : [180, 1];
+          for (let i = 0; i < frames; i++) {
+            await nextFrame();
+            add(step, count);
+          }
+        }
+        // The next step follows at once, as a page's own work does: after a frame, so that each step's first
+        // addition is in a task of its own.
+        await nextFrame();
+      }
+      for (let i = 0; i < 20 && born.size; i++) await pause(100);
+      counting = false;
+      marks.disconnect();
+      for (const { step } of born.values()) longest[step] = Infinity;
+      box.remove();
+      return longest;
+    },
+    steps,
+    GRADIENT
+  );
+
+/** The document of the fixture's iframe. */
+const inner = (): Frame => {
+  const frame = t.page.frames().find(f => f.parentFrame() === t.page.mainFrame());
+  if (!frame) throw new Error('the page has no iframe');
+  return frame;
+};
+
+/** The steps a page's own additions are measured in: each alone, then some in a row. */
+const ALONE: Step[] = ['once', 'microtasks', 'timers', 'frames-100', 'frames-1'];
+const IN_A_ROW: Step[] = ['timers', 'frames-100', 'frames-1', 'microtasks', 'frames-1'];
+/** The most frames an element a page adds on its own may wait for its mark. */
+const MOST = 2;
+
+test('the elements a page adds on its own are marked within two frames, in the page and in an iframe', async ctx => {
+  await t.ours.send('Emulation.setEmulatedMedia', FORCED);
+  try {
+    await settle();
+    for (const [where, frame] of [
+      ['the page', t.page.mainFrame()],
+      ['the iframe', inner()],
+    ] as const) {
+      const alone: number[] = [];
+      for (const step of ALONE) alone.push(...(await waited(frame, [step])));
+      const row = await waited(frame, IN_A_ROW);
+      ctx.diagnostic(
+        `${where}, the most frames an element waited: ${ALONE.map((step, i) => `${step} ${alone[i]}`).join(', ')}; ` +
+          `in a row: ${IN_A_ROW.map((step, i) => `${step} ${row[i]}`).join(', ')}`
+      );
+      for (const [i, step] of ALONE.entries())
+        assert.ok((alone[i] ?? Infinity) <= MOST, `${where}: ${step} alone waited ${alone[i]} frames`);
+      for (const [i, step] of IN_A_ROW.entries())
+        assert.ok((row[i] ?? Infinity) <= MOST, `${where}: ${step} in a row waited ${row[i]} frames`);
+    }
+  } finally {
+    await t.ours.send('Emulation.setEmulatedMedia', CLEAR);
+    await settle();
+  }
+});
+
+/**
+ * Starts a page in `frame` whose observer answers each mark in #held with one more gradient, in the turn of the
+ * mark, up to 500: the scan of that document is held for longer and longer. Gives what stops it and counts.
+ */
+const answering = async (frame: Frame): Promise<() => Promise<number>> => {
+  await frame.evaluate(html => {
+    const box = document.createElement('div');
+    box.id = 'held';
+    document.body.append(box);
+    let added = 0;
+    const observer = new MutationObserver(() => {
+      if (added++ < 500) box.insertAdjacentHTML('beforeend', html);
+    });
+    observer.observe(box, { attributes: true, subtree: true });
+    Reflect.set(window, '__held', { observer, added: () => added });
+    box.insertAdjacentHTML('beforeend', html);
+  }, GRADIENT);
+  return () =>
+    frame.evaluate(() => {
+      const state = Reflect.get(window, '__held') as { observer: MutationObserver; added(): number };
+      state.observer.disconnect();
+      document.getElementById('held')?.remove();
+      return state.added();
+    });
+};
+
+test('a document that answers the marks does not hold the scan of another, nor the next forced colors', async ctx => {
+  await t.ours.send('Emulation.setEmulatedMedia', FORCED);
+  try {
+    await settle();
+    for (const [answerer, other, name] of [
+      [inner(), t.page.mainFrame(), 'the page, while the iframe answers'],
+      [t.page.mainFrame(), inner(), 'the iframe, while the page answers'],
+    ] as const) {
+      const stop = await answering(answerer);
+      // The answers have doubled the wait a few times by now.
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const steps: Step[] = ['microtasks', 'frames-100', 'frames-1'];
+      const frames = await waited(other, steps);
+      const added = await stop();
+      ctx.diagnostic(`${name}: ${steps.map((step, i) => `${step} ${frames[i]}`).join(', ')}; ${added} answers`);
+      for (const [i, step] of steps.entries())
+        assert.ok((frames[i] ?? Infinity) <= MOST, `${name}: ${step} waited ${frames[i]} frames`);
+      assert.ok(added >= 1 && added <= 14, `the answering document added ${added} elements`);
+    }
+    // A wait still running when forced colors end is not the next run's: the page answers, which holds the scan
+    // for frames, and forced colors are set again before those have passed.
+    const stop = await answering(t.page.mainFrame());
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await t.page.evaluate(() =>
+      (Reflect.get(window, '__held') as { observer: MutationObserver }).observer.disconnect()
+    );
+    await t.ours.send('Emulation.setEmulatedMedia', CLEAR);
+    await t.ours.send('Emulation.setEmulatedMedia', FORCED);
+    const [again] = await waited(t.page.mainFrame(), ['microtasks']);
+    await stop();
+    ctx.diagnostic(`after forced colors are set again: microtasks ${again}`);
+    assert.ok((again ?? Infinity) <= MOST, `${again} frames once forced colors are set again`);
+  } finally {
+    await t.page.evaluate(() => document.querySelectorAll('#bulk, #held').forEach(el => el.remove()));
+    await inner().evaluate(() => document.querySelectorAll('#bulk, #held').forEach(el => el.remove()));
+    await t.ours.send('Emulation.setEmulatedMedia', CLEAR);
+    await settle();
+  }
 });

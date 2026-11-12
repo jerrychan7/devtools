@@ -27,6 +27,9 @@ const turnIsOpen = (): boolean => turnOpen && windowOf().now() - turnBegan < TUR
 /** Calls `fn` in a microtask, as the probe took it (natives). */
 export const queue = (fn: () => void): void => void Reflect.apply(windowOf().microtask, globalThis, [fn]);
 
+/** Calls `fn` in a task of its own, as soon as one runs: a timer of no delay, as the probe took it (natives). */
+export const task = (fn: () => void): void => void Reflect.apply(windowOf().timeout, globalThis, [fn, 0]);
+
 /** Closes the turn `no`, if that is still the open one: a timer of an earlier turn does not close a later one. */
 const closeTurn = (no: number) => {
   if (!turnOpen || no !== turnNo) return;
@@ -45,7 +48,7 @@ export function turnOf(): number {
     const no = turnNo;
     // The timer is queued by a microtask, which runs after the page's observers have run their callbacks in this
     // checkpoint: a timer one of them queues then comes before the close, whichever observer was made first.
-    queue(() => Reflect.apply(windowOf().timeout, globalThis, [() => closeTurn(no), 0]));
+    queue(() => task(() => closeTurn(no)));
   }
   return turnNo;
 }
