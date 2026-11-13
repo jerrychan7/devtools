@@ -282,7 +282,42 @@ async function sheetId(side: Side): Promise<string> {
   return id;
 }
 
+/** Sets the declarations of the rule `.a` to `text`, as the Styles pane does. */
+async function editRule(side: Side, text: string): Promise<void> {
+  const { root } = await side.send('DOM.getDocument', {});
+  const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#a' });
+  const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+  const style = (matchedCSSRules ?? []).find(m => m.rule.selectorList.text === '.a')?.rule.style;
+  assert.ok(style?.styleSheetId && style.range);
+  await side.send('CSS.setStyleTexts', { edits: [{ styleSheetId: style.styleSheetId, range: style.range, text }] });
+}
+
 const CLIENT: Record<string, Case> = {
+  // An undo puts back the block the page wrote, not the text the rule reads as, which has no shorthand.
+  'CSS.setStyleTexts, undone': {
+    css: `.a { ${SHORT(TOP)} }`,
+    client: async side => {
+      await editRule(side, 'color: red');
+      await side.send('DOM.undo');
+    },
+  },
+  'CSS.setStyleTexts, undone and done again': {
+    css: `.a { ${SHORT(TOP)} }`,
+    client: async side => {
+      await editRule(side, `${SHORT(LEFT, '5px')}`);
+      await side.send('DOM.undo');
+      await side.send('DOM.redo');
+    },
+  },
+  'CSS.setStyleTexts under the emulation, undone': {
+    css: `.a { ${SHORT(TOP)} }`,
+    client: async side => {
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 20, left: 6 } });
+      await wait(50);
+      await editRule(side, 'color: red');
+      await side.send('DOM.undo');
+    },
+  },
   // The <style> keeps its text: the rule reads as its old text does, and is not that text.
   'CSS.setStyleSheetText, to another env()': {
     css: `.a { ${SHORT(TOP)} }`,

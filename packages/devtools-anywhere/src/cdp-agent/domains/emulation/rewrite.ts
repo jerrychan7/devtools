@@ -9,6 +9,7 @@ import { pageRulesRewritten } from '../css/matching/forced-pseudo';
 import {
   type CssomChange,
   cssSupports,
+  noteWritten,
   onMediaEdit,
   ownCall,
   ownGet,
@@ -449,6 +450,36 @@ function planWritten(
       const applied = nativeGet<string>(style, 'cssText');
       return { original: playedBlock(found, false).text, applied, target: applied, written: found };
     },
+  };
+}
+
+/**
+ * Keeps what the page wrote `style`, a rule's block, in, for an edit of the client's to be undone to: what it
+ * returns puts the block back. Where the block's serialization does not tell what it declares and the record of
+ * its writes does (planWritten), by playing that record again; else by `text`, the text the block reads as.
+ */
+export function keepBlock(style: CSSStyleDeclaration, text: string): () => void {
+  const byText = () => {
+    ownSet(style, 'cssText', text);
+    noteWritten(style, text);
+  };
+  const current = nativeGet<string>(style, 'cssText');
+  const kept = styles.get(style);
+  if (!NO_VALUE.test(current) && !kept?.written) return byText;
+  if (!planWritten(style, kept?.written ? undefined : kept, current, composed(valueRewrites))) return byText;
+  const record = blockRecord(style);
+  if (!record || record.base === null) return byText;
+  const base = record.base;
+  const writes = record.writes.map(({ name, value, priority, remove }) => ({
+    name,
+    value,
+    priority,
+    ...(remove ? { remove } : {}),
+  }));
+  return () => {
+    const again = startRecord(style, base);
+    again.writes = writes.map(write => ({ ...write }));
+    play(again, ownPlayer(style));
   };
 }
 

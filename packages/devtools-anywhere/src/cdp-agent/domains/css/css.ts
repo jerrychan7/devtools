@@ -20,6 +20,7 @@ import { mergedFrames } from '../../core/frames/merged-frames';
 import { resolveElement } from '../dom/dom';
 import { historyOf, type Action } from '../../core/nodes/history';
 import { shownAttribute } from '../../core/nodes/written-attributes';
+import { keepBlock } from '../emulation/rewrite';
 import { shownCssText, shownMedia } from '../emulation/shown-style';
 import { isEmulationProperty, unwrapSafeArea } from '../emulation/safe-area';
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
@@ -44,6 +45,7 @@ import { ROOT } from './sheets/parse/css-outline';
 import { outline } from './sheets/parse/css-outline-wasm';
 import {
   editedBy,
+  noteWritten,
   ownCall,
   ownEdit,
   ownSet,
@@ -381,13 +383,19 @@ export function registerCss(ctx: Context) {
     if (!styleTextFits(edit.text)) throw new CdpError(INVALID_STYLE);
     const style = ownStyle(rule);
     const old = shownCssText(style);
+    // Put back by what the page wrote the block in, where its text does not hold what it declares.
+    const putBack = keepBlock(style, old);
     const oldSource = sources.get(style);
     editSheet(
       sheet,
       splice(sheet, edit.range, edit.text),
-      () => setStyleText(style, edit.text, () => ownSet(style, 'cssText', edit.text)),
       () => {
-        ownSet(style, 'cssText', old);
+        setStyleText(style, edit.text, () => ownSet(style, 'cssText', edit.text));
+        // The text is kept as the one the style was last written in, for the emulation's rewrites.
+        noteWritten(style, edit.text);
+      },
+      () => {
+        putBack();
         if (oldSource) sources.set(style, oldSource);
         else sources.delete(style);
       },

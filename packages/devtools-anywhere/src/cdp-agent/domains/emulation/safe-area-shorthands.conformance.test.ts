@@ -511,3 +511,57 @@ for (const [name, { before, during }] of Object.entries(PAGE_WAYS))
     assert.deepEqual(ours, r);
     if (name !== 'wholeDuring') assert.notDeepEqual(r.on.box, r.off.box);
   });
+
+test('an edit of the Styles pane that leaves a pending shorthand with another env() is emulated as in Chrome', async () => {
+  const read = () =>
+    t.page.evaluate(() => {
+      const sheet = document.getElementById('ed-sheet');
+      const rule = sheet instanceof HTMLStyleElement ? sheet.sheet?.cssRules[0] : undefined;
+      return {
+        padding: getComputedStyle(document.getElementById('ed') ?? document.body).padding,
+        text: rule instanceof CSSStyleRule ? rule.style.cssText : null,
+      };
+    });
+  const r = await sameOnBoth(t, async side => {
+    await t.page.evaluate(block => {
+      const style = document.createElement('style');
+      style.id = 'ed-sheet';
+      style.textContent = `#ed { ${block} }`;
+      document.head.appendChild(style);
+      document.body.insertAdjacentHTML('beforeend', '<div id="ed">ed</div>');
+    }, BLOCK);
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 6 } });
+    await side.send('DOM.enable');
+    await side.send('CSS.enable');
+    try {
+      const { root } = await side.send('DOM.getDocument', {});
+      const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#ed' });
+      const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+      const style = (matchedCSSRules ?? []).find(m => m.rule.selectorList.text === '#ed')?.rule.style;
+      assert.ok(style?.styleSheetId && style.range);
+      const before = (await read()).padding;
+      // The block reads the same once edited: only its text tells the env() is another.
+      const text = ` padding: ${LEFT} 2px; padding-left: 3px `;
+      await side.send('CSS.setStyleTexts', {
+        edits: [{ styleSheetId: style.styleSheetId, range: style.range, text }],
+      });
+      await settle();
+      const edited = (await read()).padding;
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await settle();
+      const off = await read();
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 7, left: 8 } });
+      await settle();
+      return { before, edited, off, again: (await read()).padding };
+    } finally {
+      await side.send('CSS.disable');
+      await side.send('DOM.disable');
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+      await t.page.evaluate(() => document.querySelectorAll('#ed, #ed-sheet').forEach(el => el.remove()));
+    }
+  });
+  assert.deepEqual(
+    [r.before, r.edited, r.off.padding, r.again],
+    ['5px 2px 5px 3px', '6px 2px 6px 3px', '0px 2px 0px 3px', '8px 2px 8px 3px']
+  );
+});

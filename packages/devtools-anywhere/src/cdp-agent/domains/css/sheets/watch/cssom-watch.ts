@@ -12,6 +12,7 @@ import {
   noteReplaced,
   noteRetexted,
   setWatched,
+  startRecord,
   textOf,
   unfollowStyles,
   wasInserted,
@@ -148,6 +149,11 @@ function sheetOf(target: unknown): CSSStyleSheet | null {
   return typeof target === 'object' && target !== null && 'parentStyleSheet' in target
     ? sheetOf(Reflect.get(target, 'parentStyleSheet'))
     : null;
+}
+
+/** Keeps `text` as what `style`, a rule's style, was set to by the agent (an edit of the CSS domain's): its block from here on. */
+export function noteWritten(style: CSSStyleDeclaration, text: string): void {
+  startRecord(style, text);
 }
 
 /** The top-level rule a rule is in, or is; null for one no longer in a sheet. */
