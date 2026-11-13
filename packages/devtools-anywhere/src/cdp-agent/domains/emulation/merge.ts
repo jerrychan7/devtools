@@ -1,5 +1,6 @@
 import { frames } from '../../core/frames/frames';
-import { ownCall, ownGet, ownRemoveProperty, ownSet, ownSetProperty } from '../css/sheets/watch/cssom-watch';
+import { ownCall, ownGet, ownPlayer, ownRemoveProperty, ownSet, ownSetProperty } from '../css/sheets/watch/cssom-watch';
+import { type BlockRecord, play } from '../css/sheets/watch/written-blocks';
 import {
   type Declaration,
   mapDeclarations,
@@ -46,6 +47,31 @@ function valuesOf(block: string): Map<string, string> {
     values.set(name, priority === 'important' ? `${value} !important` : value);
   }
   return values;
+}
+
+/** `block`, a declaration block, as the browser serializes it once parsed. */
+export function serializedBlock(block: string): string {
+  const style = scratch();
+  ownSet(style, 'cssText', block);
+  return ownGet<string>(style, 'cssText');
+}
+
+/** The names of the properties `style` holds, in the block's order (`style[i]`). */
+const orderOf = (style: CSSStyleDeclaration): string[] =>
+  Array.from({ length: ownGet<number>(style, 'length') }, (_, i) => ownCall<string>(style, 'item', i));
+
+/** What a block reads as, for comparing two: its text, and the order of its properties, which the text does not always tell. */
+export const blockReading = (style: CSSStyleDeclaration): string =>
+  `${ownGet<string>(style, 'cssText')}\n${orderOf(style).join(' ')}`;
+
+/**
+ * The block the writes of `record` give (written-blocks.ts), played on a block of no element in the page: as the
+ * page wrote them, or with `held`, as the block holds them. Its reading (blockReading), and its text.
+ */
+export function playedBlock(record: BlockRecord, held: boolean): { reading: string; text: string } {
+  const style = scratch();
+  play(record, ownPlayer(style), held);
+  return { reading: blockReading(style), text: ownGet<string>(style, 'cssText') };
 }
 
 /** A declaration block as the browser reads it: each name's value (valuesOf), and each name's declared text. */
@@ -103,10 +129,6 @@ export const serialized = (text: string): boolean =>
     .map(d => `${d.name}: ${d.value}; `)
     .join('')
     .trimEnd() === text;
-
-/** The names of the properties `style` holds, in the block's order (`style[i]`). */
-const orderOf = (style: CSSStyleDeclaration): string[] =>
-  Array.from({ length: ownGet<number>(style, 'length') }, (_, i) => ownCall<string>(style, 'item', i));
 
 /**
  * Writes `text` to `style`, a declaration block the browser serialized (a rule's style, or the style of an element

@@ -12,15 +12,37 @@ import {
   onMediaEdit,
   ownCall,
   ownGet,
+  ownPlayer,
   ownSet,
   ownStyle,
   watchCssom,
   watchRealms,
 } from '../css/sheets/watch/cssom-watch';
+import {
+  blockRecord,
+  dropRecord,
+  onNamedWrite,
+  play,
+  sheetTrusted,
+  sourceTrusted,
+  startRecord,
+} from '../css/sheets/watch/written-blocks';
+import { writtenBlock } from '../css/sheets/text/block-text';
 import { sizesRewrite } from './attributes';
 import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
-import { asciiLower } from './css-tokens';
-import { type Merge, mergeDeclarations, mergeList, sameDeclarations, serialized, writeDeclarations } from './merge';
+import { asciiLower, withoutTakenSemicolon } from './css-tokens';
+import {
+  blockReading,
+  type Merge,
+  mergeDeclarations,
+  mergeList,
+  playedBlock,
+  sameDeclarations,
+  serialized,
+  serializedBlock,
+  writeDeclarations,
+} from './merge';
+import { unwrapSafeArea } from './safe-area';
 import { mediaLists, type Rewritten, styles } from './shown-style';
 import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
 
@@ -282,11 +304,172 @@ function editMedia(list: object): (() => void) | undefined {
 /** A media list, of any realm: one the emulation may have a record of. */
 const isMediaList = (value: object): value is MediaList => mediaLists.has(value as MediaList);
 
+/**
+ * A declaration the browser serializes with no value: a side of a shorthand whose value is pending (a var() or an
+ * env() in it), once another side of it was set after it. The shorthand's own text is in no serialization then.
+ */
+const NO_VALUE = /: +(?:!important)?;/;
+
+/** The text of a sheet's file, fetched when a block of it is first looked for; null while it is not there. */
+const fileTexts = new WeakMap<CSSStyleSheet, string | null>();
+let fetchFile: typeof fetch | undefined;
+
+/** Takes the page's own fetch (the probe's), for the texts of the sheets of files. */
+export function useFetch(fetcher: typeof fetch): void {
+  fetchFile = fetcher;
+}
+
+/**
+ * The text of the file `sheet` was loaded from, once it is there: it is fetched (from the HTTP cache, mostly) the
+ * first time it is asked for, and the page's sheets are rewritten again when it comes. Fetched as the page's own
+ * fetch() does, with the credentials the sheet was loaded with: those of a <link crossorigin="use-credentials">
+ * go to another origin too, and no others do.
+ */
+function fileText(sheet: CSSStyleSheet): string | undefined {
+  const known = fileTexts.get(sheet);
+  if (known !== undefined) return known ?? undefined;
+  fileTexts.set(sheet, null);
+  const href = sheet.href;
+  const owner = nativeGet<Node | null>(sheet, 'ownerNode');
+  const crossOrigin = isHtml(owner, 'link') ? nativeCall<string | null>(owner, 'getAttribute', 'crossorigin') : null;
+  const credentials = asciiLower(crossOrigin ?? '') === 'use-credentials' ? 'include' : 'same-origin';
+  if (href && fetchFile)
+    void fetchFile(href, { cache: 'force-cache', credentials })
+      .then(response => (response.ok ? response.text() : Promise.reject(new Error(response.statusText))))
+      .then(
+        text => {
+          fileTexts.set(sheet, text);
+          if (rewriting()) schedule();
+        },
+        () => {}
+      );
+  return undefined;
+}
+
+/** What planWritten found to do with a block that has a record of its writes. */
+interface WrittenPlan {
+  /** Whether the block is to be written: what the rewrite gives is not what it holds. */
+  writes: boolean;
+  /** Writes the block, each write through `write`, and gives what to keep for it: none where it is the page's own. */
+  commit(write?: (set: () => void) => void): Rewritten | undefined;
+}
+
+/**
+ * What to do with a declaration block whose serialization does not tell what it declares (NO_VALUE), or that has
+ * a record of its writes (written-blocks.ts): the block is rewritten by playing the record again with each text
+ * rewritten, and put back by playing it as the page wrote it. The browser makes of the same writes the same
+ * block, so nothing of the block is guessed.
+ *
+ * The record is the one kept as the page wrote the block. A rule's block that has none, never written since the
+ * agent loaded (sourceTrusted), starts one from the text of its rule in its sheet (writtenBlock), where that text
+ * reads as the block does. A record is used only while playing it gives a block that reads as `style` does, text
+ * and order: otherwise it is ended, for good, and nothing is written from it. `generic` is what the rewrite by
+ * the block's own text kept for it, if it rewrote it before: the block the record started from was that one.
+ *
+ * Undefined where there is no such record: the block is rewritten by its own text, as any other (fixText), which
+ * leaves the declarations it reads with no value as they are.
+ */
+function planWritten(
+  style: CSSStyleDeclaration,
+  generic: { original: string; applied: string } | undefined,
+  current: string,
+  rewrite: Rewrite | null
+): WrittenPlan | undefined {
+  let record = blockRecord(style);
+  // The block does not hold what `heldBase` says of the sides it reads with no value: it is written whatever it holds.
+  let force = false;
+  const rule = style.parentRule;
+  const source = () => (rule ? writtenBlock(rule, fileText, sheetTrusted(style)) : undefined);
+  const apply = (text: string) => (rewrite ? rewrite(text) : text);
+  if (!record) {
+    if (!rule || !NO_VALUE.test(current) || !sourceTrusted(style)) return undefined;
+    const base = source();
+    if (base === undefined) return undefined;
+    // Rewritten by its own text before the text it was written in was there (a file's): as that text, rewritten.
+    const was = generic && generic.applied === current ? generic.original : current;
+    if (serializedBlock(base) !== was) return undefined;
+    record = startRecord(style, base);
+    if (generic) force = !!(record.heldBase = apply(base));
+  } else if (record.base === null) {
+    // Written since the agent loaded, from a block that did not hold all it declared: that block was its rule's
+    // text, where it reads as the block did.
+    const base = source();
+    if (base === undefined) return undefined;
+    const pre = generic && generic.applied === record.pre ? generic.original : record.pre;
+    if (serializedBlock(base) !== pre) return void dropRecord(style);
+    record.base = base;
+    if (generic) force = !!(record.heldBase = apply(base));
+    record.from = 'text';
+  } else if (record.from === 'read') {
+    // Started from what the block read as: the page's own text, where the rewrite had written that block.
+    if (generic) {
+      if (generic.applied !== record.pre && serializedBlock(generic.applied) !== record.pre)
+        return void dropRecord(style);
+      record.heldBase = record.base;
+      record.base = generic.original;
+    }
+    // A value left open is serialized with a semicolon after it, which the text parsed again takes into the value.
+    else record.base = withoutTakenSemicolon(record.base);
+    record.from = 'text';
+  }
+  // A text the page read from a rewritten block and wrote again is the page's as it was written.
+  const base = record.base ?? '';
+  if (record.heldBase === undefined && unwrapSafeArea(base) !== base) {
+    record.heldBase = base;
+    record.base = unwrapSafeArea(base);
+  }
+  for (const write of record.writes)
+    if (write.held === undefined && unwrapSafeArea(write.value) !== write.value) {
+      write.held = write.value;
+      write.value = unwrapSafeArea(write.value);
+    }
+  // But where the block is to be written whatever it holds: the rewrite by its own text may have moved a property.
+  if (!force && playedBlock(record, true).reading !== blockReading(style)) return void dropRecord(style);
+  const found = record;
+  const targetBase = apply(found.base ?? '');
+  const targets = found.writes.map(write => (write.remove || write.value === '' ? write.value : apply(write.value)));
+  const writes =
+    force ||
+    targetBase !== (found.heldBase ?? found.base) ||
+    found.writes.some((write, i) => targets[i] !== (write.held ?? write.value));
+  return {
+    writes,
+    commit(write) {
+      if (writes) {
+        play(found, ownPlayer(style, write), false, apply);
+        if (targetBase === found.base) delete found.heldBase;
+        else found.heldBase = targetBase;
+        found.writes.forEach((w, i) => {
+          const target = targets[i];
+          if (target === undefined || target === w.value) delete w.held;
+          else w.held = target;
+        });
+      }
+      if (found.heldBase === undefined && !found.writes.some(w => w.held !== undefined)) return undefined;
+      const applied = nativeGet<string>(style, 'cssText');
+      return { original: playedBlock(found, false).text, applied, target: applied, written: found };
+    },
+  };
+}
+
 /** Rewrites a declaration block through the CSSOM (ours, not a change of the page's to report). */
 function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean {
+  const current = nativeGet<string>(style, 'cssText');
+  const record = styles.get(style);
+  if (record?.written || NO_VALUE.test(current) || blockRecord(style)) {
+    const plan = planWritten(style, record?.written ? undefined : record, current, rewrite);
+    if (plan) {
+      const kept = plan.commit();
+      if (kept) {
+        styles.set(style, kept);
+        track(writtenStyles, style);
+      } else styles.delete(style);
+      return plan.writes;
+    }
+  }
   const fixed = fixText(
-    styles.get(style),
-    nativeGet<string>(style, 'cssText'),
+    record,
+    current,
     rewrite,
     DECLARATIONS,
     () => nativeGet<string>(style, 'cssText'),
@@ -535,10 +718,13 @@ function fixElement(el: Element, act: Active, paced = false): boolean {
  */
 const ENV_CALL = /env\(|\\/i;
 
-/** Whether a declaration block's text uses env() or color-scheme, read through the natives (core/natives.ts). */
+/**
+ * Whether a declaration block's text uses env() or color-scheme, or does not hold all the block declares (NO_VALUE):
+ * read through the natives (core/natives.ts).
+ */
 const envOrScheme = (style: CSSStyleDeclaration): boolean => {
   const text = nativeGet<string>(style, 'cssText');
-  return ENV_CALL.test(text) || /color-scheme/.test(text);
+  return ENV_CALL.test(text) || /color-scheme/.test(text) || NO_VALUE.test(text);
 };
 
 /** Rewrites a rule through the CSSOM: its media, its declarations, and what it holds. */
@@ -617,6 +803,18 @@ function onCssom(sheet: CSSStyleSheet, _text?: string, _by?: object, change?: Cs
     if (rule) changed = fixRule(rule, act);
   } else if (change.kind === 'media') changed = fixMedia(nativeGet<MediaList>(sheet, 'media'), act.media);
   if (changed) pageRulesRewritten();
+}
+
+/**
+ * The page wrote a property of `style` by name (written-blocks.ts): a rule's block is rewritten at once, as one
+ * written through setProperty() is. An element's is seen by the observer, as its attribute changes.
+ */
+function onNamed(style: object): void {
+  if (!rewriting() || !isCssom(style, 'CSSStyleDeclaration')) return;
+  const rule = nativeGet<CSSRule | null>(style, 'parentRule');
+  const sheet = rule?.parentStyleSheet;
+  if (!sheet || ownSheet(sheet) || !(styles.has(style) || envOrScheme(style))) return;
+  if (fixStyle(style, current().values)) pageRulesRewritten();
 }
 
 /** What is watched while something is rewritten. */
@@ -704,6 +902,7 @@ function onRecords(records: MutationRecord[]): void {
 /** Starts watching while something is rewritten: the observers, the CSSOM hooks, the trees. */
 function startWatching(): Watching {
   onMediaEdit(editMedia);
+  onNamedWrite(onNamed);
   return {
     observer: new (windowOf().MO)(onRecords),
     observed: new Set(),
@@ -712,6 +911,7 @@ function startWatching(): Watching {
       followTrees(schedule),
       watchCssom(onCssom, () => realmsOf(pageTrees())),
       () => onMediaEdit(null),
+      () => onNamedWrite(null),
     ],
   };
 }

@@ -75,8 +75,11 @@ export const childRules = (rule: CSSRule): ArrayLike<CSSRule> => {
  * The @import and @namespace rules the CSSOM has first pair with the first such rules of the text
  * wherever they are: CSS.addRule puts a rule asked for before them after them in the CSSOM, its
  * text where asked (as Chrome 156 does), so that the text has a style rule before them.
+ *
+ * With `omit`, the rules it tells are passed over, the nested ones too: rules the text was not
+ * written with (block-text.ts).
  */
-export function pair(text: string, rules: CSSRule[]): SheetSource | null {
+export function pair(text: string, rules: CSSRule[], omit?: (rule: CSSRule) => boolean): SheetSource | null {
   const o = outline(text);
   const namespaces = namespaceText(rules);
   const source: SheetSource = {
@@ -105,7 +108,7 @@ export function pair(text: string, rules: CSSRule[]): SheetSource | null {
     source.topNodes.push(node);
     node = o.next(node);
   }
-  if (!pairList(source, o.firstChild(ROOT), lead ? rules.slice(lead) : rules, TOP, true, used)) return null;
+  if (!pairList(source, o.firstChild(ROOT), lead ? rules.slice(lead) : rules, TOP, true, used, omit)) return null;
   // In the order of the text, which SheetTexts.splice relies on.
   if (used) {
     const { topRules, topNodes } = source;
@@ -136,7 +139,8 @@ export const TOP: Wrap = p => `${p}{}`;
 
 /**
  * Pairs `cssom` with the outline's rules from `first` on (siblings, but those in `skip`) into
- * `source.nodes` (and with `top`, `topRules` and `topNodes`).
+ * `source.nodes` (and with `top`, `topRules` and `topNodes`). The rules `omit` tells, at any depth,
+ * are passed over: the ones the text was not written with.
  */
 export function pairList(
   source: SheetSource,
@@ -144,12 +148,14 @@ export function pairList(
   cssom: ArrayLike<CSSRule>,
   wrap: Wrap,
   top = false,
-  skip?: Set<number>
+  skip?: Set<number>,
+  omit?: (rule: CSSRule) => boolean
 ): boolean {
   const o = source.outline;
   let node = first;
   for (let i = 0; i < cssom.length; i++) {
     const rule = cssom[i] as CSSRule;
+    if (omit?.(rule)) continue;
     const tag = tagOf(rule);
     for (; ; node = o.next(node)) {
       if (node < 0) return false;
@@ -161,7 +167,7 @@ export function pairList(
       }
       const inner: Wrap =
         tag === 'CSSStyleRule' ? p => `:root{${p}{}}` : tag === 'CSSKeyframesRule' ? p => `@keyframes x{${p}{}}` : wrap;
-      if (!pairList(source, o.firstChild(node), childRules(rule), inner)) return false;
+      if (!pairList(source, o.firstChild(node), childRules(rule), inner, false, undefined, omit)) return false;
       node = o.next(node);
       break;
     }

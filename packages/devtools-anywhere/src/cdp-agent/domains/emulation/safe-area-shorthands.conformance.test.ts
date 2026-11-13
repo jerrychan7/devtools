@@ -199,3 +199,315 @@ test("a page's change that leaves no env() in a rewritten declaration keeps the 
     await t.page.evaluate(() => document.getElementById('serial')?.remove());
   }
 });
+
+// A shorthand with env() (or var()) in a rule, with a longhand of its group after it: the browser writes the block
+// back as longhands with no value, so the shorthand's text is in no serialization of the rule, and the emulation
+// rewrites the block from the text the page wrote it in. Each block is written the five ways a page writes a rule,
+// and styles an element of each direction.
+const TOP = 'env(safe-area-inset-top)';
+const LEFT = 'env(safe-area-inset-left)';
+const PENDING: Record<string, string> = {
+  padding: `padding: ${TOP} 2px; padding-left:3px`,
+  longhandFirst: `padding-left:3px; padding: ${TOP} 2px`,
+  alone: `padding: ${TOP} 2px`,
+  twice: `padding:1px; padding: ${TOP} 4px; padding-left:3px`,
+  insetTop: `inset: ${TOP}; top:1px`,
+  insetLeft: `inset: ${TOP}; left:1px`,
+  margin: `margin: ${TOP} 2px; margin-left:3px`,
+  borderWidth: `border-width: ${TOP} 2px; border-left-width:3px`,
+  scrollPadding: `scroll-padding: ${TOP} 2px; scroll-padding-left:3px`,
+  max: `padding: max(${TOP},8px) 16px; padding-bottom:0`,
+  logicalAfter: `padding: ${TOP} 2px; padding-inline-start:3px`,
+  logicalShorthand: `padding-inline: ${TOP} 2px; padding-inline-end:3px`,
+  important: `padding: ${TOP} 2px !important; padding-left:3px !important; color: red`,
+  // A var() shorthand between a logical longhand and a physical one: its sides have no value to be set with.
+  between: `--x:3px; padding-inline-start: ${LEFT}; padding: var(--x); padding-left: 2px`,
+  betweenMargin: `--x:3px; margin-inline-start: ${LEFT}; margin: var(--x); margin-left: 2px`,
+  betweenBorder: `--x:3px; border-inline-start-width: ${LEFT}; border-width: var(--x); border-left-width: 2px`,
+  betweenInset: `--x:3px; inset-inline-start: ${LEFT}; inset: var(--x); left: 2px`,
+  betweenLonghand: `--x:3px; padding-inline-start: ${LEFT}; padding-left: var(--x)`,
+};
+/** What the page does to each rule's style while the emulation runs. */
+const PENDING_SETS: Record<string, string> = {
+  color: `style.setProperty('color', 'blue')`,
+  // The last property the block declares, set again: in place.
+  last: `style.setProperty(style[style.length - 1], '4px')`,
+  logical: `style.setProperty('padding-inline-end', '4px')`,
+};
+const WAYS = ['style', 'link', 'nested', 'constructed', 'insert'] as const;
+const DIRECTIONS = ['direction: ltr', 'direction: rtl', 'writing-mode: vertical-rl'];
+
+/** Writes `block` in a rule each way, with an element of each direction for each rule. */
+const writePending = (block: string) =>
+  t.page.evaluate(
+    async (block, ways, directions) => {
+      const add = (id: string, text: string) => {
+        const style = document.createElement('style');
+        style.id = id;
+        style.className = 'sp';
+        style.textContent = text;
+        document.head.appendChild(style);
+        return style;
+      };
+      add('sp-base', '.sp-el { position: relative; border: 0 solid; width: 50px; height: 20px }');
+      add('sp-style', `.sp-style { ${block} }`);
+      add('sp-nested', `.sp-nested { color: green; & { ${block} } }`);
+      add('sp-insert', '').sheet?.insertRule(`.sp-insert { ${block} }`, 0);
+      const constructed = new CSSStyleSheet();
+      constructed.replaceSync(`.sp-constructed { ${block} }`);
+      document.adoptedStyleSheets = [constructed];
+      const link = document.createElement('link');
+      link.id = 'sp-link';
+      link.className = 'sp';
+      link.rel = 'stylesheet';
+      link.href = URL.createObjectURL(new Blob([`.sp-link { ${block} }`], { type: 'text/css' }));
+      const loaded = new Promise(resolve => link.addEventListener('load', resolve));
+      document.head.appendChild(link);
+      await loaded;
+      for (const way of ways)
+        directions.forEach((direction, i) =>
+          document.body.insertAdjacentHTML(
+            'beforeend',
+            `<div class="sp sp-el sp-${way}" id="sp-${way}-${i}" style="${direction}">sp</div>`
+          )
+        );
+    },
+    block,
+    WAYS,
+    DIRECTIONS
+  );
+
+const removePending = () =>
+  t.page.evaluate(() => {
+    document.querySelectorAll('.sp').forEach(el => el.remove());
+    document.adoptedStyleSheets = [];
+  });
+
+/** The rules of writePending, by the way each was written: run in the page. */
+const PENDING_RULES = `(() => {
+  const first = id => document.getElementById(id).sheet.cssRules[0];
+  return {
+    style: first('sp-style'),
+    link: first('sp-link'),
+    nested: first('sp-nested').cssRules[0],
+    constructed: document.adoptedStyleSheets[0].cssRules[0],
+    insert: first('sp-insert'),
+  };
+})()`;
+
+const readPending = () =>
+  t.page.evaluate(`(() => {
+    const rules = ${PENDING_RULES};
+    const out = {};
+    for (const [way, rule] of Object.entries(rules)) {
+      const boxes = [...document.querySelectorAll('.sp-' + way)].map(el => {
+        const c = getComputedStyle(el);
+        return [c.padding, c.margin, c.borderWidth, c.inset, c.scrollPadding, c.color].join(' | ');
+      });
+      out[way] = { order: Array.from(rule.style), text: rule.style.cssText, boxes };
+    }
+    return out;
+  })()`) as Promise<Record<string, { order: string[]; text: string; boxes: string[] }>>;
+
+for (const [name, block] of Object.entries(PENDING))
+  for (const [set, write] of Object.entries(PENDING_SETS))
+    test(`a shorthand with env() and a longhand after it is emulated as in Chrome (${name}, ${set})`, async () => {
+      const run = async (side: (typeof t)['chrome']) => {
+        await writePending(block);
+        try {
+          const moments: Record<string, Awaited<ReturnType<typeof readPending>>> = {};
+          // The text of the rule is the emulation's while it runs: the order and the values are compared then.
+          const during = async (moment: string) => {
+            const read = await readPending();
+            for (const way of Object.values(read)) way.text = '';
+            moments[moment] = read;
+          };
+          await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 6 } });
+          // Longer than it takes to fetch the text of the sheet of a file.
+          await new Promise(resolve => setTimeout(resolve, 150));
+          await during('on');
+          await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 20, left: 7 } });
+          await settle();
+          await during('changed');
+          await t.page.evaluate(
+            `for (const rule of Object.values(${PENDING_RULES})) { const style = rule.style; ${write} }`
+          );
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await during('written');
+          await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+          await settle();
+          moments['off'] = await readPending();
+          await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 6 } });
+          await settle();
+          await during('again');
+          await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+          await settle();
+          moments['last'] = await readPending();
+          return moments;
+        } finally {
+          await removePending();
+        }
+      };
+      const r = await run(t.chrome);
+      const ours = await run(t.ours);
+      for (const moment of Object.keys(r))
+        for (const way of WAYS) assert.deepEqual(ours[moment]?.[way], r[moment]?.[way], `${moment}, ${way}`);
+      // The emulation shows: the inset is in the values while it runs, and not once it ends. Not where the var()
+      // shorthand after the env() sets every side over it, in each direction.
+      if (/^between(?!Longhand)/.test(name)) return;
+      assert.notDeepEqual(r['on']?.['style']?.boxes, r['off']?.['style']?.boxes);
+      assert.notDeepEqual(r['on']?.['style']?.boxes, r['changed']?.['style']?.boxes);
+    });
+
+for (const name of ['max', 'between'])
+  test(`the Styles pane shows a shorthand with env() and a longhand after it as the page wrote it (${name})`, async () => {
+    const run = async (side: (typeof t)['chrome']) => {
+      await writePending(PENDING[name] ?? '');
+      await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 20, left: 6 } });
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+      try {
+        const { root } = await side.send('DOM.getDocument', {});
+        const out: Record<string, unknown> = {};
+        for (const way of WAYS) {
+          const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: `#sp-${way}-0` });
+          const { matchedCSSRules } = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+          out[way] = (matchedCSSRules ?? [])
+            .filter(m => /^(&|\.sp-(?!el))/.test(m.rule.selectorList.text))
+            .map(({ rule }) => ({
+              selector: rule.selectorList.text,
+              text: rule.style.cssText,
+              properties: rule.style.cssProperties.map(p => [p.name, p.value, p.text ?? null, p.implicit ?? false]),
+              // The names alone: the value Chrome gives a shorthand whose sides do not share one is empty, where we
+              // give the one written, with or without the emulation.
+              shorthands: rule.style.shorthandEntries.map(entry => entry.name),
+            }));
+        }
+        return out;
+      } finally {
+        await side.send('CSS.disable');
+        await side.send('DOM.disable');
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+        await removePending();
+      }
+    };
+    const r = await run(t.chrome);
+    const ours = await run(t.ours);
+    // The rules of a sheet's own text: each declaration as written, and the longhands the rule holds.
+    for (const way of ['style', 'link', 'nested']) assert.deepEqual(ours[way], r[way], way);
+    assert.match(JSON.stringify(r['style']), /"padding(-inline-start)?: (max\()?env\(safe-area-inset-(top|left)\)/);
+    // A sheet the page made through the CSSOM is shown serialized, by Chrome and by us: nothing of the emulation's.
+    assert.doesNotMatch(JSON.stringify(ours), /--da-sai/);
+  });
+
+// The other ways a page comes to such a block, and what it does to one: `sheet` is the sheet of a <style> whose
+// text is `#pw { color: red } .pw { padding: env(safe-area-inset-top) 2px; padding-left: 3px } .pw-other {}`,
+// and `plain` and `rule` its first two rules.
+const BLOCK = `padding: ${TOP} 2px; padding-left: 3px`;
+const PAGE_WAYS: Record<string, { before?: string; during?: string }> = {
+  textDuring: { during: `plain.style.cssText = 'margin: ${TOP} 2px; margin-left: 3px'` },
+  textAgain: { during: `rule.style.cssText = 'padding: ${LEFT} 2px; padding-left: 3px'` },
+  nestedInsert: { before: `plain.insertRule('& { margin: ${TOP} 2px; margin-left: 3px }')` },
+  nestedInsertDuring: { during: `plain.insertRule('& { margin: ${TOP} 2px; margin-left: 3px }')` },
+  groupInsert: {
+    before: `sheet.insertRule('@media all {}', 3); sheet.cssRules[3].insertRule('.pw { margin: ${TOP} 2px; margin-left: 3px }')`,
+  },
+  replace: {
+    before: `const made = new CSSStyleSheet(); document.adoptedStyleSheets = [made];
+      await made.replace('.pw { margin: ${TOP} 2px; margin-left: 3px }')`,
+  },
+  replaceDuring: {
+    during: `const made = new CSSStyleSheet(); document.adoptedStyleSheets = [made];
+      made.replaceSync('.pw { margin: ${TOP} 2px; margin-left: 3px }')`,
+  },
+  // The rules of the sheet's text are found in it past one the page inserted.
+  rulesMoved: { before: `sheet.insertRule('.pw { color: green }', 0); sheet.insertRule('.pw { color: green }', 2)` },
+  setBefore: { before: `rule.style.setProperty('color', 'blue')` },
+  namedDuring: { during: `rule.style.paddingRight = '9px'` },
+  // The shorthand set again to another env(), and the longhand after it: the rule reads as before.
+  setAgain: {
+    during: `rule.style.setProperty('padding', '${LEFT} 2px'); rule.style.setProperty('padding-left', '3px')`,
+  },
+  // What a declaration after the text does not say: the block is the page's from then on, and nothing is lost.
+  removeDuring: { during: `rule.style.removeProperty('padding-left')` },
+  wholeDuring: { during: `rule.style.setProperty('padding', '1px')` },
+  // The text is not the rule's once a declaration is removed, though the rule comes to read as that text again.
+  removedThenSet: {
+    during: `rule.style.removeProperty('padding-left');
+      rule.style.setProperty('padding', '${LEFT} 2px'); rule.style.setProperty('padding-left', '3px')`,
+  },
+  builtDuring: {
+    during: `plain.style.setProperty('margin', '${TOP} 2px'); plain.style.setProperty('margin-left', '3px')`,
+  },
+  setTwice: {
+    during: `rule.style.setProperty('--n', '1'); rule.style.setProperty('color', 'blue');
+      await new Promise(resolve => setTimeout(resolve, 20));
+      rule.style.setProperty('--n', '2'); rule.style.setProperty('color', 'green', 'important')`,
+  },
+};
+for (const [name, { before, during }] of Object.entries(PAGE_WAYS))
+  test(`a block with a pending shorthand that the page writes through the CSSOM is emulated as in Chrome (${name})`, async () => {
+    const read = () =>
+      t.page.evaluate(() => {
+        const el = document.getElementById('pw');
+        const sheet = document.getElementById('pw-sheet');
+        const c = getComputedStyle(el ?? document.body);
+        const texts: string[] = [];
+        const orders: string[][] = [];
+        const visit = (rules: CSSRuleList) => {
+          for (const rule of rules) {
+            if (rule instanceof CSSStyleRule) {
+              texts.push(rule.style.cssText);
+              orders.push(Array.from(rule.style));
+            }
+            if ('cssRules' in rule) visit(rule.cssRules as CSSRuleList);
+          }
+        };
+        if (sheet instanceof HTMLStyleElement && sheet.sheet) visit(sheet.sheet.cssRules);
+        for (const made of document.adoptedStyleSheets) visit(made.cssRules);
+        return { box: [c.padding, c.margin, c.color, c.getPropertyValue('--n')], orders, texts };
+      });
+    const script = (code: string | undefined) =>
+      t.page.evaluate(`(async () => {
+        const sheet = document.getElementById('pw-sheet').sheet;
+        const [plain, rule] = sheet.cssRules;
+        ${code ?? ''}
+      })()`);
+    const run = async (side: (typeof t)['chrome']) => {
+      await t.page.evaluate(block => {
+        const style = document.createElement('style');
+        style.id = 'pw-sheet';
+        style.textContent = `#pw { color: red } .pw { ${block} } .pw-other {}`;
+        document.head.appendChild(style);
+        document.body.insertAdjacentHTML('beforeend', '<div id="pw" class="pw">pw</div>');
+      }, BLOCK);
+      try {
+        await script(before);
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 5, left: 6 } });
+        await settle();
+        await script(during);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const on = await read();
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+        await settle();
+        const off = await read();
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 7, left: 8 } });
+        await settle();
+        const again = await read();
+        await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+        await settle();
+        // The texts are the emulation's while it runs.
+        return { on: { ...on, texts: [] }, off, again: { ...again, texts: [] }, last: await read() };
+      } finally {
+        await t.page.evaluate(() => {
+          document.querySelectorAll('#pw, #pw-sheet').forEach(el => el.remove());
+          document.adoptedStyleSheets = [];
+        });
+      }
+    };
+    const r = await run(t.chrome);
+    const ours = await run(t.ours);
+    assert.deepEqual(ours, r);
+    if (name !== 'wholeDuring') assert.notDeepEqual(r.on.box, r.off.box);
+  });

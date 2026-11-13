@@ -195,7 +195,8 @@ const BLOCKS: Record<string, string> = {
   pendingAfter: `--x: 1px; padding-inline-start: ${L}; overflow-wrap: break-word; padding: var(--x) 3px`,
   // A custom property with no value, after the logical property: it is added again as it was.
   emptyCustom: `padding-inline-start: ${L}; --e:; padding-left: 2px`,
-  // The sides of a pending shorthand of which one was set after it: they have no value to be added again with.
+  // The sides of a pending shorthand of which one was set after it: they have no value to be added again with, and
+  // the rule is set from the text it was written in.
   pendingBroken: `--x: 1px; padding-inline-start: ${L}; padding: var(--x); padding-left: 2px`,
   // A value left open, which the text read again would take the next declarations into: last in the block.
   openValue: `padding-inline-start: ${L}; overflow-wrap: break-word; padding-top: ${T}; --x: f(a`,
@@ -268,29 +269,16 @@ for (const [block, declarations] of Object.entries(BLOCKS))
       for (const moment of ['on', 'written', 'after', 'again', 'last'] as const) {
         assert.deepEqual(ours[moment].ruleBox, r[moment].ruleBox);
         assert.deepEqual(ours[moment].box, r[moment].box);
-        if (block !== 'pendingBroken') assert.deepEqual(ours[moment].rule, r[moment].rule);
+        assert.deepEqual(ours[moment].rule, r[moment].rule);
       }
-      if (block === 'pendingBroken') {
-        // The sides with no value stay where they are, and the logical property that was before them is after them
-        // (docs/limitations.md, order of declarations): in the rule, which is read as the browser wrote it. None is
-        // lost, and the values are Chrome's. The style attribute, written as the page wrote it, has Chrome's order.
-        const sides = ['padding-top', 'padding-right', 'padding-bottom'];
-        const rest = set === 'untouched' ? [] : [set === 'color' ? 'color' : 'padding-inline-end'];
-        for (const moment of ['on', 'written', 'after', 'again', 'last'] as const) {
-          const added = moment === 'on' ? [] : rest;
-          assert.deepEqual(r[moment].rule, ['--x', 'padding-inline-start', ...sides, 'padding-left', ...added]);
-          assert.deepEqual(ours[moment].rule, ['--x', ...sides, 'padding-inline-start', 'padding-left', ...added]);
-          assert.deepEqual(ours[moment].inline, r[moment].inline);
-        }
-        return;
-      }
-      const empties = block === 'logicalShorthand' ? set === 'logical' : /^(pendingAround|emptyCustom)$/.test(block);
+      const empties =
+        block === 'logicalShorthand' ? set === 'logical' : /^(pendingAround|pendingBroken|emptyCustom)$/.test(block);
       if (empties && set !== 'untouched') {
-        // A block the browser writes with an empty value once the page has set a property of it (the sides of a
-        // pending shorthand of which one was set since, a custom property with no value): its other declarations
+        // A style attribute the browser writes with an empty value once the page has set a property of it (the sides
+        // of a pending shorthand of which one was set since, a custom property with no value): its other declarations
         // keep their var() text once the emulation ends (docs/limitations.md, partial changes). The order and the
-        // values are Chrome's.
-        const untexted = ({ ruleText: _rule, attribute: _attribute, ...rest }: typeof ours.after) => rest;
+        // values are Chrome's, and so is the rule's text, set from the text the rule was written in.
+        const untexted = ({ attribute: _attribute, ...rest }: typeof ours.after) => rest;
         assert.deepEqual(
           { ...ours, after: untexted(ours.after), last: untexted(ours.last) },
           { ...r, after: untexted(r.after), last: untexted(r.last) }

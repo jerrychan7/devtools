@@ -624,6 +624,27 @@ export function ownRemoveProperty(style: CSSStyleDeclaration, name: string): voi
   ownWrite(style, () => ownCall(style, 'removeProperty', name));
 }
 
+/**
+ * Plays the writes of a block's record on `style` (written-blocks.ts, play): the emulation's, which leave the
+ * block what the record says, so the record is kept.
+ */
+export const ownPlayer = (style: CSSStyleDeclaration, write: (set: () => void) => void = set => set()) => ({
+  text: (text: string) =>
+    write(() =>
+      ownWrite(style, () =>
+        viaOwn(
+          style,
+          'set:cssText',
+          fn => void Reflect.apply(fn, style, [text]),
+          () => void Reflect.set(style, 'cssText', text)
+        )
+      )
+    ),
+  set: (name: string, value: string, priority: string) =>
+    write(() => ownWrite(style, () => ownCall(style, 'setProperty', name, value, priority))),
+  remove: (name: string) => write(() => ownWrite(style, () => ownCall(style, 'removeProperty', name))),
+});
+
 /** Makes `write`, a write of the agent's own to `self`, as `ownSet` says. */
 function ownWrite(self: object, write: () => void): void {
   settle();
