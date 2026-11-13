@@ -1,30 +1,158 @@
 /**
- * The texts the page wrote its style sheets and rules in, kept as it writes: the browser gives a text back
- * serialized, and what it cannot serialize is lost with it. A shorthand whose value has a var() or an env() is
- * kept as written for each of its sides, and once a longhand of it is set after it the block reads as longhands
- * with no value: nothing a script reads of the rule gives the shorthand's text then.
+ * What the page wrote its style sheets and declaration blocks in, kept as it writes: the browser gives a text
+ * back serialized, and what it cannot serialize is lost with it. A shorthand whose value has a var() or an env()
+ * is kept as written for each of its sides, and once a longhand of it is set after it the block reads as
+ * longhands with no value: nothing a script reads of the block gives the shorthand's text then. The emulation
+ * rewrites such a block from what was written (domains/emulation/rewrite.ts), and only from what is known to be
+ * the block: each thing kept here says whether it still holds, and what may have changed unseen holds no more.
  *
- * Kept are the text of a sheet (replace(), replaceSync(), or one the agent set) and of an inserted rule
- * (insertRule(), addRule()), where it may call env() (`writtenText`), and which rules were inserted
- * (`wasInserted`). The rules of a list (a sheet's, a rule's) are found in its text by their place, so a list from
- * which a rule of the text was deleted, or whose change is not told, is broken (`listBroken`): its text gives
- * nothing for its rules.
+ * - The text of a sheet (replace(), replaceSync(), or one the agent set) and of an inserted rule (insertRule(),
+ *   addRule()), where it may call env() (`writtenText`), and which rules were inserted (`wasInserted`). The rules
+ *   of a list (a sheet's, a rule's) are found in its text by their place, so a list from which a rule of the text
+ *   was deleted, or whose change is not told, is broken (`listBroken`): its text gives nothing for its rules.
+ * - For a declaration block, a record of its writes (`BlockRecord`): the text it started from, and each property
+ *   set or removed since, in order. Played again on an empty block (`play`), they give the block: the browser
+ *   itself decides what each write does (a shorthand over its longhands, a logical property moved after its
+ *   physical one, a value it rejects). A record starts where the block is known: set to a text (`cssText`), or
+ *   read before a write as a text that holds all of it; a rule's block that does not hold all it declares starts
+ *   from its rule's text, looked for when the record is used. A rule's record starts with the first write to its
+ *   block, an element's with a write that may call env(). A write that cannot be told (a value or a name that is
+ *   an object, the typed OM) ends the record, and so do more writes than `MAX_WRITES`.
+ * - Which blocks were written at all (`touched`): the text of a sheet is not taken for such a rule's block.
  *
  * The writes are seen by proxies of the functions that make them, put on the prototypes of a realm
- * (`keepWritten`): the methods that insert and delete rules, replace() and replaceSync(). They are there from the
- * moment the agent loads, in the top window, and for the life of the page. They call only functions taken when
- * they were put, and index strings: no method of the page's prototypes.
+ * (`keepWritten`): the methods that insert and delete rules, replace() and replaceSync(), a style's `cssText`
+ * setter, setProperty() and removeProperty(), and the methods of StylePropertyMap. A property written by name
+ * (`style.padding = ...`) is no function of a prototype in Chrome: the names are properties of each style itself,
+ * answered by the browser, unless a prototype has a property of that name, which then takes the read and the
+ * write. So an accessor is put on CSSStyleDeclaration.prototype for each name the browser gives a style, in each
+ * spelling it takes (`paddingTop`, `padding-top`, `webkitTransform`: some 1550), which reads through
+ * getPropertyValue() and writes through setProperty(), as the browser does for the name (tested over every name
+ * in written-blocks.conformance.test.ts). The proxies call only functions taken when they were put, and index
+ * strings: no method of the page's prototypes.
+ *
+ * With `ALWAYS`, the proxies are there from the moment the agent loads, in the top window; without it, those of
+ * the styles are there only while someone watches (cssom-watch.ts), and nothing written before is trusted.
  */
 
+/**
+ * Whether the writes of declaration blocks are followed from the moment the agent loads (true), or only while
+ * someone watches the CSSOM (false): the one switch. Without it, a block written while nobody watched is not
+ * known, so the text of a sheet or of an inserted rule is never taken for a block (`sourceTrusted`), and every
+ * record ends when the watching does.
+ */
+export const ALWAYS = true;
+
+/** The most writes a record holds: past it, the record ends (a block animated property by property). */
+export const MAX_WRITES = 64;
+
+/** A property set, or removed, after the text a block started from. */
+export interface Write {
+  name: string;
+  /** The value given to setProperty(), with its priority; none for removeProperty(). */
+  value: string;
+  priority: string;
+  remove?: true;
+  /** The value the block holds for it, where the emulation rewrote it. */
+  held?: string;
+}
+
+/** The writes of a declaration block, from a text it is known to have read as. */
+export interface BlockRecord {
+  /** The text the block started from; null: the rule's text in its sheet, not looked for yet (`pre`). */
+  base: string | null;
+  /** How the base is known: a text the block was set to, or its serialization before the first write kept. */
+  from: 'text' | 'read';
+  /** The block's serialization before its first write kept. */
+  pre: string;
+  /** The base as the block holds it, where the emulation rewrote it. */
+  heldBase?: string;
+  writes: Write[];
+  epoch: number;
+}
+
+const records = new WeakMap<object, BlockRecord>();
+/** The styles the page wrote, in any way: for a rule's, its text in its sheet is no longer taken for its block. */
+const touched = new WeakSet<object>();
 /** The lists of rules (by the sheet or the rule that has them) no longer found in their text. */
 const broken = new WeakSet<object>();
 /** The texts of sheets and of inserted rules. Each an object of its own: a later write of the same text is another. */
 const written = new WeakMap<object, { text: string }>();
 /** The rules inserted (insertRule(), addRule()), whatever their text: a sheet's own text was not written with them. */
 const inserted = new WeakSet<object>();
+/** Raised by each write this module does not follow: the records made before it have ended. */
+let epoch = 0;
+/** Whether such a write was made: no text of a sheet is trusted any more. */
+let unfollowed = false;
+/** Whether someone watches the CSSOM (cssom-watch.ts): without `ALWAYS`, the writes are followed only then. */
+let watched = false;
 
 /** The agent's own calls are not the page's writes: raised around them (cssom-watch.ts, ownEdit). */
 export const agent = { busy: 0 };
+
+/** What is known of a realm's styles, by CSSStyleDeclaration.prototype. */
+interface Realm {
+  /** Followed since the realm's scripts could first write: the texts of its sheets are its blocks. */
+  fromStart: boolean;
+  proto: object;
+  /** The functions put on the prototype, and the accessors of the names of properties. */
+  put: { name: string; part: 'value' | 'set'; native: unknown; proxy: unknown }[];
+  accessors: { key: string; set: unknown }[];
+  names: Record<string, true>;
+  /** The browser's functions of the prototype, by `part:name`. */
+  natives: Map<string, unknown>;
+}
+const realms = new WeakMap<object, Realm>();
+
+/** Whether the writes of `style` are followed now: its realm's proxies are where they were put. */
+function followed(style: object): Realm | undefined {
+  const proto: unknown = Object.getPrototypeOf(style);
+  const realm = typeof proto === 'object' && proto !== null ? realms.get(proto) : undefined;
+  if (!realm || !(ALWAYS || watched)) return undefined;
+  // One accessor is looked at, for all: a page that took some of the others off is not noticed.
+  const first = realm.accessors[0];
+  if (!first || typeof Object.getOwnPropertyDescriptor(realm.proto, first.key)?.set !== 'function') return undefined;
+  // The page may wrap a function (it still calls this one); the browser's own, put back, is not followed.
+  for (const { name, part, native } of realm.put)
+    if (Object.getOwnPropertyDescriptor(realm.proto, name)?.[part] === native) return undefined;
+  return realm;
+}
+
+/** The record of the writes of `style`, where it holds: none ended it, and its writes are still followed. */
+export function blockRecord(style: object): BlockRecord | undefined {
+  const record = records.get(style);
+  if (!record) return undefined;
+  if (record.epoch === epoch && followed(style)) return record;
+  records.delete(style);
+  return undefined;
+}
+
+/** Ends the record of `style`: the block is no longer what its writes say. */
+export function dropRecord(style: object): void {
+  records.delete(style);
+}
+
+/** Starts a record of `style`, set to `text` (by the agent, or found to read as it): its block from here on. */
+export function startRecord(style: object, text: string): BlockRecord {
+  const record: BlockRecord = { base: text, from: 'text', pre: '', writes: [], epoch };
+  records.set(style, record);
+  touched.add(style);
+  return record;
+}
+
+/**
+ * Whether the text `style`'s rule was written in (its sheet's, or an inserted rule's) is still the block: the
+ * page wrote nothing to it since, as far as its writes were followed, which is from the start in its realm.
+ */
+export function sourceTrusted(style: object): boolean {
+  const realm = followed(style);
+  return ALWAYS && !unfollowed && !!realm && !touched.has(style);
+}
+
+/** Whether the text of `sheet`'s <style> or file is its rules': its realm was followed from the start. */
+export function sheetTrusted(style: object): boolean {
+  return !!followed(style)?.fromStart;
+}
 
 /** Whether the rules of `parent` (a sheet, or a rule) are no longer found in the text they were written in. */
 export const listBroken = (parent: object): boolean => broken.has(parent);
@@ -34,6 +162,12 @@ export const wasInserted = (rule: CSSRule): boolean => inserted.has(rule);
 
 /** The text `target` (a sheet, or an inserted rule) was last written in, where it is kept. */
 export const writtenText = (target: object): { text: string } | undefined => written.get(target);
+
+/** Tells whether someone watches the CSSOM. Without `ALWAYS`, what was written until now is not known. */
+export function setWatched(now: boolean): void {
+  if (!ALWAYS && now !== watched) epoch++;
+  watched = now;
+}
 
 /**
  * Whether `text` may call env(): it has `env(` in any ASCII case, or a backslash, which the name may be
@@ -48,6 +182,15 @@ export function mayCallEnv(text: string): boolean {
     const n = text[i - 2];
     const v = text[i - 1];
     if ((e === 'e' || e === 'E') && (n === 'n' || n === 'N') && (v === 'v' || v === 'V')) return true;
+  }
+  return false;
+}
+
+/** Whether a serialized block has a declaration with no value (`name: ;`): it does not hold all it declares. */
+function hasNoValue(text: string): boolean {
+  for (let i = 2; i < text.length; i++) {
+    const c = text[i];
+    if ((c === ';' || c === '!') && text[i - 1] === ' ' && text[i - 2] === ':') return true;
   }
   return false;
 }
@@ -137,15 +280,52 @@ export function noteRetexted(sheet: object, text: string, rules: Iterable<object
   breaks++;
 }
 
+/** A scratch block, to ask the browser whether it takes a write: made when first needed. */
+let scratch: { style: object; realm: Realm } | undefined;
+
+/** Whether the browser takes `write` in an empty block: it then replaces the write before it of the same name. */
+function taken(write: Write): boolean {
+  if (!scratch) return false;
+  const { style, realm } = scratch;
+  try {
+    call(realm.natives.get('set:cssText'), style, ['']);
+    call(realm.natives.get('value:setProperty'), style, [write.name, write.value, write.priority]);
+    return (call(realm.natives.get('get:length'), style) as number) > 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Puts the proxies on the prototypes of `realm`, once (see the module's note): they stay for the life of the
- * page.
+ * Adds `write` to `record`, or ends it where it holds too many. `holds`: whether the block now reads the write's
+ * value for its name, as written.
  */
-export function keepWritten(realm: Window & typeof globalThis): void {
+function add(style: object, record: BlockRecord, write: Write, holds: () => boolean): void {
+  const { writes } = record;
+  const last = writes[writes.length - 1];
+  // Set again at once: the first write is as if not made, where the browser took the second. It did where the
+  // block reads the value as written; else an empty block is asked (`taken`).
+  if (last && !last.remove && !write.remove && last.name === write.name && (holds() || taken(write)))
+    writes[writes.length - 1] = write;
+  else if (writes.length < MAX_WRITES) writes.push(write);
+  else records.delete(style);
+}
+
+/**
+ * Puts the proxies on the prototypes of `realm`, once (see the module's note): those of the sheets and rules
+ * stay for the life of the page; those of the styles too with `ALWAYS`, else until `unfollowStyles`.
+ * `fromStart`: the realm's scripts have not written yet, as far as known (the top window, when the agent loads).
+ */
+export function keepWritten(realm: Window & typeof globalThis, fromStart = false): void {
   try {
     keepRules(realm);
   } catch {
     // A realm with no CSSOM (or one the page took apart): nothing is kept.
+  }
+  try {
+    keepStyles(realm, fromStart);
+  } catch {
+    // The same: its blocks are not followed, and none is taken as known.
   }
 }
 
@@ -235,4 +415,310 @@ function keepRules(realm: Window & typeof globalThis): void {
   if (realm.CSSKeyframesRule)
     for (const name of ['appendRule', 'deleteRule'])
       wrap(realm.CSSKeyframesRule.prototype, name, 'value', null, self => noteBroken(self));
+  // The typed OM writes a block past everything here: the block of the map's owner is not known from then on.
+  // A map taken before this was put has no owner known, and its write ends every record.
+  if (realm.StylePropertyMap) {
+    const owners = new WeakMap<object, () => unknown>();
+    const owned = (proto: object | undefined, name: string) => {
+      const descriptor = proto && Object.getOwnPropertyDescriptor(proto, name);
+      const get: unknown = descriptor?.get;
+      const style: unknown = proto && Object.getOwnPropertyDescriptor(proto, 'style')?.get;
+      if (!proto || !descriptor?.configurable || typeof get !== 'function' || typeof style !== 'function') return;
+      const proxy = new Proxy(get as () => unknown, {
+        apply(f, self, args) {
+          const map: unknown = Reflect.apply(f, self, args);
+          if (typeof map === 'object' && map !== null) owners.set(map, () => call(style, self));
+          return map;
+        },
+      });
+      try {
+        Object.defineProperty(proto, name, { ...descriptor, get: proxy });
+      } catch {
+        // The page's realm refused: a write through the map ends every record.
+      }
+    };
+    owned(realm.CSSStyleRule.prototype, 'styleMap');
+    for (const proto of [realm.HTMLElement, realm.SVGElement, realm.MathMLElement])
+      owned(proto?.prototype, 'attributeStyleMap');
+    for (const name of ['set', 'append', 'delete', 'clear'])
+      wrap(realm.StylePropertyMap.prototype, name, 'value', null, self => {
+        const style = typeof self === 'object' && self !== null ? owners.get(self)?.() : undefined;
+        if (typeof style === 'object' && style !== null) {
+          records.delete(style);
+          touched.add(style);
+        } else {
+          epoch++;
+          unfollowed = true;
+        }
+      });
+  }
+}
+
+/** Told of each style the page wrote a property of by name, once the write is made (the emulation's rewrites). */
+let named: ((style: object) => void) | null = null;
+
+/** Sets (or with null, removes) what is told of the page's writes by name. */
+export function onNamedWrite(tell: ((style: object) => void) | null): void {
+  named = tell;
+}
+
+/** Whether `name` of `proto` is an accessor put here for a property written by name. */
+export const isNameAccessor = (proto: object, name: string): boolean => !!realms.get(proto)?.names[name];
+
+/** The realms whose styles have the proxies now, to take them off (`unfollowStyles`): none with `ALWAYS`. */
+const styleRealms = new Set<Realm>();
+
+/** A style's property name (`paddingTop`, `webkitTransform`, `padding-top`) as setProperty() takes it. */
+const dashed: Record<string, string> = { __proto__: null } as unknown as Record<string, string>;
+function dashedName(key: string): string {
+  const known = dashed[key];
+  if (known !== undefined) return known;
+  let out = '';
+  for (let i = 0; i < key.length; i++) {
+    const c = key[i] ?? '';
+    if (c >= 'A' && c <= 'Z') out += (i ? '-' : '') + String.fromCharCode(c.charCodeAt(0) + 32);
+    else out += c;
+  }
+  // `webkitTransform` and `WebkitTransform` are `-webkit-transform`.
+  if (out.startsWith('webkit-')) out = `-${out}`;
+  return (dashed[key] = out);
+}
+
+function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void {
+  if (!ALWAYS && !watched) return;
+  const proto = realm.CSSStyleDeclaration.prototype;
+  if (realms.has(proto)) return;
+  const natives = new Map<string, unknown>();
+  for (const [part, name] of [
+    ['get', 'cssText'],
+    ['set', 'cssText'],
+    ['get', 'parentRule'],
+    ['get', 'length'],
+    ['value', 'setProperty'],
+    ['value', 'removeProperty'],
+    ['value', 'getPropertyValue'],
+    ['value', 'getPropertyPriority'],
+  ] as const) {
+    const fn: unknown = Object.getOwnPropertyDescriptor(proto, name)?.[part];
+    if (typeof fn !== 'function') return;
+    natives.set(`${part}:${name}`, fn);
+  }
+  const read = (style: unknown) => call(natives.get('get:cssText'), style) as string;
+  const ruleOf = (style: unknown) => call(natives.get('get:parentRule'), style);
+
+  /** Before a write of `value` to `style`: the block's text, where a record may start from it. */
+  const before = (style: unknown, value: string | undefined): string | undefined => {
+    if (typeof style !== 'object' || style === null || records.has(style)) return undefined;
+    const env = value !== undefined && mayCallEnv(value);
+    // An element's block is read before a write that may call env(); a rule's once, the first time it is written.
+    // A style seen here once is not asked again whether it is a rule's.
+    if (touched.has(style)) return env && !ruleOf(style) ? read(style) : undefined;
+    if (ruleOf(style)) return read(style);
+    touched.add(style);
+    return env ? read(style) : undefined;
+  };
+  /** After the write `write` (undefined: one that cannot be told) to `style`, which read `pre` before it. */
+  const after = (style: unknown, pre: string | undefined, write: Write | undefined): void => {
+    if (typeof style !== 'object' || style === null) return;
+    const record = records.get(style);
+    if (record)
+      return write
+        ? add(
+            style,
+            record,
+            write,
+            () =>
+              call(natives.get('value:getPropertyValue'), style, [write.name]) === write.value &&
+              (call(natives.get('value:getPropertyPriority'), style, [write.name]) === 'important') ===
+                (write.priority !== '')
+          )
+        : void records.delete(style);
+    if (pre === undefined) return;
+    const rule = ruleOf(style);
+    const whole = !hasNoValue(pre);
+    // A rule's block is followed from its first write: from the text it read as, where that holds all of it, else
+    // from the rule's own text in its sheet. An element's, from a write that may call env(), where its text holds it.
+    if (write && (rule ? !touched.has(style) : whole && mayCallEnv(write.value)))
+      records.set(style, { base: whole ? pre : null, from: 'read', pre, writes: [write], epoch });
+    touched.add(style);
+  };
+
+  const put: Realm['put'] = [];
+  const accessors: Realm['accessors'] = [];
+  const seen: Record<string, true> = { __proto__: null } as unknown as Record<string, true>;
+  const realmState: Realm = { fromStart: ALWAYS && fromStart, proto, put, accessors, natives, names: seen };
+  const wrapped = (
+    name: string,
+    part: 'value' | 'set',
+    b: Parameters<typeof wrap>[3],
+    a: Parameters<typeof wrap>[4]
+  ) => {
+    const made = wrap(proto, name, part, b, a);
+    if (made) put.push({ name, part, ...made });
+    return !!made;
+  };
+  const ok =
+    wrapped('cssText', 'set', null, (self, args) => {
+      if (typeof self !== 'object' || self === null) return;
+      const text = textOf(args[0]);
+      if (text !== undefined && mayCallEnv(text))
+        records.set(self, { base: text, from: 'text', pre: '', writes: [], epoch });
+      else records.delete(self);
+      if (ruleOf(self)) touched.add(self);
+    }) &&
+    wrapped(
+      'setProperty',
+      'value',
+      (self, args) => before(self, textOf(args[1])),
+      (self, args, _result, pre) => {
+        const name = textOf(args[0]);
+        const value = args[1] === null ? '' : textOf(args[1]);
+        const priority = args[2] === undefined ? '' : args[2] === null ? '' : textOf(args[2]);
+        const told = name !== undefined && value !== undefined && priority !== undefined;
+        after(self, pre as string | undefined, told ? { name, value, priority } : undefined);
+      }
+    ) &&
+    wrapped(
+      'removeProperty',
+      'value',
+      self => before(self, undefined),
+      (self, args, _result, pre) => {
+        const name = textOf(args[0]);
+        after(
+          self,
+          pre as string | undefined,
+          name === undefined ? undefined : { name, value: '', priority: '', remove: true }
+        );
+      }
+    );
+  if (!ok) return;
+  // A property written by name: an accessor of the prototype for each name the browser gives a style, which makes
+  // the write, or the read, as the browser does (setProperty(), getPropertyValue()), and follows the write.
+  const setProperty = natives.get('value:setProperty') as Fn;
+  const getPropertyValue = natives.get('value:getPropertyValue') as Fn;
+  // The names the browser lists, and the other spellings it takes for them: with dashes, and `Webkit` for `webkit`.
+  const names: string[] = [];
+  try {
+    const style = realm.document.createElement('div').style;
+    const takes = (key: string) => {
+      if (seen[key] || !call(Object.prototype.hasOwnProperty, style, [key])) return;
+      seen[key] = true;
+      names.push(key);
+    };
+    for (const key of Object.getOwnPropertyNames(style)) {
+      takes(key);
+      takes(dashedName(key));
+      if (key.startsWith('webkit')) takes(`W${key.slice(1)}`);
+      if (key.startsWith('Webkit')) takes(`w${key.slice(1)}`);
+    }
+  } catch {
+    // No names: nothing of the realm's blocks is taken as known.
+  }
+  // Whether `self` is an object that is no style (the prototype, an object made of it): there the name is a plain
+  // property, as it is without the accessor.
+  const plain = (self: unknown) => {
+    if (typeof self !== 'object' || self === null) return false;
+    try {
+      call(natives.get('get:length'), self);
+    } catch {
+      return true;
+    }
+    return false;
+  };
+  for (const key of names) {
+    if (key in proto) continue;
+    const name = dashedName(key);
+    const get = new Proxy(getPropertyValue, {
+      apply(f, self) {
+        try {
+          return Reflect.apply(f, self, [name]);
+        } catch (e) {
+          if (plain(self)) return undefined;
+          throw e;
+        }
+      },
+    });
+    const set = new Proxy(setProperty, {
+      apply(f, self, args) {
+        const value: unknown = args[0];
+        if (agent.busy) return void Reflect.apply(f, self, [name, value]);
+        const text = value === null ? '' : textOf(value);
+        let pre: string | undefined;
+        try {
+          pre = before(self, text);
+        } catch {
+          // Ours, or no style: the write goes on.
+        }
+        try {
+          Reflect.apply(f, self, [name, value]);
+        } catch (e) {
+          if (!plain(self)) throw e;
+          Object.defineProperty(self, key, { value, writable: true, enumerable: true, configurable: true });
+          return;
+        }
+        try {
+          after(self, pre, text === undefined ? undefined : { name, value: text, priority: '' });
+          if (named && typeof self === 'object' && self !== null) named(self);
+        } catch {
+          // Ours, not the page's: its write went through.
+        }
+      },
+    });
+    try {
+      Object.defineProperty(proto, key, { get, set, enumerable: true, configurable: true });
+      accessors.push({ key, set });
+    } catch {
+      // The page's realm refused: nothing of its blocks is taken as known.
+      return;
+    }
+  }
+  if (!accessors.length) return;
+  realms.set(proto, realmState);
+  if (!ALWAYS) styleRealms.add(realmState);
+  if (!scratch)
+    try {
+      scratch = { style: realm.document.createElement('div').style, realm: realmState };
+    } catch {
+      // No scratch block: a write set again is kept as another.
+    }
+}
+
+/** Takes the proxies of the styles off again, where they are still the ones put: without `ALWAYS`, when nobody watches. */
+export function unfollowStyles(): void {
+  if (ALWAYS) return;
+  for (const realm of styleRealms) {
+    try {
+      for (const { key, set } of realm.accessors)
+        if (Object.getOwnPropertyDescriptor(realm.proto, key)?.set === set) Reflect.deleteProperty(realm.proto, key);
+      for (const { name, part, native, proxy } of realm.put) {
+        const now = Object.getOwnPropertyDescriptor(realm.proto, name);
+        if (now && now[part] === proxy) Object.defineProperty(realm.proto, name, { ...now, [part]: native });
+      }
+    } catch {
+      // The page's realm refused: its proxies stay.
+    }
+    realms.delete(realm.proto);
+  }
+  styleRealms.clear();
+  scratch = undefined;
+}
+
+/** A block to play a record on: what sets its text, sets a property and removes one. */
+export interface Player {
+  text(text: string): void;
+  set(name: string, value: string, priority: string): void;
+  remove(name: string): void;
+}
+
+/**
+ * Plays `record` on a block: its base, then each write, in order. `held`: as the block holds them (rewritten
+ * where the emulation rewrote them), not as the page wrote them. `rewrite` is applied to each text played.
+ */
+export function play(record: BlockRecord, on: Player, held = false, rewrite?: (text: string) => string): void {
+  const of = (text: string) => (rewrite ? rewrite(text) : text);
+  on.text(of((held ? record.heldBase : undefined) ?? record.base ?? ''));
+  for (const write of record.writes)
+    if (write.remove) on.remove(write.name);
+    else
+      on.set(write.name, write.value === '' ? '' : of((held ? write.held : undefined) ?? write.value), write.priority);
 }

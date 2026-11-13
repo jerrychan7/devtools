@@ -3,13 +3,17 @@ import { isCssom, realmOf } from '../../../../core/realm';
 import type { CssNatives } from '../../../../probe/types';
 import {
   agent,
+  dropRecord,
   index,
+  isNameAccessor,
   keepWritten,
   noteBroken,
   noteInserted,
   noteReplaced,
   noteRetexted,
+  setWatched,
   textOf,
+  unfollowStyles,
   wasInserted,
 } from './written-blocks';
 
@@ -542,7 +546,7 @@ export function forgetSheet(sheet: CSSStyleSheet): void {
  * hooks do not report it as a change.
  */
 function viaOwn<T>(self: object, key: string, native: (fn: Native) => T, otherwise: () => T): T {
-  // Told to the proxies that keep what the page writes too (written-blocks.ts): without a probe ahead of the page's
+  // Told to the proxies that follow the page's writes too (written-blocks.ts): without a probe ahead of the page's
   // code, the functions known as native are the ones found when the agent loaded, which may be those proxies.
   agent.busy++;
   try {
@@ -584,6 +588,7 @@ export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
  * serialized from the rule later holds this write as well.
  */
 export function ownSet(self: object, name: string, value: unknown): void {
+  if (name === 'cssText') dropRecord(self);
   ownWrite(self, () =>
     viaOwn(
       self,
@@ -609,11 +614,13 @@ export function ownSheetText(sheet: CSSStyleSheet, text: string): void {
 
 /** Sets the property `name` of `style` (setProperty()), the agent's own write, told to nobody: like `ownSet`. */
 export function ownSetProperty(style: CSSStyleDeclaration, name: string, value: string, priority: string): void {
+  dropRecord(style);
   ownWrite(style, () => ownCall(style, 'setProperty', name, value, priority));
 }
 
 /** Removes the property `name` of `style` (removeProperty()), the agent's own write: like `ownSetProperty`. */
 export function ownRemoveProperty(style: CSSStyleDeclaration, name: string): void {
+  dropRecord(style);
   ownWrite(style, () => ownCall(style, 'removeProperty', name));
 }
 
@@ -760,7 +767,10 @@ function install(realm: Window & typeof globalThis) {
   }
   for (const proto of styles)
     for (const name of Object.getOwnPropertyNames(proto))
-      if (Object.getOwnPropertyDescriptor(proto, name)?.set) hook(proto, name, styleChanged, 'set');
+      // But the names of properties, which are accessors only where written-blocks.ts put them: a property
+      // written by name is seen afterwards (`settle`), with or without them.
+      if (Object.getOwnPropertyDescriptor(proto, name)?.set && !isNameAccessor(proto, name))
+        hook(proto, name, styleChanged, 'set');
   // A style the page takes, to write its properties by name, and a rule's media list. Reading
   // `rule.style` costs more while watching (Chrome 157, 100k reads of one rule: 8.3 ms against
   // 1.6; of 1000 rules, each taken once, 9.3 ms), and stays at 6.2 ms once the native getter is
@@ -861,6 +871,8 @@ function uninstall() {
   reported.clear();
   taken = 0;
   installed = new WeakSet();
+  setWatched(false);
+  unfollowStyles();
 }
 
 /**
@@ -872,6 +884,7 @@ function uninstall() {
  */
 export function watchCssom(listener: Listener, realms: () => (Window & typeof globalThis)[]): () => void {
   listeners.add(listener);
+  setWatched(true);
   realms().forEach(tryInstall);
   return () => {
     // What the page wrote through the styles it took is counted before they are dropped.
@@ -921,4 +934,4 @@ export function ownEdit<T>(fn: () => T): T {
 
 // What the page writes is kept from here on in the top page's realm, which is this module's; a frame's is from when
 // its realm is first watched. Guarded: the module is loaded where there is no CSSOM too.
-if (typeof CSSStyleSheet === 'function') keepWritten(globalThis as Window & typeof globalThis);
+if (typeof CSSStyleSheet === 'function') keepWritten(globalThis as Window & typeof globalThis, true);
