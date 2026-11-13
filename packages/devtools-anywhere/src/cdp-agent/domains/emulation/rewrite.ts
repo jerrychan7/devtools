@@ -692,16 +692,28 @@ const writtenStyles = new Set<WeakRef<CSSStyleDeclaration>>();
 let refs = new WeakMap<object, WeakRef<object>>();
 let sweepAt = 1024;
 
-/** Keeps `obj` in `set`, once; the dead references in it are swept as it grows. */
+/**
+ * Takes the reference of an object that was collected out of its set. A sweep of the set from the code that adds
+ * to it would not do: a reference made in a job still gives its object until that job ends, and after it until
+ * the object is collected, so the references of what a page makes and drops in one job (rules inserted and
+ * deleted in a loop) would all be found alive, and kept.
+ */
+const collected =
+  typeof FinalizationRegistry === 'function'
+    ? new FinalizationRegistry<{ set: Set<WeakRef<object>>; ref: WeakRef<object> }>(({ set, ref }) => set.delete(ref))
+    : undefined;
+
+/** Keeps `obj` in `set`, once, until it is collected; without a registry, the dead references are swept as it grows. */
 function track<T extends object>(set: Set<WeakRef<T>>, obj: T): void {
   if (refs.has(obj)) return;
-  if (set.size >= sweepAt) {
+  if (!collected && set.size >= sweepAt) {
     for (const ref of set) if (!ref.deref()) set.delete(ref);
     sweepAt = Math.max(1024, set.size * 2);
   }
   const ref = new WeakRef(obj);
   refs.set(obj, ref);
   set.add(ref);
+  collected?.register(obj, { set: set as Set<WeakRef<object>>, ref });
 }
 
 /** Restores what was rewritten and is still alive, wherever it is now, and forgets it. */

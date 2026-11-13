@@ -423,3 +423,39 @@ test('an inline style written through the CSSOM is shown as the page wrote it, a
   assert.equal(ours.records, 3);
   assert.equal(ours.page, chrome.page);
 });
+
+test('the references of rules inserted and deleted in one job under the emulation are let go', async () => {
+  const cdp = await t.page.createCDPSession();
+  // The WeakRef objects alive in the page, once collected.
+  const references = async () => {
+    for (let i = 0; i < 3; i++) await cdp.send('HeapProfiler.collectGarbage');
+    const { result } = await cdp.send('Runtime.evaluate', { expression: 'WeakRef.prototype' });
+    const { objects } = await cdp.send('Runtime.queryObjects', { prototypeObjectId: result.objectId ?? '' });
+    const { result: count } = await cdp.send('Runtime.callFunctionOn', {
+      objectId: objects.objectId ?? '',
+      functionDeclaration: 'function () { return this.length; }',
+      returnByValue: true,
+    });
+    return Number(count.value);
+  };
+  try {
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 20 } });
+    const before = await references();
+    await t.page.evaluate(block => {
+      const sheet = new CSSStyleSheet();
+      document.adoptedStyleSheets = [sheet];
+      for (let i = 0; i < 5000; i++) {
+        sheet.insertRule(`.x${i} { ${block} }`, 0);
+        sheet.deleteRule(0);
+      }
+      document.adoptedStyleSheets = [];
+    }, SHORT(TOP));
+    await wait(100);
+    // Each rule was rewritten, and a reference to its block kept until it was gone: none of them is left.
+    const after = await references();
+    assert.ok(after - before < 100, `${after - before} references left`);
+  } finally {
+    await cdp.detach();
+    await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+  }
+});
