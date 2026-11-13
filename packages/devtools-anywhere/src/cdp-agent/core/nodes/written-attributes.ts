@@ -10,6 +10,8 @@ export interface Written {
   applied: string;
   /** What the rewrite gave the original, as last written (domains/emulation/rewrite.ts). */
   target: string;
+  /** For a style attribute rewritten from the writes of its block (rewrite.ts, planWritten), not from its text. */
+  played?: true;
 }
 
 /**

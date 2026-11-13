@@ -322,3 +322,104 @@ for (const [name, c] of Object.entries(CLIENT))
   test(`a sheet the client edited is emulated as in Chrome, or left as written: ${name}`, async () => {
     await check(c);
   });
+
+const BLOCK = `padding: max(${TOP}, 8px) 16px; padding-bottom: 0`;
+const INLINE: Record<string, string> = {
+  cssText: `el.style.cssText = '${BLOCK}'`,
+  byName: `el.style.padding = 'max(${TOP}, 8px) 16px'; el.style.paddingBottom = '0'`,
+  setProperty: `el.style.setProperty('padding', 'max(${TOP}, 8px) 16px'); el.style.setProperty('padding-bottom', '0', 'important')`,
+  dashed: `el.style['padding'] = 'max(${TOP}, 8px) 16px'; el.style['padding-bottom'] = '0'`,
+  style: `el.style = '${BLOCK}'`,
+  setAttribute: `el.setAttribute('style', '${BLOCK}')`,
+  shorthand: `el.style.padding = '${TOP} 16px'`,
+  margin: `el.style.cssText = 'color: red'; el.style.margin = '${LEFT} 2px'; el.style.marginInlineStart = '1px';
+    el.style.marginTop = '${TOP}'`,
+  // What a framework does to a style it keeps: each property set again, one removed, the whole set again.
+  again: `el.style.padding = '${LEFT} 1px'; el.style.paddingBottom = '0'; el.style.color = 'red';
+    el.style.padding = 'max(${TOP}, 8px) 16px'; el.style.paddingBottom = '0'; el.style.removeProperty('color')`,
+  logical: `el.style.direction = 'rtl'; el.style.paddingInlineStart = '${LEFT}'; el.style.padding = '${TOP} 2px';
+    el.style.paddingRight = '1px'`,
+  // A value left open, which the browser serializes as written: what is set after it is not in that value.
+  openValue: `el.style.cssText = '--x: f(a'; el.style.setProperty('padding-top', '${TOP}')`,
+  openAttribute: `el.setAttribute('style', '--x: f(a'); el.style.paddingTop = '${TOP}'; el.style.paddingLeft = '${LEFT}'`,
+  openInside: `el.style.cssText = '--x: calc(${TOP}'; el.style.setProperty('padding-top', 'var(--x)')`,
+  attributeThenName: `el.setAttribute('style', 'color: red'); el.style.padding = 'max(${TOP}, 8px) 16px';
+    el.style.paddingBottom = '0'`,
+};
+
+for (const [name, write] of Object.entries(INLINE))
+  for (const when of ['before', 'during'] as const)
+    test(`an inline style the page writes through the CSSOM is emulated as in Chrome (${name}, ${when})`, async () => {
+      const { ours } = await check({ [when]: write });
+      assert.notDeepEqual(ours.changed.boxes, ours.off.boxes);
+    });
+
+const UNKNOWN: Record<string, string> = {
+  // The attribute set again to what it reads: the block is then what that text gives, with no shorthand.
+  attributeAgain: `el.style.cssText = '${BLOCK}'; el.setAttribute('style', el.getAttribute('style'))`,
+  styleMap: `el.style.cssText = '${BLOCK}'; el.attributeStyleMap.set('padding', '${LEFT} 16px');
+    el.attributeStyleMap.set('padding-bottom', '0')`,
+  object: `el.style.cssText = '${BLOCK}'; el.style.padding = { toString: () => '${LEFT} 16px' }; el.style.paddingBottom = '0'`,
+  many: `el.style.cssText = '${BLOCK}'; for (let i = 0; i < 40; i++) { el.style.color = 'red'; el.style.opacity = '0.5' }`,
+};
+
+for (const [name, write] of Object.entries(UNKNOWN))
+  for (const when of ['before', 'during'] as const)
+    test(`an inline style written in a way that is not followed is left as written (${name}, ${when})`, async () => {
+      const chrome = await run(t.chrome, { [when]: write });
+      const ours = await run(t.ours, { [when]: write });
+      assert.deepEqual(ours.off, chrome.off);
+      assert.deepEqual(ours.native, chrome.native);
+      // Emulated as Chrome emulates it, or not at all: nothing else.
+      for (const moment of ['on', 'changed'] as const)
+        assert.ok(
+          ours[moment].boxes['a'] === chrome[moment].boxes['a'] || ours[moment].boxes['a'] === ours.off.boxes['a'],
+          `${moment}: ${ours[moment].boxes['a']}, Chrome ${chrome[moment].boxes['a']}`
+        );
+    });
+
+test('an inline style written through the CSSOM is shown as the page wrote it, and written a few times', async () => {
+  const shown = async (side: Side) => {
+    await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div id="a" class="sw a">a</div>'));
+    await script(`el.style.padding = 'max(${TOP}, 8px) 16px'; el.style.paddingBottom = '0'`);
+    await side.send('DOM.enable');
+    await side.send('CSS.enable');
+    // What a page's own observer is told of the emulation's writes.
+    await t.page.evaluate(() => {
+      const w = window as unknown as { swRecords: number };
+      w.swRecords = 0;
+      new MutationObserver(records => (w.swRecords += records.length)).observe(document.getElementById('a') as Node, {
+        attributes: true,
+      });
+    });
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 20 } });
+    await wait(50);
+    const { root } = await side.send('DOM.getDocument', {});
+    const { nodeId } = await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#a' });
+    const inline = await side.send('CSS.getInlineStylesForNode', { nodeId });
+    const matched = await side.send('CSS.getMatchedStylesForNode', { nodeId });
+    const { attributes } = await side.send('DOM.getAttributes', { nodeId });
+    const style = (s: typeof inline.inlineStyle) => ({
+      text: s?.cssText,
+      properties: s?.cssProperties.map(p => [p.name, p.value, p.text ?? null]),
+    });
+    const records = await t.page.evaluate(() => (window as unknown as { swRecords: number }).swRecords);
+    const page = await t.page.evaluate(() => document.getElementById('a')?.getAttribute('style'));
+    await side.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
+    await side.send('CSS.disable');
+    await side.send('DOM.disable');
+    await t.page.evaluate(() => document.querySelectorAll('.sw').forEach(el => el.remove()));
+    return { inline: style(inline.inlineStyle), matched: style(matched.inlineStyle), attributes, records, page };
+  };
+  const chrome = await shown(t.chrome);
+  const ours = await shown(t.ours);
+  assert.deepEqual(ours.inline, chrome.inline);
+  assert.deepEqual(ours.matched, chrome.matched);
+  assert.deepEqual(ours.attributes, chrome.attributes);
+  assert.doesNotMatch(JSON.stringify([ours.inline, ours.matched, ours.attributes]), /--da-sai/);
+  // A known limit: the page's observers are told of the emulation's writes, one for the block's text and one for
+  // each property set after it. The attribute reads as it did: the sides have no value in it.
+  assert.equal(chrome.records, 0);
+  assert.equal(ours.records, 3);
+  assert.equal(ours.page, chrome.page);
+});

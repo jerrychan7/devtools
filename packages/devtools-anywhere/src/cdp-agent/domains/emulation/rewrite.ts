@@ -487,6 +487,40 @@ function fixStyle(style: CSSStyleDeclaration, rewrite: Rewrite | null): boolean 
 const kindOf = (name: string): Kind => (name === 'style' ? DECLARATIONS : LISTS);
 
 /**
+ * Rewrites the style attribute of `el` where its block has a record of its writes (planWritten): the page wrote it
+ * through the element's style, and the attribute is the browser's serialization of the block, which may not tell
+ * what it declares. Undefined where it has none, or the attribute was set since: it is rewritten by its text. The
+ * element's style is read only for an attribute that may be such a block's (fixAttribute tells why).
+ */
+function fixPlayed(
+  el: Element,
+  current: string,
+  record: Written | undefined,
+  rewrite: Rewrite | null,
+  paced: boolean
+): boolean | undefined {
+  if (!record?.played && !NO_VALUE.test(current) && !ENV_CALL.test(current)) return undefined;
+  if (!serialized(current)) return undefined;
+  const style = ownGet<CSSStyleDeclaration | undefined>(el, 'style');
+  if (!style || !blockRecord(style)) return undefined;
+  // The attribute is not the block's serialization: it was set since, and the block is what its text gives.
+  if (nativeGet<string>(style, 'cssText') !== current) return void dropRecord(style);
+  const plan = planWritten(style, record?.played ? undefined : record, current, rewrite);
+  if (!plan) return undefined;
+  if (paced && rewrite && holdBack(el, 'style', current, record, plan.writes)) return false;
+  const attribute = () => ownCall<string | null>(el, 'getAttribute', 'style');
+  const kept = plan.commit(set => quietMutations(set, { target: el, name: 'style', before: attribute() }));
+  if (plan.writes) wroteAt(el, 'style');
+  setWrittenAttribute(
+    el,
+    'style',
+    kept && { original: kept.original, applied: attribute() ?? '', target: kept.target, played: true }
+  );
+  if (kept) track(writtenElements, el);
+  return plan.writes;
+}
+
+/**
  * Rewrites an attribute of `el` with setAttribute: ours, which the client does not see (`quietMutations`).
  * Read and written through the agent's own natives (ownCall), not the element's methods, which a page
  * may have wrapped. `paced`: the page changed the attribute, so the rewrite may be held (see holdBack).
@@ -498,6 +532,10 @@ function fixAttribute(el: Element, name: string, rewrite: Rewrite | null, paced 
     return false;
   }
   const record = writtenAttribute(el, name);
+  if (name === 'style') {
+    const played = fixPlayed(el, current, record, rewrite, paced);
+    if (played !== undefined) return played;
+  }
   const plan = planText(record, current, rewrite, kindOf(name));
   if (paced && rewrite && holdBack(el, name, current, record, plan.write !== undefined)) return false;
   const fixed = applyText(
