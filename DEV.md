@@ -96,7 +96,7 @@ experiments/      validation records
 
 | Change | Where | How to see it |
 |---|---|---|
-| Early capture (console, errors, requests) | `packages/devtools-anywhere/src/cdp-agent/probe/` | Keep it small: it runs synchronously before the page's code. Check `probe.iife.js` size (min+gzip) |
+| Early capture (console, errors, requests) | `packages/devtools-anywhere/src/cdp-agent/probe/` | Keep it small: it runs synchronously before the page's code. Check the size of `probe.iife.js` as raw bytes after minification (`wc -c`), not gzip |
 | A CDP domain | `packages/devtools-anywhere/src/cdp-agent/domains/` | Playground, plus a conformance test |
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
 | Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |

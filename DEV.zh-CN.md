@@ -96,7 +96,7 @@ experiments/      验证记录
 
 | 改动 | 位置 | 怎么验证 |
 |---|---|---|
-| 早期捕获（console、异常、请求） | `packages/devtools-anywhere/src/cdp-agent/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积（min+gzip） |
+| 早期捕获（console、异常、请求） | `packages/devtools-anywhere/src/cdp-agent/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积：minify 后的原始字节（`wc -c`），不按 gzip 计 |
 | CDP 域 | `packages/devtools-anywhere/src/cdp-agent/domains/` | playground，并加一致性测试 |
 | 组件、连接、外壳模式、Service Worker | `packages/devtools-anywhere/src/` | playground、端到端测试 |
 | Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts`（示例应用在 `tests/e2e/vite-app/`） |
