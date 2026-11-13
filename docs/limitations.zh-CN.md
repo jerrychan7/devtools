@@ -34,8 +34,9 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 | 设备模式 | 部分支持 | [仅外壳模式，只改尺寸](#device-mode) |
 | 全屏的页面 | 部分支持 | [有元素全屏时用不了 DevTools](#fullscreen-pages)；按 Esc 退出全屏即可 |
 | Rendering 面板的模拟 | 部分支持 | [「模拟页面处于焦点」、自动深色模式、双指缩放重置做不到](#rendering-emulation)，返回错误 |
-| 模拟媒体特性 | 部分支持 | 媒体特性和媒体类型[通过改写页面的样式表实现](#emulated-media) |
-| 模拟安全区 | 部分支持 | [在页面的样式表里替换](#safe-area-insets) `env(safe-area-inset-*)` |
+| 模拟媒体特性 | 部分支持 | 媒体特性和媒体类型[通过改写页面的样式表、`<source>` 元素和图片的 `sizes` 实现](#emulated-media) |
+| 强制颜色 | 部分支持 | [系统调色板和画布色通过自有样式表实现，表单控件只改颜色](#forced-colors) |
+| 模拟安全区 | 部分支持 | [在页面的样式表和 style 属性里，通过自定义属性读取](#safe-area-insets) `env(safe-area-inset-*)` |
 | 色觉缺陷模拟 | 完整支持 | 和 Chrome 相同的 SVG 滤镜，作为顶层（top layer）里一个透明遮罩的 backdrop-filter：页面自己在 `<html>` 上的 `filter` 保留，`getComputedStyle` 看不到；页面之后打开的 dialog、popover、全屏元素会立即被压回遮罩之下，内嵌面板保持在遮罩之上（页面先打开 modal dialog 时，面板显示在遮罩之上但随页面一起 inert，鼠标点不到；不开滤镜时面板本来就被 modal 盖住）。滤不到：浏览器自己的弹层（`<select>` 下拉、日期选择器、customizable select 的 `::picker`）和 closed 声明式 shadow root 里的顶层元素（页面和我们都拿不到）。与 Chrome 的差异：同源 iframe 和页面一起滤一次，而不是各滤各的；模糊在视口边缘不向外淡出（约 4px：backdrop-filter 会重复边缘像素，把遮罩外扩到视口之外也不变） |
 | 布局叠加层 | 部分支持 | Grid、Flex、容器查询、scroll-snap、隔离、铰链、刘海和 frame 叠加层，[按计算样式近似绘制](#layout-overlays) |
 | 网络条件 | 部分支持 | [只对探针拦截的 `fetch()`、XHR 生效](#network-conditions)，不支持限速 |
@@ -83,7 +84,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 ### 事件监听器
 
 - **Chrome**：列出所有监听器，带源码位置。
-- **devtools-anywhere**：只有探针运行之后添加的；没有源码位置。
+- **devtools-anywhere**：只有探针运行之后添加的；没有源码位置。被 `signal` 移除的监听器不会列出，但探针保留它的记录（连同监听函数），直到同一目标上下一次添加监听器，或该目标被回收。
 - **原因**：监听器靠探针装的钩子看到。源码位置需要每次添加时捕获堆栈，会拖慢页面（见[路线图](roadmap.zh-CN.md#其他能在页面里补上的功能)）。
 
 <a id="css"></a>
@@ -113,12 +114,12 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 返回样式表的原文，range 与 Chrome 一致，编辑按原样写入原文。不同之处：
 
 - **`<style>` 的位置**：原文从 0:0 起算，不是它在 HTML 里的位置。
-- **CSSOM 改动之后**：页面通过 CSSOM 改过样式表后（`replace()`、`replaceSync()` 除外），原文改为从 CSSOM 序列化，格式与 Chrome 首次见到已被改过的样式表时一致：每条规则（含 `@import`）的文本后跟一个换行。Chrome 对已知原文的样式表是把规则文本拼进原文，且会滞后。原文里找到的规则与 CSSOM 配不上时、DevTools 打开前就构造的样式表，也改为序列化。
+- **CSSOM 改动之后**：页面通过 CSSOM 改过样式表的规则后（`replace()`、`replaceSync()` 除外，样式表自己的媒体列表 `sheet.media` 也除外），原文改为从 CSSOM 序列化，格式与 Chrome 首次见到已被改过的样式表时一致：每条规则（含 `@import`）的文本后跟一个换行。Chrome 对已知原文的样式表是把规则文本拼进原文，且会滞后。原文里找到的规则与 CSSOM 配不上时、DevTools 打开前就构造的样式表，也改为序列化。
 - **启用 CSS 前就被改过**：样式表在启用 CSS 前是否被页面改过，要到第一次用到原文时（`CSS.getMatchedStylesForNode`、`CSS.getStyleSheetText`、编辑）或页面空闲时检查才发现，而不是在登记时：`CSS.styleSheetAdded` 的 header 按写下的原文计算；发现改过后补发 `CSS.styleSheetChanged`，之后按序列化文本提供（header 的 `length`、`endLine`、`endColumn` 仍是先前发出的值，前端也不会重新获取）。Chrome 在 header 里直接给出最终文本，不发 `CSS.styleSheetChanged`；对脚本插入的 `<style>`，这个文本是把改过的规则文本拼在 `<style>` 原文之前。
-- **按属性名赋值**：`rule.style.color = …` 这类赋值没有可挂的钩子（Chrome 里这些属性是每个 style 对象自有的数据属性），改为事后检测：页面通过 `rule.style` 取得过的规则，在下次使用原文之前与取得时的文本比对。因此修改要到下次使用原文时才被发现，`CSS.styleSheetChanged` 也随之延后。看不到的情况：CSS 启用之前就取得并保存的 style，之后通过它所做的修改；同时盯着的规则超过 2048 条时，相关样式表整表重新序列化并不再盯着这些规则，此后通过早先保存的 style 所做的修改。
+- **按属性名赋值**：`rule.style.color = …` 这类赋值发生时 CSS 域得不到通知（Chrome 里这些名字是每个 style 对象自有的属性；agent 为它们放在原型上的访问器只通知模拟，见[跟踪页面的写入](#following-writes)），改为事后检测：页面通过 `rule.style` 取得过的规则，在下次使用原文之前与取得时的文本比对。因此修改要到下次使用原文时才被发现，`CSS.styleSheetChanged` 也随之延后。看不到的情况：CSS 启用之前就取得并保存的 style，之后通过它所做的修改；同时盯着的规则超过 2048 条时，相关样式表整表重新序列化并不再盯着这些规则，此后通过早先保存的 style 所做的修改。
 - **header 的 `isMutable`**：与 Chrome 一样，样式表的规则经 CSSOM 被页面或编辑改过后即为 mutable，构造样式表始终是。这里不算、Chrome 却算的情况：CSS 未启用时（启用之前或关闭期间）页面所做的修改；按属性名赋了属性不接受的值（`rule.style.color = 'nope'`），因为比对的文本没变；同时盯着的规则超过 2048 条之后，通过从中取得的 style 所做的写入。
-- **媒体列表**：`mediaText`、`appendMedium()`、`deleteMedium()` 的修改能看到。CSS 启用之前就取得的媒体列表，之后对它的修改看不到（不知道它属于哪条规则）。
-- **开销**：CSS 启用期间，元素行内样式的 `style.cssText = …` 写入约有 40% 额外开销，因为经过钩子；逐属性赋值（`el.style.left = …`）不受影响。页面读取规则的 `rule.style`、`rule.media` 也经过钩子：启用期间每次约慢 70～90 ns（Chrome 157，10 万次读取从 1.6 ms 变为 8～11 ms）。**关闭 CSS 之后也不会完全恢复**：原生 getter 已还原，但 V8 不再内联被重新定义过的属性，此后该页面里这类读取每次仍慢约 45 ns（约为原来的 4 倍，10 万次约 6.2 ms），直到页面重新加载。
+- **媒体列表**：`mediaText`、`appendMedium()`、`deleteMedium()` 的修改能看到，包括规则的媒体列表（`rule.media`）和样式表自己的媒体列表（`sheet.media`）。在任何会话或模拟开始监视 CSSOM 之前就取得的媒体列表，之后对它的修改看不到（不知道它属于哪条规则或样式表）。
+- **开销**：CSS 启用期间，元素行内样式的 `style.cssText = …` 写入约有 40% 额外开销，因为经过钩子；逐属性赋值（`el.style.left = …`）的开销与 CSS 是否启用无关：这类写入从 agent 加载起就经过 agent 的访问器（见[跟踪页面的写入](#following-writes)）。页面读取规则的 `rule.style`、`rule.media`，或样式表的 `sheet.media`（未单独测量），也经过钩子：启用期间每次约慢 70～90 ns（Chrome 157，10 万次读取从 1.6 ms 变为 8～11 ms）。**关闭 CSS 之后也不会完全恢复**：原生 getter 已还原，但 V8 不再内联被重新定义过的属性，此后该页面里这类读取每次仍慢约 45 ns（约为原来的 4 倍，10 万次约 6.2 ms），直到页面重新加载。
 - **编辑 `@supports`、`@container`、`@scope` 的条件**：Chrome 保持原规则对象。这里整条替换该规则，因为 CSSOM 无法修改它们的条件：页面持有的该规则及其内部规则对象会脱离。
 - **整体替换原文**（`CSS.setStyleSheetText`）：Chrome 先清空样式表的全部规则再重新解析，页面持有的每个规则对象都会脱离（`parentStyleSheet` 变为 `null`），文本未变的也一样。这里只删除并插入文本有变化的顶层规则，其余规则以原对象留在表中：大样式表里编辑代价低，页面的引用也仍然有效。
 - **重新获取**：`<link>` 和 `@import` 的文件会再取一次（能用 HTTP 缓存时走缓存）。
@@ -137,7 +138,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 ### 强制 `:hover`、`:focus` 等
 
 - **Chrome**：在所有样式表里强制状态。
-- **devtools-anywhere**：不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表。
+- **devtools-anywhere**：不覆盖 `@import` 和 `adoptedStyleSheets` 的样式表。被强制的元素带有属性 `data-devtools-anywhere-force`，客户端看不到它，但指名它的查询能找到：`DOM.querySelector`、`DOM.querySelectorAll`，以及用选择器（如 `[data-devtools-anywhere-force]`）或 XPath 表达式（如 `//*[@data-devtools-anywhere-force]`）的 `DOM.performSearch`。devtools-anywhere 的样式表隐藏在文档或 shadow root 里时，页面在探针取得访问器之后才包装的 `adoptedStyleSheets` 访问器 wrapper，对该树的读取和赋值不再被调用；在探针之前包装的仍会被调用（见[页面的 wrapper](#emulated-media)）。
 
 <a id="animations"></a>
 
@@ -326,13 +327,83 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 ### 模拟媒体特性
 
 - **Chrome**：对整个页面模拟媒体特性。
-- **devtools-anywhere**：`prefers-color-scheme`、`prefers-reduced-motion`、`prefers-reduced-data`、`prefers-reduced-transparency`、`prefers-contrast`、`forced-colors`、`color-gamut` 和媒体类型，通过改写页面的样式表实现。跨域样式表、内联样式和 `matchMedia()` 不受影响；`light-dark()` 和强制颜色选的配色不会变。
+- **devtools-anywhere**：`prefers-color-scheme`、`prefers-reduced-motion`、`prefers-reduced-transparency`、`prefers-contrast`、`forced-colors`、`color-gamut` 和媒体类型，通过改写页面的样式表和 `matchMedia()` 得到的查询、`<source>` 的 `media` 和图片的 `sizes` 实现（与 Chrome 一样，页面里的图片在创建时、以及其 `<source>` 改变时，浏览器会重新选择资源）。跨域样式表的规则不改写（它的 media 会改写），探针运行之前、同源 iframe 加载完成之前页面做的查询也不改写；`matchMedia()` 得到的查询的变化事件在下一帧发出，且不可信（`isTrusted` 为 false）；`light-dark()` 选的配色只通过模拟改写的 `color-scheme` 值跟随模拟的配色（见下面的「颜色方案」）：该值没有被改写的地方（带 `var()` 的值、跨域样式表的规则），配色不变。强制颜色还会绘制页面，见[强制颜色](#forced-colors)。页面自己的脚本读到的是改写后的值（`mediaText`、媒体列表的 `item()` 和各项、`media` 和 `sizes` 属性、`style`），页面自己的 MutationObserver 也会看到这些写入；`appendMedium()` 和 `deleteMedium()` 与 Chrome 一样按页面写入的各项操作，操作后列表仍是改写后的；只有 devtools-anywhere 的客户端看到的是页面写入的原值。`prefers-reduced-data` 不模拟：Chrome 157 不模拟它，其媒体查询交给浏览器处理。
+- **错误**：经过被挂钩的 `matchMedia()`、其 `matches` getter 和 `Function.prototype.toString` 抛出的错误，栈里比 Chrome 多一帧探针的 bundle（`at Object.apply`），Chrome 的错误没有这一帧。经过顶层窗口的 `addEventListener` 和 `removeEventListener` 抛出的，多两帧（这一帧，以及探针原有的监听器包装），`change` 监听器则多四帧；经过 `addListener`、`removeListener` 和 `onchange` 的多三帧。顶层窗口的 `addEventListener` 和 `removeEventListener` 就是那个包装，所以它们的 `toString()` 显示的是其源码，而不是 `[native code]`；它们的 `name` 为空、`length` 为 3，而浏览器的有名字、`length` 为 2。CSS 启用期间或模拟改写页面期间被挂钩的 CSSOM 方法和访问器，名字和 `length` 不变，但 `toString()` 显示时没有名字，为 `function () { [native code] }`。agent 用来跟踪页面写入的那些函数从 agent 加载起就被代理（同源 iframe 里则从它的 realm 首次被挂钩起，见[跟踪页面的写入](#following-writes)）：在页面存续期间它们一直这样显示。经其中之一抛出的错误（规则解析失败、写计算样式）栈里多一帧 bundle（`at Object.apply`）；CSS 启用期间或模拟改写页面期间，其中同时又被挂钩的那些则多两帧：插入和删除规则的方法、`replace()`、`replaceSync()`、`setProperty()`、`removeProperty()` 和 `cssText` setter。
+- **未挂钩的 realm**：同源 iframe 在 agent 发现它之前（即其导航的 load 事件之前，见[同源 iframe](#same-origin-iframes)），以及只有探针、没有 agent 的页面（它从不挂钩 iframe）：在那里，`Function.prototype.toString` 把顶层窗口被挂钩的函数显示为 `function () { [native code] }`。
+- **探针不知道的监听器**：通过未挂钩的 realm 的原生 `addEventListener` 添加的监听器，探针不知道。该列表上没有探针知道的监听器时，它收不到合成的变化事件，浏览器对原查询自己的变化事件反而会送到它那里（不是模拟后的）；该列表上有探针知道的监听器时，它收到的事件与其他监听器相同。
+- **时机**：通过 CSSOM 插入或改动的规则，以及样式表自己的媒体列表（`sheet.media`），在造成改动的那次调用里改写；`replace()` 在其 promise 完成后改写，`replaceSync()` 在调用里改写。设置的 `style` 属性或新增的 `<style>` 在所在任务的脚本之后（微任务里）改写。按属性名写在规则样式上的属性（`rule.style.color = …`）也在那次调用里改写，靠的是 agent 为这些名字放置的访问器（见[跟踪页面的写入](#following-writes)）；没有这些访问器的 realm 里，要等到下一次同步页面的样式表（样式表或模拟有变化之后）时，或 CSS 域读取该样式表时才改写，可能在页面已读取该样式之后。
+- **守卫**：页面每次改动模拟改写过的属性（`style`、`media` 或 `sizes`）时都把它改回原文（守卫），每次改写都会被它的写入应答。模拟等待后再改写：在模拟写入的同一回合里应答的改回，每次都让等待加倍，最多 64 帧（60 Hz 下约一秒）。回合在其计时器运行时结束，或在开始之后一秒结束：清除了全部计时器编号的页面（比如循环调用 clearTimeout）会让这个计时器不再运行，回合于是在一秒后结束。其余的改回在各自独立的任务里、3 秒之内计数：不超过 3 次的立即改写；超过之后，每次写入都等待，并同样逐次加倍。守卫的 observer 看到模拟的写入后排定的定时器里的改回，算作同一回合里的应答，无论守卫的 observer 和模拟的 observer 谁先创建。页面因其他原因（如以另一种写法写入的媒体列表）频繁写入这类值时，也会如此。守卫存在期间，元素显示的是页面写入的原文，而 Chrome 显示模拟后的值：每次改写都应答的守卫，只要它还在运行，模拟就一直不在该元素上生效（例如 `env(safe-area-inset-top)` 的 padding 在每一帧里都按真实的安全区计算），守卫停止后模拟才生效。页面本身照常运行。
+- **颜色方案**：同时含 light 和 dark 的 `color-scheme` 值（样式表、style 属性、CSSOM 或 `<meta name="color-scheme">` 里的）按模拟的 `prefers-color-scheme` 取值，与 Chrome 一样改写为该配色（写在原处的 `only` 保留，`only light dark` 成为 `only dark`），因此随它取值的 `light-dark()`、CanvasText 和表单控件与 Chrome 的渲染一致。根元素不另外强制配色；只含一种配色、`normal`，或 Chrome 不认识的值保持原样。`getComputedStyle().colorScheme`、`style.colorScheme` 和 `<meta name="color-scheme">` 的 `content` 读到的是改写后的值（深色偏好下 `light dark` 为 `dark`），Chrome 读到的是页面自己的值；Styles 窗格、样式表文本和 DOM 显示的仍是页面自己的值，但页面通过 CSSOM 改过的样式表除外（见「模拟媒体特性」的「复制与查询」）。带函数的值（如 `color-scheme: var(--scheme)`）不改写，页面因此跟随浏览器自己的偏好。
+- **多个客户端**：页面上有多个客户端时，之后才链接的沙箱 iframe（已并入页面）按客户端逐个接收每个客户端最后一次的媒体模拟调用，客户端的先后按它们首次出现的顺序，而不是调用的先后；它的媒体类型可能与页面不同。
+- **复制与查询**：页面在改写期间复制的元素（`cloneNode()`，或页面脚本复制的 `outerHTML`），会把改写后的值当成自己的，模拟结束后仍保留。页面写入的值恰好与模拟写入的文本相同时，被当作模拟的写入。选择器查询（`DOM.querySelector`、Elements 按选择器搜索）按改写后的值匹配。页面通过 CSSOM 改过的样式表，按规则序列化后提供，其中含改写后的值。
+- **导入和自定义元素**：`<style>` 里的 `@import` 要等页面下次改动样式表时才改写，因为没有事件告诉我们它何时加载完成。对模拟写入的属性作出反应而改动它的自定义元素，模拟会跟随它改写。
+- **样式表文本**：媒体模拟改写 `<style>` 里的 `@media` 规则期间，该样式表的文本首次被检查时，客户端可能收到它的 `CSS.styleSheetChanged`，因为其规则已与原文不符；Chrome 对此不发。
+- **页面的 wrapper**：下面列出的调用，agent 用的是探针在页面代码之前取得的浏览器原生函数（探针是页面的第一个脚本），探针运行之后页面才包装上去的 wrapper 不会被调用：
+  - 模拟的改写：它读写的元素的属性方法、`matches`、`querySelector` 和 `querySelectorAll`、元素的 `style` getter，它读写的样式表、规则、声明块和媒体列表的方法与访问器（`cssRules`、`media`、`cssText`、`mediaText`、`setProperty`、`removeProperty` 等），以及文档和 shadow root 的 `adoptedStyleSheets`；
+  - 模拟的等待和回合：它的 `setTimeout`、`queueMicrotask`、`requestAnimationFrame` 和 `performance.now`（包括色觉缺陷遮罩的帧），以及 shadow root 和样式表监视用的 `queueMicrotask`；
+  - 模拟及其跟随的 frame 和 shadow root 的 MutationObserver，以及模拟给页面文档添加的 `load` 监听器；
+  - 强制颜色的扫描：它的 `getComputedStyle` 和 `getPropertyValue`、`querySelectorAll`，以及它给元素打标记用的属性；
+  - 色觉缺陷遮罩的 `attachShadow`、`setAttribute`、popover 调用和监听器；
+  - DOM 域对属性的读取和编辑（属性方法和 `attributes`，包括这些编辑的撤销与重做）、它的 `querySelector`、`querySelectorAll` 和 `matches`，以及 CSS 域按文本读写 `style` 属性、读写强制状态标记属性。
+
+  除此之外，agent 的其它调用都可能被页面的 wrapper 看到。例如：其它域的 `getComputedStyle`、MutationObserver、定时器和 `performance.now`；DOM 树的读取和编辑（`parentNode`、`insertBefore`、`innerHTML`、`cloneNode` 等）；CSS 域直接读元素的 `style` 或通过它写入（`CSS.setEffectivePropertyValueForNode` 的 `el.style.setProperty`），以及它填充自己的样式表（`replaceSync`）；模拟为了给客户端显示页面写的原文而读取被改写的声明块或媒体列表的文本（`cssText`、`mediaText`），为了读出浏览器怎样解析一个声明块而创建元素（`document.createElement`，以及该元素的 `style`），以及在规则写入时的文本里查找该规则（声明块的 `parentRule`，规则的 `parentRule` 和 `parentStyleSheet`，样式表的 `href`，`<style>` 的 `textContent`，与该文本配对的各规则的 `cssRules` 和 `selectorText`、嵌套在其间的声明的 `getPropertyValue()`（它们的 `style` 经浏览器自己的 getter 读取），为单独解析选择器而创建的 `CSSStyleSheet`，以及重新抓取样式表文件时响应的 `text()`；请求本身用的是探针取得的 `fetch`）；agent 用来跟踪页面写入的函数（见[跟踪页面的写入](#following-writes)），它们盖在 agent 加载时页面已有的函数之上并调用后者，以及为列出 style 的属性名而创建的元素（`document.createElement` 及其 `style`）；devtools-anywhere 注入样式表时用的各文档所在 window 的 `CSSStyleSheet` 构造函数；色觉缺陷遮罩的元素，经页面的 DOM 创建和放置（`createElement`、`append`、`remove`）；强制颜色扫描为 `forced-color-adjust: preserve-parent-color` 从元素向上的查找（`parentElement`、`assignedSlot`、shadow root 的 `host`）。若探针不在页面代码之前（旧版探针，或页面代码先于探针运行），用的是 agent 加载时页面已有的函数，wrapper 会看到所有调用。
+- **内存**：模拟运行期间，页面移除的同源 iframe 的 realm 上的钩子（CSSOM 的和 `adoptedStyleSheets` 的）保留到模拟结束，与 CSS 启用时相同：该 iframe 及其文档要到模拟结束后才被回收。页面移除的 shadow 宿主在模拟运行期间即可回收。`change` 监听器被 signal 移除的 MediaQueryList 与 Chrome 一样可被回收。在没有 `AbortSignal.any` 的浏览器（Chrome 116 之前）里，探针靠该 signal 自己的 `abort` 事件得知中止：若页面的监听器拦下了这个事件（`stopImmediatePropagation()`），探针的监听器会留在该列表上，使它不被回收。
+
+<a id="forced-colors"></a>
+
+### 强制颜色
+
+- **Chrome**：按系统调色板绘制页面：每个不保留颜色的元素（`forced-color-adjust: none` 之外的元素）的文字、边框、链接和背景，表单控件由系统主题绘制，没有 `url()` 图片的背景里的渐变被去掉。
+- **devtools-anywhere**：调色板是页面每个框架和 shadow root 里的自有样式表，规则带 `!important`。保留颜色的元素、有背景的元素和失去渐变的元素，带有属性 `data-devtools-anywhere-forced-colors`，其中的记号（`kept`、`canvas`、`canvas-<percent>`、`no-image`）说明是哪一种；客户端看不到这个属性，模拟结束时标记和样式表都会去掉。与 Chrome 一样，背景变为画布色，所以不透明的背景会盖住它覆盖的内容；半透明的背景保留不透明度，按 5% 的步长取整，低于 2.5% 的则保留页面的颜色。
+- **优先级**：Chrome 的强制颜色替换页面的颜色，无论特异性如何，包括 `!important` 声明和内联的 `!important` 声明。这里调色板的规则也带 `!important`，但特异性低，所以特异性更高的 `!important` 声明，以及内联的 `!important` 声明，保留自己的颜色。
+- **表单控件**：Chrome 由系统主题绘制它们，边框、宽度和强调色（复选框、单选框和滑块的勾选与填充）都来自系统。这里只改颜色：边框保留浏览器的宽度和样式，强调色是浏览器自己的。
+- **时机**：元素被加入页面时标记，模拟开始时已在页面里的元素在开始时标记。之后对它的渐变、背景或 `forced-color-adjust` 的改变（改 class、悬停样式，或父元素的 `forced-color-adjust` 被子元素继承），不会被看到；把元素移到另一个父元素下，或改分配到另一个 slot（改它的 `slot` 属性，或改宿主 shadow 树里的 slot），也不会被看到：它保留原来的标记，所以 `forced-color-adjust: preserve-parent-color` 的元素保留的是标记时所在的父元素或 slot 给它的结果。页面自己的 MutationObserver 若以添加元素来应答这些标记（比如每看到一次属性变化就添加一个），不会像在 Chrome 下那样保持静止，因为 Chrome 不写入任何这类页面能应答的东西。若它在标记的同一回合里应答（在观察者回调里、在微任务里，或在回合结束之前运行的任务里：回合由模拟在标记之后排入的一个零延迟定时器结束，不看任务是谁排入的；实测零延迟定时器、`MessageChannel` 消息和 `scheduler.postTask()` 回调都在它之前运行），该文档的扫描会把这些元素延后若干帧再标记：第一个延后的批次等 2 帧，之后每开一个新批次加倍，最多 64 帧（60 Hz 下约一秒）。批次等待期间到来的应答并入同一批，不延长等待。页面在标记的回合之外自己添加元素时，等待重新从 2 帧开始。这样的页面两秒内只添加几个元素（微任务和上述三种任务实测都是 6 个），元素在被标记之前显示自己的背景和渐变。强制颜色结束时这些等待被丢弃：下一次模拟从 2 帧重新开始。若它更晚才应答（在帧回调里，或带延迟的定时器里），这个应答与页面自己的添加无法区分，会立即标记：页面按它自己的节奏继续添加（60 Hz 下两秒内实测：帧回调应答 120 个，即每帧一个；50 ms 定时器应答 37 个）。页面自己添加的元素在加入的那一帧标记，除非它碰巧落在某次标记的同一回合里，比如分多个微任务或多个零延迟定时器加入的一批元素里靠后的部分：这些元素晚两帧标记（实测：一次调用加入 2000 个、连续 20 帧每帧 100 个、每帧一个持续三秒，都在加入的那一帧标记；分 20 个微任务或 20 个零延迟定时器加入 2000 个，2 帧之内标记完；这些方式接连进行时也在 2 帧之内）。等待按文档分别记：一个应答标记的 iframe 不会拖住页面的元素，页面也不会拖住 iframe 的。后台标签页里没有帧，等待靠定时器进行，而 Chrome 在后台会放慢定时器。
+- **伪元素**：`::before` 和 `::after` 的文字、边框和阴影取调色板的颜色，阴影去掉，背景透明：它覆盖的内容会透出来，而 Chrome 会把它的画布色盖在上面。它们上面的渐变不会被去掉。
+- **衬底**：文字画在绘制过的边框或半透明背景之上时，Chrome 在文字后面画一块衬底，改变了文字下面的像素；这里不改变它们。
+- **计算值**：对大多数元素，`getComputedStyle()` 把 `text-decoration-color` 和 `column-rule-color` 报成调色板的颜色，而 Chrome 保留页面的颜色；`color-scheme` 报成页面的值，而 Chrome 计算为 `light dark`。根元素和 `<body>` 的 `background-color` 读到的是画布色 `rgb(0, 0, 0)`，而 Chrome 保留页面的值、把画布色画在它后面；其他元素的背景读数与 Chrome 一致，即按页面给的不透明度取画布色（不透明的为 `rgb(0, 0, 0)`，50% 的为 `rgba(0, 0, 0, 0.5)`），只有半透明背景不透明度的取整和低于 2.5% 的背景（见上）不同。
+- **保留颜色的元素**：`forced-color-adjust: none` 的元素若从父元素取颜色（自己没有设 `color`，或 `background-color: inherit`），得到的是父元素强制之后的颜色（调色板的颜色），而 Chrome 给它页面给父元素的颜色。`forced-color-adjust: preserve-parent-color` 沿扁平树读取（取元素被分配到的 slot），闭合的 shadow root 除外：其 slot 不向页面暴露（`assignedSlot` 为 null），被分配进去的元素按其 DOM 父元素的子元素处理。
+- **查询**：指名该标记的查询能找到被标记的元素，尽管客户端看不到这个属性：`DOM.querySelector`、`DOM.querySelectorAll`，以及用选择器（如 `[data-devtools-anywhere-forced-colors]`）或 XPath 表达式（如 `//*[@data-devtools-anywhere-forced-colors]`）的 `DOM.performSearch`。按文本的搜索不会匹配它。
+- **页面自己看到的**：页面的脚本和 MutationObserver 能看到这些标记，它的 `outerHTML` 也含有这些标记；只有 devtools-anywhere 的客户端看到的是页面写入的原样。
+- **框架**：调色板覆盖同源 iframe，以及 devtools-anywhere 知道的 shadow root（其中闭合的，只包括探针记录下的）；跨域 iframe 的文档够不着。
 
 <a id="safe-area-insets"></a>
 
 ### 模拟安全区
 
-- **devtools-anywhere**：在页面的样式表里替换 `env(safe-area-inset-*)`：跨域样式表和内联样式不受影响；Styles 里显示的是替换后的值。
+- **devtools-anywhere**：页面的样式表和元素的 `style` 属性里，每个 `env(safe-area-inset-*)` 和 `env(safe-area-max-inset-*)` 都通过模拟在 `:root` 上设置的自定义属性读取（`--da-sai-top`、`--da-sai-max-top` 等），写成 `var(--da-sai-top, env(safe-area-inset-top, 7px))`。没有设置的边保留真实的安全区，改变数值只改变这些属性。跨域样式表的规则不受影响。
+- **页面的脚本**：它读到的是改写后的文本，通过 `element.style`、`getAttribute('style')`、规则的 `style` 和 `cssText`：Chrome 给出 `env(safe-area-inset-top, 7px)` 的地方，这里是 `var(--da-sai-top, env(safe-area-inset-top, 7px))`。`getComputedStyle()` 会列出 `--da-sai-*` 属性，并在 `:root` 上读到它们，Chrome 上没有这些属性。计算值与 Chrome 一致，覆盖的情况包括：回退值、简写、自定义属性、max 安全区、切换和结束模拟、shadow 树和同源 iframe。模拟改写或恢复 `style` 属性时，页面自己观察该属性的 MutationObserver 会收到 Chrome 的模拟不会产生的记录：属性按文本写入时一条；逐条声明写入并放回声明顺序时有多条（见下面的「声明的顺序」；对两个这样的属性实测为 10 条和 15 条，每设置或清除一次安全区各一轮）；按页面自己的写入重做该块时（见「简写后面跟着长写」），块起始的文本一条，之后设置的每个属性各一条（`el.style.padding = …; el.style.paddingBottom = …` 为 3 条）。浏览器写成不带值的各边，有没有模拟读起来都一样。
+- **交给客户端的值**：Styles 面板、`CSS.getMatchedStylesForNode`、`CSS.getInlineStylesForNode` 和 `CSS.getStyleSheetText` 显示页面写的 `env()` 文本，与 Chrome 一致，包括 `@media`、`@supports` 等规则里嵌套的规则，以及 `@keyframes`、`@font-face` 规则里的；`CSS.getComputedStyleForNode` 不列出 `--da-sai-*` 属性。页面通过 CSSOM 改过的样式表，或含有比较尚不认识的规则种类的样式表，会整张序列化（见[样式表原文](#style-sheet-text)）。
+- **部分修改**：带 `env()` 的简写，页面只改了其中一边（如 `el.style.paddingLeft = …`）时，其余各边在模拟运行期间保持，模拟结束后读到真实的安全区，与 Chrome 一致；页面自己的声明按它写的样子保留。这种简写的文本是浏览器自己的，其各边写成空的长写属性，与 Chrome 的写法相同。在不能凭页面的写入得知其块的 `style` 属性里（见下一条），同一块里页面没改的其他声明，模拟结束后仍保留 `var()` 文本（页面的脚本读到的是它，Chrome 保留 `env()`），它们的值同样是真实的安全区，顺序也与 Chrome 相同。`style` 属性里有不带值的自定义属性（`--x: ;`）时也是这样。知道页面写入时的内容的块（见下一条），模拟结束后读起来与 Chrome 相同；不知道时与这样的 `style` 属性一样。
+- **简写后面跟着长写**：一个块若声明了带 `env()` 或 `var()` 的简写、后面又跟着同组的某个长写（`padding: max(env(safe-area-inset-top), 8px) 16px; padding-bottom: 0`），浏览器会把它写成不带值的长写（`padding-top: ; padding-right: ; padding-left: ; padding-bottom: 0px;`），也不以任何别的方式给出简写的文本：`env()` 不在模拟读到的文本里。这样的块按页面写入它时的内容改写，模拟结束时再按它恢复；这些内容由 agent 在页面写入时记下（见下面的[跟踪页面的写入](#following-writes)）：
+  - 页面从未通过 CSSOM 写过的规则：该规则在这些文本里的那一段：传给 `insertRule()` 或 `addRule()` 的文本，传给 `replace()` 或 `replaceSync()` 的文本，它所在 `<style>` 的文本，或它的 `<link>`、`@import` 的文件。文件用页面自己的 `fetch()` 重新抓取（多半来自 HTTP 缓存），所以这样的规则要等文件到了才被模拟，比其他规则晚。这次请求带的是同源请求的凭据，`<link crossorigin="use-credentials">` 的则对别的源也带凭据；它不上报给客户端（Network 域）；页面的 Service Worker 能看到它，是一次 `fetch()`（mode 为 `cors`，cache 为 `force-cache`，没有 destination），而样式表自己加载时是 `style` 请求；
+  - 通过 CSSOM 写过的块，规则的或元素的：它被设成的文本（`style.cssText = …`、`el.style = …`），或第一次被记下的写入之前它读出的文本，以及之后依次设置或移除的每个属性（`setProperty()`、`removeProperty()`、按名字写属性）。改写时把同样的写入重做一遍，其中每个 `env()` 换成改写后的；恢复时按页面原来的写法重做一遍：同样的写入，浏览器得出同样的块，其中没有任何猜测。脚本逐个属性设置的元素样式（`el.style.padding = …; el.style.paddingBottom = …`，框架就是这样做的），无论在模拟安全区之前还是期间设置，都这样被模拟。
+
+  此时这种块的计算值、顺序（`style[i]`）以及模拟结束后的文本都与 Chrome 相同。一致性测试对照的是：规则里的 `padding`、`margin`、`inset`、`border-width`、`scroll-padding` 和 `padding-inline`，在从左到右、从右到左和竖排的元素上；元素样式里的 `padding` 和 `margin`。在 Styles 面板里编辑这样的规则，撤销（`DOM.undo`）时回到页面写的那个块。
+
+  记下的内容只在确知它就是该块时才使用：
+  - 一个块的写入记录，遇到写入时得不到内容的写入就永久作废：值或名字是对象；通过 Typed OM 的写入（`attributeStyleMap`、`styleMap`）；记下的写入超过 64 次（同一属性紧接着再设一次会顶替前一次写入，所以要轮流设置几个属性才会达到，比如脚本做的动画）；
+  - 元素的记录只在它的 `style` 属性读起来就是浏览器对该块的序列化时使用：之后被设置过的属性（`setAttribute('style', …)`）本身就是那个块，按一般的文本改写；
+  - 每次使用之前，把记录里的写入在 agent 自己的一个块上重做一遍，它必须与页面的块读起来相同，文本和顺序都相同；不同则记录作废；
+  - 样式表或插入规则的文本，只在 agent 加载以来页面没有写过该规则的块、且该规则所在列表里的规则（插入的除外）仍是文本里的那些时，才当作该规则的块。文本里的某条规则被删除过的规则列表（`deleteRule()`、`removeRule()`），以及页面追加或删除过关键帧的 `@keyframes` 规则，此后不再为其中的规则给出文本，因为不知道文本里剩下的是哪些规则；`replace()` 尚未完成的样式表也不给出。`<style>` 或文件的文本只在顶层窗口里采用，那里 agent 从加载起就跟踪写入；同源 iframe 里从它的 realm 首次被挂钩起才跟踪，此后传给 `insertRule()`、`replace()` 等的文本可以采用。客户端设置过文本的样式表（`CSS.setStyleSheetText`）按那个文本，客户端添加的规则（`CSS.addRule`）按它自己的文本。
+
+  不能这样确知页面写了什么时，这种简写里的 `env()` 不被模拟（top 安全区为 20 时，上面的 padding 计算为 `8px 16px 0px`，Chrome 给出 `20px 16px 0px`），也不会按某个文本去设置该块：它的各边保持原样，块里的其他声明照常模拟，该块按一般的块改写（它留下的差异见下面的「声明的顺序」）。属于这种情况的有：
+  - 在其写入被跟踪之前写下的块：agent 加载之前，或同源 iframe 里它的 realm 首次被挂钩之前（CSS 启用期间或模拟改写页面期间才挂钩）；以及这种 iframe 里 `<style>` 或文件的规则；
+  - 页面按文本写下 `style` 属性、之后又通过元素的 style 做了不含 `env()` 的写入（对 `<div style="padding: env(…) 2px; padding-left: 0">` 执行 `el.style.color = …`）：属性于是成了浏览器的文本，这个块没有记录。保持页面所写文本的属性会被模拟，因为它的文本里有 `env()`；
+  - 记录已作废、列表不再给出其规则、文件无法重新抓取或文件里已找不到该规则，以及规则读起来与它在样式表文本里的那一段不同。
+
+  一个块仍可能被设成已不属于它的文本，只剩这一种途径：agent 看不到的写入，并且写入之后块读起来与之前一样（简写设成另一个 `env()`、后面再设同一个长写）。agent 看不到的写入有：通过页面在 agent 加载之前从原型上取走的函数所做的（保存下来的 `setProperty`），agent 加载之前所做的（脚本先于 agent 运行的页面），以及页面把 agent 的访问器又去掉之后在该 realm 里所做的。此时该块按记下的内容模拟，模拟结束时被设成记下的内容。
+- **跟踪页面的写入**：<a id="following-writes"></a>为了知道一个块写入时的内容（上一条），agent 加载时在顶层窗口的 CSSOM 原型上放置代理，同源 iframe 里则在它的 realm 首次被挂钩时放置。它们在页面存续期间一直保留：`insertRule()` 和 `deleteRule()`（样式表的、分组规则的和样式规则的）、`addRule()`、`removeRule()`、`replace()`、`replaceSync()`、`@keyframes` 规则的 `appendRule()` 和 `deleteRule()`、`StylePropertyMap` 的 `set()`、`append()`、`delete()` 和 `clear()` 连同 `styleMap` 和 `attributeStyleMap` 的 getter，以及声明块的 `cssText` setter、`setProperty()` 和 `removeProperty()`。它们的名字和 `length` 不变，显示为 `function () { [native code] }`；它们给错误栈增加的帧见[模拟媒体](#emulated-media)下的「错误」。按名字写属性（`el.style.padding = …`）在 Chrome 里不经过任何函数，这些名字是每个 style 对象自有的属性。agent 为浏览器给 style 的每个名字、按它接受的每种写法（`paddingTop`、`padding-top`、`webkitTransform`、`WebkitTransform`：Chrome 157 里共 1551 个）在 `CSSStyleDeclaration.prototype` 上放一个访问器，读取走 `getPropertyValue()`，写入走 `setProperty()`。一致性测试对每个名字用 20 个值与浏览器自己的读写结果逐一对照。页面能察觉到的有：
+  - 这些名字属于原型，不再是每个 style 自有的：`Object.hasOwn(el.style, 'padding')` 为 false，`Object.getOwnPropertyDescriptor(el.style, 'padding')` 为 undefined，而 Chrome 里是数据属性；`'padding' in CSSStyleDeclaration.prototype` 为 true；原型自有 1561 个名字，Chrome 的是 10 个。`Object.keys(el.style)`、`for … in`、`in`、`JSON.stringify(el.style)` 和 `Object.assign(el.style, …)` 的结果与 Chrome 相同。复制 style 自有属性得到的对象（`{ ...el.style }`、`Object.entries(el.style)`、`Object.values(el.style)`）里没有这些名字，Chrome 里全都有；
+  - 访问器的函数名为 `getPropertyValue` 和 `setProperty`，`length` 也是这两个函数的，显示为 `function () { [native code] }`；
+  - 按名字写入出错时（写计算样式，或值是 Symbol），错误信息是 `Failed to execute 'setProperty' on 'CSSStyleDeclaration'`，Chrome 是 `Failed to set a named property 'color' on 'CSSStyleDeclaration'`，栈里多一帧 bundle（`at Object.apply`）；
+  - 开销，在一台机器的 Chrome 157 上与没有 agent 的页面对照，对元素样式做 10 万次不含 `env()` 的写入：`el.style.transform = …` 约 29 ms 对 12 ms，`style.setProperty()` 26 ms 对 15 ms，`style.cssText = …` 44 ms 对 27 ms；10 万次按名字读取（`el.style.transform`）22 ms 对 14 ms。有记录的块上每次写入都要记下：按名字写同一个属性 10 万次为 52 ms。2 万次 `insertRule()` 后各跟一次 `deleteRule()` 为 22～27 ms 对 12 ms；
+  - 内存：记下的内容由它所属的样式表、规则或 style 弱引用着，随之回收；存放它们的表不会缩小。插入再删除 2 万条带 `env()` 的规则之后，堆比没有 agent 的页面高约 610 KB，再做 10 万条也不再升高；模拟安全区期间约为 2.6 MB。
+
+  agent 里有一个常量（`written-blocks.ts` 的 `ALWAYS`），可以让声明块的代理和这些访问器只在 CSS 启用期间或模拟改写页面期间存在。那样就不再把样式表或插入规则的文本当作块，因为期间之外的写入看不到：只有在它们存在时写下的块才被模拟。
+- **未闭合的值**：没有闭合函数、块、字符串或 `url()` 的值（`--x: f(a`），浏览器按原样序列化，后面接一个分号和其余声明；这个文本重新解析时，它们会被并进这个值里。未闭合的值自身里的 `env()` 会被模拟（`--x: calc(env(safe-area-inset-top)` 被 `padding-top: var(--x)` 读取时得到安全区，与 Chrome 相同）。页面之后通过 CSSOM 在该块里声明的内容（`el.style.setProperty('padding-top', 'env(safe-area-inset-top)')`），在该块有页面写入的记录时会被模拟（见「简写后面跟着长写」），因为重做的是写入而不是文本。没有记录时（记录已作废），该块按它的文本逐条声明地写，而在那个文本里，未闭合的值之后设置的声明是这个值的一部分：其中的 `env()` 不被模拟。之前已改写的声明照常模拟，不会丢失任何声明，模拟结束后该块读起来与 Chrome 模拟下相同。Styles 面板对这样的 `style` 属性的解析可能与 Chrome 不同：Chrome 把 `--x` 显示为 `f(a; color: blue`，并在其后列出 `color`；这里的值多一个分号，且不列出 `color`。
+- **声明的顺序**：被改写的块在模拟运行期间和结束之后都保持声明的顺序（`style[i]`）。若块里靠后的位置声明了某属性对应的逻辑或物理属性（`padding-inline-start` 在 `padding-top` 之前、`inline-size` 在 `height` 之前），浏览器在设置该属性时会把它移到块尾，它在那里会压过对应的那个属性。所以改写会把从被移动的属性起的各个属性按块原来的顺序放回：逐个移除，再带着当前的值重新添加；值待定的简写（带 `var()` 或 `env()`）整条添加。这个顺序是块自己的，不是块文本的，文本并不总能说明它：浏览器把 `padding: 1px; padding-inline-start: 3px; padding-left: 2px` 写成 `padding: 1px 1px 1px 2px; padding-inline-start: 3px`。当要写入的文本声明的名字与规则自己的文本声明的名字相同时（改写留下的就是这样），规则这样逐条声明地写；声明了其他名字的文本整块设置（`cssText`）。凭页面写入时的内容得知的块（「简写后面跟着长写」）不按文本写：把页面的写入重做一遍，得到的就是页面做出的那个块，顺序不变。`style` 属性按文本写回，用页面自己的文本；只有当它的文本就是浏览器为该元素的 style 序列化出的文本（最后一次是 CSSOM 写的）时例外：知道页面的写入时按这些写入重做，否则像规则一样逐条声明地写，其中带未闭合值的也一样。在逐条声明写入的块里还剩一处差异：没有值可供重新添加的属性留在原处，排在放回的属性之前。这类属性是 `all`，以及值待定的简写中、另一边之后又被单独设置时的各边（`padding: var(--x); padding-left: 2px`，浏览器把它写成空的长写），后者出现在不能凭页面写入时的内容得知的块里：「简写后面跟着长写」所列情况下的规则，或最后一次由 CSSOM 写入的 `style` 属性。这样的块若读作 `padding-inline-start: env(safe-area-inset-left); padding: var(--x); padding-left: 2px`（`margin`、`border-width`、`inset` 同理），`padding-inline-start` 于是排在 `padding-bottom` 之后，而 Chrome 把它排在最前：从开始模拟安全区起一直如此，模拟结束后也是，直到该块被重新写入或页面重新加载；不会丢失任何声明。计算值与 Chrome 相同，除非被移动的属性与它越过的某个属性设置的是同一边：在从右到左的元素上 `padding-inline-start` 是右内边距，在竖排的元素（`writing-mode: vertical-rl`）上是上内边距，它会压过简写给出的值（`--x: 3px`、left 安全区为 6 时实测：该内边距在模拟期间为 6px、结束后为 0px，Chrome 为 3px；从左到右的元素与 Chrome 相同）。放回顺序要对从被移动的属性起的每个属性做一次移除和一次设置。在一台机器的 Chrome 157 上实测：一个 `<style>` 里 100 条规则、每条 200 条声明（最前是带 `env()` 的逻辑属性，接着 198 个自定义属性，最后是 `padding-top`），设置再清除安全区、每次之后读一次计算样式，约 280 ms；第一条属性是 `padding-left`、不发生移动时约 230 ms；启用 DOM 域和 CSS 域时分别约 305 ms 和 255 ms。Chrome 自己的模拟约 2 ms，启用这两个域时约 10 ms。`CSS.getMatchedStylesForNode` 里，被改写规则的声明之后那些不带文本的长写条目，是把页面的文本重新解析得到的，`!important` 的排在最后，与页面通过 CSSOM 给出的顺序无关。
+- **页面自己写的、与模拟相同的 `var()`**（`var(--da-sai-top, env(safe-area-inset-top))`）与模拟写的无法区分：客户端看到的是 `env(safe-area-inset-top)`，在 Styles 面板里编辑该样式会写入这个 `env()`。
+- **安全区**：必须是 int32 范围内的整数，与 Chrome 一致；其他值会以「Invalid parameters」失败。
 
 <a id="layout-overlays"></a>
 
