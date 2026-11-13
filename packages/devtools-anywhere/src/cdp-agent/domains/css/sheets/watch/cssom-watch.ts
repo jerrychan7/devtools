@@ -1,6 +1,19 @@
 import { microtask, type Native, viaNative } from '../../../../core/natives';
 import { isCssom, realmOf } from '../../../../core/realm';
 import type { CssNatives } from '../../../../probe/types';
+import {
+  agent,
+  index,
+  keepWritten,
+  noteBroken,
+  noteInserted,
+  noteReplaced,
+  noteRetexted,
+  textOf,
+  wasInserted,
+} from './written-blocks';
+
+export { keepWritten, wasInserted, writtenText } from './written-blocks';
 
 /**
  * Notices the page changing style sheets through the CSSOM: the methods that add and remove
@@ -152,21 +165,6 @@ function inRule(rule: unknown): RuleChange | undefined {
   const top = typeof rule === 'object' && rule !== null && 'parentRule' in rule ? topRuleOf(rule as CSSRule) : null;
   return top ? { kind: 'rule', rule: top } : undefined;
 }
-
-/**
- * An index argument as Web IDL's `unsigned long` takes it; undefined for an object, which the
- * page's own conversion (`valueOf()`, `toString()`) would see called again.
- */
-const index = (value: unknown, otherwise: number) =>
-  value === undefined
-    ? otherwise
-    : typeof value === 'object' || typeof value === 'function'
-      ? undefined
-      : Number(value) >>> 0;
-
-/** A text argument, as the native function took it; undefined for an object, as for `index`. */
-const textOf = (value: unknown) =>
-  (typeof value === 'object' && value !== null) || typeof value === 'function' ? undefined : String(value);
 
 /**
  * `CSS` and its `supports`, as the page found them: the probe's, taken before the page's code
@@ -544,7 +542,14 @@ export function forgetSheet(sheet: CSSStyleSheet): void {
  * hooks do not report it as a change.
  */
 function viaOwn<T>(self: object, key: string, native: (fn: Native) => T, otherwise: () => T): T {
-  return viaNative(self, key, native, () => ownEdit(otherwise));
+  // Told to the proxies that keep what the page writes too (written-blocks.ts): without a probe ahead of the page's
+  // code, the functions known as native are the ones found when the agent loaded, which may be those proxies.
+  agent.busy++;
+  try {
+    return viaNative(self, key, native, () => ownEdit(otherwise));
+  } finally {
+    agent.busy--;
+  }
 }
 
 /**
@@ -555,12 +560,19 @@ function viaOwn<T>(self: object, key: string, native: (fn: Native) => T, otherwi
  * no native function known.
  */
 export function ownCall<T>(self: object, name: string, ...args: unknown[]): T {
-  return viaOwn(
+  // A rule the agent deletes is no longer where the sheet's text has it, as one the page deletes (written-blocks.ts).
+  if (name === 'deleteRule' && !wasInserted(ownGet<CSSRuleList>(self, 'cssRules')[index(args[0], 0) ?? 0] as CSSRule))
+    noteBroken(self);
+  const result = viaOwn(
     self,
     `value:${name}`,
     fn => Reflect.apply(fn, self, args) as T,
     () => Reflect.apply(Reflect.get(self, name) as Native, self, args) as T
   );
+  // And one it inserts, or a sheet it writes whole, is written in the text it gives.
+  if (name === 'insertRule') noteInserted(ownGet<CSSRuleList>(self, 'cssRules')[Number(result)], textOf(args[0]));
+  else if (name === 'replaceSync') noteReplaced(self, textOf(args[0]));
+  return result;
 }
 
 /**
@@ -580,6 +592,19 @@ export function ownSet(self: object, name: string, value: unknown): void {
       () => void Reflect.set(self, name, value)
     )
   );
+}
+
+/** The agent set the text of `sheet` to `text`, rule by rule: its rules are those of that text (written-blocks.ts). */
+export function ownSheetText(sheet: CSSStyleSheet, text: string): void {
+  const all: CSSRule[] = [];
+  const visit = (parent: object) => {
+    for (const rule of Array.from(ownGet<CSSRuleList>(parent, 'cssRules'))) {
+      all.push(rule);
+      if ('cssRules' in rule) visit(rule);
+    }
+  };
+  visit(sheet);
+  noteRetexted(sheet, text, all);
 }
 
 /** Sets the property `name` of `style` (setProperty()), the agent's own write, told to nobody: like `ownSet`. */
@@ -810,6 +835,8 @@ let installed = new WeakSet<object>();
 
 /** Hooks a realm, as far as it lets: what the page made unhookable is not watched. */
 function tryInstall(realm: Window & typeof globalThis) {
+  // Before the hooks, which are put over the proxies that keep what is written, and taken off them again.
+  keepWritten(realm);
   if (installed.has(realm)) return;
   installed.add(realm);
   try {
@@ -883,9 +910,15 @@ export function editedBy(by: object, sheet: CSSStyleSheet, text: string | undefi
 /** Runs `fn`, the agent's own change (the CSS domain's, or the emulation's), without reporting it. */
 export function ownEdit<T>(fn: () => T): T {
   own++;
+  agent.busy++;
   try {
     return fn();
   } finally {
     own--;
+    agent.busy--;
   }
 }
+
+// What the page writes is kept from here on in the top page's realm, which is this module's; a frame's is from when
+// its realm is first watched. Guarded: the module is loaded where there is no CSSOM too.
+if (typeof CSSStyleSheet === 'function') keepWritten(globalThis as Window & typeof globalThis);

@@ -47,6 +47,7 @@ import {
   ownCall,
   ownEdit,
   ownSet,
+  ownSheetText,
   ownSheet,
   ownStyle,
   settle,
@@ -768,7 +769,7 @@ export function registerCss(ctx: Context) {
         if (isConstructed(sheet)) return ownCall<void>(sheet, 'replaceSync', text);
         if (sheets.texts.retext(sheet, text, s => sheets.rulesOf(s))) {
           recorded = true;
-          return;
+          return ownSheetText(sheet, text);
         }
         while (sheet.cssRules.length) ownCall(sheet, 'deleteRule', sheet.cssRules.length - 1);
         const o = outline(text);
@@ -778,6 +779,7 @@ export function registerCss(ctx: Context) {
           } catch {
             // Dropped, as the parser drops it.
           }
+        ownSheetText(sheet, text);
       };
       const old = sheets.text(sheet);
       editSheet(
