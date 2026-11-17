@@ -34,6 +34,7 @@ Based on Chrome 158 (158.0.8127.37).
 - Memory: a `<devtools-anywhere>` the page removes, placed by the page or the global one, can be garbage collected with its panel and its frontend iframe; removed elements with a shadow root are collected too, without waiting for an iframe to be added or removed, as the agent's frame registry no longer keeps them alive.
 - Opening the panel no longer prints `console.assert` errors in the page's console: the call frames of console messages, uncaught errors and request initiators now carry the id of the script the Sources panel lists for their URL, so their links in the Console and their marks in Sources resolve to that script.
 - Under Chrome 158, a click in a cross-origin or sandboxed iframe focuses what it presses again, so keys and text reach the iframe's field: since that version a cross-origin iframe's page can focus an element only while its frame has the focus, and a press now gives its frame the focus first, as Chrome does.
+- With the browser's own WebMCP API (Chrome 158), invoking a form's tool with a parameter the form does not have fails with Chrome's text, `Input contains a parameter "…" but there is no such parameter for the tool`, instead of the browser's `Failed to parse tool input arguments.`
 
 ### API changes
 

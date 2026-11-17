@@ -34,6 +34,7 @@
 - 内存：页面移除的 `<devtools-anywhere>`（页面放置的或全局的）连同其面板和 frontend iframe 可以被垃圾回收；移除的带 shadow root 的元素也能被回收，不必等页面增删 iframe，agent 的框架登记不再拉住它们。
 - 打开面板时不再在页面控制台打出 `console.assert` 错误：控制台消息、未捕获错误和请求发起方的调用栈，每一帧都带上 Sources 面板按其 URL 列出的脚本的 id，Console 里的链接和 Sources 里的标记都落到这个脚本上。
 - 在 Chrome 158 下，点击跨域或沙箱 iframe 里的元素重新会让它获得焦点，按键和文字能进入 iframe 里的输入框：从该版本起，跨域 iframe 的页面只有在其 frame 有焦点时才能让元素获得焦点，现在按下时先把焦点交给该 frame，和 Chrome 一样。
+- 在浏览器自带 WebMCP API 的情况下（Chrome 158），调用表单工具时传入表单没有的参数，报的是 Chrome 的文字 `Input contains a parameter "…" but there is no such parameter for the tool`，不再是浏览器的 `Failed to parse tool input arguments.`。
 
 ### 接口变化
 

@@ -1,6 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../../core/session';
 import type { Context } from '../../core/context';
+import { isHtml } from '../../core/realm';
 import { stackOf } from '../../core/scripts';
 import type { ToolOutcome, ToolRecord } from '../../probe/types';
 
@@ -194,6 +195,10 @@ export function registerWebMcp(ctx: Context) {
         ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
       async invoke(input, signal) {
+        // The browser's own call fails such an input with a text of its own since Chrome 158; its
+        // CDP checks the form's parameters first.
+        const unknown = isHtml(form, 'form') && unknownParameter(form, input);
+        if (unknown) return { status: 'Error', errorText: unknown };
         try {
           const output = await context.executeTool(tool, input, { signal });
           const returned = record && takeOutcome(record, false, output);
@@ -408,11 +413,20 @@ function formSchema(form: HTMLFormElement): object {
   return { type: 'object', properties, required };
 }
 
+/** Chrome's error text for an input key the form has no field for, if there is one. */
+function unknownParameter(form: HTMLFormElement, input: Record<string, unknown>): string | undefined {
+  const fields = fieldsOf(form);
+  const key = Object.keys(input).find(key => !fields.has(key));
+  return key === undefined
+    ? undefined
+    : `Input contains a parameter "${key}" but there is no such parameter for the tool`;
+}
+
 /** Fills the form in from the tool's input; returns an error text when the input does not fit. */
 function fillForm(form: HTMLFormElement, input: Record<string, unknown>): string | undefined {
+  const unknown = unknownParameter(form, input);
+  if (unknown) return unknown;
   const fields = fieldsOf(form);
-  for (const key of Object.keys(input))
-    if (!fields.has(key)) return `Input contains a parameter "${key}" but there is no such parameter for the tool`;
   for (const [name, value] of Object.entries(input)) {
     for (const el of fields.get(name) ?? []) {
       if (el instanceof HTMLInputElement && el.type === 'checkbox') el.checked = Boolean(value);
