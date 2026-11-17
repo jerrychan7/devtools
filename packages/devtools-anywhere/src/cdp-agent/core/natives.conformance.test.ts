@@ -253,7 +253,14 @@ test('the scan and the sheets of forced colors call no page wrapper', async () =
     await wrappedBeforeGoto(page);
     await page.evaluateOnNewDocument(wrapScan);
   });
-  const FORCED = { features: [{ name: 'forced-colors', value: 'active' }] };
+  // The palette follows the colour scheme: dark is emulated too, so that the text below is white
+  // whichever scheme the browser has.
+  const FORCED = {
+    features: [
+      { name: 'forced-colors', value: 'active' },
+      { name: 'prefers-color-scheme', value: 'dark' },
+    ],
+  };
   const color = (id: string) =>
     t.page.evaluate(id => getComputedStyle(document.getElementById(id) ?? document.body).color, id);
   await t.page.evaluate(() => {
