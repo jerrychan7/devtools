@@ -66,7 +66,7 @@ export function registerEmulation(ctx: Context) {
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
       rewriteMedia('media', media.set(session, params));
       rewriteColorScheme(media.colorScheme());
-      setForcedColors(media.forcedColors());
+      setForcedColors(media.forcedColors(), media.colorScheme());
     },
     // Done by rewriting env(safe-area-inset-*) in the page's style sheets and style attributes to read custom
     // properties (safe-area.ts).
@@ -84,7 +84,7 @@ export function registerEmulation(ctx: Context) {
     // The session ends as a call with nothing, as Chrome's does: whoever set the media type, it goes.
     rewriteMedia('media', media.end(session));
     rewriteColorScheme(media.colorScheme());
-    setForcedColors(media.forcedColors());
+    setForcedColors(media.forcedColors(), media.colorScheme());
     // Told of this change too, so that matchMedia() follows it; after that, this session's listener is not kept.
     stopMatchMedia();
     for (const [what, owner] of owners) {

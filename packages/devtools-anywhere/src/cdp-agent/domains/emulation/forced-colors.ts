@@ -33,18 +33,33 @@ const NO_IMAGE = 'no-image';
 /** The steps of opacity between transparent and opaque. */
 const STEPS = 20;
 
-/** Chrome's system colours under forced colors, the values the palette paints with. */
-const CANVAS = '#000';
-const CANVAS_TEXT = '#fff';
-const LINK_TEXT = '#ff0';
-const BUTTON_FACE = '#000';
-const BUTTON_TEXT = '#fff';
-const BUTTON_BORDER = '#fff';
-const FIELD = '#000';
-const FIELD_TEXT = '#fff';
-const HIGHLIGHT = 'rgba(0, 230, 255, 0.8)';
-const HIGHLIGHT_TEXT = '#000';
-const GRAY_TEXT = 'rgb(63, 242, 63)';
+/** A color scheme, which Chrome chooses the palette by. */
+type Scheme = 'light' | 'dark';
+
+/**
+ * Chrome's system colours under forced colors, the values the palette paints with. Chrome takes the dark or
+ * the light palette from the page's `prefers-color-scheme`: the emulated one, else the browser's. The page's
+ * own `color-scheme` does not choose it. `canvas` is the canvas as r, g, b, for its translucent steps.
+ */
+const PALETTES = {
+  dark: {
+    canvas: '0, 0, 0',
+    text: '#fff',
+    link: '#ff0',
+    highlight: 'rgba(0, 230, 255, 0.8)',
+    highlightText: '#000',
+    gray: 'rgb(63, 242, 63)',
+  },
+  light: {
+    canvas: '255, 255, 255',
+    text: '#000',
+    link: 'rgb(0, 0, 159)',
+    highlight: 'rgba(5, 0, 73, 0.8)',
+    highlightText: '#fff',
+    gray: 'rgb(96, 0, 0)',
+  },
+};
+/** Marks are yellow under both palettes. */
 const MARK = '#ff0';
 const MARK_TEXT = '#000';
 
@@ -74,43 +89,59 @@ function paint(selector: string, text: string, border: string, background?: stri
   );
 }
 
-/** The rule of each translucent step: the canvas at its opacity (`canvas-5` … `canvas-95`). */
-const TRANSLUCENT = Array.from(
-  { length: STEPS - 1 },
-  (_, i) =>
-    `[${FORCED_COLORS_ATTRIBUTE}~="${CANVAS_TOKEN}-${(i + 1) * (100 / STEPS)}"] { background-color: rgba(0, 0, 0, ${(i + 1) / STEPS}) !important; }`
-);
+/**
+ * The style sheet of forced colors for `scheme`, the same in every tree of the page. Buttons and fields take the
+ * canvas and its text: ButtonFace, Field and the canvas are one colour in Chrome's palettes, and so are their
+ * texts and ButtonBorder.
+ */
+function palette(scheme: Scheme): string {
+  const { canvas: rgb, text, link, highlight, highlightText, gray } = PALETTES[scheme];
+  const canvas = `rgb(${rgb})`;
+  return [
+    `:root${ADJUSTED}, body${ADJUSTED} { background-color: ${canvas} !important; }`,
+    // The backgrounds are not reset here: an element's own background shows until its mark makes it the
+    // canvas, so a background that covers something hides it, as in Chrome, and a transparent one stays
+    // transparent. Buttons, fields and marks get the backgrounds the palette gives them, as they do in Chrome.
+    `*${ADJUSTED} { color: ${text} !important;` +
+      ` border-color: ${text} !important; outline-color: ${text} !important;` +
+      ` caret-color: ${text} !important; text-decoration-color: ${text} !important;` +
+      ` column-rule-color: ${text} !important; box-shadow: none !important; text-shadow: none !important;` +
+      ` accent-color: auto !important; scrollbar-color: auto !important; }`,
+    // A pseudo-element has no mark: its background is transparent, so what it covers shows through it.
+    `*${ADJUSTED}::before, *${ADJUSTED}::after { background-color: transparent !important;` +
+      ` color: ${text} !important; border-color: ${text} !important;` +
+      ` outline-color: ${text} !important; caret-color: ${text} !important;` +
+      ` text-decoration-color: ${text} !important; column-rule-color: ${text} !important;` +
+      ` box-shadow: none !important; text-shadow: none !important; }`,
+    `[${FORCED_COLORS_ATTRIBUTE}~="${CANVAS_TOKEN}"] { background-color: ${canvas} !important; }`,
+    // Each translucent step: the canvas at its opacity (`canvas-5` … `canvas-95`).
+    ...Array.from(
+      { length: STEPS - 1 },
+      (_, i) =>
+        `[${FORCED_COLORS_ATTRIBUTE}~="${CANVAS_TOKEN}-${(i + 1) * (100 / STEPS)}"] { background-color: rgba(${rgb}, ${(i + 1) / STEPS}) !important; }`
+    ),
+    paint('a:link', link, link),
+    paint('a:visited', link, link),
+    paint('a:active', link, link),
+    paint(BUTTONS, text, text, canvas),
+    // Only the disabled buttons are grey: a disabled field keeps the field's colours, as in Chrome.
+    paint(`:is(${BUTTONS}):disabled`, gray, gray),
+    paint(FIELDS, text, text, canvas),
+    paint('mark', MARK_TEXT, MARK_TEXT, MARK),
+    `*${ADJUSTED}::selection { color: ${highlightText} !important; background-color: ${highlight} !important; }`,
+    `[${FORCED_COLORS_ATTRIBUTE}~="${NO_IMAGE}"] { background-image: none !important; }`,
+  ].join('\n');
+}
 
-/** The style sheet of forced colors, the same in every tree of the page. */
-const PALETTE = [
-  `:root${ADJUSTED}, body${ADJUSTED} { background-color: ${CANVAS} !important; }`,
-  // The backgrounds are not reset here: an element's own background shows until its mark makes it the
-  // canvas, so a background that covers something hides it, as in Chrome, and a transparent one stays
-  // transparent. Buttons, fields and marks get the backgrounds the palette gives them, as they do in Chrome.
-  `*${ADJUSTED} { color: ${CANVAS_TEXT} !important;` +
-    ` border-color: ${CANVAS_TEXT} !important; outline-color: ${CANVAS_TEXT} !important;` +
-    ` caret-color: ${CANVAS_TEXT} !important; text-decoration-color: ${CANVAS_TEXT} !important;` +
-    ` column-rule-color: ${CANVAS_TEXT} !important; box-shadow: none !important; text-shadow: none !important;` +
-    ` accent-color: auto !important; scrollbar-color: auto !important; }`,
-  // A pseudo-element has no mark: its background is transparent, so what it covers shows through it.
-  `*${ADJUSTED}::before, *${ADJUSTED}::after { background-color: transparent !important;` +
-    ` color: ${CANVAS_TEXT} !important; border-color: ${CANVAS_TEXT} !important;` +
-    ` outline-color: ${CANVAS_TEXT} !important; caret-color: ${CANVAS_TEXT} !important;` +
-    ` text-decoration-color: ${CANVAS_TEXT} !important; column-rule-color: ${CANVAS_TEXT} !important;` +
-    ` box-shadow: none !important; text-shadow: none !important; }`,
-  `[${FORCED_COLORS_ATTRIBUTE}~="${CANVAS_TOKEN}"] { background-color: ${CANVAS} !important; }`,
-  ...TRANSLUCENT,
-  paint('a:link', LINK_TEXT, LINK_TEXT),
-  paint('a:visited', LINK_TEXT, LINK_TEXT),
-  paint('a:active', LINK_TEXT, LINK_TEXT),
-  paint(BUTTONS, BUTTON_TEXT, BUTTON_BORDER, BUTTON_FACE),
-  // Only the disabled buttons are grey: a disabled field keeps the field's colours, as in Chrome.
-  paint(`:is(${BUTTONS}):disabled`, GRAY_TEXT, GRAY_TEXT),
-  paint(FIELDS, FIELD_TEXT, BUTTON_BORDER, FIELD),
-  paint('mark', MARK_TEXT, MARK_TEXT, MARK),
-  `*${ADJUSTED}::selection { color: ${HIGHLIGHT_TEXT} !important; background-color: ${HIGHLIGHT} !important; }`,
-  `[${FORCED_COLORS_ATTRIBUTE}~="${NO_IMAGE}"] { background-image: none !important; }`,
-].join('\n');
+/**
+ * The style sheet for the scheme emulated, or, with none, both palettes under the browser's own
+ * `prefers-color-scheme`, so that the browser follows a change of its scheme. The agent's own sheets are not
+ * rewritten by the media emulation.
+ */
+const sheetFor = (scheme: Scheme | undefined): string =>
+  scheme
+    ? palette(scheme)
+    : `@media not (prefers-color-scheme: dark) {\n${palette('light')}\n}\n@media (prefers-color-scheme: dark) {\n${palette('dark')}\n}`;
 
 /**
  * The element above `el` in the flat tree, which is the one styles are inherited along: the slot it is assigned
@@ -228,20 +259,30 @@ function unmarkAll(): void {
 }
 
 let active = false;
+/** The sheet injected while active, so that a change of the emulated scheme replaces it. */
+let sheet = '';
 
 /**
  * Turns forced colors on or off for the whole page: the palette in every tree, the scan of new elements
- * and the marks. Turning them off takes all of it back. Setting the state it already has changes nothing.
+ * and the marks. `scheme` is the emulated `prefers-color-scheme`, undefined for the browser's own: a change of
+ * it while active replaces the palette and keeps the marks. Turning them off takes all of it back. Setting the
+ * state it already has changes nothing.
  */
-export function setForcedColors(on: boolean): void {
+export function setForcedColors(on: boolean, scheme?: Scheme): void {
+  if (on && active) {
+    const css = sheetFor(scheme);
+    if (css !== sheet) injectOwnStyle(NAME, (sheet = css));
+    return;
+  }
   if (on === active) return;
   active = on;
   if (on) {
     keeps = new WeakMap();
-    injectOwnStyle(NAME, PALETTE);
+    injectOwnStyle(NAME, (sheet = sheetFor(scheme)));
     scanElements(NAME, visit);
     return;
   }
+  sheet = '';
   scanElements(NAME, null);
   injectOwnStyle(NAME, null);
   unmarkAll();
