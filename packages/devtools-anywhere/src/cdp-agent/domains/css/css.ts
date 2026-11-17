@@ -22,7 +22,7 @@ import { historyOf, type Action } from '../../core/nodes/history';
 import { shownAttribute } from '../../core/nodes/written-attributes';
 import { keepBlock } from '../emulation/rewrite';
 import { shownCssText, shownMedia } from '../emulation/shown-style';
-import { isEmulationProperty, unwrapSafeArea } from '../emulation/safe-area';
+import { isEmulationProperty } from '../emulation/safe-area';
 import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
 import { environmentVariables } from './env-variables';
 import { ForcedPseudoClasses } from './matching/forced-pseudo';
@@ -1039,8 +1039,9 @@ export function registerCss(ctx: Context) {
         editedBy(sheets, sheet, known ?? undefined);
       };
       record(after);
-      // As the page wrote it: a redo inserts the env() of a safe area inset, which the emulation rewrites again.
-      const text = unwrapSafeArea(rule.cssText);
+      // A redo inserts the text the client gave, as Chrome does: the rule's own text does not hold all the rule
+      // declares (a shorthand with a var() or an env() and a longhand after it reads as longhands with no value).
+      const text = params.ruleText;
       // Redo inserts a new rule object, which the next undo removes.
       let added: CSSRule = rule;
       history.record({

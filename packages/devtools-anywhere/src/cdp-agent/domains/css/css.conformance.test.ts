@@ -200,6 +200,35 @@ describe('CSS', () => {
     assert.deepEqual(seen, [1, 0, 1, 0]);
   });
 
+  test('an added rule done again keeps a shorthand the browser gives as longhands with no value', async () => {
+    // Its text reads `margin-top: ; …`: a redo inserts the text the client gave, as Chrome does.
+    const block = async (side: TestPage['ours'], name: string) => {
+      const { styleSheetId } = await side.send('CSS.createStyleSheet', {
+        frameId: (await side.send('Page.getResourceTree')).frameTree.frame.id,
+      });
+      await side.send('DOM.markUndoableState');
+      await side.send('CSS.addRule', {
+        styleSheetId,
+        ruleText: `.${name} { margin: env(safe-area-inset-left) 2px; margin-bottom: 0 }`,
+        location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+      });
+      await side.send('DOM.markUndoableState');
+      await side.send('DOM.undo');
+      await side.send('DOM.redo');
+      // Chrome's inspector sheet is not one of the page's sheets: the rule is read by the margin it gives.
+      return t.page.evaluate(n => {
+        const el = document.body.appendChild(document.createElement('div'));
+        el.className = n;
+        const margin = getComputedStyle(el).margin;
+        el.remove();
+        return margin;
+      }, name);
+    };
+    const chrome = await block(t.chrome, 'redo-c');
+    assert.equal(await block(t.ours, 'redo-o'), chrome);
+    assert.equal(chrome, '0px 2px');
+  });
+
   /**
    * The fixture has two style sheets that differ only in the class name (twin-o, twin-c). Each
    * side edits its own, so the responses can be compared without one edit seeing the other's.
