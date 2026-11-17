@@ -26,6 +26,8 @@ export const NATIVE_KEYS: readonly string[] = [
   'get:media',
   'get:styleSheet',
   'get:ownerNode',
+  'get:parentRule',
+  'get:parentStyleSheet',
   'get:style',
   'get:cssText',
   'set:cssText',

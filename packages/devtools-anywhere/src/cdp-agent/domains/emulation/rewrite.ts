@@ -379,7 +379,7 @@ function planWritten(
   let record = blockRecord(style);
   // The block does not hold what `heldBase` says of the sides it reads with no value: it is written whatever it holds.
   let force = false;
-  const rule = style.parentRule;
+  const rule = nativeGet<CSSRule | null>(style, 'parentRule');
   const source = () => (rule ? writtenBlock(rule, fileText, sheetTrusted(style)) : undefined);
   const apply = (text: string) => (rewrite ? rewrite(text) : text);
   if (!record) {
@@ -893,7 +893,7 @@ function onCssom(sheet: CSSStyleSheet, _text?: string, _by?: object, change?: Cs
 function onNamed(style: object): void {
   if (!rewriting() || !isCssom(style, 'CSSStyleDeclaration')) return;
   const rule = nativeGet<CSSRule | null>(style, 'parentRule');
-  const sheet = rule?.parentStyleSheet;
+  const sheet = rule && nativeGet<CSSStyleSheet | null>(rule, 'parentStyleSheet');
   if (!sheet || ownSheet(sheet) || !(styles.has(style) || envOrScheme(style))) return;
   if (fixStyle(style, current().values)) pageRulesRewritten();
 }
