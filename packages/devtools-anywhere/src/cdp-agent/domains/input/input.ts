@@ -267,6 +267,10 @@ export function registerInput({ session, frames }: Context) {
       // this page's document too, as a same-origin iframe's is.
       if (p.type !== 'mouseWheel' && childTargets.linkOf(target)?.merged)
         hover(path, p, buttonsOf(p) ?? (p.type === 'mousePressed' ? BUTTONS[p.button ?? 'none'] : 0));
+      // Since Chrome 158 a cross-origin iframe's page can focus an element only while its frame
+      // has the focus: a press gives the frame the focus first, as Chrome's does, through its
+      // window, which fires no focus event at the iframe's element here (Chrome fires none).
+      if (p.type === 'mousePressed' && isHtml(target, 'iframe')) target.contentWindow?.focus();
       return await mouseInto(link, target, p);
     }
     const button = p.button ?? 'none';
