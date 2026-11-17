@@ -11,6 +11,7 @@ import {
   noteInserted,
   noteReplaced,
   noteRetexted,
+  sealRecord,
   setWatched,
   startRecord,
   textOf,
@@ -634,22 +635,27 @@ export function ownRemoveProperty(style: CSSStyleDeclaration, name: string): voi
  * Plays the writes of a block's record on `style` (written-blocks.ts, play): the emulation's, which leave the
  * block what the record says, so the record is kept.
  */
-export const ownPlayer = (style: CSSStyleDeclaration, write: (set: () => void) => void = set => set()) => ({
-  text: (text: string) =>
-    write(() =>
-      ownWrite(style, () =>
+export const ownPlayer = (style: CSSStyleDeclaration, write: (set: () => void) => void = set => set()) => {
+  // Each write is the record's own: the block is still what the record says (written-blocks.ts, sealRecord).
+  const played = (set: () => void) => {
+    write(() => ownWrite(style, set));
+    sealRecord(style);
+  };
+  return {
+    text: (text: string) =>
+      played(() =>
         viaOwn(
           style,
           'set:cssText',
           fn => void Reflect.apply(fn, style, [text]),
           () => void Reflect.set(style, 'cssText', text)
         )
-      )
-    ),
-  set: (name: string, value: string, priority: string) =>
-    write(() => ownWrite(style, () => ownCall(style, 'setProperty', name, value, priority))),
-  remove: (name: string) => write(() => ownWrite(style, () => ownCall(style, 'removeProperty', name))),
-});
+      ),
+    set: (name: string, value: string, priority: string) =>
+      played(() => ownCall(style, 'setProperty', name, value, priority)),
+    remove: (name: string) => played(() => ownCall(style, 'removeProperty', name)),
+  };
+};
 
 /** Makes `write`, a write of the agent's own to `self`, as `ownSet` says. */
 function ownWrite(self: object, write: () => void): void {
@@ -781,10 +787,10 @@ function install(realm: Window & typeof globalThis) {
     if (validPriority(args[2])) styleWritten(args, self, true);
   });
   hook(realm.CSSStyleDeclaration.prototype, 'removeProperty', (self, args) => styleWritten(args, self, false));
-  // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are no
-  // accessors, so `el.style.left = …` is not hooked and costs nothing), a rule's selector, a
-  // keyframe's key. While watching, an element's `style.cssText = …` costs about 40% more
-  // (Chrome 157, 1000 writes: 0.33 ms against 0.24 ms), the proxy's.
+  // A style's setters (in Chrome 157 `cssText` and `cssFloat`: `color` and the like are accessors
+  // only where written-blocks.ts put them, and are not hooked here), a rule's selector, a
+  // keyframe's key. While watching, an element's `style.cssText = …` passes through the proxies of
+  // both modules, and costs noticeably more than without the agent.
   // A style's properties may be on an interface of its own (CSSStyleProperties) above it.
   const styles: object[] = [];
   for (let p: unknown = Object.getPrototypeOf(realm.document.createElement('div').style); ;) {

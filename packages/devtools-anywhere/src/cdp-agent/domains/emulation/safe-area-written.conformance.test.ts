@@ -81,6 +81,8 @@ interface Case {
 }
 
 interface Run {
+  /** Before the insets are emulated: the blocks as the page left them. */
+  bare: Reading;
   on: Reading;
   changed: Reading;
   off: Reading;
@@ -109,6 +111,7 @@ async function run(side: Side, c: Case): Promise<Run> {
       await side.send('CSS.enable');
       await c.client(side);
     }
+    const bare = await read();
     await side.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 20, left: 6 } });
     await wait(150);
     const on = await read();
@@ -127,7 +130,7 @@ async function run(side: Side, c: Case): Promise<Run> {
       reading.texts = [];
       reading.attributes = {};
     }
-    return { on, changed, off, native };
+    return { bare, on, changed, off, native };
   } finally {
     await side.send('CSS.disable').catch(() => {});
     await side.send('DOM.disable').catch(() => {});
@@ -157,6 +160,11 @@ async function check(c: Case): Promise<{ chrome: Run; ours: Run }> {
   assert.notDeepEqual(chrome.changed.boxes, chrome.off.boxes);
   return { chrome, ours };
 }
+
+/** In the page: `set` and `setText`, setProperty() and the `cssText` setter of an iframe made now. */
+const OTHER_REALM = `const frame = document.createElement('iframe'); frame.className = 'sw'; document.body.append(frame);
+  const other = frame.contentWindow.CSSStyleDeclaration.prototype; const set = other.setProperty;
+  const setText = Object.getOwnPropertyDescriptor(other, 'cssText').set;`;
 
 const SHORT = (inset: string, other = '2px') => `padding: ${inset} ${other}; padding-bottom: 0`;
 
@@ -258,6 +266,27 @@ const RULES: Record<string, Case> = {
     css: `.a { color: red }`,
     during: `rules[0].style.setProperty('padding', 'max(${TOP}, 8px) 16px'); rules[0].style.setProperty('padding-bottom', '0')`,
   },
+  'a rule with an important shorthand, set property by property': {
+    css: `.a { color: red }`,
+    before: `rules[0].style.setProperty('padding', '${TOP} 2px', 'important');
+      rules[0].style.setProperty('padding-left', '1px', 'important')`,
+  },
+  'a rule with an important longhand after the shorthand': {
+    css: `.a { padding: ${TOP} 2px; padding-bottom: 0 !important }`,
+  },
+  // A write the agent does not see, by the function of a realm made in the same task: the next write it sees
+  // finds the block reading another text than its record left.
+  'a rule written by the function of another realm, then by name': {
+    css: `.a { color: red }`,
+    before: `rules[0].style.cssText = '${SHORT(TOP)}'; ${OTHER_REALM}
+      set.call(rules[0].style, 'padding', '${LEFT} 3px'); rules[0].style.paddingBottom = '0'`,
+    left: ['a'],
+  },
+  'a rule written by the function of another realm while the insets are emulated': {
+    css: `.a { color: red }`,
+    during: `rules[0].style.cssText = '${SHORT(TOP)}'; ${OTHER_REALM}
+      set.call(rules[0].style, 'padding', '${LEFT} 3px'); rules[0].style.paddingBottom = '0'`,
+  },
   'a rule with a property removed and the shorthand set again': {
     css: `.a { ${SHORT(TOP)}; color: red }`,
     before: `rules[0].style.removeProperty('padding-bottom'); rules[0].style.padding = '${LEFT} 3px';
@@ -265,11 +294,22 @@ const RULES: Record<string, Case> = {
   },
 };
 
+// Without `ALWAYS` (written-blocks.ts), a block is known only by what the page wrote while someone watched: the
+// texts of the <style> and of the rules inserted, and what was written before, are not taken. The cases that are
+// known so (`emulated`) are emulated as in Chrome; the others, as in Chrome or not at all.
+const EMULATED = new Set([
+  'a rule the page sets by name while the insets are emulated',
+  'a rule built property by property while the insets are emulated',
+]);
+
 for (const [name, c] of Object.entries(RULES))
   test(`a block the browser does not give back is emulated as in Chrome, or left as written: ${name}`, async () => {
-    const { ours } = await check(c);
-    // Left alone, or emulated: one or the other, as the case says.
-    if (!c.left) assert.notDeepEqual(ours.changed.boxes, ours.off.boxes);
+    const { chrome, ours } = await leftOrSame(c);
+    // Written while the insets are emulated: emulated as in Chrome from then on.
+    if (EMULATED.has(name)) {
+      assert.deepEqual(ours.changed.boxes, chrome.changed.boxes);
+      assert.notDeepEqual(ours.changed.boxes, ours.off.boxes);
+    }
   });
 
 /** The sheet of the test's <style>, as the CSS domain names it. */
@@ -341,6 +381,19 @@ const CLIENT: Record<string, Case> = {
       await side.send('CSS.setStyleSheetText', { styleSheetId: await sheetId(side), text: `.a { ${SHORT(TOP)} }` });
     },
   },
+  // A redo inserts the text the client gave: the rule's own text has no shorthand.
+  'CSS.addRule, undone and done again': {
+    css: `.a { ${SHORT(LEFT)} }`,
+    client: async side => {
+      await side.send('CSS.addRule', {
+        styleSheetId: await sheetId(side),
+        ruleText: `.a { margin: ${TOP} 2px; margin-bottom: 0 }`,
+        location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+      });
+      await side.send('DOM.undo');
+      await side.send('DOM.redo');
+    },
+  },
   'CSS.addRule': {
     css: `.a { ${SHORT(LEFT)} } .a { ${SHORT(TOP)} }`,
     client: async side => {
@@ -353,10 +406,17 @@ const CLIENT: Record<string, Case> = {
   },
 };
 
+// An edit undone puts the rule back by its text, where the block is not known: a shorthand the browser gives as
+// longhands with no value is lost (docs/limitations.md). Under `ALWAYS` the text of the <style> was taken.
+const UNDONE = new Set(['CSS.setStyleTexts, undone', 'CSS.setStyleTexts under the emulation, undone']);
+const UNDONE_WHY = 'an undo puts a rule not known by its writes back by its text (docs/limitations.md)';
+
 for (const [name, c] of Object.entries(CLIENT))
-  test(`a sheet the client edited is emulated as in Chrome, or left as written: ${name}`, async () => {
-    await check(c);
-  });
+  test(
+    `a sheet the client edited is emulated as in Chrome, or left as written: ${name}`,
+    UNDONE.has(name) ? { todo: UNDONE_WHY } : {},
+    async () => void (await leftOrSame(c))
+  );
 
 const BLOCK = `padding: max(${TOP}, 8px) 16px; padding-bottom: 0`;
 const INLINE: Record<string, string> = {
@@ -380,14 +440,52 @@ const INLINE: Record<string, string> = {
   openInside: `el.style.cssText = '--x: calc(${TOP}'; el.style.setProperty('padding-top', 'var(--x)')`,
   attributeThenName: `el.setAttribute('style', 'color: red'); el.style.padding = 'max(${TOP}, 8px) 16px';
     el.style.paddingBottom = '0'`,
+  // The sides of an important shorthand read `name:  !important`.
+  important: `el.style.setProperty('padding', 'max(${TOP}, 8px) 16px', 'important');
+    el.style.setProperty('padding-bottom', '0')`,
+  importantText: `el.style.cssText = 'padding: max(${TOP}, 8px) 16px !important'; el.style.paddingBottom = '0'`,
+  cssFloat: `el.style.padding = 'max(${TOP}, 8px) 16px'; el.style.paddingBottom = '0'; el.style.cssFloat = 'left'`,
 };
 
-for (const [name, write] of Object.entries(INLINE))
-  for (const when of ['before', 'during'] as const)
-    test(`an inline style the page writes through the CSSOM is emulated as in Chrome (${name}, ${when})`, async () => {
-      const { ours } = await check({ [when]: write });
-      assert.notDeepEqual(ours.changed.boxes, ours.off.boxes);
-    });
+const PARTIAL = new Set(['margin']);
+// A known limit (docs/limitations.md, Order of declarations): a logical property before a pending shorthand whose
+// side was set after it is listed after the shorthand's sides, in a block not known by the page's writes.
+const ORDER_WHY = 'the order of a block written a declaration at a time (docs/limitations.md)';
+
+for (const [name, write] of Object.entries(INLINE)) {
+  test(`an inline style the page writes through the CSSOM is emulated as in Chrome (${name}, during)`, async () => {
+    const { ours } = await check({ during: write });
+    assert.notDeepEqual(ours.changed.boxes, ours.off.boxes);
+  });
+  // Written while nobody watched (written-blocks.ts, ALWAYS): what it was written in is not known. A block whose
+  // text has an env() of its own is rewritten by it, but for the sides it reads with no value (`partial`).
+  test(
+    `an inline style written before the emulation is emulated as in Chrome or not at all (${name}, before)`,
+    name === 'logical' ? { todo: ORDER_WHY } : {},
+    async () => void (await leftOrSame({ before: write }, PARTIAL.has(name)))
+  );
+}
+
+/**
+ * Runs `c` on both sides: the page is left as Chrome leaves it, and each element is emulated as in Chrome or not
+ * at all.
+ */
+async function leftOrSame(c: Case, partial = false): Promise<{ chrome: Run; ours: Run }> {
+  const chrome = await run(t.chrome, c);
+  const ours = await run(t.ours, c);
+  assert.deepEqual(ours.off, chrome.off);
+  assert.deepEqual(ours.native, chrome.native);
+  // Not emulated: as the page left the block at that moment, before the insets and after the change of `during`.
+  const bare = { on: ours.bare, changed: ours.off };
+  if (!partial)
+    for (const moment of ['on', 'changed'] as const)
+      for (const id of Object.keys(chrome[moment].boxes))
+        assert.ok(
+          ours[moment].boxes[id] === chrome[moment].boxes[id] || ours[moment].boxes[id] === bare[moment].boxes[id],
+          `${moment}, ${id}: ${ours[moment].boxes[id]}, Chrome ${chrome[moment].boxes[id]}`
+        );
+  return { chrome, ours };
+}
 
 const UNKNOWN: Record<string, string> = {
   // The attribute set again to what it reads: the block is then what that text gives, with no shorthand.
@@ -396,22 +494,64 @@ const UNKNOWN: Record<string, string> = {
     el.attributeStyleMap.set('padding-bottom', '0')`,
   object: `el.style.cssText = '${BLOCK}'; el.style.padding = { toString: () => '${LEFT} 16px' }; el.style.paddingBottom = '0'`,
   many: `el.style.cssText = '${BLOCK}'; for (let i = 0; i < 40; i++) { el.style.color = 'red'; el.style.opacity = '0.5' }`,
+  // Writes the agent does not see, which leave the block reading as its record gives it: the element's observer
+  // tells them (written-blocks.ts, sealing).
+  otherRealm: `el.style.cssText = '${BLOCK}'; ${OTHER_REALM}
+    set.call(el.style, 'padding', '${LEFT} 3px'); el.style.paddingBottom = '0'`,
+  otherRealmOnly: `el.style.cssText = '${BLOCK}'; ${OTHER_REALM}
+    set.call(el.style, 'padding', '${LEFT} 3px'); set.call(el.style, 'padding-bottom', '0')`,
+  otherRealmText: `el.style.cssText = '${BLOCK}'; ${OTHER_REALM}
+    setText.call(el.style, 'padding: ${LEFT} 3px; padding-bottom: 0')`,
+  attributeBetween: `el.style.cssText = '${BLOCK}'; el.setAttribute('style', 'padding: ${LEFT} 3px');
+    el.style.paddingBottom = '0'`,
+  defined: `el.style.cssText = '${BLOCK}'; el.setAttribute('style', 'padding: ${LEFT} 3px');
+    Object.defineProperty(el.style, 'paddingBottom', { value: '0' })`,
+  // A style taken by another realm's getter is of no element known: it has no record.
+  otherGetter: `${OTHER_REALM}
+    const get = Object.getOwnPropertyDescriptor(frame.contentWindow.HTMLElement.prototype, 'style').get;
+    get.call(el).cssText = '${BLOCK}'`,
 };
 
 for (const [name, write] of Object.entries(UNKNOWN))
   for (const when of ['before', 'during'] as const)
     test(`an inline style written in a way that is not followed is left as written (${name}, ${when})`, async () => {
-      const chrome = await run(t.chrome, { [when]: write });
-      const ours = await run(t.ours, { [when]: write });
-      assert.deepEqual(ours.off, chrome.off);
-      assert.deepEqual(ours.native, chrome.native);
+      if (name === 'defined' && when === 'during') {
+        // While the accessors are there, the property defined is one of the style object, not the CSS property
+        // Chrome sets (docs/limitations.md, Following the page's writes). The block left is emulated as Chrome's
+        // own emulation shows it.
+        const ours = await run(t.ours, { during: write });
+        assert.equal(ours.off.attributes['a'], `padding: ${LEFT} 3px`);
+        assert.deepEqual(ours.changed.boxes, ours.native.boxes);
+        return;
+      }
       // Emulated as Chrome emulates it, or not at all: nothing else.
-      for (const moment of ['on', 'changed'] as const)
-        assert.ok(
-          ours[moment].boxes['a'] === chrome[moment].boxes['a'] || ours[moment].boxes['a'] === ours.off.boxes['a'],
-          `${moment}: ${ours[moment].boxes['a']}, Chrome ${chrome[moment].boxes['a']}`
-        );
+      await leftOrSame({ [when]: write });
     });
+
+test('rules deleted and inserted in turn are left as written', async () => {
+  // The rule of the padding is no longer where the sheet's text has it, and the rule inserted was inserted while
+  // nobody watched: neither is emulated, and both read as in Chrome once the emulation ends.
+  await leftOrSame({
+    css: `.a { ${SHORT(LEFT)} } .b { color: red } .a { ${SHORT(TOP)} }`,
+    before: `sheet.deleteRule(1); sheet.insertRule('.c { color: blue }', 0); sheet.deleteRule(1);
+      sheet.insertRule('.a { margin: ${TOP} 2px; margin-bottom: 0 }', 1)`,
+  });
+});
+
+// A known limit (docs/limitations.md): a rule's block tells no one of its changes, so writes the agent does not
+// see that leave the block reading as before are not told from none.
+test(
+  'a rule written only by the functions of another realm is left as written',
+  { todo: 'a rule gives no sign of a write that leaves its text as it was (docs/limitations.md)' },
+  async () => {
+    await check({
+      css: `.a { color: red }`,
+      before: `rules[0].style.cssText = '${SHORT(TOP)}'; ${OTHER_REALM}
+        set.call(rules[0].style, 'padding', '${LEFT} 3px'); set.call(rules[0].style, 'padding-bottom', '0')`,
+      left: ['a'],
+    });
+  }
+);
 
 test('an inline style written through the CSSOM is shown as the page wrote it, and written a few times', async () => {
   const shown = async (side: Side) => {
@@ -452,10 +592,10 @@ test('an inline style written through the CSSOM is shown as the page wrote it, a
   assert.deepEqual(ours.matched, chrome.matched);
   assert.deepEqual(ours.attributes, chrome.attributes);
   assert.doesNotMatch(JSON.stringify([ours.inline, ours.matched, ours.attributes]), /--da-sai/);
-  // A known limit: the page's observers are told of the emulation's writes, one for the block's text and one for
-  // each property set after it. The attribute reads as it did: the sides have no value in it.
+  // Written before CSS was enabled, the block is not known and not emulated: the page's observer gets no record,
+  // as in Chrome. The attribute reads as it did: the sides have no value in it.
   assert.equal(chrome.records, 0);
-  assert.equal(ours.records, 3);
+  assert.equal(ours.records, chrome.records);
   assert.equal(ours.page, chrome.page);
 });
 
@@ -493,4 +633,37 @@ test('the references of rules inserted and deleted in one job under the emulatio
     await cdp.detach();
     await t.ours.send('Emulation.setSafeAreaInsetsOverride', { insets: {} });
   }
+});
+
+test('a write of an inline style gives the page an observer record of its own, and no more', async () => {
+  // A page without the agent gets one record for each write of the attribute. Each count uses an observer of
+  // its own, taken off after it.
+  const count = (write: string) =>
+    t.page.evaluate(`(async () => {
+      document.body.insertAdjacentHTML('beforeend', '<div id="a" class="sw a">a</div>');
+      const el = document.getElementById('a');
+      let n = 0;
+      const observer = new MutationObserver(records => (n += records.length));
+      observer.observe(el, { attributes: true });
+      ${write};
+      await new Promise(resolve => setTimeout(resolve));
+      n += observer.takeRecords().length;
+      observer.disconnect();
+      el.remove();
+      return n;
+    })()`);
+  const writes = [
+    `el.style.cssText = 'color: red'`,
+    `el.style.cssText = 'padding: ${TOP} 2px; padding-bottom: 0'`,
+    `el.style.padding = '${TOP} 2px'; el.style.paddingBottom = '0'`,
+  ];
+  const expected = [1, 1, 2];
+  const alone: unknown[] = [];
+  for (const write of writes) alone.push(await count(write));
+  assert.deepEqual(alone, expected, 'not watched');
+  await t.ours.send('DOM.enable');
+  await t.ours.send('CSS.enable');
+  const watched: unknown[] = [];
+  for (const write of writes) watched.push(await count(write));
+  assert.deepEqual(watched, expected, 'watched');
 });

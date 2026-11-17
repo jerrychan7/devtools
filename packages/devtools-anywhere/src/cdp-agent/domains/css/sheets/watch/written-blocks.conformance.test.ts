@@ -47,12 +47,24 @@ setUpAndTearDown(
   () => env?.close()
 );
 
-/** A page with the module loaded, as the agent loads it: before the page writes anything. */
-async function freshPage(): Promise<Page> {
+/**
+ * A page with the module loaded, as the agent loads it: before the page writes anything. With `watched`, someone
+ * watches the CSSOM from then on, in the top window: without `ALWAYS` (written-blocks.ts) the writes of the
+ * declaration blocks are followed only then.
+ */
+async function freshPage(watched = false): Promise<Page> {
   if (!env) throw new Error('no browser');
   const page = await env.browser.newPage();
   await page.goto(`${env.baseUrl}/packages/devtools-anywhere/test-support/fixture.html`);
   await page.addScriptTag({ content: bundled.outputFiles[0]?.text ?? '' });
+  if (watched)
+    await page.evaluate(() => {
+      const w = (globalThis as unknown as { __written: Written }).__written;
+      w.watchCssom(
+        () => {},
+        () => [window]
+      );
+    });
   return page;
 }
 
@@ -128,7 +140,7 @@ test('the texts the page writes sheets and rules in are kept, whoever watches, a
 });
 
 test('a record of the writes of a block starts where the block is known, and ends with a write that is not told', async () => {
-  const page = await freshPage();
+  const page = await freshPage(true);
   const records = await page.evaluate(() => {
     const w = (globalThis as unknown as { __written: Written }).__written;
     const ENV = 'env(safe-area-inset-top)';
@@ -197,8 +209,42 @@ test('a record of the writes of a block starts where the block is known, and end
       s.cssText = `top: ${ENV}`;
       s.cssText = '';
     });
+    // Writes that are not seen end the record of an element's block, whatever the block then reads: by the
+    // function of a realm nobody watched, by the attribute, within the write that starts the record.
+    const frame = document.body.appendChild(document.createElement('iframe'));
+    const other = frame.contentWindow as unknown as typeof globalThis;
+    const set = other.CSSStyleDeclaration.prototype.setProperty;
+    const SIDES = `padding: ${ENV} 2px; padding-left: 0`;
+    run('otherRealm', s => {
+      s.cssText = SIDES;
+      set.call(s, 'padding', `${ENV} 3px`);
+      set.call(s, 'padding-left', '0');
+    });
+    run('otherRealmThenSeen', s => {
+      s.cssText = SIDES;
+      set.call(s, 'padding', `${ENV} 3px`);
+      s.paddingLeft = '0';
+    });
+    run('attribute', (s, e) => {
+      s.cssText = SIDES;
+      e.setAttribute('style', `padding: ${ENV} 3px; padding-left: 0`);
+    });
+    run('seenAgain', s => {
+      s.cssText = SIDES;
+      set.call(s, 'padding', `${ENV} 3px`);
+      s.cssText = `margin: ${ENV}`;
+    });
+    // A style that the `style` getter of the page's realm did not give is of no element known.
+    const e = el();
+    const taken = Object.getOwnPropertyDescriptor(other.HTMLElement.prototype, 'style')?.get?.call(e) as
+      | CSSStyleDeclaration
+      | undefined;
+    if (taken) taken.cssText = SIDES;
+    out['otherGetter'] = taken ? shown(taken) : 'none';
+    e.remove();
+    frame.remove();
     // A rule's block: from its first write, by the text it read as, or by its sheet's (a base of null) where
-    // that text does not hold it all. The text of its sheet is trusted until then.
+    // that text does not hold it all. The text of its sheet is trusted until then, with `ALWAYS` only.
     const style = document.head.appendChild(document.createElement('style'));
     style.textContent = `.a { color: red } .b { padding: ${ENV} 2px; padding-left: 0 } .c {} .d {}`;
     const [a, b, c, d] = Array.from((style.sheet as CSSStyleSheet).cssRules) as CSSStyleRule[];
@@ -208,6 +254,17 @@ test('a record of the writes of a block starts where the block is known, and end
     if (c) c.styleMap.set('top', '0');
     out['rules'] = [a, b, c].map(rule => rule && shown(rule.style));
     out['trusted'] = [trusted, [a, b, c, d].map(rule => !!rule && w.sourceTrusted(rule.style))];
+    // A rule's block gives no sign of a write: its record ends where it reads another text than the last write
+    // kept left, and holds where the writes not seen leave the text as it was (docs/limitations.md).
+    if (a) {
+      a.style.cssText = SIDES;
+      set.call(a.style, 'padding', `${ENV} 3px`);
+      const told = shown(a.style);
+      a.style.cssText = SIDES;
+      set.call(a.style, 'padding', `${ENV} 3px`);
+      set.call(a.style, 'padding-left', '0');
+      out['ruleOtherRealm'] = [told, shown(a.style)];
+    }
     style.remove();
     return out;
   });
@@ -225,17 +282,25 @@ test('a record of the writes of a block starts where the block is known, and end
     many: null,
     typed: null,
     cleared: null,
+    otherRealm: null,
+    otherRealmThenSeen: null,
+    attribute: null,
+    seenAgain: [`margin: ${ENV}`],
+    otherGetter: null,
+    ruleOtherRealm: [null, [`padding: ${ENV} 2px; padding-left: 0`]],
     rules: [['color: red;', 'top=0'], [null, 'color=red'], null],
+    // Without `ALWAYS`, the text of a sheet is never taken for a block: what was written while nobody watched is
+    // not known.
     trusted: [
-      [true, true, true, true],
-      [false, false, false, true],
+      [false, false, false, false],
+      [false, false, false, false],
     ],
   });
   await page.close();
 });
 
 test('the writes of a record, played again, give the block: its text and the order of its properties', async () => {
-  const page = await freshPage();
+  const page = await freshPage(true);
   const wrong = await page.evaluate(() => {
     const w = (globalThis as unknown as { __written: Written }).__written;
     const names = [
@@ -419,7 +484,7 @@ test('the functions that follow the writes behave as the browser has them', asyn
 });
 
 test('a property read or written by name does what the browser does for the name', async () => {
-  const page = await freshPage();
+  const page = await freshPage(true);
   const r = await page.evaluate(async () => {
     // A frame nobody watched, in standards mode as the page is: a quirks-mode document takes other values.
     const frame = document.createElement('iframe');
@@ -503,8 +568,17 @@ test('a property read or written by name does what the browser does for the name
       const proto = realm.CSSStyleDeclaration.prototype;
       const made = Object.create(proto) as Record<string, unknown>;
       made['color'] = 'red';
-      let keys = 0;
-      for (const key in style) if (key) keys++;
+      const listed = (object: object) => {
+        const keys: string[] = [];
+        for (const key in object) keys.push(key);
+        return keys;
+      };
+      const rule = new realm.CSSStyleSheet();
+      rule.replaceSync('.a { top: 0 }');
+      const proxied = new Proxy(style, {}) as typeof style;
+      const proxyRead = [proxied['padding'], proxied['padding-top'], proxied['paddingTop'], proxied['nope'] ?? null];
+      proxied['color'] = 'red';
+      (new Proxy(style, { set: (t, k, v, r) => Reflect.set(t, k, v, r) }) as typeof style)['top'] = '1px';
       let computed = '';
       try {
         (realm.getComputedStyle(realm.document.body) as unknown as Record<string, unknown>)['color'] = 'red';
@@ -520,7 +594,13 @@ test('a property read or written by name does what the browser does for the name
         setter: set ? [set.name, set.length, String(set).replace(/\s+/g, ' ')] : null,
         keys: Object.keys(style).length > 100,
         copied: Object.keys({ ...style }).length > 100,
-        forIn: keys > 100,
+        forIn: [
+          listed(style),
+          listed(realm.getComputedStyle(realm.document.body)),
+          listed((rule.cssRules[0] as CSSStyleRule).style),
+          listed(proto),
+        ].map(keys => `${keys.length} ${keys.join()}`),
+        proxy: [proxyRead, style.cssText, new Proxy(realm.getComputedStyle(el), {})['display' as never]],
         made: [Object.hasOwn(made, 'color'), made['color'], made['padding'] ?? null],
         prototypeRead: (proto as unknown as Record<string, unknown>)['padding'] ?? null,
         assigned: Object.assign(realm.document.createElement('div').style, { color: 'red', paddingTop: '2px' }).cssText,
@@ -540,6 +620,7 @@ test('a property read or written by name does what the browser does for the name
   assert.deepEqual(same, {
     keys: browser.keys,
     forIn: browser.forIn,
+    proxy: browser.proxy,
     made: browser.made,
     prototypeRead: browser.prototypeRead,
     assigned: browser.assigned,
@@ -550,7 +631,11 @@ test('a property read or written by name does what the browser does for the name
     [true, true, false, false, null, true]
   );
   assert.deepEqual([own, descriptor, onPrototype, prototypeNames, copied], [false, false, true, true, false]);
-  assert.deepEqual(setter, ['setProperty', 2, 'function () { [native code] }']);
+  // The names the browser lists, in its order, and no others: those of the prototype are not enumerable.
+  assert.match(browser.forIn[0] ?? '', /^\d{3} [\d,]*accentColor,/);
+  assert.deepEqual(browser.proxy[0], ['3px', '3px', '3px', null]);
+  // A setter of the agent's own, as its text tells: the browser has none to look like.
+  assert.deepEqual(setter?.slice(0, 2), ['set padding', 1]);
   assert.match(browser.computed, /^NoModificationAllowedError: Failed to set a named property 'color'/);
   assert.match(computed, /^NoModificationAllowedError: Failed to execute 'setProperty'/);
 });

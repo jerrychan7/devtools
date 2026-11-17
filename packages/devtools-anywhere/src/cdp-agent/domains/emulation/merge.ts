@@ -119,14 +119,16 @@ export const mergeDeclarations: Merge = (original, applied, current) => {
 };
 
 /**
- * Whether `text`, a style attribute, reads as the browser serializes a block: `name: value; ` for each declaration,
- * or a text that ends in an open value, which only the CSSOM leaves so with a semicolon after it. Such a text may
- * be the CSSOM's, whose block is not always the one the text parsed again gives (writeDeclarations).
+ * Whether `text`, a style attribute, reads as the browser serializes a block: `name: value; ` for each declaration
+ * (a side with no value that is `!important` as `name:  !important; `, the priority after the space of the value
+ * that is not there), or a text that ends in an open value, which only the CSSOM leaves so with a semicolon after
+ * it. Such a text may be the CSSOM's, whose block is not always the one the text parsed again gives
+ * (writeDeclarations).
  */
 export const serialized = (text: string): boolean =>
   withoutTakenSemicolon(text) !== text ||
   declarationsOf(text)
-    .map(d => `${d.name}: ${d.value}; `)
+    .map(d => `${d.name}: ${splitPriority(d.value).value === '' && d.value !== '' ? ' ' : ''}${d.value}; `)
     .join('')
     .trimEnd() === text;
 

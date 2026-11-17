@@ -20,6 +20,7 @@ import {
   watchRealms,
 } from '../css/sheets/watch/cssom-watch';
 import {
+  ALWAYS,
   blockRecord,
   dropRecord,
   onNamedWrite,
@@ -393,7 +394,9 @@ function planWritten(
     if (generic) force = !!(record.heldBase = apply(base));
   } else if (record.base === null) {
     // Written since the agent loaded, from a block that did not hold all it declared: that block was its rule's
-    // text, where it reads as the block did.
+    // text, where it reads as the block did. Without `ALWAYS` that text may be older than the watching, with
+    // writes made since that were not seen: it is not taken.
+    if (!ALWAYS) return void dropRecord(style);
     const base = source();
     if (base === undefined) return undefined;
     const pre = generic && generic.applied === record.pre ? generic.original : record.pre;

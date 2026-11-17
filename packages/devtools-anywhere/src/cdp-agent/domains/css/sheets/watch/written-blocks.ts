@@ -17,23 +17,29 @@
  *   read before a write as a text that holds all of it; a rule's block that does not hold all it declares starts
  *   from its rule's text, looked for when the record is used. A rule's record starts with the first write to its
  *   block, an element's with a write that may call env(). A write that cannot be told (a value or a name that is
- *   an object, the typed OM) ends the record, and so do more writes than `MAX_WRITES`.
+ *   an object, the typed OM) ends the record, and so do more writes than `MAX_WRITES`, and a write made past the
+ *   proxies, as far as it shows (see Sealing below).
  * - Which blocks were written at all (`touched`): the text of a sheet is not taken for such a rule's block.
  *
  * The writes are seen by proxies of the functions that make them, put on the prototypes of a realm
- * (`keepWritten`): the methods that insert and delete rules, replace() and replaceSync(), a style's `cssText`
- * setter, setProperty() and removeProperty(), and the methods of StylePropertyMap. A property written by name
- * (`style.padding = ...`) is no function of a prototype in Chrome: the names are properties of each style itself,
- * answered by the browser, unless a prototype has a property of that name, which then takes the read and the
- * write. So an accessor is put on CSSStyleDeclaration.prototype for each name the browser gives a style, in each
- * spelling it takes (`paddingTop`, `padding-top`, `webkitTransform`: some 1550), which reads through
+ * (`keepWritten`): the methods that insert and delete rules, replace() and replaceSync(), a style's `cssText` and
+ * `cssFloat` setters, setProperty() and removeProperty(), and the methods of StylePropertyMap. A property written
+ * by name (`style.padding = ...`) is no function of a prototype in Chrome: the names are properties of each style
+ * itself, answered by the browser, unless a prototype has a property of that name, which then takes the read and
+ * the write. So an accessor is put on CSSStyleDeclaration.prototype for each name the browser gives a style, in
+ * each spelling it takes (`paddingTop`, `padding-top`, `webkitTransform`: some 1550), which reads through
  * getPropertyValue() and writes through setProperty(), as the browser does for the name (tested over every name
- * in written-blocks.conformance.test.ts). The proxies call only functions taken when they were put, and index
- * strings: no method of the page's prototypes.
+ * in written-blocks.conformance.test.ts). The accessors are not enumerable, so `for (name in style)` lists what
+ * the browser lists; a style no longer has the names as properties of its own (`Object.hasOwn(style, 'color')`,
+ * its descriptor, `{ ...style }`), which a prototype's property hides by Web IDL's rules: see docs/limitations.md
+ * for what a page can tell. The proxies and accessors call only functions taken when they were put, and index
+ * strings: no method of the page's prototypes, but those of WeakMap.
  *
  * With `ALWAYS`, the proxies are there from the moment the agent loads, in the top window; without it, those of
  * the styles are there only while someone watches (cssom-watch.ts), and nothing written before is trusted.
  */
+
+import { disconnect, newObserver, observe, takeRecords } from '../../../../core/natives';
 
 /**
  * Whether the writes of declaration blocks are followed from the moment the agent loads (true), or only while
@@ -41,7 +47,7 @@
  * known, so the text of a sheet or of an inserted rule is never taken for a block (`sourceTrusted`), and every
  * record ends when the watching does.
  */
-export const ALWAYS = true;
+export const ALWAYS = false;
 
 /** The most writes a record holds: past it, the record ends (a block animated property by property). */
 export const MAX_WRITES = 64;
@@ -69,6 +75,10 @@ export interface BlockRecord {
   heldBase?: string;
   writes: Write[];
   epoch: number;
+  /** The element whose style the block is, observed since the record started (`sealing`); null for a rule's. */
+  owner: Element | null;
+  /** A rule's block: what it read as after the last write kept, which it must still read as before the next. */
+  last?: string | undefined;
 }
 
 const records = new WeakMap<object, BlockRecord>();
@@ -90,6 +100,80 @@ let watched = false;
 /** The agent's own calls are not the page's writes: raised around them (cssom-watch.ts, ownEdit). */
 export const agent = { busy: 0 };
 
+/** A write was made that is not known of any block: every record has ended, and no text of a sheet is trusted. */
+function unseen(): void {
+  epoch++;
+  unfollowed = true;
+}
+
+/*
+ * Sealing. A block can be written past the proxies: by the functions of another realm (an iframe's
+ * `CSSStyleDeclaration.prototype.setProperty.call(style, ...)`), by functions the page took before the agent
+ * loaded, by `Object.defineProperty(style, name, { value })`, by the element's `style` attribute. Such a write may
+ * leave the block reading as before (a shorthand with an env() set over another, with the same longhand after it),
+ * so comparing what the record gives with the block does not tell it.
+ *
+ * An element's block tells it itself: each change of an inline style is a mutation of the `style` attribute. The
+ * element is observed from before the write that starts its record, by an observer of the agent's own, whose
+ * records are taken around each write the proxies see: one that is not such a write's ends the record. The
+ * element of a style is known from the `style` getter (a proxy on the element prototypes): a style taken another
+ * way has no record.
+ *
+ * A rule's block tells nothing. Its record keeps what the block read as after each write, and ends where the block
+ * reads another text before the next: writes past the proxies that leave the text as it was are not seen (see
+ * docs/limitations.md).
+ */
+/** The element each inline style was read from (`el.style`), and the style of each element observed. */
+const owners = new WeakMap<object, Element>();
+let observedStyles = new WeakMap<Element, object>();
+let sealer: MutationObserver | undefined;
+
+/** Ends the records of the elements `list` tells a change of, but `own`'s; returns how many were `own`'s. */
+function ended(list: MutationRecord[], own?: Element): number {
+  let count = 0;
+  for (let i = 0; i < list.length; i++) {
+    const target = list[i]?.target as Element;
+    if (target === own) count++;
+    else {
+      const style = observedStyles.get(target);
+      if (style) records.delete(style);
+    }
+  }
+  return count;
+}
+
+/** Takes the changes observed so far: see `ended`. */
+const drain = (own?: Element): number => (sealer ? ended(takeRecords(sealer), own) : 0);
+
+/** The element of `style`, observed from here on; undefined where it is not known. */
+function sealing(style: object): Element | undefined {
+  const owner = owners.get(style);
+  if (!owner) return undefined;
+  if (observedStyles.get(owner) !== style) {
+    sealer ??= newObserver(list => void ended(list));
+    observe(sealer, owner, { attributes: true, attributeFilter: ['style'] });
+    observedStyles.set(owner, style);
+  }
+  return owner;
+}
+
+/** What `style` reads as, by its realm's own getter; undefined where its writes are not followed. */
+function reading(style: object): string | undefined {
+  const get = followed(style)?.natives.get('get:cssText');
+  return get ? (call(get, style) as string) : undefined;
+}
+
+/**
+ * The agent wrote `style` as its record says (the emulation playing it, cssom-watch.ts): the block is the
+ * record's from here on.
+ */
+export function sealRecord(style: object): void {
+  const record = records.get(style);
+  if (!record) return;
+  if (record.owner) drain(record.owner);
+  else record.last = reading(style);
+}
+
 /** What is known of a realm's styles, by CSSStyleDeclaration.prototype. */
 interface Realm {
   /** Followed since the realm's scripts could first write: the texts of its sheets are its blocks. */
@@ -97,6 +181,8 @@ interface Realm {
   proto: object;
   /** The functions put on the prototype, and the accessors of the names of properties. */
   put: { name: string; part: 'value' | 'set'; native: unknown; proxy: unknown }[];
+  /** The `style` getters of the element prototypes, with the proxies put over them. */
+  getters: { proto: object; native: unknown; proxy: unknown }[];
   accessors: { key: string; set: unknown }[];
   names: Record<string, true>;
   /** The browser's functions of the prototype, by `part:name`. */
@@ -120,9 +206,12 @@ function followed(style: object): Realm | undefined {
 
 /** The record of the writes of `style`, where it holds: none ended it, and its writes are still followed. */
 export function blockRecord(style: object): BlockRecord | undefined {
+  drain();
   const record = records.get(style);
   if (!record) return undefined;
-  if (record.epoch === epoch && followed(style)) return record;
+  // A rule's block that reads another text than the last write kept left it with was written unseen.
+  const kept = record.owner || record.last === undefined || reading(style) === record.last;
+  if (kept && record.epoch === epoch && followed(style)) return record;
   records.delete(style);
   return undefined;
 }
@@ -134,8 +223,9 @@ export function dropRecord(style: object): void {
 
 /** Starts a record of `style`, set to `text` (by the agent, or found to read as it): its block from here on. */
 export function startRecord(style: object, text: string): BlockRecord {
-  const record: BlockRecord = { base: text, from: 'text', pre: '', writes: [], epoch };
+  const record: BlockRecord = { base: text, from: 'text', pre: '', writes: [], epoch, owner: null };
   records.set(style, record);
+  record.last = reading(style);
   touched.add(style);
   return record;
 }
@@ -186,11 +276,16 @@ export function mayCallEnv(text: string): boolean {
   return false;
 }
 
-/** Whether a serialized block has a declaration with no value (`name: ;`): it does not hold all it declares. */
+/**
+ * Whether a serialized block has a declaration with no value (`name: ;`, or `name:  !important;`): it does not
+ * hold all it declares.
+ */
 function hasNoValue(text: string): boolean {
   for (let i = 2; i < text.length; i++) {
     const c = text[i];
-    if ((c === ';' || c === '!') && text[i - 1] === ' ' && text[i - 2] === ':') return true;
+    if (text[i - 1] !== ' ') continue;
+    if (c === ';' && text[i - 2] === ':') return true;
+    if (c === '!' && (text[i - 2] === ':' || (text[i - 2] === ' ' && text[i - 3] === ':'))) return true;
   }
   return false;
 }
@@ -446,10 +541,7 @@ function keepRules(realm: Window & typeof globalThis): void {
         if (typeof style === 'object' && style !== null) {
           records.delete(style);
           touched.add(style);
-        } else {
-          epoch++;
-          unfollowed = true;
-        }
+        } else unseen();
       });
   }
 }
@@ -506,47 +598,87 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
   const read = (style: unknown) => call(natives.get('get:cssText'), style) as string;
   const ruleOf = (style: unknown) => call(natives.get('get:parentRule'), style);
 
-  /** Before a write of `value` to `style`: the block's text, where a record may start from it. */
-  const before = (style: unknown, value: string | undefined): string | undefined => {
-    if (typeof style !== 'object' || style === null || records.has(style)) return undefined;
+  /** What `before` found for a write: the block's text, where a record may start from it, and the element observed. */
+  interface Kept {
+    pre?: string | undefined;
+    owner?: Element | undefined;
+  }
+  /**
+   * Before a write to `style` that its record would hold, or that may start one (`env`): an element's block is
+   * observed, and the changes told so far are taken (`sealing`); a rule's that reads another text than its record
+   * left ends its record.
+   */
+  const guard = (style: object, env: boolean): Element | undefined => {
+    const record = records.get(style);
+    if (!record && !env) return undefined;
+    const owner = sealing(style);
+    if (owner) drain();
+    else if (record && record.last !== undefined && read(style) !== record.last) records.delete(style);
+    return owner;
+  };
+  /** Before a write of `value` to `style`: see `Kept`. */
+  const before = (style: unknown, value: string | undefined): Kept | undefined => {
+    if (typeof style !== 'object' || style === null) return undefined;
     const env = value !== undefined && mayCallEnv(value);
+    const owner = guard(style, env);
+    if (records.has(style)) return { owner };
     // An element's block is read before a write that may call env(); a rule's once, the first time it is written.
     // A style seen here once is not asked again whether it is a rule's.
-    if (touched.has(style)) return env && !ruleOf(style) ? read(style) : undefined;
-    if (ruleOf(style)) return read(style);
+    if (touched.has(style)) return { owner, pre: env && !ruleOf(style) ? read(style) : undefined };
+    if (ruleOf(style)) return { owner, pre: read(style) };
     touched.add(style);
-    return env ? read(style) : undefined;
+    return { owner, pre: env ? read(style) : undefined };
   };
-  /** After the write `write` (undefined: one that cannot be told) to `style`, which read `pre` before it. */
-  const after = (style: unknown, pre: string | undefined, write: Write | undefined): void => {
+  /** After the write `write` (undefined: one that cannot be told) to `style`, for which `before` gave `kept`. */
+  const after = (style: unknown, kept: Kept | undefined, write: Write | undefined): void => {
     if (typeof style !== 'object' || style === null) return;
+    const owner = kept?.owner;
+    // An element's write is one change of its attribute, or none: another was made within it, unseen.
+    if (!kept || (owner && drain(owner) > 1)) {
+      records.delete(style);
+      touched.add(style);
+      return;
+    }
     const record = records.get(style);
-    if (record)
-      return write
-        ? add(
-            style,
-            record,
-            write,
-            () =>
-              call(natives.get('value:getPropertyValue'), style, [write.name]) === write.value &&
-              (call(natives.get('value:getPropertyPriority'), style, [write.name]) === 'important') ===
-                (write.priority !== '')
-          )
-        : void records.delete(style);
+    if (record) {
+      if (!write) return void records.delete(style);
+      add(
+        style,
+        record,
+        write,
+        () =>
+          call(natives.get('value:getPropertyValue'), style, [write.name]) === write.value &&
+          (call(natives.get('value:getPropertyPriority'), style, [write.name]) === 'important') ===
+            (write.priority !== '')
+      );
+      if (!record.owner) record.last = read(style);
+      return;
+    }
+    const pre = kept.pre;
     if (pre === undefined) return;
     const rule = ruleOf(style);
     const whole = !hasNoValue(pre);
     // A rule's block is followed from its first write: from the text it read as, where that holds all of it, else
-    // from the rule's own text in its sheet. An element's, from a write that may call env(), where its text holds it.
-    if (write && (rule ? !touched.has(style) : whole && mayCallEnv(write.value)))
-      records.set(style, { base: whole ? pre : null, from: 'read', pre, writes: [write], epoch });
+    // from the rule's own text in its sheet. An element's, from a write that may call env(), where its text holds
+    // it and its element is observed.
+    if (write && (rule ? !touched.has(style) : whole && !!owner && mayCallEnv(write.value)))
+      records.set(style, {
+        base: whole ? pre : null,
+        from: 'read',
+        pre,
+        writes: [write],
+        epoch,
+        owner: rule ? null : (owner ?? null),
+        last: rule ? read(style) : undefined,
+      });
     touched.add(style);
   };
 
   const put: Realm['put'] = [];
   const accessors: Realm['accessors'] = [];
   const seen: Record<string, true> = { __proto__: null } as unknown as Record<string, true>;
-  const realmState: Realm = { fromStart: ALWAYS && fromStart, proto, put, accessors, natives, names: seen };
+  const getters: Realm['getters'] = [];
+  const realmState: Realm = { fromStart: ALWAYS && fromStart, proto, put, getters, accessors, natives, names: seen };
   const wrapped = (
     name: string,
     part: 'value' | 'set',
@@ -558,14 +690,46 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
     return !!made;
   };
   const ok =
-    wrapped('cssText', 'set', null, (self, args) => {
-      if (typeof self !== 'object' || self === null) return;
-      const text = textOf(args[0]);
-      if (text !== undefined && mayCallEnv(text))
-        records.set(self, { base: text, from: 'text', pre: '', writes: [], epoch });
-      else records.delete(self);
-      if (ruleOf(self)) touched.add(self);
-    }) &&
+    wrapped(
+      'cssText',
+      'set',
+      (self, args) => {
+        const text = textOf(args[0]);
+        return typeof self === 'object' && self !== null
+          ? { owner: guard(self, text !== undefined && mayCallEnv(text)) }
+          : undefined;
+      },
+      (self, args, _result, kept) => {
+        if (typeof self !== 'object' || self === null) return;
+        const text = textOf(args[0]);
+        const rule = ruleOf(self);
+        const owner = (kept as Kept | undefined)?.owner;
+        // An element's block is the text's where its element is observed, and the set was its one change.
+        const known = rule ? true : !!owner && drain(owner) <= 1;
+        if (kept && known && text !== undefined && mayCallEnv(text))
+          records.set(self, {
+            base: text,
+            from: 'text',
+            pre: '',
+            writes: [],
+            epoch,
+            owner: rule ? null : (owner ?? null),
+            last: rule ? read(self) : undefined,
+          });
+        else records.delete(self);
+        if (rule) touched.add(self);
+      }
+    ) &&
+    // `cssFloat` is the one property with a setter of the prototype's own: it sets `float`.
+    wrapped(
+      'cssFloat',
+      'set',
+      (self, args) => before(self, textOf(args[0])),
+      (self, args, _result, kept) => {
+        const value = args[0] === null ? '' : textOf(args[0]);
+        after(self, kept as Kept | undefined, value === undefined ? undefined : { name: 'float', value, priority: '' });
+      }
+    ) &&
     wrapped(
       'setProperty',
       'value',
@@ -575,7 +739,7 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
         const value = args[1] === null ? '' : textOf(args[1]);
         const priority = args[2] === undefined ? '' : args[2] === null ? '' : textOf(args[2]);
         const told = name !== undefined && value !== undefined && priority !== undefined;
-        after(self, pre as string | undefined, told ? { name, value, priority } : undefined);
+        after(self, pre as Kept | undefined, told ? { name, value, priority } : undefined);
       }
     ) &&
     wrapped(
@@ -586,7 +750,7 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
         const name = textOf(args[0]);
         after(
           self,
-          pre as string | undefined,
+          pre as Kept | undefined,
           name === undefined ? undefined : { name, value: '', priority: '', remove: true }
         );
       }
@@ -614,9 +778,9 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
   } catch {
     // No names: nothing of the realm's blocks is taken as known.
   }
-  // Whether `self` is an object that is no style (the prototype, an object made of it): there the name is a plain
-  // property, as it is without the accessor.
-  const plain = (self: unknown) => {
+  // Whether `self` is an object that is no style (the prototype, an object made of it, a proxy of a style): the
+  // browser has no accessor for the name, and reads or writes it as a property of that object.
+  const plain = (self: unknown): self is object => {
     if (typeof self !== 'object' || self === null) return false;
     try {
       call(natives.get('get:length'), self);
@@ -625,47 +789,72 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
     }
     return false;
   };
+  /**
+   * Reads (or with `write`, writes) `key` of `self`, which is no style, as the browser does where the prototype
+   * has no accessor for it: the accessor is taken off for the time of it. A proxy of a style then answers with
+   * its style's property (`new Proxy(el.style, {}).color`), and writes it: a write the agent is not told the
+   * block of, nor what a trap of the proxy writes meanwhile, so every record ends (`unseen`).
+   */
+  const without = (self: object, key: string, write?: { value: unknown }): unknown => {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+    // A prototype the page froze keeps the accessor: the name reads as undefined there, and is not written.
+    if (!descriptor || !Reflect.deleteProperty(proto, key)) return undefined;
+    unseen();
+    try {
+      return write ? Reflect.set(self, key, write.value) : (Reflect.get(self, key) as unknown);
+    } finally {
+      Object.defineProperty(proto, key, descriptor);
+    }
+  };
+  const apply = Reflect.apply;
   for (const key of names) {
     if (key in proto) continue;
     const name = dashedName(key);
-    const get = new Proxy(getPropertyValue, {
-      apply(f, self) {
-        try {
-          return Reflect.apply(f, self, [name]);
-        } catch (e) {
-          if (plain(self)) return undefined;
-          throw e;
-        }
+    const read = [name];
+    // Plain functions, not proxies of the browser's: the browser has no accessor to look like, and a read by
+    // name, of a computed style as well, costs the call of getPropertyValue() and little more.
+    const { get, set } = Object.getOwnPropertyDescriptor(
+      {
+        get [key](): unknown {
+          try {
+            return apply(getPropertyValue, this, read);
+          } catch (e) {
+            if (plain(this)) return without(this, key);
+            throw e;
+          }
+        },
+        set [key](value: unknown) {
+          if (agent.busy) {
+            apply(setProperty, this, [name, value]);
+            return;
+          }
+          const text = value === null ? '' : textOf(value);
+          let kept: Kept | undefined;
+          try {
+            kept = before(this, text);
+          } catch {
+            // Ours, or no style: the write goes on.
+          }
+          try {
+            apply(setProperty, this, [name, value]);
+          } catch (e) {
+            if (!plain(this)) throw e;
+            without(this, key, { value });
+            return;
+          }
+          try {
+            after(this, kept, text === undefined ? undefined : { name, value: text, priority: '' });
+            if (named && typeof this === 'object' && this !== null) named(this);
+          } catch {
+            // Ours, not the page's: its write went through.
+          }
+        },
       },
-    });
-    const set = new Proxy(setProperty, {
-      apply(f, self, args) {
-        const value: unknown = args[0];
-        if (agent.busy) return void Reflect.apply(f, self, [name, value]);
-        const text = value === null ? '' : textOf(value);
-        let pre: string | undefined;
-        try {
-          pre = before(self, text);
-        } catch {
-          // Ours, or no style: the write goes on.
-        }
-        try {
-          Reflect.apply(f, self, [name, value]);
-        } catch (e) {
-          if (!plain(self)) throw e;
-          Object.defineProperty(self, key, { value, writable: true, enumerable: true, configurable: true });
-          return;
-        }
-        try {
-          after(self, pre, text === undefined ? undefined : { name, value: text, priority: '' });
-          if (named && typeof self === 'object' && self !== null) named(self);
-        } catch {
-          // Ours, not the page's: its write went through.
-        }
-      },
-    });
+      key
+    ) as { get: () => unknown; set: (value: unknown) => void };
     try {
-      Object.defineProperty(proto, key, { get, set, enumerable: true, configurable: true });
+      // Not enumerable: `for (name in style)` lists the names the browser lists, each once.
+      Object.defineProperty(proto, key, { get, set, enumerable: false, configurable: true });
       accessors.push({ key, set });
     } catch {
       // The page's realm refused: nothing of its blocks is taken as known.
@@ -673,6 +862,32 @@ function keepStyles(realm: Window & typeof globalThis, fromStart: boolean): void
     }
   }
   if (!accessors.length) return;
+  // The element of each inline style, from the getter that gives it (`sealing`).
+  for (const ctor of [realm.HTMLElement, realm.SVGElement, realm.MathMLElement]) {
+    const owner: object | undefined = ctor?.prototype;
+    const descriptor = owner && Object.getOwnPropertyDescriptor(owner, 'style');
+    const native: unknown = descriptor?.get;
+    if (!owner || !descriptor?.configurable || typeof native !== 'function') continue;
+    // A plain getter, not a proxy of the browser's: `el.style` is read for every write of an inline style, and a
+    // proxy of the browser's getter costs far more per read than a plain getter does.
+    const proxy = Object.getOwnPropertyDescriptor(
+      {
+        get style(): unknown {
+          const style: unknown = apply(native as Fn, this, []);
+          if (typeof style === 'object' && style !== null && !owners.has(style)) owners.set(style, this as Element);
+          return style;
+        },
+      },
+      'style'
+    )?.get;
+    if (!proxy) continue;
+    try {
+      Object.defineProperty(owner, 'style', { ...descriptor, get: proxy });
+      getters.push({ proto: owner, native, proxy });
+    } catch {
+      // The page's realm refused: the styles of its elements have no record.
+    }
+  }
   realms.set(proto, realmState);
   if (!ALWAYS) styleRealms.add(realmState);
   if (!scratch)
@@ -694,6 +909,10 @@ export function unfollowStyles(): void {
         const now = Object.getOwnPropertyDescriptor(realm.proto, name);
         if (now && now[part] === proxy) Object.defineProperty(realm.proto, name, { ...now, [part]: native });
       }
+      for (const { proto, native, proxy } of realm.getters) {
+        const now = Object.getOwnPropertyDescriptor(proto, 'style');
+        if (now && now.get === proxy) Object.defineProperty(proto, 'style', { ...now, get: native as () => unknown });
+      }
     } catch {
       // The page's realm refused: its proxies stay.
     }
@@ -701,6 +920,9 @@ export function unfollowStyles(): void {
   }
   styleRealms.clear();
   scratch = undefined;
+  if (sealer) disconnect(sealer);
+  sealer = undefined;
+  observedStyles = new WeakMap();
 }
 
 /** A block to play a record on: what sets its text, sets a property and removes one. */
