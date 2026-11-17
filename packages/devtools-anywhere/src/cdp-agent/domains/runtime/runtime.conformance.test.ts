@@ -454,12 +454,13 @@ describe('Runtime exceptions of commands', () => {
 });
 
 describe('parseStack', () => {
-  const frame = (line: string) => parseStack(`Error\n${line}`)[0];
+  const idOf = (url: string) => `id:${url}`;
+  const frame = (line: string) => parseStack(`Error\n${line}`, idOf)[0];
 
   test('named, anonymous and async V8 frames', () => {
     assert.deepEqual(frame('    at foo (http://a.js:3:5)'), {
       functionName: 'foo',
-      scriptId: '',
+      scriptId: 'id:http://a.js',
       url: 'http://a.js',
       lineNumber: 2,
       columnNumber: 4,
@@ -483,7 +484,7 @@ describe('parseStack', () => {
   test('Gecko and Safari frames', () => {
     assert.deepEqual(frame('async*foo@http://a.js:3:5'), {
       functionName: 'foo',
-      scriptId: '',
+      scriptId: 'id:http://a.js',
       url: 'http://a.js',
       lineNumber: 2,
       columnNumber: 4,
@@ -491,8 +492,19 @@ describe('parseStack', () => {
     assert.equal(frame('global code@http://a.js:1:1')?.functionName, '');
   });
 
+  test('every frame gets the id of the script at its URL', () => {
+    const frames = parseStack(
+      'Error\n    at a (http://a.js:1:1)\n    at eval (eval at a (http://a.js:1:1), <anonymous>:1:1)',
+      idOf
+    );
+    assert.deepEqual(
+      frames.map(f => f.scriptId),
+      ['id:http://a.js', 'id:']
+    );
+  });
+
   test('skip drops top frames', () => {
-    const frames = parseStack('Error\n    at a (http://a.js:1:1)\n    at b (http://a.js:2:1)', 1);
+    const frames = parseStack('Error\n    at a (http://a.js:1:1)\n    at b (http://a.js:2:1)', idOf, 1);
     assert.deepEqual(
       frames.map(f => f.functionName),
       ['b']

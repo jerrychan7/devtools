@@ -3,7 +3,7 @@ import type { Context } from '../../core/context';
 import { base64, readBody } from '../../core/body';
 import { CdpError } from '../../core/session';
 import { toTag } from '../../core/objects';
-import { parseStack } from '../../core/stack';
+import { stackOf } from '../../core/scripts';
 import type { RequestRecord, SocketEvent, SocketRecord } from '../../probe/types';
 import { childTargets } from '../../core/frames/child-targets';
 import { mergedFrames } from '../../core/frames/merged-frames';
@@ -213,7 +213,9 @@ export function registerNetwork(ctx: Context) {
       } else if (rec.postData !== undefined || rec.hasPostData) {
         request.hasPostData = true;
       }
-      const callFrames = parseStack(rec.stack, 1);
+      // Taken in the frame that made the request, as Debugger reports its scripts (debugger.ts).
+      const context = ((rec.frame && frames.byId(rec.frame.frameId)) ?? frames.top).executionContextId;
+      const callFrames = stackOf(rec.stack, context, 1);
       session.emit('Network.requestWillBeSent', {
         requestId: wireId(rec.requestId),
         loaderId,
@@ -284,7 +286,7 @@ export function registerNetwork(ctx: Context) {
 
     if (!done.has('created')) {
       done.add('created');
-      const callFrames = parseStack(rec.stack, 1);
+      const callFrames = stackOf(rec.stack, frames.top.executionContextId, 1);
       session.emit('Network.webSocketCreated', {
         requestId,
         url: rec.url,

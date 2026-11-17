@@ -6,7 +6,7 @@ import { returnOutsideFunction } from '../../core/lexer-queries';
 import { isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
 import { mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
 import { CdpError } from '../../core/session';
-import { parseStack } from '../../core/stack';
+import { scriptIdOfFrame, stackOf } from '../../core/scripts';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
 import { executionContexts } from './contexts';
 import { globalLexicalNames } from './lexical-names';
@@ -381,7 +381,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames, worlds
     // The context could not run the code at all: a protocol error, not the page's exception.
     if (error instanceof CdpError) throw error;
     hideEvalFrames(error, win);
-    const callFrames = isError(error, win) ? parseStack(error.stack) : [];
+    const callFrames = isError(error, win) ? stackOf(error.stack, frame.executionContextId) : [];
     // One object for both places, like V8.
     const exception = objects.wrap(error, { generatePreview, group, world: world?.id });
     return {
@@ -435,11 +435,12 @@ export function registerRuntime({ session, objects, nodes, probe, frames, worlds
         executionContextId: contextOfEntry(entry),
         timestamp: entry.time,
         // Drop the probe's console wrapper frame.
-        stackTrace: { callFrames: parseStack(entry.stack, 1) },
+        stackTrace: { callFrames: stackOf(entry.stack, contextOfEntry(entry), 1) },
       } satisfies Protocol.Runtime.ConsoleAPICalledEvent);
       return;
     }
-    const callFrames = parseStack(entry.stack);
+    const executionContextId = contextOfEntry(entry);
+    const callFrames = stackOf(entry.stack, executionContextId);
     const top = callFrames[0];
     const url = entry.url || top?.url;
     session.emit('Runtime.exceptionThrown', {
@@ -450,9 +451,10 @@ export function registerRuntime({ session, objects, nodes, probe, frames, worlds
         lineNumber: entry.line ? entry.line - 1 : (top?.lineNumber ?? 0),
         columnNumber: entry.column ? entry.column - 1 : (top?.columnNumber ?? 0),
         ...(url ? { url } : {}),
-        scriptId: '',
+        // Like Chrome, the script the error was thrown in: the frontend places the message by it.
+        scriptId: scriptIdOfFrame(executionContextId, url ?? ''),
         exception: objects.wrap(entry.error, { generatePreview: true, group: 'console' }),
-        executionContextId: contextOfEntry(entry),
+        executionContextId,
         ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
     } satisfies Protocol.Runtime.ExceptionThrownEvent);

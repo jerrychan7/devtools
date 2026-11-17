@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { CdpError } from '../../core/session';
 import type { Context } from '../../core/context';
-import { parseStack } from '../../core/stack';
+import { stackOf } from '../../core/scripts';
 import type { ToolOutcome, ToolRecord } from '../../probe/types';
 
 /** A tool as `document.modelContext.getTools()` describes it. */
@@ -179,7 +179,7 @@ export function registerWebMcp(ctx: Context) {
   function nativeTool(context: ModelContext, tool: RegisteredTool): Tool {
     const form = document.querySelector(`form[toolname="${CSS.escape(tool.name)}"]`);
     const record = form ? undefined : probe.tools.get(tool.name);
-    const callFrames = parseStack(record?.stack, 1);
+    const callFrames = stackOf(record?.stack, frames.top.executionContextId, 1);
     const annotations = annotationsOf(
       tool.annotations ?? (form?.hasAttribute('toolautosubmit') ? { autosubmit: true } : undefined)
     );
