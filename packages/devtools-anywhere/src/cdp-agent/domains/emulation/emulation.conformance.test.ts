@@ -13,7 +13,8 @@ let t: TestPage;
 
 setUpAndTearDown(
   async () => {
-    env = await launch();
+    // A dark scheme, whatever the system's: the tests emulate a light one and read the change.
+    env = await launch(['--blink-settings=preferredColorScheme=0']);
     t = await openEmulationPage(env, [
       'DOM.attributeModified',
       'DOM.attributeRemoved',

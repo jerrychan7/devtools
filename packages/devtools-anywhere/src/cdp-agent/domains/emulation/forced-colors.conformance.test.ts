@@ -142,7 +142,9 @@ let t: TestPage;
 
 setUpAndTearDown(
   async () => {
-    env = await launch();
+    // A dark scheme, whatever the system's: Chrome's palette follows it, ours is the dark one
+    // (docs/limitations.md#forced-colors).
+    env = await launch(['--blink-settings=preferredColorScheme=0']);
     t = await openPage(env, ['DOM.attributeModified', 'DOM.attributeRemoved']);
     // Taller than the page and the elements the tests add below it, so that every element compared lies inside the
     // screenshot: png-pixels.ts throws on a box that does not.
