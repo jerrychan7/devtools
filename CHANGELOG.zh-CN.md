@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+基于 Chrome 158（158.0.8127.37）。
+
+- DevTools 前端改为来自 Chrome 158（原为 Chrome 156），面板和界面随之更新；Styles 里显示的浏览器默认样式也改为 Chrome 158 的。
 - Elements 的 Accessibility 窗格显示无障碍树；`Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors` 的应答与 Chrome 一致，供读取页面结构的工具和 agent 使用。树由 `accessibility.js` 在页面里计算，首次使用时从 bundle 旁边加载；其中打包了 dom-accessibility-api（MIT）。
 - Animations 面板列出页面的 CSS 动画、过渡和 Web Animations，能暂停、拖动进度、改时间和调速。能找到 shadow 树（包括声明式的和宿主后插入的）和同源 iframe 里的动画；伪元素动画指向的节点与 Chrome 一致（`::backdrop` 例外，指向其 dialog，因我们的 DOM 没有它的节点）；分别开始的两个 CSS 动画分成两组。和 Chrome 一样报告 `getAnimations()` 漏掉的动画：无 target、不在文档里、立即结束或在第一帧前就取消的（探针挂钩 `animate()`、`new Animation()`、`play()`、`pause()` 和 `cancel()`）。调速会跟随页面自己设的速率，disable 时还给页面；拖动进度条时每个动画各自 seek 到自己的时间，已结束的先播放、停在结尾，与 Chrome 一致。前端删除最后一个动画分组时不再抛错。滚动驱动动画连同其滚动或视图时间线一起列出，以像素为单位；拖动 scrubber 会滚动页面，页面自己滚动时 scrubber 也会跟随，靠的是在页面里模拟的隔离世界（`Page.createIsolatedWorld`）和 binding（`Runtime.addBinding`）。任何伪元素的动画（`::backdrop`、`::scroll-marker`、`::column`、view transition 的，后面带伪类的也算）都按赢得其属性的规则分组，与 Chrome 一致；在元素上开始的 view transition 也能看到。挂钩不让页面察觉：`startViewTransition` 由 CSS 域挂在原型上，页面的 options 只读一次，作为新的字典传入，其中 `update` 被包装；`reverse()`、`finish()`、`updatePlaybackRate()` 和设新时间、新速率也能看到；面板的控制调用浏览器自己的函数而不是页面的（改时间除外：它经由效果的 `updateTiming()`，页面的 wrapper 能看到）；探针自己的错误不再经过页面包装过的 `console.error`。
 - 模拟也作用于页面的 HTML 和 CSSOM：在媒体模拟下，`<picture>` 的 `<source>` 和图片的 `sizes` 与 Chrome 一样选出对应的资源；页面元素的 `style` 属性获得安全区的模拟值；页面通过 `insertRule()` 或 `replaceSync()` 插入的规则在同一任务里就生效，嵌套在样式规则里的也一样。对模拟改写过的媒体列表调用 `appendMedium()` 和 `deleteMedium()`，与 Chrome 一样按页面写入的各项查找。页面属性的值按页面写入的原样显示给客户端，agent 自己的写入不向客户端发出 DOM 域事件。对模拟改写过的属性或样式的编辑，撤销（`DOM.undo`）时回到页面写入的原文，模拟结束后不会留下改写后的文本。按文本的 DOM 搜索不再匹配 agent 加在节点上、不显示给客户端的属性（强制伪类状态的标记和强制颜色的标记；按选择器或 XPath 点名这种属性的搜索仍能找到节点，见能力边界）；撤销属性编辑也不再把该标记恢复成编辑时的状态。

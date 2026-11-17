@@ -107,10 +107,9 @@ UI.ViewManager.registerViewExtension({
   commandPrompt: i18nLazyString(PageStrings.showPage),
   order: 2,
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
-  async loadView(universe) {
+  async loadView() {
     const SourcesModule: typeof Sources = await import('../../panels/sources/sources.js');
-    return SourcesModule.SourcesNavigator.NetworkNavigatorView.instance(
-        {forceNew: null, networkProjectManager: universe.networkProjectManager});
+    return SourcesModule.SourcesNavigator.NetworkNavigatorView.instance();
   },
 });
 
