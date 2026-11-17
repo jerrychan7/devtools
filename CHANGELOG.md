@@ -4,6 +4,8 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
+## 0.4.0
+
 Based on Chrome 158 (158.0.8127.37).
 
 - The DevTools frontend now comes from Chrome 158 (it was Chrome 156), with that version's panels and UI; the browser default styles shown in Styles follow Chrome 158 too.
