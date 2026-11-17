@@ -210,6 +210,9 @@ export function registerPage({ session, probe, frames, worlds }: Context) {
     getInstallabilityErrors: (): Protocol.Page.GetInstallabilityErrorsResponse => ({ installabilityErrors: [] }),
     getManifestIcons: () => ({}),
     getAppId: () => ({}),
+    // A page is no installed app with sub-apps: Chrome's own handler answers an empty list too.
+    getSubApps: (): Protocol.Page.GetSubAppsResponse => ({ subApps: [] }),
+    getSiblingSubApps: (): Protocol.Page.GetSiblingSubAppsResponse => ({ subApps: [] }),
     bringToFront: () => {},
     setAdBlockingEnabled: () => {},
     setLifecycleEventsEnabled: () => {},
