@@ -9,7 +9,7 @@ This package contains the third-party code below, with its copyright notices and
 | [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | devtools-anywhere |
 | [snapDOM (@zumer/snapdom)](https://github.com/zumerlab/snapdom) | 3.3.5 | MIT | ZumerLab | devtools-anywhere |
 | [dom-accessibility-api](https://github.com/eps1lon/dom-accessibility-api) | 0.7.1 | MIT | Sebastian Silbermann | devtools-anywhere |
-| [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/156.0.8078.80/third_party/blink/renderer/core/html/resources/html.css) | Chrome 156.0.8078.80 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
+| [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css) | Chrome 158.0.8127.37 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
 
 ### es-module-lexer (ported code)
 
@@ -101,10 +101,10 @@ SOFTWARE.
 
 ### Chromium's default style sheet (html.css)
 
-- Version: Chrome 156.0.8078.80
+- Version: Chrome 158.0.8127.37
 - License: LGPL-2.0-or-later
 - Copyright: Lars Knoll; Apple Inc.
-- Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/156.0.8078.80/third_party/blink/renderer/core/html/resources/html.css
+- Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css
 - Included in: devtools-anywhere
 - Notes: Shipped unmodified as dist/chromium-html.css, with this license as dist/chromium-html.LICENSE.txt; loaded on demand for the Styles pane. It is the only file under this license: deleting both leaves out the user agent stylesheet rules and nothing else.
 
