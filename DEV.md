@@ -184,7 +184,7 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 The frontend follows stable Chrome, which is what most users have, minor updates included: each one ships another devtools-frontend commit. `.github/workflows/chrome-update.yml` checks every day and opens an issue when stable Chrome's commit is not the one in `REVISION` (closing an older one not done yet). Move to it with
 
 ```bash
-pnpm --filter @devtools-anywhere/devtools-frontend update
+pnpm --filter @devtools-anywhere/devtools-frontend run update
 ```
 
 It builds the devtools-frontend commit the current stable Chrome ships (on its milestone's branch, `chromium/<branch>`, not on upstream's `main`; Chromium Dash's `fetch_releases` says which) and pins it in `REVISION`, and its Chrome version in the packages' `chrome` field, on success. Should Chromium Dash not answer, write that commit into `REVISION` by hand and run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it; set `chrome` by hand then). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console). Also run `node scripts/sync-user-agent-css.ts` once the `chrome` field has changed: it fetches that Chrome's `html.css` for the browser default styles (`--check` only tells whether the copy matches; the build warns when it does not), then update the link it names in that directory's `README.md`.
