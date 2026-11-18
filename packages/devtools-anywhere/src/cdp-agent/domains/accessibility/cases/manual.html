@@ -1,0 +1,740 @@
+<!--
+Accessibility conformance cases: the input HTML only, each element marked data-ax-case compared
+with real Chrome (test-support/accessibility.ts). Imported from:
+- dom-accessibility-api (https://github.com/eps1lon/dom-accessibility-api), commit
+  a1828981f407b6cd6dc9d7b1046a618af93d0270, groups "dom-accessibility-api …".
+  MIT License. Copyright (c) 2020 Sebastian Silbermann
+- web-platform-tests (https://github.com/web-platform-tests/wpt), commit
+  73abd6299d0100763f0dfab7d30947282f626021, groups "wpt <path>": the file's body without its
+  scripts. The 3-Clause BSD License. Copyright © web-platform-tests contributors
+Ids were added to the elements compared; whitespace is part of the input.
+-->
+<!-- group: dom-accessibility-api manual -->
+<div><img id="lib-DS1" data-ax-case="lib-DS1" src=foo.jpg alt="test" aria-describedby="lib-DS1-t1"><span id="lib-DS1-t1" role="presentation">foo</span></div>
+<div><img id="lib-DS2" data-ax-case="lib-DS2" src=foo.jpg alt="test" aria-describedby="lib-DS2-t1"><span id="lib-DS2-t1" role="none">foo</span></div>
+<div><a id="lib-DS3" data-ax-case="lib-DS3" href="#" aria-label="California" title="San Francisco">United States</a></div>
+<div><button id="lib-DS4" data-ax-case="lib-DS4" aria-description="Paid feature">Deploy</button></div>
+<div><img id="lib-DS5" data-ax-case="lib-DS5" src=foo.jpg alt="test" aria-description="bar" aria-describedby="lib-DS5-t1"><span id="lib-DS5-t1" role="presentation">foo</span></div>
+<!-- group: dom-accessibility-api shadow roots -->
+<div><div><template shadowrootmode="open"><div id="d">This is a button</div><button id="lib-DS6" data-ax-case="lib-DS6" aria-describedby="d">Click me</button></template></div></div>
+<!-- group: wpt accname/manual/description_1.0_combobox-focusable-manual.html -->
+<div id="m-description-1-0-combobox-focusable" data-ax-case="m-description-1-0-combobox-focusable" role="combobox" tabindex="0" title="Choose your language.">
+    <span> English </span>
+  </div>
+<!-- group: wpt accname/manual/description_from_content_of_describedby_element-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <input id="m-description-from-content-of-describedby-element" data-ax-case="m-description-from-content-of-describedby-element" type="text" aria-label="Important stuff" aria-describedby="descId" />
+  <div>
+    <div id="descId">
+      <span aria-hidden="true"><i> Hello, </i></span>
+      <span>My</span> name is
+      <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+      <span role="presentation" aria-label="Eli">
+        <span aria-label="Garaventa">Zambino</span>
+      </span>
+      <span>the weird.</span>
+      (QED)
+      <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+      <table>
+        <tr>
+          <td>Where</td>
+          <td style="visibility:hidden;"><div>in</div></td>
+          <td><div style="display:none;">the world</div></td>
+          <td>are my marbles?</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+<!-- group: wpt accname/manual/description_link-with-label-manual.html -->
+<a id="m-description-link-with-label" data-ax-case="m-description-link-with-label" href="#" aria-label="California" title="San Francisco" >United States</a>
+<!-- group: wpt accname/manual/description_test_case_557-manual.html -->
+<img id="m-description-test-case-557" data-ax-case="m-description-test-case-557" src="foo.jpg" aria-label="1" alt="a" title="t"/>
+<!-- group: wpt accname/manual/description_test_case_664-manual.html -->
+<div>
+    <img id="m-description-test-case-664" data-ax-case="m-description-test-case-664" aria-describedby="ID1" src="test.png">
+  </div>
+  <div id="ID1">foo</div>
+<!-- group: wpt accname/manual/description_test_case_665-manual.html -->
+<div>
+    <img id="m-description-test-case-665" data-ax-case="m-description-test-case-665" aria-describedby="ID1" src="test.png">
+  </div>
+  <div id="ID1" style="display:none">foo</div>
+<!-- group: wpt accname/manual/description_test_case_666-manual.html -->
+<div>
+    <img id="m-description-test-case-666" data-ax-case="m-description-test-case-666" aria-describedby="ID1" src="test.png">
+  </div>
+  <div id="ID1" role="presentation">foo</div>
+<!-- group: wpt accname/manual/description_test_case_772-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-772" data-ax-case="m-description-test-case-772" alt="test" aria-describedby="t1">
+  <div id="t1">foo</div>
+<!-- group: wpt accname/manual/description_test_case_773-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-773" data-ax-case="m-description-test-case-773" alt="test" aria-describedby="t1">
+  <div id="t1" style="display:none">foo</div>
+<!-- group: wpt accname/manual/description_test_case_774-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-774" data-ax-case="m-description-test-case-774" alt="test" aria-describedby="t1">
+  <span id="t1" role="presentation">foo</span>
+<!-- group: wpt accname/manual/description_test_case_838-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-838" data-ax-case="m-description-test-case-838" alt="test" aria-describedby="t1">
+  <div id="t1" style="visibility:hidden">foo</div>
+<!-- group: wpt accname/manual/description_test_case_broken_reference-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-broken-reference" data-ax-case="m-description-test-case-broken-reference" alt="test" aria-describedby="t1">
+<!-- group: wpt accname/manual/description_test_case_one_valid_reference-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-one-valid-reference" data-ax-case="m-description-test-case-one-valid-reference" alt="test" aria-describedby="t1 t2 t3">
+  <div id="t2">foo</div>
+<!-- group: wpt accname/manual/description_title-same-element-manual.html -->
+<div><input aria-label="Name" id="m-description-title-same-element" data-ax-case="m-description-title-same-element" title="Title" aria-describedby="ID1" type="text"></div>
+  <div id="ID1">Description</div>
+<!-- group: wpt accname/manual/name_1.0_combobox-focusable-alternative-manual.html -->
+<input id="m-name-1-0-combobox-focusable-alternative" data-ax-case="m-name-1-0-combobox-focusable-alternative" role="combobox" type="text" title="Choose your language" value="English">
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-combobox-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-combobox" data-ax-case="m-name-checkbox-label-embedded-combobox" />
+  <label for="m-name-checkbox-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-listbox-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-listbox" data-ax-case="m-name-checkbox-label-embedded-listbox" />
+  <label for="m-name-checkbox-label-embedded-listbox">Flash the screen
+    <ul role="listbox" style="list-style-type: none;">
+      <li role="option" aria-selected="true">1</li>
+      <li role="option">2</li>
+      <li role="option">3</li>
+    </ul>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-menu-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-menu" data-ax-case="m-name-checkbox-label-embedded-menu" />
+  <label for="m-name-checkbox-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+        <span role="menuitem" hidden>2</span>
+    <span role="menuitem" hidden>3</span>
+      </span>
+      times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-select-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-select" data-ax-case="m-name-checkbox-label-embedded-select" />
+  <label for="m-name-checkbox-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-slider-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-slider" data-ax-case="m-name-checkbox-label-embedded-slider" />
+  <label for="m-name-checkbox-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-spinbutton-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-spinbutton" data-ax-case="m-name-checkbox-label-embedded-spinbutton" />
+  <label for="m-name-checkbox-label-embedded-spinbutton">foo <input role="spinbutton" type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-textbox-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-textbox" data-ax-case="m-name-checkbox-label-embedded-textbox" />
+  <label for="m-name-checkbox-label-embedded-textbox">Flash the screen
+    <div role="textbox" contenteditable>1</div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-multiple-label-alternative-manual.html -->
+<label for="m-name-checkbox-label-multiple-label-alternative">a test</label>
+  <label>This <input type="checkbox" id="m-name-checkbox-label-multiple-label-alternative" data-ax-case="m-name-checkbox-label-multiple-label-alternative" /> is</label>
+<!-- group: wpt accname/manual/name_checkbox-label-multiple-label-manual.html -->
+<label>This <input type="checkbox" id="m-name-checkbox-label-multiple-label" data-ax-case="m-name-checkbox-label-multiple-label" /> is</label>
+  <label for="m-name-checkbox-label-multiple-label">a test</label>
+<!-- group: wpt accname/manual/name_checkbox-title-manual.html -->
+<input type="checkbox" id="m-name-checkbox-title" data-ax-case="m-name-checkbox-title" title="foo" />
+<!-- group: wpt accname/manual/name_file-label-inline-block-styles-manual.html -->
+<style>
+    label:before { content: "This"; display: block; }
+    label:after { content: "."; }
+  </style>
+  <label for="m-name-file-label-inline-block-styles">is a test</label>
+  <input type="text" id="m-name-file-label-inline-block-styles" data-ax-case="m-name-file-label-inline-block-styles"/>
+<!-- group: wpt accname/manual/name_from_content-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <div id="m-name-from-content" data-ax-case="m-name-from-content" role="link" tabindex="0">
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli">
+      <span aria-label="Garaventa">Zambino</span>
+    </span>
+    <span>the weird.</span>
+    (QED)
+    <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+    <table>
+      <tr>
+        <td>Where</td>
+        <td style="visibility:hidden;"><div>in</div></td>
+        <td><div style="display:none;">the world</div></td>
+        <td>are my marbles?</td>
+      </tr>
+    </table>
+  </div>
+<!-- group: wpt accname/manual/name_from_content_of_label-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <input type="text" id="m-name-from-content-of-label" data-ax-case="m-name-from-content-of-label" />
+  <label for="m-name-from-content-of-label" id="label">
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli">
+      <span aria-label="Garaventa">Zambino</span>
+   </span>
+   <span>the weird.</span>
+   (QED)
+   <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+   <table>
+     <tr>
+       <td>Where</td>
+       <td style="visibility:hidden;"><div>in</div></td>
+       <td><div style="display:none;">the world</div></td>
+       <td>are my marbles?</td>
+    </tr>
+   </table>
+  </label>
+<!-- group: wpt accname/manual/name_from_content_of_labelledby_element-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <input id="m-name-from-content-of-labelledby-element" data-ax-case="m-name-from-content-of-labelledby-element" type="text" aria-labelledby="lblId" />
+  <div id="lblId" >
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli">
+      <span aria-label="Garaventa">Zambino</span>
+    </span>
+    <span>the weird.</span>
+    (QED)
+    <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+    <table>
+      <tr>
+        <td>Where</td>
+        <td style="visibility:hidden;"><div>in</div></td>
+        <td><div style="display:none;">the world</div></td>
+        <td>are my marbles?</td>
+      </tr>
+    </table>
+  </div>
+<!-- group: wpt accname/manual/name_from_content_of_labelledby_elements_one_of_which_is_hidden-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <div>
+    <input id="m-name-from-content-of-labelledby-elements-one-of-which-is-hidden" data-ax-case="m-name-from-content-of-labelledby-elements-one-of-which-is-hidden" type="text" aria-labelledby="lbl1 lbl2" aria-describedby="descId" />
+    <span>
+      <span aria-hidden="true" id="lbl1">Important</span>
+      <span class="hidden">
+        <span aria-hidden="true" id="lbl2">stuff</span>
+      </span>
+    </span>
+  </div>
+  <div class="hidden">
+    <div id="descId">
+      <span aria-hidden="true"><i> Hello, </i></span>
+      <span>My</span> name is
+      <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+      <span role="presentation" aria-label="Eli">
+        <span aria-label="Garaventa">Zambino</span>
+      </span>
+      <span>the weird.</span>
+      (QED)
+      <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+      <table>
+        <tr>
+          <td>Where</td>
+          <td style="visibility:hidden;"><div>in</div></td>
+          <td><div style="display:none;">the world</div></td>
+          <td>are my marbles?</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+<!-- group: wpt accname/manual/name_heading-combobox-focusable-alternative-manual.html -->
+<h2 id="m-name-heading-combobox-focusable-alternative" data-ax-case="m-name-heading-combobox-focusable-alternative">
+  Country of origin:
+  <input role="combobox" type="text" title="Choose your country." value="United States">
+  </h2>
+<!-- group: wpt accname/manual/name_link-mixed-content-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <div id="m-name-link-mixed-content" data-ax-case="m-name-link-mixed-content" role="link" tabindex="0">
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli"><span aria-label="Garaventa">Zambino</span></span>
+    <span>the weird.</span>
+    (QED)
+    <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+  </div>
+<!-- group: wpt accname/manual/name_password-label-embedded-combobox-manual.html -->
+<input type="password" id="m-name-password-label-embedded-combobox" data-ax-case="m-name-password-label-embedded-combobox" />
+  <label for="m-name-password-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-menu-manual.html -->
+<input type="password" id="m-name-password-label-embedded-menu" data-ax-case="m-name-password-label-embedded-menu" />
+  <label for="m-name-password-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+      <span role="menuitem" hidden>2</span>
+      <span role="menuitem" hidden>3</span>
+    </span>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-select-manual.html -->
+<input type="password" id="m-name-password-label-embedded-select" data-ax-case="m-name-password-label-embedded-select" />
+  <label for="m-name-password-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-slider-manual.html -->
+<input type="password" id="m-name-password-label-embedded-slider" data-ax-case="m-name-password-label-embedded-slider" />
+  <label for="m-name-password-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-spinbutton-manual.html -->
+<input type="password" id="m-name-password-label-embedded-spinbutton" data-ax-case="m-name-password-label-embedded-spinbutton" />
+  <label for="m-name-password-label-embedded-spinbutton">foo <input role="spinbutton" type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_password-title-manual.html -->
+<input type="password" id="m-name-password-title" data-ax-case="m-name-password-title" title="foo" />
+<!-- group: wpt accname/manual/name_radio-label-embedded-combobox-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-combobox" data-ax-case="m-name-radio-label-embedded-combobox" />
+  <label for="m-name-radio-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-menu-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-menu" data-ax-case="m-name-radio-label-embedded-menu" />
+  <label for="m-name-radio-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+      <span role="menuitem" hidden>2</span>
+      <span role="menuitem" hidden>3</span>
+    </span>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-select-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-select" data-ax-case="m-name-radio-label-embedded-select" />
+  <label for="m-name-radio-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-slider-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-slider" data-ax-case="m-name-radio-label-embedded-slider" />
+  <label for="m-name-radio-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-spinbutton-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-spinbutton" data-ax-case="m-name-radio-label-embedded-spinbutton" />
+  <label for="m-name-radio-label-embedded-spinbutton">foo <input role="spinbutton"  type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_radio-title-manual.html -->
+<input type="radio" id="m-name-radio-title" data-ax-case="m-name-radio-title" title="foo" />
+<!-- group: wpt accname/manual/name_test_case_539-manual.html -->
+<input type="button" aria-label="Rich" id="m-name-test-case-539" data-ax-case="m-name-test-case-539">
+<!-- group: wpt accname/manual/name_test_case_540-manual.html -->
+<div id="ID1">Rich's button</div>
+  <input type="button" aria-labelledby="ID1" id="m-name-test-case-540" data-ax-case="m-name-test-case-540">
+<!-- group: wpt accname/manual/name_test_case_541-manual.html -->
+<div id="ID1">Rich's button</div>
+  <input type="button" aria-label="bar" aria-labelledby="ID1" id="m-name-test-case-541" data-ax-case="m-name-test-case-541"/>
+<!-- group: wpt accname/manual/name_test_case_544-manual.html -->
+<input type="button" id="m-name-test-case-544" data-ax-case="m-name-test-case-544" value="foo"/>
+<!-- group: wpt accname/manual/name_test_case_546-manual.html -->
+<label for="m-name-test-case-546">States:</label>
+  <input type="text" id="m-name-test-case-546" data-ax-case="m-name-test-case-546"/>
+<!-- group: wpt accname/manual/name_test_case_547-manual.html -->
+<label for="m-name-test-case-547">
+  foo
+  <input type="text" value="David"/>
+  </label>
+  <input type="text" id="m-name-test-case-547" data-ax-case="m-name-test-case-547" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_548-manual.html -->
+<label for="m-name-test-case-548">
+  crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="text" id="m-name-test-case-548" data-ax-case="m-name-test-case-548" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_549-manual.html -->
+<label for="m-name-test-case-549">
+    crazy
+     <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+     </div>
+  </label>
+  <input type="text" id="m-name-test-case-549" data-ax-case="m-name-test-case-549" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_550-manual.html -->
+<label for="m-name-test-case-550">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="text" id="m-name-test-case-550" data-ax-case="m-name-test-case-550" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_551-manual.html -->
+<input type="text" id="m-name-test-case-551" data-ax-case="m-name-test-case-551" title="crazy" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_552-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-552">fruit</label>
+  <input type="text" id="m-name-test-case-552" data-ax-case="m-name-test-case-552"/>
+<!-- group: wpt accname/manual/name_test_case_553-manual.html -->
+<style type="text/css">
+    [data-after]:after { content: attr(data-after); }
+  </style>
+  <label for="m-name-test-case-553" data-after="test content"></label>
+  <input type="text" id="m-name-test-case-553" data-ax-case="m-name-test-case-553">
+<!-- group: wpt accname/manual/name_test_case_556-manual.html -->
+<img id="m-name-test-case-556" data-ax-case="m-name-test-case-556" src="foo.jpg" aria-label="1"/>
+<!-- group: wpt accname/manual/name_test_case_558-manual.html -->
+<input type="text" value="peanuts" id="m-name-test-case-558" data-ax-case="m-name-test-case-558">
+  <img aria-labelledby="m-name-test-case-558" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_559-manual.html -->
+<img id="m-name-test-case-559" data-ax-case="m-name-test-case-559" aria-labelledby="m-name-test-case-559" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_560-manual.html -->
+<input type="text" value="peanuts" id="m-name-test-case-560" data-ax-case="m-name-test-case-560">
+  <img aria-labelledby="m-name-test-case-560" aria-label="1" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_561-manual.html -->
+<img id="m-name-test-case-561" data-ax-case="m-name-test-case-561" aria-labelledby="m-name-test-case-561" aria-label="1" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_562-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <input type="text" value="apple jacks" id="ID3">
+  <img aria-labelledby="ID1 ID2 ID3" id="m-name-test-case-562" data-ax-case="m-name-test-case-562" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_563-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <img id="m-name-test-case-563" data-ax-case="m-name-test-case-563" aria-label="l" aria-labelledby="m-name-test-case-563 ID1" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_564-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <img id="m-name-test-case-564" data-ax-case="m-name-test-case-564" aria-label="l" aria-labelledby="m-name-test-case-564 ID1 ID2" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_565-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <input type="text" value="apple jacks" id="ID3">
+  <img id="m-name-test-case-565" data-ax-case="m-name-test-case-565" aria-label="l" aria-labelledby="m-name-test-case-565 ID1 ID2 ID3" alt= "a" title="t" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_566-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <input type="text" value="apple jacks" id="ID3">
+  <img id="m-name-test-case-566" data-ax-case="m-name-test-case-566" aria-label="" aria-labelledby="m-name-test-case-566 ID1 ID2 ID3" alt="" title="t" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_596-manual.html -->
+<div id="m-name-test-case-596" data-ax-case="m-name-test-case-596" aria-labelledby="ID1">foo</div>
+  <span id="ID1">bar</span>
+<!-- group: wpt accname/manual/name_test_case_597-manual.html -->
+<div id="m-name-test-case-597" data-ax-case="m-name-test-case-597" aria-label="Tag">foo</div>
+<!-- group: wpt accname/manual/name_test_case_598-manual.html -->
+<div id="m-name-test-case-598" data-ax-case="m-name-test-case-598" aria-labelledby="ID1" aria-label="Tag">foo</div>
+  <span id="ID1">bar</span>
+<!-- group: wpt accname/manual/name_test_case_599-manual.html -->
+<div id="m-name-test-case-599" data-ax-case="m-name-test-case-599" aria-labelledby="ID0 ID1" aria-label="Tag">foo</div>
+  <span id="ID0">bar</span>
+  <span id="ID1">baz</span>
+<!-- group: wpt accname/manual/name_test_case_600-manual.html -->
+<div id="m-name-test-case-600" data-ax-case="m-name-test-case-600">Div with text</div>
+<!-- group: wpt accname/manual/name_test_case_601-manual.html -->
+<div id="m-name-test-case-601" data-ax-case="m-name-test-case-601" role="button">foo</div>
+<!-- group: wpt accname/manual/name_test_case_602-manual.html -->
+<div id="m-name-test-case-602" data-ax-case="m-name-test-case-602" role="button" title="Tag" style="outline:medium solid black; width:2em; height:1em;">
+  </div>
+<!-- group: wpt accname/manual/name_test_case_603-manual.html -->
+<div id="ID1">foo</div>
+  <a id="m-name-test-case-603" data-ax-case="m-name-test-case-603" href="test.html" aria-labelledby="ID1">bar</a>
+<!-- group: wpt accname/manual/name_test_case_604-manual.html -->
+<a id="m-name-test-case-604" data-ax-case="m-name-test-case-604" href="test.html" aria-label="Tag">ABC</a>
+<!-- group: wpt accname/manual/name_test_case_605-manual.html -->
+<a href="test.html" id="m-name-test-case-605" data-ax-case="m-name-test-case-605" aria-labelledby="ID1" aria-label="Tag">foo</a>
+  <p id="ID1">bar</p>
+<!-- group: wpt accname/manual/name_test_case_606-manual.html -->
+<a href="test.html" id="m-name-test-case-606" data-ax-case="m-name-test-case-606" aria-labelledby="m-name-test-case-606 ID1" aria-label="Tag"></a>
+  <p id="ID1">foo</p>
+<!-- group: wpt accname/manual/name_test_case_607-manual.html -->
+<a href="test.html" id="m-name-test-case-607" data-ax-case="m-name-test-case-607">ABC</a>
+<!-- group: wpt accname/manual/name_test_case_608-manual.html -->
+<a href="test.html" id="m-name-test-case-608" data-ax-case="m-name-test-case-608" title="Tag"></a>
+<!-- group: wpt accname/manual/name_test_case_609-manual.html -->
+<input id="m-name-test-case-609" data-ax-case="m-name-test-case-609" type="text" aria-labelledby="ID1 ID2 ID3">
+  <p id="ID1">foo</p>
+  <p id="ID2">bar</p>
+  <p id="ID3">baz</p>
+<!-- group: wpt accname/manual/name_test_case_610-manual.html -->
+<input id="m-name-test-case-610" data-ax-case="m-name-test-case-610" type="text" aria-label="bar" aria-labelledby="ID1 m-name-test-case-610">
+  <div id="ID1">foo</div>
+<!-- group: wpt accname/manual/name_test_case_611-manual.html -->
+<input id="m-name-test-case-611" data-ax-case="m-name-test-case-611" type="text"/>
+  <label for="m-name-test-case-611">foo</label>
+<!-- group: wpt accname/manual/name_test_case_612-manual.html -->
+<input type="password" id="m-name-test-case-612" data-ax-case="m-name-test-case-612">
+  <label for="m-name-test-case-612">foo</label>
+<!-- group: wpt accname/manual/name_test_case_613-manual.html -->
+<input type="checkbox" id="m-name-test-case-613" data-ax-case="m-name-test-case-613">
+  <label for="m-name-test-case-613">foo</label></body>
+<!-- group: wpt accname/manual/name_test_case_614-manual.html -->
+<input type="radio" id="m-name-test-case-614" data-ax-case="m-name-test-case-614">
+  <label for="m-name-test-case-614">foo</label>
+<!-- group: wpt accname/manual/name_test_case_617-manual.html -->
+<input type="checkbox" id="m-name-test-case-617" data-ax-case="m-name-test-case-617">
+  <label for="m-name-test-case-617">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_618-manual.html -->
+<input type="text" id="m-name-test-case-618" data-ax-case="m-name-test-case-618">
+  <label for="m-name-test-case-618">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_619-manual.html -->
+<input type="password" id="m-name-test-case-619" data-ax-case="m-name-test-case-619">
+  <label for="m-name-test-case-619">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_620-manual.html -->
+<input type="radio" id="m-name-test-case-620" data-ax-case="m-name-test-case-620">
+  <label for="m-name-test-case-620">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_659-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-659" title="bar"><input id="m-name-test-case-659" data-ax-case="m-name-test-case-659" type="text" name="test" title="buz"></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_660-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-660" title="bar"><input id="m-name-test-case-660" data-ax-case="m-name-test-case-660" type="password" name="test" title="buz"></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_661-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-661"><input id="m-name-test-case-661" data-ax-case="m-name-test-case-661" type="checkbox" name="test" title=" bar "></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_662-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-662"><input id="m-name-test-case-662" data-ax-case="m-name-test-case-662" type="radio" name="test" title=" bar "></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_721-manual.html -->
+<label for="m-name-test-case-721">States:</label>
+  <input type="password" id="m-name-test-case-721" data-ax-case="m-name-test-case-721"/>
+<!-- group: wpt accname/manual/name_test_case_723-manual.html -->
+<label for="m-name-test-case-723">States:</label>
+  <input type="checkbox" id="m-name-test-case-723" data-ax-case="m-name-test-case-723"/>
+<!-- group: wpt accname/manual/name_test_case_724-manual.html -->
+<label for="m-name-test-case-724">States:</label>
+  <input type="radio" id="m-name-test-case-724" data-ax-case="m-name-test-case-724"/>
+<!-- group: wpt accname/manual/name_test_case_727-manual.html -->
+<label for="m-name-test-case-727">
+    foo
+    <input type="text" value="David"/>
+  </label>
+  <input type="password" id="m-name-test-case-727" data-ax-case="m-name-test-case-727" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_728-manual.html -->
+<label for="m-name-test-case-728">
+    foo
+    <input type="text" value="David"/>
+  </label>
+  <input type="checkbox" id="m-name-test-case-728" data-ax-case="m-name-test-case-728"/>
+<!-- group: wpt accname/manual/name_test_case_729-manual.html -->
+<label for="m-name-test-case-729">
+    foo
+    <input type="text" value="David"/>
+  </label>
+  <input type="radio" id="m-name-test-case-729" data-ax-case="m-name-test-case-729"/>
+<!-- group: wpt accname/manual/name_test_case_733-manual.html -->
+<label for="m-name-test-case-733">
+    crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="password" id="m-name-test-case-733" data-ax-case="m-name-test-case-733"/>
+<!-- group: wpt accname/manual/name_test_case_734-manual.html -->
+<label for="m-name-test-case-734">
+    crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="checkbox" id="m-name-test-case-734" data-ax-case="m-name-test-case-734"/>
+<!-- group: wpt accname/manual/name_test_case_735-manual.html -->
+<label for="m-name-test-case-735">
+    crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="radio" id="m-name-test-case-735" data-ax-case="m-name-test-case-735"/>
+<!-- group: wpt accname/manual/name_test_case_738-manual.html -->
+<label for="m-name-test-case-738">
+    crazy
+    <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="password" value="baz" id="m-name-test-case-738" data-ax-case="m-name-test-case-738"/>
+<!-- group: wpt accname/manual/name_test_case_739-manual.html -->
+<label for="m-name-test-case-739">
+    crazy
+    <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="checkbox" id="m-name-test-case-739" data-ax-case="m-name-test-case-739"/>
+<!-- group: wpt accname/manual/name_test_case_740-manual.html -->
+<label for="m-name-test-case-740">
+    crazy
+    <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="radio" id="m-name-test-case-740" data-ax-case="m-name-test-case-740"/>
+<!-- group: wpt accname/manual/name_test_case_743-manual.html -->
+<label for="m-name-test-case-743">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="password" id="m-name-test-case-743" data-ax-case="m-name-test-case-743" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_744-manual.html -->
+<label for="m-name-test-case-744">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="checkbox" id="m-name-test-case-744" data-ax-case="m-name-test-case-744"/>
+<!-- group: wpt accname/manual/name_test_case_745-manual.html -->
+<label for="m-name-test-case-745">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="radio" id="m-name-test-case-745" data-ax-case="m-name-test-case-745"/>
+<!-- group: wpt accname/manual/name_test_case_748-manual.html -->
+<input type="password" id="m-name-test-case-748" data-ax-case="m-name-test-case-748" title="crazy" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_749-manual.html -->
+<input type="checkbox" id="m-name-test-case-749" data-ax-case="m-name-test-case-749" title="crazy"/>
+<!-- group: wpt accname/manual/name_test_case_750-manual.html -->
+<input type="radio" id="m-name-test-case-750" data-ax-case="m-name-test-case-750" title="crazy"/>
+<!-- group: wpt accname/manual/name_test_case_753-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-753">fruit</label>
+  <input type="password" id="m-name-test-case-753" data-ax-case="m-name-test-case-753"/>
+<!-- group: wpt accname/manual/name_test_case_754-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-754">fruit</label>
+  <input type="checkbox" id="m-name-test-case-754" data-ax-case="m-name-test-case-754"/>
+<!-- group: wpt accname/manual/name_test_case_755-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-755">fruit</label>
+  <input type="radio" id="m-name-test-case-755" data-ax-case="m-name-test-case-755"/>
+<!-- group: wpt accname/manual/name_test_case_758-manual.html -->
+<style>
+    label:after { content:" fruit"; }
+  </style>
+  <label for="m-name-test-case-758">fancy</label>
+  <input type="password" id="m-name-test-case-758" data-ax-case="m-name-test-case-758"/>
+<!-- group: wpt accname/manual/name_test_case_759-manual.html -->
+<style>
+    label:after { content:" fruit"; }
+  </style>
+  <label for="m-name-test-case-759">fancy</label>
+  <input type="checkbox" id="m-name-test-case-759" data-ax-case="m-name-test-case-759"/>
+<!-- group: wpt accname/manual/name_test_case_760-manual.html -->
+<style>
+    label:after { content:" fruit"; }
+  </style>
+  <label for="m-name-test-case-760">fancy</label>
+  <input type="radio" id="m-name-test-case-760" data-ax-case="m-name-test-case-760"/>
+<!-- group: wpt accname/manual/name_text-label-embedded-combobox-manual.html -->
+<input type="text" id="m-name-text-label-embedded-combobox" data-ax-case="m-name-text-label-embedded-combobox" />
+  <label for="m-name-text-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-menu-manual.html -->
+<input type="text" id="m-name-text-label-embedded-menu" data-ax-case="m-name-text-label-embedded-menu" />
+  <label for="m-name-text-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+      <span role="menuitem" hidden>2</span>
+      <span role="menuitem" hidden>3</span>
+    </span>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-select-manual.html -->
+<input type="text" id="m-name-text-label-embedded-select" data-ax-case="m-name-text-label-embedded-select" />
+  <label for="m-name-text-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-slider-manual.html -->
+<input type="text" id="m-name-text-label-embedded-slider" data-ax-case="m-name-text-label-embedded-slider" />
+  <label for="m-name-text-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-spinbutton-manual.html -->
+<input type="text" id="m-name-text-label-embedded-spinbutton" data-ax-case="m-name-text-label-embedded-spinbutton" />
+  <label for="m-name-text-label-embedded-spinbutton">foo <input role="spinbutton" type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_text-title-manual.html -->
+<input type="text" id="m-name-text-title" data-ax-case="m-name-text-title" title="foo" />
