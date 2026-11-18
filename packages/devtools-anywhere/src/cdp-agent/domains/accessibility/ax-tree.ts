@@ -500,6 +500,12 @@ export function renderedText(text: Text): string {
   return value;
 }
 
+/** The inclusions, built once (included) or by kind. */
+const INCLUDED: Inclusion = { kind: 'included' };
+const ignored = (reason: IgnoredReason): Inclusion => ({ kind: 'ignored', reason });
+const lifted = (reason: IgnoredReason): Inclusion => ({ kind: 'lifted', reason });
+const excluded = (reason: IgnoredReason): Inclusion => ({ kind: 'excluded', reason });
+
 /** The tree's structure over one document, with aria-owns resolved. */
 export class TreeShape {
   /** Elements moved by aria-owns, to their owner. */
@@ -525,38 +531,36 @@ export class TreeShape {
 
   /** How a node takes part in the tree (Inclusion). */
   inclusion(node: Node): Inclusion {
-    if (node === this.doc) return { kind: 'included' };
+    if (node === this.doc) return INCLUDED;
     if (isText(node)) {
       const parent = domParent(node);
       if (!parent || (isElement(parent) && (OPAQUE.has(parent.localName) || hiddenReason(parent))))
-        return { kind: 'excluded', reason: 'notRendered' };
-      if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n)))
-        return { kind: 'excluded', reason: 'uninteresting' };
+        return excluded('notRendered');
+      if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n))) return excluded('uninteresting');
       const hidden = this.hiddenRoot(node);
-      return hidden ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden } : { kind: 'included' };
+      return hidden ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden } : INCLUDED;
     }
-    if (!isElement(node)) return { kind: 'excluded', reason: 'uninteresting' };
-    if (node.closest('[data-devtools-anywhere]')) return { kind: 'excluded', reason: 'notRendered' };
+    if (!isElement(node)) return excluded('uninteresting');
+    if (node.closest('[data-devtools-anywhere]')) return excluded('notRendered');
     // An image map's area is shown through its image, whatever its own box.
     const hiddenBy = isHtml(node, 'area') && imageOf(node) ? null : hiddenReason(node);
-    if (hiddenBy) return { kind: 'excluded', reason: hiddenBy };
+    if (hiddenBy) return excluded(hiddenBy);
     if (
       isHtmlElement(node) &&
       (NOT_RENDERED.has(node.localName) ||
         (node.localName === 'embed' && !hasAttr(node, 'src') && !hasAttr(node, 'type')))
     )
-      return { kind: 'excluded', reason: 'notRendered' };
+      return excluded('notRendered');
     const hidden = this.hiddenRoot(node);
     // Chrome leaves the aria-hidden element out and keeps what it hides, ignored.
-    if (hidden === node) return { kind: 'lifted', reason: 'ariaHiddenElement' };
+    if (hidden === node) return lifted('ariaHiddenElement');
     if (hidden)
       return {
         kind: 'ignored',
         reason: 'ariaHiddenSubtree',
         hiddenRoot: hidden,
       };
-    if (node === this.doc.documentElement || node === this.doc.body)
-      return { kind: 'ignored', reason: 'uninteresting' };
+    if (node === this.doc.documentElement || node === this.doc.body) return ignored('uninteresting');
     // A tbody without a role, ARIA attribute, title, id (a possible link target) or tabindex is ignored;
     // thead and tfoot are kept.
     if (
@@ -566,7 +570,7 @@ export class TreeShape {
       !(node.id && !isShadowRoot(node.getRootNode())) &&
       !hasAttr(node, 'tabindex')
     )
-      return { kind: 'ignored', reason: 'uninteresting' };
+      return ignored('uninteresting');
     // Chrome gives a ruby's annotation as its description only.
     if (node.localName === 'rt' && node.parentElement?.localName === 'ruby')
       return { kind: 'ignored', reason: 'uninteresting', noReason: true };
@@ -580,7 +584,7 @@ export class TreeShape {
       !hasAuthorName(node) &&
       (node.parentNode as Element | null)?.namespaceURI !== SVG_NS
     )
-      return { kind: 'ignored', reason: 'uninteresting' };
+      return ignored('uninteresting');
     // A list item in a native list given another role is presentational, whatever its attributes.
     if (
       node.localName === 'li' &&
@@ -588,7 +592,7 @@ export class TreeShape {
       /^(ul|ol|menu)$/.test(node.parentElement?.localName ?? '') &&
       !/^(|list|directory)$/.test(node.parentElement?.getAttribute('role') ?? '')
     )
-      return { kind: 'lifted', reason: 'presentationalRole' };
+      return lifted('presentationalRole');
     if (
       node.localName === 'img' &&
       attr(node, 'alt') === '' &&
@@ -597,9 +601,9 @@ export class TreeShape {
       !hasAttr(node, 'aria-labelledby') &&
       !attr(node, 'title')
     )
-      return { kind: 'lifted', reason: 'emptyAlt' };
-    if (explicit === 'none') return { kind: 'lifted', reason: 'presentationalRole' };
-    return { kind: 'included' };
+      return lifted('emptyAlt');
+    if (explicit === 'none') return lifted('presentationalRole');
+    return INCLUDED;
   }
 
   /** The element with aria-hidden="true" that hides a node, if any. */

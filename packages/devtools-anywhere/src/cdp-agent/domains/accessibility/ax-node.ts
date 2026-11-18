@@ -43,6 +43,10 @@ const bool = (name: AXPropertyName, value: boolean, type: AXValue['type'] = 'boo
   name,
   value: { type, value },
 });
+/** A property that is true or false (never undefined). */
+const flag = (name: AXPropertyName, value: boolean) => bool(name, value, 'boolean');
+/** A token property. */
+const token = (name: AXPropertyName, value: string) => prop(name, 'token', value);
 const prop = (name: AXPropertyName, type: AXValue['type'], value: unknown): AXProperty => ({
   name,
   value: { type, value },
@@ -305,7 +309,7 @@ function liveRegion(el: Element, role: string): AXProperty[] {
   // Of the live regions by role, alert and status are atomic.
   const atomic = ariaBool(el, 'aria-atomic') ?? (role === 'alert' || role === 'status');
   const relevant = attr(el, 'aria-relevant')?.trim() || 'additions text';
-  return [prop('live', 'token', live), bool('atomic', atomic, 'boolean'), prop('relevant', 'tokenList', relevant)];
+  return [token('live', live), flag('atomic', atomic), prop('relevant', 'tokenList', relevant)];
 }
 
 /** An element's properties, in Chrome's order (inspector_type_builder_helper.cc). */
@@ -316,56 +320,49 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   // An object element that shows no content (no plugin, no frame) is disabled.
   const emptyObject = isHtml(el, 'object') && !el.contentWindow;
   const disabled = el.matches(':disabled') || attr(el, 'aria-disabled') === 'true' || emptyObject;
-  if (disabled) out.push(bool('disabled', true, 'boolean'));
+  if (disabled) out.push(flag('disabled', true));
   const invalid = attr(el, 'aria-invalid');
-  if (invalid && invalid !== 'false') out.push(prop('invalid', 'token', invalid));
-  else if (isListed(el)) out.push(prop('invalid', 'token', invalid === null && !isValidControl(el) ? 'true' : 'false'));
-  else if (invalid !== null) out.push(prop('invalid', 'token', 'false'));
+  if (invalid && invalid !== 'false') out.push(token('invalid', invalid));
+  else if (isListed(el)) out.push(token('invalid', invalid === null && !isValidControl(el) ? 'true' : 'false'));
+  else if (invalid !== null) out.push(token('invalid', 'false'));
   if (isFocusable(el) || (isHtml(el, 'dialog') && el.open)) out.push(bool('focusable', true));
   if (isFocused(el)) out.push(bool('focused', true));
   const field = isTextField(el) || isNativeRange(el);
   const editableField = field && (/^(textbox|searchbox|spinbutton)$/.test(role) || combobox === 'textField');
   const readOnly = isReadOnly(el, role);
-  if (editableField) out.push(prop('editable', 'token', 'plaintext'));
-  else if (isEditingHost(el)) out.push(prop('editable', 'token', 'richtext'));
+  if (editableField) out.push(token('editable', 'plaintext'));
+  else if (isEditingHost(el)) out.push(token('editable', 'richtext'));
   const settable = SETTABLE_ROLE.test(role) || combobox === 'textField';
   if (settable && !disabled && !readOnly) out.push(bool('settable', true));
   // Widget properties.
-  if (combobox === 'select') out.push(prop('hasPopup', 'token', 'menu'));
+  if (combobox === 'select') out.push(token('hasPopup', 'menu'));
   else {
     const popup = hasPopup(el) ?? (combobox ? 'listbox' : null);
-    if (popup) out.push(prop('hasPopup', 'token', popup));
+    if (popup) out.push(token('hasPopup', popup));
   }
   const level = levelOf(el, role);
   if (level !== null) out.push(prop('level', 'integer', level));
   if (/^(tablist|listbox|grid|tree|treegrid)$/.test(role)) {
     const multiple = ariaBool(el, 'aria-multiselectable') ?? (isHtml(el, 'select') && el.multiple);
-    out.push(bool('multiselectable', multiple, 'boolean'));
+    out.push(flag('multiselectable', multiple));
   }
   const orientation = isNativeRange(el) && el.type === 'range' ? 'horizontal' : orientationOf(el, role);
-  if (orientation) out.push(prop('orientation', 'token', orientation));
+  if (orientation) out.push(token('orientation', orientation));
   if (role === 'textbox')
-    out.push(bool('multiline', isHtml(el, 'textarea') || ariaBool(el, 'aria-multiline') === true, 'boolean'));
-  if (READONLY_ROLE.test(role)) out.push(bool('readonly', readOnly, 'boolean'));
+    out.push(flag('multiline', isHtml(el, 'textarea') || ariaBool(el, 'aria-multiline') === true));
+  if (READONLY_ROLE.test(role)) out.push(flag('readonly', readOnly));
   if (REQUIRED_ROLE.test(role) || combobox === 'textField' || combobox === 'button') {
     const native = (isTextField(el) || isNativeRange(el) || isHtml(el, 'select')) && el.required;
-    out.push(bool('required', native || attr(el, 'aria-required') === 'true', 'boolean'));
+    out.push(flag('required', native || attr(el, 'aria-required') === 'true'));
   }
-  if (isNativeRange(el)) {
-    const max = el.type === 'range' ? 100 : 0;
-    out.push(prop('valuemin', 'number', Number(el.min || 0)));
-    out.push(prop('valuemax', 'number', Number(el.max || max)));
-    out.push(prop('valuetext', 'string', el.value));
-  } else if (isHtml(el, 'progress')) {
-    out.push(prop('valuemin', 'number', 0));
-    out.push(prop('valuemax', 'number', el.max));
-    out.push(prop('valuetext', 'string', ''));
-  } else if (isRange(el, role)) {
+  const range = (min: number, max: number, text: string) =>
+    out.push(prop('valuemin', 'number', min), prop('valuemax', 'number', max), prop('valuetext', 'string', text));
+  if (isNativeRange(el)) range(Number(el.min || 0), Number(el.max || (el.type === 'range' ? 100 : 0)), el.value);
+  else if (isHtml(el, 'progress')) range(0, el.max, '');
+  else if (isRange(el, role)) {
     const { min, max } = rangeBounds(el, role);
-    out.push(prop('valuemin', 'number', min ?? 0));
-    out.push(prop('valuemax', 'number', max ?? 0));
     // Chrome gives an ARIA range no valuetext, whatever aria-valuetext says.
-    out.push(prop('valuetext', 'string', ''));
+    range(min ?? 0, max ?? 0, '');
   }
   // Widget states.
   const pressed = role === 'button' ? tristate(attr(el, 'aria-pressed')) : null;
@@ -384,7 +381,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   const selected = selectedOf(el, role);
   if (selected !== null) out.push(bool('selected', selected));
   if (role === 'dialog' || role === 'alertdialog')
-    out.push(bool('modal', ariaBool(el, 'aria-modal') ?? (isHtml(el, 'dialog') && el.matches(':modal')), 'boolean'));
+    out.push(flag('modal', ariaBool(el, 'aria-modal') ?? (isHtml(el, 'dialog') && el.matches(':modal'))));
   // Relationships, then sparse attributes.
   for (const name of ['describedby', 'owns'] as const) {
     const list = idrefList(el, name, idOf);
