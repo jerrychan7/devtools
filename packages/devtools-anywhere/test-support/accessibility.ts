@@ -31,6 +31,20 @@ export async function setBody(t: TestPage, html: string): Promise<void> {
     // The fixture's own focus would differ between the sides' runs.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, html);
+  // An image still loading would change its node (a broken image's name, its size) mid-comparison.
+  await t.page.evaluate(() =>
+    Promise.all(
+      [...document.images].map(img =>
+        img.complete
+          ? undefined
+          : new Promise<void>(resolve => {
+              img.addEventListener('load', () => resolve(), { once: true });
+              img.addEventListener('error', () => resolve(), { once: true });
+              setTimeout(resolve, 5000);
+            })
+      )
+    )
+  );
 }
 
 /** The DOM node id of `#id` on one side, looked for in shadow roots too. */
@@ -141,6 +155,11 @@ export function describeCases(groups: CaseGroup[], options: CaseOptions = {}): v
   const todo = new Map<string, string>();
   for (const [reason, ids] of Object.entries(options.todo ?? {}))
     for (const id of ids.split(/\s+/).filter(Boolean)) todo.set(id, reason);
+
+  // A setup for a group the cases do not have would never run, silently.
+  const names = new Set(groups.map(group => group.name));
+  for (const name of Object.keys(options.setups ?? {}))
+    if (!names.has(name)) throw new Error(`setup for "${name}", a group the cases do not have`);
 
   for (const group of groups)
     describe(group.name, () => {

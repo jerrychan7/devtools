@@ -1690,6 +1690,29 @@ alert message" data-expectedlabel="alert message" data-testname="div with role a
   data-testname="explicit link name from content containing an element explicit with term role"
   class="ex iblock"
  id="name-comp-name-from-content-79" data-ax-case="name-comp-name-from-content-79"><span>this is an </span><span role="term">example</span></div>
+<!-- group: wpt accname/name/comp_name_from_content_alt_counter_invalidation.html -->
+<style type="text/css">
+.alt-counter::before {
+  counter-set: cnt 5051;
+  content: "" / counter(cnt);
+}
+</style>
+
+<p>Tests the <a href="https://w3c.github.io/accname/#comp_name_from_content">#comp_name_from_content</a> portions of the AccName <em>Name Computation</em> algorithm.</p>
+
+<p>This series of tests exercises the button, heading, and link elements, because each have different characteristics worthy of testing in each of the name computation algorithm scenarios:</p>
+<ul>
+  <li>button is a leaf node with sub-level elements presentational.</li>
+  <li>heading is block level, and can contain sub-level interactives like links.</li>
+  <li>link (a[href]) is an interactive inline element that can include non-presentational descendants.</li>
+</ul>
+
+<h1>alt counter with ::before</h1>
+<button data-expectedlabel="228 label" data-testname="button with alt counter on ::before" class="ex alt-counter" id="name-comp-name-from-content-alt-counter-invalidation-1" data-ax-case="name-comp-name-from-content-alt-counter-invalidation-1">label</button><br>
+<h3 data-expectedlabel="228 label" data-testname="heading with alt counter on ::before" class="ex alt-counter" id="name-comp-name-from-content-alt-counter-invalidation-2" data-ax-case="name-comp-name-from-content-alt-counter-invalidation-2">label</h3>
+<a href="#" data-expectedlabel="228 label" data-testname="link with alt counter on ::before" class="ex alt-counter" id="name-comp-name-from-content-alt-counter-invalidation-3" data-ax-case="name-comp-name-from-content-alt-counter-invalidation-3">label</a><br>
+<br>
+
 <!-- group: wpt accname/name/comp_name_from_content_display_contents.html -->
 <p>Each element below is named from its contents. In the first group its contents are the single character "x", and
 text in a following sibling belongs to that sibling and must not be part of the name.</p>
