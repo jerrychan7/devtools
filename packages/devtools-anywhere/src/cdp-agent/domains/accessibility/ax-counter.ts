@@ -115,24 +115,225 @@ export function counterValues(target: Element, pseudo: Pseudo, name: string): nu
   return instances.map(i => i.value);
 }
 
-/** A counter's number in a list style; the styles not written here, and numbers out of a style's range, are decimal. */
-export function counterText(n: number, style = 'decimal'): string {
-  const symbol = { disc: '•', circle: '◦', square: '■' }[style];
-  if (symbol) return symbol;
-  const kind = style.replace(/^(lower|upper)-/, '');
+/** The styles that show one symbol whatever the number. */
+const SYMBOLS: Record<string, string> = {
+  disc: '•',
+  circle: '◦',
+  square: '■',
+  'disclosure-open': '▾',
+  'disclosure-closed': '▸',
+};
+
+/** The digits 0 to 9 of the numeric styles: from the code point of their zero, or written out. */
+const NUMERIC: Record<string, number | string> = {
+  'arabic-indic': 0x660,
+  bengali: 0x9e6,
+  cambodian: 0x17e0,
+  khmer: 0x17e0,
+  'cjk-decimal': '〇一二三四五六七八九',
+  devanagari: 0x966,
+  gujarati: 0xae6,
+  gurmukhi: 0xa66,
+  kannada: 0xce6,
+  lao: 0xed0,
+  malayalam: 0xd66,
+  mongolian: 0x1810,
+  myanmar: 0x1040,
+  oriya: 0xb66,
+  persian: 0x6f0,
+  urdu: 0x6f0,
+  tamil: 0xbe6,
+  telugu: 0xc66,
+  thai: 0xe50,
+  tibetan: 0xf20,
+};
+
+/** The letters of the alphabetic styles, from 1 on (a, b, …, z, aa, ab, …); the last two only go up to their letters. */
+const ALPHABETIC: Record<string, string> = {
+  'lower-alpha': 'abcdefghijklmnopqrstuvwxyz',
+  'lower-greek': 'αβγδεζηθικλμνξοπρστυφχψω',
+  hiragana: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをん',
+  katakana: 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヰヱヲン',
+  'hiragana-iroha': 'いろはにほへとちりぬるをわかよたれそつねならむうゐのおくやまけふこえてあさきゆめみしゑひもせす',
+  'katakana-iroha': 'イロハニホヘトチリヌルヲワカヨタレソツネナラムウヰノオクヤマケフコエテアサキユメミシヱヒモセス',
+  'ethiopic-halehame': 'ሀለሐመሠረሰቀበተኀነአከወዐዘየደገጠጰጸፀፈፐ',
+  'ethiopic-halehame-am': 'ሀለሐመሠረሰሸቀበተቸኀነኘአከኸወዐዘዠየደጀገጠጨጰጸፀፈፐ',
+  'ethiopic-halehame-ti-er': 'ሀለሐመረሰሸቀቐበተቸነኘአከኸወዐዘዠየደጀገጠጨጰጸፈፐ',
+  'ethiopic-halehame-ti-et': 'ሀለሐመሠረሰሸቀቐበተቸኀነኘአከኸወዐዘዠየደጀገጠጨጰጸፀፈፐ',
+  'cjk-earthly-branch': '子丑寅卯辰巳午未申酉戌亥',
+  'cjk-heavenly-stem': '甲乙丙丁戊己庚辛壬癸',
+};
+
+/** A CJK style: its digits 0 to 9, its tens, hundreds and thousands, its ten thousands and hundred millions, its minus. */
+type CjkStyle = [string, string, string, string];
+const CJK: Record<string, CjkStyle> = {
+  'simp-chinese-informal': ['零一二三四五六七八九', '十百千', '万亿', '负'],
+  'simp-chinese-formal': ['零壹贰叁肆伍陆柒捌玖', '拾佰仟', '万亿', '负'],
+  'trad-chinese-informal': ['零一二三四五六七八九', '十百千', '萬億', '負'],
+  'cjk-ideographic': ['零一二三四五六七八九', '十百千', '萬億', '負'],
+  'trad-chinese-formal': ['零壹貳參肆伍陸柒捌玖', '拾佰仟', '萬億', '負'],
+  'japanese-informal': ['〇一二三四五六七八九', '十百千', '', 'マイナス'],
+  'japanese-formal': ['零壱弐参四伍六七八九', '拾百阡', '', 'マイナス'],
+  'korean-hangul-formal': ['영일이삼사오육칠팔구', '십백천', '만억', '마이너스 '],
+  'korean-hanja-informal': ['零一二三四五六七八九', '十百千', '萬億', '마이너스 '],
+  'korean-hanja-formal': ['零壹貳參四五六七八九', '拾百仟', '萬億', '마이너스 '],
+};
+
+/** The letters of each decimal place of the additive styles, from the units up (1 to 9, 10 to 90, …). */
+const PLACES = {
+  armenian: ['ԱԲԳԴԵԶԷԸԹ', 'ԺԻԼԽԾԿՀՁՂ', 'ՃՄՅՆՇՈՉՊՋ', 'ՌՍՎՏՐՑՒՓՔ'],
+  georgian: ['აბგდევზჱთ', 'იკლმნჲოპჟ', 'რსტჳფქღყშ', 'ჩცძწჭხჴჯჰ', 'ჵ'],
+  hebrew: ['אבגדהוזחט', 'יכלמנסעפצ', 'קרש'],
+};
+
+/** `n` in letters by decimal place, from the highest: each place's digit as its letter, `mark` after each. */
+function byPlace(n: number, places: string[], mark = ''): string {
   let out = '';
-  if (kind === 'roman' && n > 0 && n < 4000) {
-    // Each decimal digit from the units up, with its place's one, five and ten.
-    for (let i = 0; n; i += 2, n = Math.floor(n / 10)) {
-      const [one = '', five = '', ten = ''] = 'ivxlcdm'.slice(i, i + 3);
-      const d = n % 10;
-      out = (d % 5 > 3 ? one + (d > 5 ? ten : five) : (d > 4 ? five : '') + one.repeat(d % 5)) + out;
+  for (let p = 0; n; p++, n = Math.floor(n / 10)) if (n % 10) out = (places[p]?.[(n % 10) - 1] ?? '') + mark + out;
+  return out;
+}
+
+/** Hebrew below 1000: four hundreds as ת, and 15 and 16 as 9 + 6 and 9 + 7. */
+function hebrewUnder1000(n: number): string {
+  const [ones = '', tens = '', hundreds = ''] = PLACES.hebrew;
+  let out = 'ת'.repeat(Math.floor(n / 400));
+  n %= 400;
+  if (n >= 100) out += hundreds[Math.floor(n / 100) - 1];
+  n %= 100;
+  if (n === 15 || n === 16) return out + 'ט' + ones[n - 10];
+  return out + (tens[Math.floor(n / 10) - 1] ?? '') + (ones[(n % 10) - 1] ?? '');
+}
+
+/** Ethiopic numerals: pairs of digits from the units up, ፻ after the odd ones and ፼ after the even ones. */
+function ethiopic(n: number): string {
+  if (n === 1) return '፩';
+  const pairs: number[] = [];
+  for (; n; n = Math.floor(n / 100)) pairs.unshift(n % 100);
+  return pairs
+    .map((pair, i) => {
+      const index = pairs.length - 1 - i;
+      // A pair of 1 leaves out its digit at the top, and before ፻.
+      const digits =
+        pair === 1 && (!i || index % 2)
+          ? ''
+          : String.fromCharCode(
+              ...(pair >= 10 ? [0x1371 + Math.floor(pair / 10)] : []),
+              ...(pair % 10 ? [0x1368 + (pair % 10)] : [])
+            );
+      return digits + (index % 2 ? (pair ? '፻' : '') : index ? '፼' : '');
+    })
+    .join('');
+}
+
+/**
+ * A CJK number, by Chrome's algorithm: groups of four digits with their places, zeros inside the
+ * number once in a row in Chinese, and none in Japanese or Korean, which spaces its groups.
+ */
+function cjk(n: number, style: string): string {
+  const [digits, places, groups, minus] = CJK[style] ?? [];
+  if (!digits || !places || groups === undefined || minus === undefined) return String(n);
+  const chinese = /chinese|ideographic/.test(style);
+  // Informal Japanese and Korean hanja leave out a one before a place or a group; informal
+  // Chinese the one of the tens from ten to nineteen.
+  const dropOne = /^(japanese|korean-hanja)-informal$/.test(style);
+  const groupsOf: number[] = [];
+  for (let rest = Math.abs(n); rest; rest = Math.floor(rest / 10000)) groupsOf.unshift(rest % 10000);
+  if (!groupsOf.length) return digits[0] ?? '';
+  const tokens: string[] = [];
+  groupsOf.forEach((group, i) => {
+    const level = groupsOf.length - 1 - i;
+    // From the units up: a zero once a digit other than zero was written, in all places but
+    // above the top group's first digit.
+    const out: string[] = [];
+    let trailing = true;
+    for (let p = 0; p < 4 && (i || group >= 10 ** p); p++) {
+      const d = Math.floor(group / 10 ** p) % 10;
+      const one =
+        d === 1 && ((dropOne && (p || level)) || (chinese && !style.endsWith('-formal') && p === 1 && group < 20));
+      if (d) out.unshift((one ? '' : (digits[d] ?? '')) + (p ? (places[p - 1] ?? '') : ''));
+      else if (!trailing) out.unshift('0');
+      if (p < 3) trailing &&= !d;
     }
-  } else if (/^(alpha|latin|greek)$/.test(kind) && n > 0) {
-    const letters = kind === 'greek' ? 'αβγδεζηθικλμνξοπρστυφχψω' : 'abcdefghijklmnopqrstuvwxyz';
-    for (; n > 0; n = Math.floor((n - 1) / letters.length)) out = letters[(n - 1) % letters.length] + out;
-  } else out = (style === 'decimal-leading-zero' && n >= 0 && n < 10 ? '0' : '') + n;
-  return style.startsWith('upper-') ? out.toUpperCase() : out;
+    tokens.push(...out);
+    if (group && level) tokens.push((groups[level - 1] ?? '') + (style.startsWith('korean') ? ' ' : ''));
+    // As in Chrome, a group above the units that ends in three zeros is followed by a zero.
+    if (level && trailing) tokens.push('0');
+  });
+  while (tokens[tokens.length - 1] === '0') tokens.pop();
+  const text = tokens
+    .filter((t, i) => t !== '0' || (chinese && tokens[i - 1] !== '0'))
+    .map(t => (t === '0' ? (digits[0] ?? '') : t))
+    .join('');
+  return (n < 0 ? minus : '') + text.trimEnd();
+}
+
+/** `n` in `style`, or null when out of the style's range. */
+function represent(n: number, style: string): string | null {
+  const digits = NUMERIC[style];
+  if (digits !== undefined) {
+    if (typeof digits === 'string') return n < 0 ? null : [...String(n)].map(d => digits[+d]).join('');
+    return String(n).replace(/\d/g, d => String.fromCharCode(digits + +d));
+  }
+  const letters = ALPHABETIC[style];
+  if (letters) {
+    const all = [...letters];
+    if (n < 1 || (style.startsWith('cjk-') && n > all.length)) return null;
+    let out = '';
+    for (; n > 0; n = Math.floor((n - 1) / all.length)) out = all[(n - 1) % all.length] + out;
+    return out;
+  }
+  if (CJK[style]) return style.startsWith('japanese') && Math.abs(n) > 9999 ? null : cjk(n, style);
+  switch (style) {
+    case 'lower-roman': {
+      if (n < 1 || n > 3999) return null;
+      // Each decimal digit from the units up, with its place's one, five and ten.
+      let out = '';
+      for (let i = 0; n; i += 2, n = Math.floor(n / 10)) {
+        const [one = '', five = '', ten = ''] = 'ivxlcdm'.slice(i, i + 3);
+        const d = n % 10;
+        out = (d % 5 > 3 ? one + (d > 5 ? ten : five) : (d > 4 ? five : '') + one.repeat(d % 5)) + out;
+      }
+      return out;
+    }
+    case 'armenian':
+      // Ten thousands and up as the units, with a circumflex.
+      return n < 1 || n > 99999999
+        ? null
+        : byPlace(Math.floor(n / 10000), PLACES.armenian, '\u0302') + byPlace(n % 10000, PLACES.armenian);
+    case 'georgian':
+      return n < 1 || n > 19999 ? null : byPlace(n, PLACES.georgian);
+    case 'hebrew':
+      if (n < 0 || n > 999999) return null;
+      if (!n) return 'אפס';
+      return (n >= 1000 ? hebrewUnder1000(Math.floor(n / 1000)) + '׳' : '') + hebrewUnder1000(n % 1000);
+    case 'ethiopic-numeric':
+      return n < 1 ? null : ethiopic(n);
+  }
+  return null;
+}
+
+/** The style a style falls back to out of its range: decimal, but for some CJK ones. */
+const fallbackOf = (style: string) => (/^(cjk-(earthly|heavenly)|japanese)/.test(style) ? 'cjk-decimal' : 'decimal');
+
+/**
+ * A counter's number in a list style, as Chrome writes it for the predefined styles of CSS
+ * Counter Styles; others (none, @counter-style rules) are decimal.
+ */
+export function counterText(n: number, style = 'decimal'): string {
+  const symbol = SYMBOLS[style];
+  if (symbol) return symbol;
+  // The upper and lower forms of a style, and its other names.
+  const name = style
+    .replace(/^(upper|lower)-(alpha|latin)$/, 'lower-alpha')
+    .replace(/^upper-roman$/, 'lower-roman')
+    .replace(/^(upper|lower)-armenian$/, 'armenian');
+  for (let current = name; current !== 'decimal'; current = fallbackOf(current)) {
+    const out = represent(n, current);
+    if (out === null) continue;
+    if (current !== name) return out;
+    return style.startsWith('upper-') ? out.toUpperCase() : style.startsWith('lower-') ? out.toLowerCase() : out;
+  }
+  return (style === 'decimal-leading-zero' && n >= 0 && n < 10 ? '0' : '') + n;
 }
 
 const STRING = /"((?:[^"\\]|\\.)*)"/g;

@@ -815,3 +815,19 @@ The licenses in full: LICENSES in this directory.
 <div class="ca"><button id="cnt-attr" data-x="hi" data-ax-case="cnt-attr">x</button></div>
 <div class="cl"><ol><li>a</li><li><button id="cnt-list-item" data-ax-case="cnt-list-item">x</button></li></ol><ol start="5"><li><button id="cnt-list-item-start" data-ax-case="cnt-list-item-start">x</button></li></ol></div>
 <div class="cr"><ol><li>a</li><li>b</li><li><button id="cnt-reversed" data-ax-case="cnt-reversed">x</button></li></ol></div>
+<!-- group: devtools-anywhere counter styles -->
+<style>
+  .cx button::before { content: "" / counter(s, decimal-leading-zero) "|" counter(s, arabic-indic) "|" counter(s, armenian) "|" counter(s, upper-armenian) "|" counter(s, lower-armenian) "|" counter(s, bengali) "|" counter(s, cambodian) "|" counter(s, khmer) "|" counter(s, cjk-decimal) "|" counter(s, devanagari) "|" counter(s, georgian) "|" counter(s, gujarati) "|" counter(s, gurmukhi) "|" counter(s, hebrew) "|" counter(s, kannada) "|" counter(s, lao) "|" counter(s, malayalam) "|" counter(s, mongolian) "|" counter(s, myanmar) "|" counter(s, oriya) "|" counter(s, persian) "|" counter(s, urdu) "|" counter(s, tamil) "|" counter(s, telugu) "|" counter(s, thai) "|" counter(s, tibetan) "|" counter(s, hiragana) "|" counter(s, hiragana-iroha) "|" counter(s, katakana) "|" counter(s, katakana-iroha) "|" counter(s, disclosure-open) "|" counter(s, disclosure-closed) "|" counter(s, cjk-earthly-branch) "|" counter(s, cjk-heavenly-stem) "|" counter(s, cjk-ideographic) "|" counter(s, japanese-informal) "|" counter(s, japanese-formal) "|" counter(s, korean-hangul-formal) "|" counter(s, korean-hanja-informal) "|" counter(s, korean-hanja-formal) "|" counter(s, simp-chinese-informal) "|" counter(s, simp-chinese-formal) "|" counter(s, trad-chinese-informal) "|" counter(s, trad-chinese-formal) "|" counter(s, ethiopic-numeric) "|" counter(s, ethiopic-halehame) "|" counter(s, ethiopic-halehame-am) "|" counter(s, ethiopic-halehame-ti-er) "|" counter(s, ethiopic-halehame-ti-et) "|" counter(s, lower-norwegian); }
+  .cx .vm12::before { counter-reset: s -12; }
+  .cx .v0::before { counter-reset: s 0; }
+  .cx .v1::before { counter-reset: s 1; }
+  .cx .v15::before { counter-reset: s 15; }
+  .cx .v99::before { counter-reset: s 99; }
+  .cx .v1001::before { counter-reset: s 1001; }
+  .cx .v10010::before { counter-reset: s 10010; }
+  .cx .v12345::before { counter-reset: s 12345; }
+  .cx .v1000100::before { counter-reset: s 1000100; }
+  .cx .v10001000::before { counter-reset: s 10001000; }
+  .cx .v123456789::before { counter-reset: s 123456789; }
+</style>
+<div class="cx"><button class="vm12" id="cnt-style-m12" data-ax-case="cnt-style-m12">x</button><button class="v0" id="cnt-style-0" data-ax-case="cnt-style-0">x</button><button class="v1" id="cnt-style-1" data-ax-case="cnt-style-1">x</button><button class="v15" id="cnt-style-15" data-ax-case="cnt-style-15">x</button><button class="v99" id="cnt-style-99" data-ax-case="cnt-style-99">x</button><button class="v1001" id="cnt-style-1001" data-ax-case="cnt-style-1001">x</button><button class="v10010" id="cnt-style-10010" data-ax-case="cnt-style-10010">x</button><button class="v12345" id="cnt-style-12345" data-ax-case="cnt-style-12345">x</button><button class="v1000100" id="cnt-style-1000100" data-ax-case="cnt-style-1000100">x</button><button class="v10001000" id="cnt-style-10001000" data-ax-case="cnt-style-10001000">x</button><button class="v123456789" id="cnt-style-123456789" data-ax-case="cnt-style-123456789">x</button></div>
