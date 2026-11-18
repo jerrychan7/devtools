@@ -208,9 +208,6 @@ importers:
 
   packages/devtools-anywhere:
     dependencies:
-      '@zumer/snapdom':
-        specifier: ^3.3.5
-        version: 3.3.5
       dom-accessibility-api:
         specifier: ^0.7.1
         version: 0.7.1
@@ -218,6 +215,9 @@ importers:
       '@devtools-anywhere/relay-core':
         specifier: workspace:*
         version: link:../relay-core
+      '@zumer/snapdom':
+        specifier: ^3.3.5
+        version: 3.3.5
       devtools-protocol:
         specifier: ^0.0.1721318
         version: 0.0.1721318

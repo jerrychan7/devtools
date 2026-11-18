@@ -45,11 +45,11 @@
     "dev": "node build.ts --watch"
   },
   "dependencies": {
-    "@zumer/snapdom": "^3.3.5",
     "dom-accessibility-api": "^0.7.1"
   },
   "devDependencies": {
     "@devtools-anywhere/relay-core": "workspace:*",
+    "@zumer/snapdom": "^3.3.5",
     "devtools-protocol": "^0.0.1721318",
     "esbuild": "^0.25.0",
     "typescript": "^7.0.2"
