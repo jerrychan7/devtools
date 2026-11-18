@@ -1,8 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
+import { comparable, nodeIdOf, openAxPage, outline } from '../../../../test-support/accessibility.ts';
 
 let env: Env | undefined;
 let t: TestPage;
@@ -73,47 +74,10 @@ const FIXTURE = `
 setUpAndTearDown(
   async () => {
     env = await launch();
-    t = await openPage(env, []);
-    await t.page.evaluate(
-      (html, base) => {
-        document.title = 'AX';
-        document.body.innerHTML = html;
-        // The fixture's own focus would differ between the sides' runs.
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-        window.__session = window.DevtoolsAnywhere.createCdpSession({
-          loadAccessibility: () => import(base + '/packages/devtools-anywhere/dist/accessibility.js'),
-        });
-      },
-      FIXTURE,
-      env.baseUrl
-    );
-    // Chrome's whole-tree commands need the domain enabled.
-    await Promise.all([t.ours.send('Accessibility.enable'), t.chrome.send('Accessibility.enable')]);
+    t = await openAxPage(env, FIXTURE);
   },
   () => env?.close()
 );
-
-/** The DOM node id of `#id` on one side. */
-async function nodeIdOf(side: Side, id: string) {
-  const { root } = await side.send('DOM.getDocument', { depth: 0 });
-  return (await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: `#${id}` })).nodeId;
-}
-
-/** Ids and links between nodes differ between the sides; Chrome's internal role numbers are its own. */
-function comparable(node: Protocol.Accessibility.AXNode) {
-  return JSON.parse(
-    JSON.stringify(node, (key, value: unknown) =>
-      ['nodeId', 'parentId', 'childIds', 'backendDOMNodeId', 'chromeRole', 'frameId'].includes(key) ? undefined : value
-    )
-  ) as unknown;
-}
-
-/** The node and its relatives as roles and names: what the page cannot see (inline text boxes) left out. */
-function outline(nodes: Protocol.Accessibility.AXNode[]) {
-  return nodes
-    .filter(n => n.role?.value !== 'InlineTextBox')
-    .map(n => `${String(n.role?.value)}${n.name ? `:${String(n.name.value)}` : ''}`);
-}
 
 const ids = [...FIXTURE.matchAll(/ id=(\w+)/g)].map(m => m[1] ?? '');
 
