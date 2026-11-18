@@ -120,9 +120,7 @@ describe('Accessibility.getPartialAXTree', () => {
         )
       );
       assert.ok(ours && chrome);
-      // Chrome's list markers have no DOM node.
-      const nodes = (r: typeof ours) => outline(r.nodes).filter(s => !s.startsWith('ListMarker'));
-      assert.deepEqual(nodes(ours), nodes(chrome), `#${id}`);
+      assert.deepEqual(outline(ours.nodes), outline(chrome.nodes), `#${id}`);
     }
   });
 
@@ -153,10 +151,6 @@ test('without accessibility.js the commands fail', async () => {
     /Not supported in the page/
   );
 });
-
-/** Roles and names of a list of nodes, without those the page cannot see. */
-const visible = (nodes: Protocol.Accessibility.AXNode[]) =>
-  outline(nodes).filter(s => !/^(ListMarker|MenuListPopup)/.test(s));
 
 describe('the whole tree', () => {
   test('queryAXTree finds nodes by role and name in a subtree', async () => {
@@ -205,7 +199,7 @@ describe('the whole tree', () => {
       let id = root.nodeId;
       for (let i = 0; i < 5; i++) {
         const { nodes } = await side.send('Accessibility.getChildAXNodes', { id });
-        seen.push(visible(nodes));
+        seen.push(outline(nodes));
         const next = nodes[0];
         if (!next) break;
         id = next.nodeId;
@@ -221,7 +215,7 @@ describe('the whole tree', () => {
       [t.ours, t.chrome].map(side => side.send('Accessibility.getFullAXTree', { depth: 1 }))
     );
     assert.ok(ours && chrome);
-    assert.deepEqual(visible(ours.nodes), visible(chrome.nodes));
+    assert.deepEqual(outline(ours.nodes), outline(chrome.nodes));
   });
 });
 
@@ -276,7 +270,7 @@ test('DOM methods the page replaced do not change the tree', async () => {
   try {
     assert.deepEqual(await full(), before);
     const [ours, chrome] = await Promise.all([top(t.ours), top(t.chrome)]);
-    assert.deepEqual(visible(ours.nodes), visible(chrome.nodes));
+    assert.deepEqual(outline(ours.nodes), outline(chrome.nodes));
   } finally {
     await t.page.evaluate(() => (window as unknown as { __restoreDom: () => void }).__restoreDom());
   }
