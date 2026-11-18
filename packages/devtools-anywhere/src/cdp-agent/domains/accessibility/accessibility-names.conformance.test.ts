@@ -16,9 +16,6 @@ const TODO = {
   'name: Chrome names an SVG shape from its title child even with role=none on the title; ours gives none': `
     name-comp-host-language-label-tentative-7
     `,
-  'owns: Chrome leaves out aria-owns targets it does not take (hidden, already owned); ours lists them all': `
-    accname-aria-owns-7 accname-aria-owns-8 accname-aria-owns-9
-    `,
   'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
     name-comp-label-104
     `,

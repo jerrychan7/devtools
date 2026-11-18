@@ -2,6 +2,7 @@
 // it turns the DOM into CDP AXNodes. Kept out of the bundle like snapDOM, for its size.
 import type { Protocol } from 'devtools-protocol';
 import { contentsText, documentNameOf, nameOf, textNameOf, type IdOf } from './ax-name';
+import { inDisplayNone } from './ax-text';
 import { TreeShape, isFocusable, isInternalRole, roleOf } from './ax-tree';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText } from '../../core/realm';
 
@@ -47,6 +48,22 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
     if (target) relatedNodes.push({ backendDOMNodeId: idOf(target), idref });
   }
   return { name, value: { type: 'idrefList', value, relatedNodes } };
+}
+
+/**
+ * Whether aria-owns takes none of its targets: Chrome leaves out targets that are not rendered or
+ * carry aria-hidden themselves (one inside an aria-hidden subtree is still taken), and drops the
+ * relation when none is left.
+ */
+function ownsNothing(el: Element): boolean {
+  const root = el.getRootNode();
+  if (!isDocument(root) && !isShadowRoot(root)) return false;
+  const targets = (el.getAttribute('aria-owns') ?? '')
+    .trim()
+    .split(/\s+/)
+    .map(idref => root.getElementById(idref))
+    .filter(target => target !== null);
+  return targets.length > 0 && targets.every(t => inDisplayNone(t) || t.getAttribute('aria-hidden') === 'true');
 }
 
 /** The nesting level of a list item: how many lists hold it. */
@@ -393,7 +410,8 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   // Relationships, then sparse attributes.
   for (const name of ['describedby', 'owns'] as const) {
     const list = idrefList(el, name, idOf);
-    if (list && !(name === 'describedby' && !list.value.relatedNodes?.length)) out.push(list);
+    if (list && !(name === 'describedby' && !list.value.relatedNodes?.length) && !(name === 'owns' && ownsNothing(el)))
+      out.push(list);
   }
   const url = urlOf(el, role);
   if (url) out.push(prop('url', 'string', url));
