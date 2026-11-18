@@ -393,7 +393,7 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     const text = recursiveTextAlternative(legend, null, c)[0];
     if (text) return [text, 'relatedElement'];
   }
-  if (el.localName === 'svg' && el.namespaceURI === SVG_NS) {
+  if (el.namespaceURI === SVG_NS) {
     const title = el.querySelector(':scope > title');
     if (title?.textContent) return [title.textContent, 'relatedElement'];
   }
@@ -612,7 +612,7 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
   if ((isHtml(el, 'img') || area) && el.getAttribute('alt') === '') return out;
   if (isHtmlElement(el) && el.isContentEditable && !isNativeTextField(el) && !isTextFieldRole(role))
     push(attributeSource(el, 'aria-placeholder', 'placeholder'), false);
-  if (el.localName === 'svg' && el.namespaceURI === SVG_NS) {
+  if (el.namespaceURI === SVG_NS) {
     const title = el.querySelector(':scope > title');
     const text = title?.textContent ?? '';
     push(source({ type: 'relatedElement', nativeSource: 'title' }, text || null), !!text);

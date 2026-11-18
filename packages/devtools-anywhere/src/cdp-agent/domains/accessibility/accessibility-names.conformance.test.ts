@@ -10,9 +10,6 @@ const TODO = {
   'name: Chrome drops the white space after an image whose text is taken elsewhere; ours keeps a double space': `
     name-comp-name-from-content-52
     `,
-  'name: Chrome names an SVG shape from its title child even with role=none on the title; ours gives none': `
-    name-comp-host-language-label-tentative-7
-    `,
 };
 
 describeCases(readCases(new URL('cases/names.html', import.meta.url)), {
