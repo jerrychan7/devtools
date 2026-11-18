@@ -375,7 +375,8 @@ function implicitRole(el: Element): string {
       return el.parentElement?.querySelector(':scope > td') ? 'rowheader' : 'columnheader';
     }
     case 'td':
-      return /^(grid|treegrid)$/.test(el.closest('table')?.getAttribute('role') ?? '') ? 'gridcell' : 'cell';
+      const grid = el.closest('table');
+      return grid && /^(grid|treegrid)$/.test(explicitRole(grid) ?? '') ? 'gridcell' : 'cell';
     case 'input':
       if (isHtml(el, 'input')) return inputRole(el);
       break;
@@ -608,6 +609,7 @@ export class TreeShape {
       node.localName === 'li' &&
       !explicit &&
       /^(ul|ol|menu)$/.test(node.parentElement?.localName ?? '') &&
+      // Chrome compares the role attribute as written: only "list" and "directory" keep the item.
       !/^(|list|directory)$/.test(node.parentElement?.getAttribute('role') ?? '')
     )
       return lifted('presentationalRole');
