@@ -373,18 +373,18 @@ function labelsOf(el: Element & { labels: NodeListOf<HTMLLabelElement> }, c: Com
 /**
  * A ::before or ::after pseudo-element's generated text: as rendered, or its alternative text as
  * written (`content: "text" / "alternative"`). Chrome resolves attr() in the computed value;
- * counter() is computed here.
+ * counters and quotes are worked out in ax-counter.ts.
  */
 function generatedText(el: Element, pseudo: '::before' | '::after'): string {
   const style = styleOf(el, pseudo);
   const parts = style.content.split(/\s\/\s/);
-  if (parts.length > 1) return contentText(parts[parts.length - 1] ?? '', el, pseudo);
-  let text = contentText(parts[0] ?? '', el, pseudo).replace(/[ \t\n\f\r]+/g, ' ');
+  if (parts.length > 1) return contentText(parts[parts.length - 1] ?? '', el, pseudo, true);
+  let text = contentText(parts[0] ?? '', el, pseudo, false).replace(/[ \t\n\f\r]+/g, ' ');
   // Its space at the start or the end of a line does not show.
   const inline = style.display.startsWith('inline');
   if (text.startsWith(' ') && (!inline || (pseudo === '::before' && lineEdge(el, true)))) text = text.slice(1);
   if (text.endsWith(' ') && (!inline || (pseudo === '::after' && lineEdge(el, false)))) text = text.slice(0, -1);
-  return text;
+  return text.replace(/\0/g, '');
 }
 
 /** A child of an element, as the text of its content walks it: a node, or a generated pseudo-element. */
