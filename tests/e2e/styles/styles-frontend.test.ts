@@ -89,11 +89,7 @@ async function state(property: string) {
     const el = document.getElementById('e2e');
     return el ? getComputedStyle(el).getPropertyValue(p) : '';
   }, property);
-  const at = await page.evaluate(() => {
-    const box = document.getElementById('e2e')?.getBoundingClientRect();
-    return box ? { x: Math.round(box.left + 2), y: Math.round(box.top + 2) } : { x: 0, y: 0 };
-  });
-  const text = await frontend.evaluate(async at => {
+  const text = await frontend.evaluate(async () => {
     // The built frontend has no type declarations; only this much of it is used.
     type Host = {
       InspectorFrontendHost: {
@@ -116,24 +112,31 @@ async function state(property: string) {
       if (msg.id) pending.get(msg.id)?.(msg.result);
     });
     let id = 9e8 + Math.floor(Math.random() * 1e6);
+    // A failed step throws, naming it, rather than reading as an empty sheet.
     const call = (method: string, params: object) =>
-      new Promise<Record<string, unknown>>(resolve => {
-        pending.set(++id, result => resolve(result && typeof result === 'object' ? { ...result } : {}));
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        pending.set(++id, result =>
+          result && typeof result === 'object' ? resolve({ ...result }) : reject(new Error(`${method} failed`))
+        );
         host.sendMessageToBackend(JSON.stringify({ id, method, params }));
       });
+    // #e2e found by its id, not at a point of the page: a point moves with the margin the tests
+    // add. Not by DOM.getDocument either, which would reset the frontend's own node ids.
+    const { result } = await call('Runtime.evaluate', { expression: "document.getElementById('e2e')" });
+    const objectId = result && typeof result === 'object' ? Reflect.get(result, 'objectId') : undefined;
+    const { nodeId } = await call('DOM.requestNode', { objectId });
     // The sheet of the rule matching #e2e with `.e2e` in its selector.
-    const { backendNodeId } = await call('DOM.getNodeForLocation', at);
-    const { nodeIds } = await call('DOM.pushNodesByBackendIdsToFrontend', { backendNodeIds: [backendNodeId] });
-    const nodeId = Array.isArray(nodeIds) ? nodeIds[0] : undefined;
     const { matchedCSSRules } = await call('CSS.getMatchedStylesForNode', { nodeId });
     const rules = Array.isArray(matchedCSSRules) ? matchedCSSRules : [];
     const rule: unknown = rules
       .map(m => (m && typeof m === 'object' ? Reflect.get(m, 'rule') : null))
       .find(r => r && typeof r === 'object' && JSON.stringify(Reflect.get(r, 'selectorList')).includes('.e2e'));
     const styleSheetId = rule && typeof rule === 'object' ? Reflect.get(rule, 'styleSheetId') : undefined;
+    if (!styleSheetId) throw new Error('no rule with .e2e matches #e2e');
     const { text } = await call('CSS.getStyleSheetText', { styleSheetId });
-    return typeof text === 'string' ? text : '';
-  }, at);
+    if (typeof text !== 'string') throw new Error('CSS.getStyleSheetText gave no text');
+    return text;
+  });
   return { computed, text };
 }
 
