@@ -336,8 +336,17 @@ export function counterText(n: number, style = 'decimal'): string {
   return (style === 'decimal-leading-zero' && n >= 0 && n < 10 ? '0' : '') + n;
 }
 
+/** What a list marker writes after its number in a list style, as Chrome does (". " for the styles not known). */
+export function markerSuffix(style: string): string {
+  if (SYMBOLS[style]) return ' ';
+  if (/^(cjk-|hiragana|katakana|japanese-|simp-chinese|trad-chinese)/.test(style)) return '、';
+  if (style.startsWith('korean-')) return ', ';
+  if (style.startsWith('ethiopic-halehame')) return '፦';
+  return style === 'ethiopic-numeric' ? '/ ' : '. ';
+}
+
 const STRING = /"((?:[^"\\]|\\.)*)"/g;
-const unescape = (text = '') => text.replace(/\\(.)/g, '$1');
+export const unescape = (text = '') => text.replace(/\\(.)/g, '$1');
 
 /** How deep in quotes the pseudo-element `pseudo` of `target` starts: the quotes generated before it, in order. */
 function quoteDepth(target: Element, pseudo: Pseudo): number {

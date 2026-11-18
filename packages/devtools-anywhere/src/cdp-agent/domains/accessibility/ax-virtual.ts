@@ -3,6 +3,8 @@
 // placeholder and inner editor with its text, an input button's text, a color well's swatch). Each is a
 // VirtualNode, found again by its host element and a key unique in that host: the Accessibility
 // domain gives it an id of its own (accessibility.ts), apart from the DOM nodes' backend ids.
+// A list marker and its text children are VirtualNodes too, keys `marker` and `marker:<n>`, built
+// in ax-node.ts (ax-marker.ts); the marker has its ::marker's backend id.
 import { domChildren, hasAttr, isMenuList, matches, type Inclusion } from './ax-tree';
 import { isElement, isHtml } from '../../core/realm';
 

@@ -5,6 +5,7 @@ import { CdpError } from '../../core/session';
 import type { Context } from '../../core/context';
 import { documentOf, isNode } from '../../core/realm';
 import { resolveNode } from '../dom/dom';
+import { PseudoElement } from '../../core/nodes/nodes';
 import type { AccessibilityModule, AXTree } from './ax-node';
 import type { AXRef } from './ax-virtual';
 
@@ -27,7 +28,9 @@ const OBSERVED: MutationObserverInit = {
  * implicit roles (ax-tree.ts, ax-name.ts), as Chrome's getPartialAXTree gives it to the
  * Accessibility pane. Chrome's inline text boxes are not in it. The nodes of user-agent shadow
  * trees (a select's popup), which the page cannot see, are redone without a DOM node
- * (ax-virtual.ts): each gets a negative id, kept for the session, apart from the backend ids.
+ * (ax-virtual.ts): each gets a negative id, kept for the session, apart from the backend ids. So
+ * are list markers (ax-marker.ts), but a marker has its ::marker pseudo-element's backend id, as in
+ * Chrome; its text children get negative ids.
  *
  * Events, as Chrome 158 sends them: `nodesUpdated` only while enabled, and only for the nodes the
  * client was given by getChildAXNodes or getAXNodeAndAncestors (the Accessibility pane's
@@ -68,7 +71,13 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
         throw e;
       }
     ));
-    return m.createAXTree(doc, node => nodes.backendIdOf(node), frames.ofNode(doc).id, virtualIdOf);
+    return m.createAXTree(
+      doc,
+      node => nodes.backendIdOf(node),
+      frames.ofNode(doc).id,
+      virtualIdOf,
+      host => nodes.backendIdOf(nodes.pseudoOf(host, 'marker'))
+    );
   };
 
   /**
@@ -176,8 +185,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     async getPartialAXTree(
       params: Protocol.Accessibility.GetPartialAXTreeRequest
     ): Promise<Protocol.Accessibility.GetPartialAXTreeResponse> {
-      const node = resolveNode(ctx, params);
-      const ax = await tree(documentOf(node));
+      const { node, ax } = await target(params);
       const out = [ax.node(node)];
       if (params.fetchRelatives ?? true) {
         // Like Chrome: the node's children, then its ancestors up to the root.
@@ -220,13 +228,20 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     async getChildAXNodes(
       params: Protocol.Accessibility.GetChildAXNodesRequest
     ): Promise<Protocol.Accessibility.GetChildAXNodesResponse> {
+      // A node without a DOM node by its id below 0, a list marker by its ::marker's backend id.
       const id = Number(params.id);
       const virtual = virtualKeys.get(id);
-      const host = nodes.getByBackendId(virtual ? virtual.hostId : id);
+      const found = nodes.getByBackendId(virtual ? virtual.hostId : id);
+      const marker = found instanceof PseudoElement && found.pseudoType === 'marker';
+      const host = marker ? found.host : found;
       if (!isNode(host)) throw new CdpError('Invalid ID');
       const ax = await tree(documentOf(host));
-      const node = virtual ? ax.virtual(host, virtual.key) : host;
-      if (!node) throw new CdpError('Invalid ID');
+      const node = virtual || marker ? ax.virtual(host, virtual ? virtual.key : 'marker') : host;
+      // A ::marker the tree has no marker for has no children, as Chrome's ignored node.
+      if (!node) {
+        if (marker) return { nodes: [] };
+        throw new CdpError('Invalid ID');
+      }
       const given: [AXRef, Protocol.Accessibility.AXNode][] = [];
       childrenOf(ax, node, given);
       remember(given);
@@ -236,8 +251,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     async getAXNodeAndAncestors(
       params: Protocol.Accessibility.GetAXNodeAndAncestorsRequest
     ): Promise<Protocol.Accessibility.GetAXNodeAndAncestorsResponse> {
-      const node = resolveNode(ctx, params);
-      const ax = await tree(documentOf(node));
+      const { node, ax } = await target(params);
       const given: [AXRef, Protocol.Accessibility.AXNode][] = [[node, ax.node(node)]];
       for (let p = ax.parent(node); p; p = ax.parent(p)) given.push([p, ax.node(p)]);
       remember(given);
@@ -279,6 +293,25 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
       if (axChild.ignored) childrenOf(ax, child, out);
     }
     return out;
+  }
+
+  /**
+   * The node a command refers to and its tree: a DOM node, or a ::marker pseudo-element for its list
+   * marker's node (its host's when the tree has no marker for it, where Chrome has an ignored node).
+   */
+  async function target(params: {
+    nodeId?: number;
+    backendNodeId?: number;
+    objectId?: string;
+  }): Promise<{ node: AXRef; ax: AXTree }> {
+    const { nodeId, backendNodeId } = params;
+    const ref = nodeId ? nodes.get(nodeId) : backendNodeId ? nodes.getByBackendId(backendNodeId) : null;
+    if (ref instanceof PseudoElement && ref.pseudoType === 'marker') {
+      const ax = await tree(documentOf(ref.host));
+      return { node: ax.virtual(ref.host, 'marker') ?? ref.host, ax };
+    }
+    const node = resolveNode(ctx, params);
+    return { node, ax: await tree(documentOf(node)) };
   }
 
   /** The document of a frame, the top one by default. */

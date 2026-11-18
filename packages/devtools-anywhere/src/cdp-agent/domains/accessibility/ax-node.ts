@@ -12,6 +12,7 @@ import {
   type IdOf,
 } from './ax-name';
 import { inDisplayNone } from './ax-text';
+import { markerText, type MarkerText } from './ax-marker';
 import {
   attr,
   byId,
@@ -29,10 +30,11 @@ import {
   scopeOf,
   textOf,
   TreeShape,
+  type Inclusion,
 } from './ax-tree';
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import type { Probe } from '../../probe/types';
-import { isVirtual, type AXRef, type VirtualNode } from './ax-virtual';
+import { isVirtual, VirtualNode, type AXRef } from './ax-virtual';
 
 // This script has its own copy of core/natives.ts, which found the page's functions when it loaded, on
 // demand: the agent gives it those it uses instead (accessibility.ts).
@@ -56,7 +58,10 @@ export interface AXTree {
   children(node: AXRef): AXRef[];
   /** Whether a node is in the tree. */
   inTree(node: AXRef): boolean;
-  /** A node without a DOM node (ax-virtual.ts), by its host and key. */
+  /**
+   * A node without a DOM node (ax-virtual.ts), by its host and key: `marker` for an element's list
+   * marker, which has the backend id of its ::marker.
+   */
   virtual(host: Node, key: string): AXRef | null;
 }
 
@@ -65,7 +70,14 @@ export type VirtualIdOf = (hostId: number, key: string) => number;
 
 /** What accessibility.js exports. */
 export interface AccessibilityModule {
-  createAXTree(doc: Document, idOf: IdOf, frameId: string, virtualIdOf: VirtualIdOf): AXTree;
+  /** `markerIdOf`: the backend id of an element's ::marker pseudo-element. */
+  createAXTree(
+    doc: Document,
+    idOf: IdOf,
+    frameId: string,
+    virtualIdOf: VirtualIdOf,
+    markerIdOf: (host: Element) => number
+  ): AXTree;
   /** Takes the agent's native functions (`nativesInUse`), past the page's wrappers. */
   useNatives(natives: Pick<Probe, 'natives' | 'top'>): void;
 }
@@ -549,25 +561,151 @@ function virtualNode(node: VirtualNode, queried: boolean | undefined): Omit<AXNo
 const fieldText = (el: Element) =>
   isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type) ? inputButtonText(el) : textValueOf(el, roleOf(el));
 
-export function createAXTree(doc: Document, idOf: IdOf, frameId: string, virtualIdOf: VirtualIdOf): AXTree {
+/** An element's list marker in the tree: its text, its node, and why it is ignored. */
+interface Marker {
+  text: MarkerText;
+  /** Key `marker`, with one StaticText child per run of its text, keys `marker:0`, `marker:1`… */
+  node: VirtualNode;
+  /** The reason of an ignored marker: in a summary, or in a list item hidden or not visible. */
+  ignoredBy: 'presentationalRole' | 'ariaHiddenSubtree' | 'notVisible' | null;
+}
+
+const PRESENTATIONAL: Inclusion = { kind: 'ignored', reason: 'presentationalRole' };
+
+/** Whether a node is a list marker or one of its children (ax-marker.ts). */
+const isMarker = (node: AXRef): node is VirtualNode => isVirtual(node) && /^marker\b/.test(node.key);
+
+export function createAXTree(
+  doc: Document,
+  idOf: IdOf,
+  frameId: string,
+  virtualIdOf: VirtualIdOf,
+  markerIdOf: (host: Element) => number
+): AXTree {
   const shape = new TreeShape(doc, fieldText);
-  const id = (node: AXRef) => String(isVirtual(node) ? virtualIdOf(idOf(node.host), node.key) : idOf(node));
+  // The markers' nodes, made once per tree.
+  const markers = new Map<Element, Marker | null>();
+  const markerOf = (host: Element): Marker | null => {
+    let marker = markers.get(host);
+    if (marker !== undefined) return marker;
+    const inclusion = shape.inclusion(host);
+    const text = shape.inTree(host) ? markerText(host) : null;
+    // A list item aria-hidden or not visible keeps its marker ignored and empty; not one aria-hidden
+    // by an ancestor.
+    const hidden = inclusion.kind === 'ignored' && /^(ariaHidden|notVisible)/.test(inclusion.reason);
+    if (!text || (inclusion.kind === 'ignored' && inclusion.reason === 'ariaHiddenSubtree')) marker = null;
+    else {
+      const ignoredBy = hidden
+        ? inclusion.reason === 'notVisible'
+          ? 'notVisible'
+          : 'ariaHiddenSubtree'
+        : roleOf(host) === 'DisclosureTriangle'
+          ? 'presentationalRole'
+          : null;
+      const parts = (hidden || text.alt ? [] : text.parts).map((part, i) => {
+        const child = new VirtualNode(host, `marker:${i}`, 'StaticText', PRESENTATIONAL);
+        child.text = part;
+        return child;
+      });
+      const node = new VirtualNode(
+        host,
+        'marker',
+        text.alt ? 'StaticText' : 'ListMarker',
+        ignoredBy ? { kind: 'ignored', reason: ignoredBy } : { kind: 'included' },
+        parts
+      );
+      for (const part of parts) part.parent = node;
+      marker = { text, node, ignoredBy };
+    }
+    markers.set(host, marker);
+    return marker;
+  };
+  // A marker has its ::marker's backend id, as in Chrome; the other nodes without a DOM node get ids
+  // below 0, kept for the session (accessibility.ts).
+  const id = (node: AXRef) =>
+    String(
+      !isVirtual(node)
+        ? idOf(node)
+        : node.key === 'marker'
+          ? markerIdOf(node.host)
+          : virtualIdOf(idOf(node.host), node.key)
+    );
+  const children = (node: AXRef): AXRef[] => {
+    if (isMarker(node)) return node.raw;
+    const own = shape.children(node);
+    const marker = isElement(node) && markerOf(node);
+    return marker ? [marker.node, ...own] : own;
+  };
+  const parent = (node: AXRef): AXRef | null => (isMarker(node) ? node.parent : shape.parent(node));
   const links = (node: AXRef, base: AXNode): AXNode => {
-    const parent = shape.parent(node);
+    const up = parent(node);
     return {
       ...base,
-      ...(parent && { parentId: id(parent) }),
-      childIds: shape.children(node).map(id),
+      ...(up && { parentId: id(up) }),
+      childIds: children(node).map(id),
       // Chrome's nodes of the shadow trees have one; the page cannot see theirs.
-      ...(!isVirtual(node) && { backendDOMNodeId: idOf(node) }),
+      ...(!isVirtual(node)
+        ? { backendDOMNodeId: idOf(node) }
+        : node.key === 'marker' && { backendDOMNodeId: markerIdOf(node.host) }),
     };
   };
+  /**
+   * The AXNode of a marker or of one of its text children, which Chrome ignores as presentational.
+   * `queried`: an ignored one keeps its role and name, as for DOM nodes.
+   */
+  const markerNode = (node: VirtualNode, queried?: boolean): AXNode => {
+    const marker = markerOf(node.host) as Marker;
+    const as = (role: string, value: string) =>
+      queried
+        ? { role: roleValue(role), name: { type: 'computedString' as const, value } }
+        : { role: roleValue('none') };
+    if (node !== marker.node)
+      return links(node, {
+        nodeId: id(node),
+        ignored: true,
+        ignoredReasons: [{ name: 'presentationalRole', value: { type: 'boolean', value: true } }],
+        ...as('StaticText', node.text),
+      });
+    if (marker.ignoredBy) {
+      const value: AXValue =
+        marker.ignoredBy === 'ariaHiddenSubtree'
+          ? {
+              type: 'idref',
+              relatedNodes: [{ backendDOMNodeId: idOf(node.host), ...(node.host.id && { idref: node.host.id }) }],
+            }
+          : { type: 'boolean', value: true };
+      return links(node, {
+        nodeId: id(node),
+        ignored: true,
+        ignoredReasons: [{ name: marker.ignoredBy, value }],
+        ...as('ListMarker', marker.text.name),
+      });
+    }
+    const value = marker.text.name;
+    return links(node, {
+      nodeId: id(node),
+      ignored: false,
+      role: roleValue(node.role),
+      name: {
+        type: 'computedString',
+        value,
+        sources: [{ type: marker.text.alt ? 'implicit' : 'contents', value: { type: 'computedString', value } }],
+      },
+      properties: [],
+    });
+  };
   return {
-    parent: node => shape.parent(node),
-    children: node => shape.children(node),
-    inTree: node => shape.inTree(node),
-    virtual: (host, key) => (isElement(host) ? shape.virtual(host, key) : null),
+    parent,
+    children,
+    inTree: node => isMarker(node) || shape.inTree(node),
+    virtual(host, key) {
+      if (!isElement(host)) return null;
+      if (!/^marker\b/.test(key)) return shape.virtual(host, key);
+      const marker = markerOf(host)?.node;
+      return (key === 'marker' ? marker : marker?.raw.find(c => isVirtual(c) && c.key === key)) ?? null;
+    },
     node(node, queried) {
+      if (isMarker(node)) return markerNode(node, queried);
       if (isVirtual(node)) return links(node, { nodeId: id(node), ...virtualNode(node, queried) });
       const inclusion = shape.inclusion(node);
       if (inclusion.kind !== 'included') {

@@ -499,7 +499,22 @@ function implicitRole(el: Element): string {
   // A generic element that can be dragged or takes autofocus is a group in Chrome.
   // Not with a role attribute, even one with no role Chrome knows.
   if (attr(el, 'role')?.trim()) return 'generic';
+  // So is one shown as a list item a list item, marker or not.
+  if (isListItemBox(el)) return 'listitem';
   return hasAttr(el, 'draggable') || hasAttr(el, 'autofocus') ? 'group' : 'generic';
+}
+
+/** Whether an element is shown as a list item (`display: list-item`, inline or not). */
+export const isListItemBox = (el: Element) => /\blist-item\b/.test(styleOf(el).display);
+
+/**
+ * Whether an element shows a list marker (ax-marker.ts): a list item whose ::marker has content,
+ * its own or that of list-style-type; list-style-image alone makes none in the tree.
+ */
+export function generatesMarker(el: Element): boolean {
+  if (!isListItemBox(el)) return false;
+  const content = styleOf(el, '::marker').content;
+  return content !== 'none' && (content !== 'normal' || styleOf(el).listStyleType !== 'none');
 }
 
 /** The role Chrome gives an element: an ARIA role, or one of its own (isInternalRole). */
@@ -658,14 +673,23 @@ export class TreeShape {
 
   /**
    * How a node takes part in the tree (Inclusion). An element aria-owns moves stays in the tree
-   * when presentational or aria-hidden, ignored, as in Chrome.
+   * when presentational or aria-hidden, ignored, as in Chrome; so does a list item with a marker,
+   * and one with visibility: hidden, which keeps its marker.
    */
   inclusion(node: AXRef): Inclusion {
     if (isVirtual(node)) return node.inclusion;
     let inclusion = this.inclusions.get(node);
     if (!inclusion) {
       inclusion = this.ownInclusion(node);
-      if (inclusion.kind === 'lifted' && this.owner.has(node as Element)) inclusion = ignored(inclusion.reason);
+      if (inclusion.kind === 'lifted' || inclusion.kind === 'excluded') {
+        const raised = inclusion.kind === 'lifted';
+        const unseen = inclusion.reason === 'notVisible';
+        if (
+          (raised && this.owner.has(node as Element)) ||
+          ((raised || unseen) && isElement(node) && generatesMarker(node))
+        )
+          inclusion = ignored(inclusion.reason);
+      }
       this.inclusions.set(node, inclusion);
     }
     return inclusion;

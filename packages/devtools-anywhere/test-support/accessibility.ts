@@ -108,6 +108,33 @@ export async function partialNode(t: TestPage, id: string): Promise<{ ours: unkn
   return { ours, chrome };
 }
 
+/**
+ * `#id`'s node and the nodes under it in the whole tree on each side, comparable, each with its
+ * depth below `#id`: what a node alone does not show, such as the list markers, which have no DOM
+ * node of their own but their ::marker.
+ */
+export async function subtree(t: TestPage, id: string): Promise<{ ours: unknown; chrome: unknown }> {
+  const [ours, chrome] = await Promise.all(
+    [t.ours, t.chrome].map(async side => {
+      const { node } = await side.send('DOM.describeNode', { nodeId: await nodeIdOf(side, id) });
+      const { nodes } = await side.send('Accessibility.getFullAXTree', {});
+      const byId = new Map(nodes.map(n => [n.nodeId, n]));
+      const out: unknown[] = [];
+      const visit = (n: Protocol.Accessibility.AXNode | undefined, depth: number) => {
+        if (!n || n.role?.value === 'InlineTextBox') return;
+        out.push({ depth, ...(comparable(n) as object) });
+        for (const child of n.childIds ?? []) visit(byId.get(child), depth + 1);
+      };
+      visit(
+        nodes.find(n => n.backendDOMNodeId === node.backendNodeId),
+        0
+      );
+      return out;
+    })
+  );
+  return { ours, chrome };
+}
+
 /** Asserts that `#id`'s node is the same on both sides. */
 export async function assertSameNode(t: TestPage, id: string): Promise<void> {
   const { ours, chrome } = await partialNode(t, id);
@@ -119,6 +146,8 @@ export interface CaseGroup {
   html: string;
   /** The ids of the elements to compare, in document order. */
   ids: string[];
+  /** The ids of the elements whose subtrees are compared too (`data-ax-tree`), in document order. */
+  trees?: string[];
 }
 
 /** The groups of a case file. */
@@ -137,7 +166,8 @@ export function readCases(url: URL): CaseGroup[] {
         throw new Error(`${url.pathname}: case id "${id}" in "${name}" is already used in "${first}"`);
       seen.set(id, name);
     }
-    groups.push({ name, html, ids });
+    const trees = [...html.matchAll(/\sdata-ax-tree="([^"]+)"/g)].map(m => m[1] ?? '');
+    groups.push({ name, html, ids, trees });
   }
   return groups;
 }
@@ -178,6 +208,11 @@ export function describeCases(groups: CaseGroup[], options: CaseOptions = {}): v
         if (setup) await t.page.evaluate(setup);
       });
       for (const id of group.ids) test(`#${id}`, { todo: todo.get(id) }, () => assertSameNode(t, id));
+      for (const id of group.trees ?? [])
+        test(`#${id} and its subtree`, { todo: todo.get(id) }, async () => {
+          const { ours, chrome } = await subtree(t, id);
+          assert.deepEqual(ours, chrome);
+        });
     });
 }
 

@@ -8,7 +8,11 @@
 import { MANUAL_SETUPS, describeCases, readCases } from '../../../../test-support/accessibility.ts';
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
-const TODO = {};
+const TODO = {
+  // Chrome splits a quote of a marker's content into a text node of its own, and writes counters in
+  // the styles of @counter-style rules, which are decimal here.
+  'list markers with quotes or @counter-style styles': 'lm-todo',
+};
 
 describeCases(readCases(new URL('cases/manual.html', import.meta.url)), {
   todo: TODO,

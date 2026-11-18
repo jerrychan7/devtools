@@ -831,3 +831,23 @@ The licenses in full: LICENSES in this directory.
   .cx .v123456789::before { counter-reset: s 123456789; }
 </style>
 <div class="cx"><button class="vm12" id="cnt-style-m12" data-ax-case="cnt-style-m12">x</button><button class="v0" id="cnt-style-0" data-ax-case="cnt-style-0">x</button><button class="v1" id="cnt-style-1" data-ax-case="cnt-style-1">x</button><button class="v15" id="cnt-style-15" data-ax-case="cnt-style-15">x</button><button class="v99" id="cnt-style-99" data-ax-case="cnt-style-99">x</button><button class="v1001" id="cnt-style-1001" data-ax-case="cnt-style-1001">x</button><button class="v10010" id="cnt-style-10010" data-ax-case="cnt-style-10010">x</button><button class="v12345" id="cnt-style-12345" data-ax-case="cnt-style-12345">x</button><button class="v1000100" id="cnt-style-1000100" data-ax-case="cnt-style-1000100">x</button><button class="v10001000" id="cnt-style-10001000" data-ax-case="cnt-style-10001000">x</button><button class="v123456789" id="cnt-style-123456789" data-ax-case="cnt-style-123456789">x</button></div>
+<!-- group: devtools-anywhere list markers -->
+<style>
+  .lm-c1::marker { content: "abc"; }
+  .lm-c2::marker { content: "a" "b" attr(data-x); }
+  .lm-c3::marker { content: counter(list-item); }
+  .lm-c4::marker { content: "(" counter(list-item, upper-roman) ") "; }
+  .lm-c5::marker { content: ""; }
+  .lm-c6::marker { content: none; }
+  .lm-c7::marker { content: "x" / "alt"; }
+  .lm-q::marker { content: open-quote "q" close-quote; }
+  @counter-style lm-thumbs { system: cyclic; symbols: "+"; suffix: " "; }
+</style>
+<ol id="lm-ol" data-ax-tree="lm-ol"><li id="lm-ol-1" data-ax-case="lm-ol-1">a</li><li>b<ol><li>nested</li></ol></li><li style="display:block">block</li><li><button id="lm-button" data-ax-case="lm-button">in a button's item</button></li></ol>
+<ol id="lm-start" data-ax-tree="lm-start" start="5" reversed><li>a</li><li value="10">b</li><li>c</li><li value="-2">d</li></ol>
+<ul id="lm-ul" data-ax-tree="lm-ul"><li>disc</li><li style="list-style-type:circle">circle</li><li style="list-style-type:square">square</li><li style="list-style-type:disclosure-open">open</li><li style="list-style-type:disclosure-closed">closed</li><li style="list-style-type:'-> '">string</li><li style="list-style-type:''">empty string</li><li style="list-style-position:inside">inside</li><li style="list-style:none">none</li><li style="list-style-image:url(data:image/gif;base64,R0lGODlhAQABAAAAACw=)">image</li><li style="list-style-image:url(data:image/gif;base64,R0lGODlhAQABAAAAACw=);list-style-type:none">image, no type</li><li style="list-style-type:no-such-style">unknown style</li></ul>
+<ol id="lm-styles" data-ax-tree="lm-styles"><li value="13" style="list-style-type:upper-roman">a</li><li style="list-style-type:lower-greek">b</li><li style="list-style-type:hebrew">c</li><li style="list-style-type:cjk-earthly-branch">d</li><li style="list-style-type:simp-chinese-informal">e</li><li style="list-style-type:korean-hangul-formal">f</li><li style="list-style-type:japanese-formal">g</li><li style="list-style-type:ethiopic-halehame">h</li><li style="list-style-type:ethiopic-numeric">i</li><li style="list-style-type:arabic-indic">j</li><li style="list-style-type:decimal-leading-zero" value="3">k</li></ol>
+<ol id="lm-content" data-ax-tree="lm-content"><li class="lm-c1">string</li><li class="lm-c2" data-x="c">strings</li><li class="lm-c3">counter</li><li class="lm-c4">counter and strings</li><li class="lm-c5">empty</li><li class="lm-c6">none</li><li class="lm-c7">alternative text</li></ol>
+<div id="lm-div" data-ax-tree="lm-div"><div id="lm-div-1" data-ax-case="lm-div-1" style="display:list-item">a div</div><span style="display:list-item">a span</span><div style="display:list-item;list-style:none">no marker</div><p style="display:list-item">a paragraph</p><div style="display:inline list-item" draggable="true">inline, draggable</div></div>
+<ul id="lm-roles" data-ax-tree="lm-roles"><li role="none">none</li><li role="presentation" style="list-style:none">presentation, no marker</li><li role="button" id="lm-role-button" data-ax-case="lm-role-button">button</li><li role="generic">generic</li><li style="visibility:hidden">hidden</li></ul>
+<ul id="lm-todo" data-ax-tree="lm-todo"><li class="lm-q">quotes</li><li style="list-style-type:lm-thumbs">counter style rule</li></ul>
