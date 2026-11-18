@@ -479,7 +479,7 @@ export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree
           nodeId: id(node),
           ignored: true,
           // Chrome gives some ignored nodes no reason (a ruby's annotation, folded into the ruby).
-          ignoredReasons: inclusion.reason ? [reason] : [],
+          ignoredReasons: inclusion.kind === 'ignored' && inclusion.noReason ? [] : [reason],
           role: { type: 'role', value: 'none' },
         });
       }
