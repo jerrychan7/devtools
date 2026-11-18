@@ -52,10 +52,16 @@ export async function nodeIdOf(side: Side, id: string): Promise<number> {
   const { root } = await side.send('DOM.getDocument', { depth: 0 });
   // An id the selector cannot take (a leading digit) is looked for as one in a shadow root.
   const found = await side
-    .send('DOM.querySelector', { nodeId: root.nodeId, selector: `#${CSS.escape(id)}` })
+    .send('DOM.querySelector', {
+      nodeId: root.nodeId,
+      selector: `#${CSS.escape(id)}`,
+    })
     .catch(() => ({ nodeId: 0 }));
   if (found.nodeId) return found.nodeId;
-  const { root: tree } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+  const { root: tree } = await side.send('DOM.getDocument', {
+    depth: -1,
+    pierce: true,
+  });
   const search = (node: Protocol.DOM.Node): number | undefined => {
     const attrs = node.attributes ?? [];
     for (let i = 0; i < attrs.length; i += 2) if (attrs[i] === 'id' && attrs[i + 1] === id) return node.nodeId;
@@ -92,7 +98,10 @@ export async function partialNode(t: TestPage, id: string): Promise<{ ours: unkn
   const [ours, chrome] = await Promise.all(
     [t.ours, t.chrome].map(async side =>
       (
-        await side.send('Accessibility.getPartialAXTree', { nodeId: await nodeIdOf(side, id), fetchRelatives: false })
+        await side.send('Accessibility.getPartialAXTree', {
+          nodeId: await nodeIdOf(side, id),
+          fetchRelatives: false,
+        })
       ).nodes.map(comparable)
     )
   );
@@ -170,4 +179,103 @@ export function describeCases(groups: CaseGroup[], options: CaseOptions = {}): v
       });
       for (const id of group.ids) test(`#${id}`, { todo: todo.get(id) }, () => assertSameNode(t, id));
     });
+}
+
+/** cases/manual.html's setups: nodes made in a frame's realm, moved into the page. */
+export const MANUAL_SETUPS = {
+  'devtools-anywhere nodes of another realm': () => {
+    const frame = document.body.appendChild(document.createElement('iframe'));
+    const other = frame.contentDocument as Document;
+    for (const id of ['da-realm-1', 'da-realm-3']) {
+      const span = other.createElement('span');
+      span.append(other.createTextNode('from a frame'));
+      document.getElementById(id)?.append(span);
+    }
+    frame.remove();
+  },
+};
+
+/** A whole-tree line: the node's role, name and whether it is ignored, indented by its depth. */
+export interface TreeLine {
+  text: string;
+  /** The roles of the node's ancestors, root first, to tell what a difference is about. */
+  ancestors: string[];
+}
+
+/**
+ * One side's whole tree (`Accessibility.getFullAXTree`) as lines in tree order, children under
+ * their parent by `childIds`. Inline text boxes are left out: the page cannot see them, so we do
+ * not make them; their text is already their parent StaticText's name, which stays.
+ */
+export async function fullTree(side: Side): Promise<TreeLine[]> {
+  const { nodes } = await side.send('Accessibility.getFullAXTree', {});
+  const byId = new Map(nodes.map(n => [n.nodeId, n]));
+  const lines: TreeLine[] = [];
+  const visit = (node: Protocol.Accessibility.AXNode, depth: number, ancestors: string[]) => {
+    const role = String(node.role?.value);
+    if (role === 'InlineTextBox') return;
+    const name = node.name?.value ? `:${JSON.stringify(String(node.name.value))}` : '';
+    lines.push({
+      text: `${'  '.repeat(depth)}${role}${name}${node.ignored ? ' (ignored)' : ''}`,
+      ancestors,
+    });
+    for (const id of node.childIds ?? []) {
+      const child = byId.get(id);
+      if (child) visit(child, depth + 1, [...ancestors, role]);
+      else
+        lines.push({
+          text: `${'  '.repeat(depth + 1)}<not listed>`,
+          ancestors: [...ancestors, role],
+        });
+    }
+  };
+  const root = nodes.find(n => !n.parentId) ?? nodes[0];
+  if (root) visit(root, 0, []);
+  return lines;
+}
+
+/** The kinds a whole-tree difference falls into, by what the line's node is and where it is. */
+export type TreeDiffKind = 'ListMarker' | 'MenuListPopup/option' | 'input inner generic' | 'svg title text' | 'other';
+
+export function treeDiffKind(line: TreeLine): TreeDiffKind {
+  const role = line.text.trim().split(/[: ]/)[0] ?? '';
+  if (role === 'ListMarker' || line.ancestors.includes('ListMarker')) return 'ListMarker';
+  if (/^MenuList(Popup|Option)$/.test(role) || line.ancestors.includes('MenuListPopup')) return 'MenuListPopup/option';
+  // An input's own subtree: a text field's inner editor, a date field's parts.
+  const inputs = ['textbox', 'searchbox', 'spinbutton', 'combobox', 'slider', 'Date', 'DateTime', 'InputTime'];
+  if (inputs.some(r => line.ancestors.includes(r))) return 'input inner generic';
+  const svg = ['SvgRoot', 'graphics-document', 'graphics-symbol', 'graphics-object'];
+  if (svg.includes(role) || svg.some(r => line.ancestors.includes(r))) return 'svg title text';
+  return 'other';
+}
+
+/** The lines only one side has, by a longest common subsequence of the two outlines. */
+export function treeDiff(ours: TreeLine[], chrome: TreeLine[]): { side: 'ours' | 'chrome'; line: TreeLine }[] {
+  const n = ours.length;
+  const m = chrome.length;
+  const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  const at = (i: number, j: number) => lcs[i]?.[j] ?? 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const row = lcs[i] ?? new Uint32Array(0);
+    for (let j = m - 1; j >= 0; j--)
+      row[j] = ours[i]?.text === chrome[j]?.text ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
+  }
+  const out: { side: 'ours' | 'chrome'; line: TreeLine }[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    const a = ours[i];
+    const b = chrome[j];
+    if (a && b && a.text === b.text) {
+      i++;
+      j++;
+    } else if (b && (!a || at(i, j + 1) >= at(i + 1, j))) {
+      out.push({ side: 'chrome', line: b });
+      j++;
+    } else if (a) {
+      out.push({ side: 'ours', line: a });
+      i++;
+    }
+  }
+  return out;
 }
