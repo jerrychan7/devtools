@@ -388,7 +388,7 @@ function generatedText(el: Element, pseudo: '::before' | '::after'): string {
 }
 
 /** A child of an element, as the text of its content walks it: a node, or a generated pseudo-element. */
-type Piece = Node | { pseudo: string; text: string };
+type Piece = Node | { pseudo: string; text: string; alt?: boolean };
 
 /** Whether a pseudo-element is laid out inline. */
 const pseudoInline = (el: Element, pseudo: string) => styleOf(el, pseudo).display.startsWith('inline');
@@ -449,10 +449,11 @@ function separates(el: Element, prev: Piece, next: Piece, prevFrom: From, nextFr
 function textFromDescendants(el: Element, root: Root, c: Computation): string {
   const pieces: Piece[] = [];
   const before = generatedText(el, '::before');
-  if (before) pieces.push({ pseudo: '::before', text: before });
+  const hasAlt = (pseudo: string) => /\s\/\s/.test(styleOf(el, pseudo).content);
+  if (before) pieces.push({ pseudo: '::before', text: before, alt: hasAlt('::before') });
   pieces.push(...childrenOf(el));
   const after = generatedText(el, '::after');
-  if (after) pieces.push({ pseudo: '::after', text: after });
+  if (after) pieces.push({ pseudo: '::after', text: after, alt: hasAlt('::after') });
 
   const actions = targetsOf(el, 'aria-actions');
   // The white space between a row's cells is not in the tree.
@@ -461,6 +462,8 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
   let prev: Piece | null = null;
   let lastFrom: From = 'none';
   let skipped = false;
+  // Whether the text so far ends with a ::before's alternative text.
+  let altEnd = false;
   for (let i = 0; i < pieces.length; i++) {
     const piece = pieces[i] as Piece;
     // Not the element being named, which its own label's text passes over keeping both spaces.
@@ -493,14 +496,18 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
       out &&
       !isHtmlSpace(out[out.length - 1]) &&
       !isHtmlSpace(text[0]) &&
-      separates(el, prev, piece, lastFrom, from)
+      // Chrome sets alternative text apart from the text beside it with a space.
+      (altEnd || (!isNode(piece) && piece.alt) || separates(el, prev, piece, lastFrom, from))
     )
       out += ' ';
     // An element already taken in this computation gives nothing and leaves its two sides' white space as one.
     else if (skipped && text && isHtmlSpace(text[0]) && isHtmlSpace(out[out.length - 1])) text = text.slice(1);
     out += text;
     prev = piece;
-    if (text) lastFrom = from;
+    if (text) {
+      lastFrom = from;
+      altEnd = !isNode(piece) && !!piece.alt;
+    }
     skipped = !text && wasVisited ? true : text ? false : skipped;
   }
   return out;

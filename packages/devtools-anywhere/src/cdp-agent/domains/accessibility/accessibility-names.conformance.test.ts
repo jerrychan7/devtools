@@ -7,10 +7,7 @@
 import { describeCases, readCases } from '../../../../test-support/accessibility.ts';
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
-const TODO = {
-  'a ::before whose alt text is a counter: Chrome joins it to the content with a space, we do not':
-    'name-comp-name-from-content-alt-counter-invalidation-1 name-comp-name-from-content-alt-counter-invalidation-2 name-comp-name-from-content-alt-counter-invalidation-3',
-};
+const TODO = {};
 
 describeCases(readCases(new URL('cases/names.html', import.meta.url)), {
   todo: TODO,
