@@ -38,7 +38,11 @@ const NAME_FROM_CONTENTS = new Set([
 ]);
 
 /** Roles that list no `title` source in Chrome: an element that is only a container of text. */
-const NO_TITLE = new Set(['generic', 'paragraph', 'term', 'definition', 'caption']);
+const NO_TITLE = new Set(
+  'generic paragraph term definition caption code deletion insertion emphasis mark strong subscript superscript time'.split(
+    ' '
+  )
+);
 
 const computed = (value: string): Protocol.Accessibility.AXValue => ({ type: 'computedString', value });
 

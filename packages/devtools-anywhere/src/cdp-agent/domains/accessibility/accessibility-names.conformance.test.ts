@@ -47,12 +47,11 @@ const TODO = {
     aria-actions-aria-actions-target-accname-from-aria-label-tentative-1
     `,
   'name sources: same name, different source list': `
-    lib-A20 lib-C8 lib-T8 lib-T10 lib-P2 lib-P3 lib-P4 lib-P6 lib-P10 lib-P11 lib-P12b
-    name-comp-hidden-not-referenced-2 name-comp-hidden-not-referenced-3 input-01
-    name-comp-hidden-not-referenced-7 name-comp-hidden-not-referenced-8 name-comp-host-language-label-1
-    name-comp-host-language-label-3 name-comp-host-language-label-4 name-comp-label-32
-    name-comp-label-51 name-comp-label-61 name-comp-label-99 name-comp-label-112 name-comp-label-128
-    name-comp-label-129 name-comp-label-130 name-comp-labelledby-hidden-nodes-12
+    lib-A20 lib-C8 lib-T8 lib-T10 name-comp-hidden-not-referenced-2 name-comp-hidden-not-referenced-3
+    input-01 name-comp-hidden-not-referenced-7 name-comp-hidden-not-referenced-8
+    name-comp-host-language-label-1 name-comp-host-language-label-3 name-comp-host-language-label-4
+    name-comp-label-32 name-comp-label-51 name-comp-label-61 name-comp-label-99 name-comp-label-112
+    name-comp-label-128 name-comp-label-129 name-comp-label-130 name-comp-labelledby-hidden-nodes-12
     name-comp-labelledby-hidden-nodes-13 name-comp-labelledby-hidden-nodes-14
     name-comp-labelledby-hidden-nodes-15 name-comp-labelledby-hidden-nodes-16
     name-comp-labelledby-hidden-nodes-18 name-comp-labelledby-hidden-nodes-19
@@ -65,15 +64,10 @@ const TODO = {
     name-comp-host-language-label-46 name-comp-host-language-label-47 name-comp-host-language-label-48
     name-comp-host-language-label-51 name-comp-host-language-label-52 name-comp-host-language-label-67
     name-comp-host-language-label-68 name-comp-host-language-label-71 name-comp-host-language-label-72
-    name-comp-label-93 name-comp-tooltip-20 name-comp-tooltip-22
     `,
   'implicit role: Chrome gives the element its own role (deletion, emphasis, meter, time…); ours gives generic': `
-    irn name-comp-host-language-label-tentative-4 lirp name-comp-host-language-label-tentative-7
-    name-comp-label-94 html-aam-names-1 html-aam-names-2 html-aam-names-3 html-aam-names-4
-    html-aam-names-5 html-aam-names-6 html-aam-names-7 html-aam-names-8 html-aam-names-57
-    html-aam-names-58 html-aam-names-59 html-aam-names-60 html-aam-names-61 html-aam-names-62
-    html-aam-names-63 html-aam-names-64 html-aam-names-105 html-aam-names-106 html-aam-names-107
-    html-aam-names-108 html-aam-names-109 html-aam-names-110 html-aam-names-111 html-aam-names-112
+    name-comp-host-language-label-tentative-4 name-comp-host-language-label-tentative-7
+    name-comp-label-94
     `,
   'value: Chrome and ours give different values': `
     lib-C10 name-comp-embedded-control-8 name-comp-embedded-control-10 name-comp-embedded-control-12
@@ -115,9 +109,6 @@ const TODO = {
   'properties: Chrome and ours differ in atomic, invalid, live, relevant': `
     lib-C1
     `,
-  'role attribute with no valid first token (invalid, abstract, case or Unicode variant): Chrome falls back to the next token or the implicit role; ours takes the token as is': `
-    lib-P12
-    `,
   'properties: Chrome and ours differ in activedescendant, orientation, required': `
     name-comp-embedded-control-6
     `,
@@ -126,9 +117,6 @@ const TODO = {
     `,
   'properties: Chrome and ours differ in hasPopup, required': `
     name-comp-label-11
-    `,
-  'role: Chrome gives list; ours gives directory': `
-    name-comp-label-15
     `,
   'properties: Chrome and ours differ in readonly': `
     name-comp-label-20

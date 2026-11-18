@@ -3,21 +3,12 @@
 //
 // Blink builds its tree from the layout tree (third_party/blink/renderer/modules/accessibility/),
 // which a page cannot read: these rules redo the common cases from the DOM and computed styles,
-// checked against Chrome's getFullAXTree (accessibility.conformance.test.ts). The role mapping
-// starts from dom-accessibility-api's getRole (HTML-AAM) and adds Chrome's own choices.
-import { getRole } from 'dom-accessibility-api';
+// checked against Chrome's getFullAXTree (accessibility.conformance.test.ts). The role mapping is
+// Chrome's: ARIA roles where it gives them, its own (capitalized) roles elsewhere.
 import { isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 
-/** Chrome's roles that are not ARIA roles, reported as `internalRole`. */
-export const INTERNAL_ROLES = new Set([
-  'RootWebArea',
-  'StaticText',
-  'LabelText',
-  'DisclosureTriangle',
-  'DescriptionList',
-  'Legend',
-  'Figcaption',
-]);
+/** Whether a role is one of Chrome's own, not an ARIA role (reported as `internalRole`). */
+export const isInternalRole = (role: string) => /^[A-Z]/.test(role);
 
 /** Why a node in the tree is ignored (CDP `AXPropertyName`). */
 export type IgnoredReason =
@@ -49,10 +40,42 @@ const OPAQUE = new Set(
 /** Sectioning elements, inside which `header` and `footer` are no landmarks. */
 const SECTIONING = 'article, aside, main, nav, section';
 
-/** The first token of `role` that is a role, or null. */
+/** The ARIA roles Chrome knows (abstract roles are not among them). */
+const ARIA_ROLES = new Set(
+  'alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox comment complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic graphics-document graphics-object graphics-symbol grid gridcell group heading image img insertion link list listbox listitem log main mark marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox sectionfooter sectionheader separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(
+    ' '
+  )
+);
+const DOC_ROLE =
+  /^doc-(abstract|acknowledgments|afterword|appendix|backlink|biblioentry|bibliography|biblioref|chapter|colophon|conclusion|cover|credit|credits|dedication|endnotes?|epigraph|epilogue|errata|example|footnote|foreword|glossary|glossref|index|introduction|noteref|notice|pagebreak|pagefooter|pageheader|pagelist|part|preface|prologue|pullquote|qna|subtitle|tip|toc)$/;
+
+/** ARIA attributes any element takes: with one, Chrome keeps the element's role over none. */
+const GLOBAL_ARIA =
+  /^aria-(atomic|busy|controls|current|describedby|description|details|dropeffect|flowto|grabbed|keyshortcuts|label|labelledby|live|owns|relevant|roledescription)$/;
+
+/** Whether an element has a name from its author: aria-labelledby (to some text), aria-label or title. */
+function hasAuthorName(el: Element): boolean {
+  if (el.getAttribute('aria-label')?.trim() || el.getAttribute('title')?.trim()) return true;
+  const root = el.getRootNode() as Document | ShadowRoot;
+  return (el.getAttribute('aria-labelledby') ?? '')
+    .split(/[ \t\n\r\f]+/)
+    .some(id => !!id && !!root.getElementById?.(id)?.textContent?.trim());
+}
+
+/**
+ * The role from the role attribute: its first token that is a role Chrome knows (in any case),
+ * with region and form only when named; `none` for both presentational roles, unless the element
+ * is focusable or has a global ARIA attribute. Null when no token applies.
+ */
 function explicitRole(el: Element): string | null {
-  const value = el.getAttribute('role')?.trim();
-  return value ? (value.split(/\s+/)[0] ?? null) : null;
+  for (const token of (el.getAttribute('role') ?? '').toLowerCase().split(/[ \t\n\r\f]+/)) {
+    if (!ARIA_ROLES.has(token) && !DOC_ROLE.test(token)) continue;
+    if ((token === 'region' || token === 'form') && !hasAuthorName(el)) continue;
+    if (token === 'none' || token === 'presentation')
+      return isFocusable(el) || [...el.attributes].some(a => GLOBAL_ARIA.test(a.name)) ? null : 'none';
+    return token === 'img' ? 'image' : token === 'directory' ? 'list' : token;
+  }
+  return null;
 }
 
 /** Whether an element takes keyboard focus: in the tab order or focusable by script. */
@@ -73,60 +96,151 @@ const isSummary = (el: Element) =>
   el.parentElement?.localName === 'details' &&
   el.parentElement.querySelector(':scope > summary') === el;
 
-/** The role Chrome gives an element: an ARIA role, or one of INTERNAL_ROLES. */
-export function roleOf(el: Element): string {
-  const explicit = explicitRole(el);
-  if (explicit === 'img') return 'image';
-  if (explicit && explicit !== 'none' && explicit !== 'presentation') return explicit;
+/** Roles that only depend on the tag name. */
+const TAG_ROLES: Record<string, string> = {
+  abbr: 'Abbr',
+  address: 'group',
+  article: 'article',
+  audio: 'Audio',
+  blockquote: 'blockquote',
+  br: 'LineBreak',
+  button: 'button',
+  canvas: 'Canvas',
+  caption: 'caption',
+  code: 'code',
+  datalist: 'listbox',
+  dd: 'definition',
+  del: 'deletion',
+  s: 'deletion',
+  details: 'group',
+  dfn: 'term',
+  dt: 'term',
+  dialog: 'dialog',
+  dir: 'list',
+  menu: 'list',
+  ol: 'list',
+  ul: 'list',
+  dl: 'DescriptionList',
+  em: 'emphasis',
+  embed: 'EmbeddedObject',
+  fieldset: 'group',
+  figure: 'figure',
+  figcaption: 'Figcaption',
+  form: 'form',
+  h1: 'heading',
+  h2: 'heading',
+  h3: 'heading',
+  h4: 'heading',
+  h5: 'heading',
+  h6: 'heading',
+  hgroup: 'group',
+  optgroup: 'group',
+  hr: 'separator',
+  iframe: 'Iframe',
+  img: 'image',
+  svg: 'image',
+  ins: 'insertion',
+  label: 'LabelText',
+  legend: 'Legend',
+  li: 'listitem',
+  main: 'main',
+  mark: 'mark',
+  math: 'MathMLMath',
+  meter: 'meter',
+  nav: 'navigation',
+  object: 'PluginObject',
+  option: 'option',
+  output: 'status',
+  p: 'paragraph',
+  progress: 'progressbar',
+  ruby: 'Ruby',
+  search: 'search',
+  strong: 'strong',
+  sub: 'subscript',
+  sup: 'superscript',
+  table: 'table',
+  textarea: 'textbox',
+  time: 'time',
+  tr: 'row',
+  thead: 'rowgroup',
+  tbody: 'rowgroup',
+  tfoot: 'rowgroup',
+  video: 'Video',
+};
+
+/** An input's role, by its type. */
+function inputRole(el: HTMLInputElement): string {
+  switch (el.type) {
+    case 'button':
+    case 'submit':
+    case 'reset':
+    case 'image':
+    case 'file':
+      return 'button';
+    case 'checkbox':
+    case 'radio':
+      return el.type;
+    case 'range':
+      return 'slider';
+    case 'number':
+      return 'spinbutton';
+    case 'color':
+      return 'ColorWell';
+    case 'date':
+      return 'Date';
+    case 'datetime-local':
+    case 'month':
+    case 'week':
+      return 'DateTime';
+    case 'time':
+      return 'InputTime';
+  }
+  if (el.list) return 'combobox';
+  return el.type === 'search' ? 'searchbox' : 'textbox';
+}
+
+/** The role an element has without a role attribute. */
+function implicitRole(el: Element): string {
   switch (el.localName) {
-    case 'dl':
-      return 'DescriptionList';
-    case 'legend':
-      return 'Legend';
-    case 'figcaption':
-      return 'Figcaption';
-    case 'blockquote':
-      return 'blockquote';
-    case 'caption':
-      return 'caption';
     case 'th': {
       const scope = el.getAttribute('scope');
       if (scope === 'row' || scope === 'rowgroup') return 'rowheader';
       if (scope === 'col' || scope === 'colgroup') return 'columnheader';
       return el.parentElement?.querySelector(':scope > td') ? 'rowheader' : 'columnheader';
     }
+    case 'td':
+      return /^(grid|treegrid)$/.test(el.closest('table')?.getAttribute('role') ?? '') ? 'gridcell' : 'cell';
     case 'input':
-      // dom-accessibility-api has no role for a password field; Chrome makes it a text box.
-      if (isHtml(el, 'input') && el.type === 'password') return 'textbox';
+      if (isHtml(el, 'input')) return inputRole(el);
       break;
-    case 'label':
-      return 'LabelText';
     case 'summary':
       return isSummary(el) ? 'DisclosureTriangle' : 'generic';
-    case 'details':
-      return 'group';
     case 'section':
-      return el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || el.hasAttribute('title')
-        ? 'region'
-        : 'generic';
+      return hasAuthorName(el) ? 'region' : 'generic';
+    case 'aside':
+      return el.parentElement?.closest(SECTIONING) && !hasAuthorName(el) ? 'generic' : 'complementary';
     case 'header':
     case 'footer': {
       const inSection = el.parentElement?.closest(SECTIONING);
       if (inSection) return el.localName === 'header' ? 'sectionheader' : 'sectionfooter';
       return el.localName === 'header' ? 'banner' : 'contentinfo';
     }
-    case 'p':
-      return 'paragraph';
     case 'a':
+    case 'area':
       return el.hasAttribute('href') ? 'link' : 'generic';
-    case 'svg':
-      return 'image';
     case 'select':
       if (isHtml(el, 'select')) return el.multiple || el.size > 1 ? 'listbox' : 'combobox';
   }
-  const role = getRole(el);
-  if (role === 'img') return 'image';
-  return role && role !== 'presentation' && role !== 'none' ? role : 'generic';
+  const role = TAG_ROLES[el.localName];
+  if (role) return role;
+  // A generic element that can be dragged or takes autofocus is a group in Chrome.
+  return el.hasAttribute('draggable') || el.hasAttribute('autofocus') ? 'group' : 'generic';
+}
+
+/** The role Chrome gives an element: an ARIA role, or one of its own (isInternalRole). */
+export function roleOf(el: Element): string {
+  const explicit = explicitRole(el);
+  return explicit && explicit !== 'none' ? explicit : implicitRole(el);
 }
 
 /**
@@ -240,10 +354,16 @@ export class TreeShape {
     // An implicit or plain tbody; thead and tfoot are row groups.
     if (node.localName === 'tbody' && !node.hasAttribute('role')) return { kind: 'ignored', reason: 'uninteresting' };
     const explicit = explicitRole(node);
-    if (node.localName === 'img' && node.getAttribute('alt') === '' && !explicit)
+    if (
+      node.localName === 'img' &&
+      node.getAttribute('alt') === '' &&
+      !explicit &&
+      !node.hasAttribute('aria-label') &&
+      !node.hasAttribute('aria-labelledby') &&
+      !node.getAttribute('title')
+    )
       return { kind: 'lifted', reason: 'emptyAlt' };
-    if ((explicit === 'none' || explicit === 'presentation') && !isFocusable(node))
-      return { kind: 'lifted', reason: 'presentationalRole' };
+    if (explicit === 'none') return { kind: 'lifted', reason: 'presentationalRole' };
     return { kind: 'included' };
   }
 

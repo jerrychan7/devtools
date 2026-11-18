@@ -687,50 +687,30 @@ const groups: CaseGroup[] = Object.entries(CONFIGS).map(([file, configs]) => {
 /** Cases that differ from Chrome on the current implementation, by what differs. */
 const TODO = {
   'Chrome gives one of its internal roles (Abbr, Canvas, DateTime, LayoutTable…); ours gives an ARIA role': `
-    iframe-el-1 iframe-el-2 iframe-el-3 iframe-el-4 iframe-el-5 other-form-elements-el-22
-    other-form-elements-el-23 other-form-elements-el-24 other-form-elements-el-25
-    other-form-elements-el-26 other-form-elements-el-27 other-form-elements-el-28
-    other-form-elements-el-29 other-form-elements-el-30 other-form-elements-el-31
-    other-form-elements-el-32 other-form-elements-el-33 other-form-elements-el-34
-    other-form-elements-el-35 other-form-elements-el-36 other-form-elements-el-37
-    other-form-elements-el-38 other-form-elements-el-39 other-form-elements-el-40
-    other-form-elements-el-41 other-form-elements-el-42 other-form-elements-el-50
-    other-form-elements-el-51 other-form-elements-el-52 other-form-elements-el-53
-    other-form-elements-el-54 other-form-elements-el-55 other-form-elements-el-56
-    other-form-elements-el-64 other-form-elements-el-65 other-form-elements-el-66
-    other-form-elements-el-67 other-form-elements-el-68 other-form-elements-el-69
-    other-form-elements-el-70 other-form-elements-el-71 other-form-elements-el-72
-    other-form-elements-el-73 other-form-elements-el-74 other-form-elements-el-75
-    other-form-elements-el-76 other-form-elements-el-77 phrasing-elements-el-6 phrasing-elements-el-7
-    phrasing-elements-el-8 phrasing-elements-el-9 phrasing-elements-el-10 phrasing-elements-el-16
-    phrasing-elements-el-17 phrasing-elements-el-18 phrasing-elements-el-19 phrasing-elements-el-20
+    other-form-elements-el-22 other-form-elements-el-23 other-form-elements-el-24
+    other-form-elements-el-25 other-form-elements-el-26 other-form-elements-el-27
+    other-form-elements-el-28 other-form-elements-el-29 other-form-elements-el-30
+    other-form-elements-el-31 other-form-elements-el-32 other-form-elements-el-33
+    other-form-elements-el-34 other-form-elements-el-35 other-form-elements-el-36
+    other-form-elements-el-37 other-form-elements-el-38 other-form-elements-el-39
+    other-form-elements-el-40 other-form-elements-el-41 other-form-elements-el-42
+    other-form-elements-el-50 other-form-elements-el-51 other-form-elements-el-52
+    other-form-elements-el-53 other-form-elements-el-54 other-form-elements-el-55
+    other-form-elements-el-56 other-form-elements-el-64 other-form-elements-el-65
+    other-form-elements-el-66 other-form-elements-el-67 other-form-elements-el-68
+    other-form-elements-el-69 other-form-elements-el-70 other-form-elements-el-71
+    other-form-elements-el-72 other-form-elements-el-73 other-form-elements-el-74
+    other-form-elements-el-75 other-form-elements-el-76 other-form-elements-el-77 phrasing-elements-el-6
+    phrasing-elements-el-7 phrasing-elements-el-8 phrasing-elements-el-9 phrasing-elements-el-10
     phrasing-elements-el-36 phrasing-elements-el-37 phrasing-elements-el-38 phrasing-elements-el-39
     phrasing-elements-el-40 table-el-5 table-el-6 tr-td-th.tentative-el-1 tr-td-th.tentative-el-2
     tr-td-th.tentative-el-3 tr-td-th.tentative-el-4 tr-td-th.tentative-el-5 tr-td-th.tentative-el-11
     tr-td-th.tentative-el-12 tr-td-th.tentative-el-13 tr-td-th.tentative-el-14 tr-td-th.tentative-el-15
     `,
   'implicit role: Chrome gives the element its own role (deletion, emphasis, meter, time…); ours gives generic': `
-    phrasing-elements-el-1 phrasing-elements-el-2 phrasing-elements-el-3 phrasing-elements-el-4
-    phrasing-elements-el-5 phrasing-elements-el-46 phrasing-elements-el-47 phrasing-elements-el-48
-    phrasing-elements-el-49 phrasing-elements-el-50 phrasing-elements-el-51 phrasing-elements-el-52
-    phrasing-elements-el-53 phrasing-elements-el-54 phrasing-elements-el-55 phrasing-elements-el-66
-    phrasing-elements-el-67 phrasing-elements-el-68 phrasing-elements-el-69 phrasing-elements-el-70
-    phrasing-elements-el-86 phrasing-elements-el-87 phrasing-elements-el-88 phrasing-elements-el-89
-    phrasing-elements-el-90 phrasing-elements-el-101 phrasing-elements-el-102 phrasing-elements-el-103
-    phrasing-elements-el-104 phrasing-elements-el-105 phrasing-elements-el-106 phrasing-elements-el-107
-    phrasing-elements-el-108 phrasing-elements-el-109 phrasing-elements-el-110 phrasing-elements-el-111
-    phrasing-elements-el-112 phrasing-elements-el-113 phrasing-elements-el-114 phrasing-elements-el-115
-    phrasing-elements-el-116 phrasing-elements-el-117 phrasing-elements-el-118 phrasing-elements-el-119
-    phrasing-elements-el-120 section-and-grouping-elements-el-11 section-and-grouping-elements-el-12
-    section-and-grouping-elements-el-13 section-and-grouping-elements-el-14
-    section-and-grouping-elements-el-15 section-and-grouping-elements-el-46
-    section-and-grouping-elements-el-47 section-and-grouping-elements-el-48
-    section-and-grouping-elements-el-49 section-and-grouping-elements-el-50
-    section-and-grouping-elements-el-56 section-and-grouping-elements-el-57
-    section-and-grouping-elements-el-58 section-and-grouping-elements-el-59
-    section-and-grouping-elements-el-60 section-and-grouping-elements-el-91
-    section-and-grouping-elements-el-92 section-and-grouping-elements-el-93
-    section-and-grouping-elements-el-94 section-and-grouping-elements-el-95
+    section-and-grouping-elements-el-91 section-and-grouping-elements-el-92
+    section-and-grouping-elements-el-93 section-and-grouping-elements-el-94
+    section-and-grouping-elements-el-95
     `,
   'name sources: same name, different source list': `
     input-button-submit-reset-el-1 input-button-submit-reset-el-2 input-button-submit-reset-el-3

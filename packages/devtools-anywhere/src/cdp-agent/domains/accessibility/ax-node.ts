@@ -2,7 +2,7 @@
 // it turns the DOM into CDP AXNodes. Kept out of the bundle like snapDOM, for its size.
 import type { Protocol } from 'devtools-protocol';
 import { documentNameOf, nameOf, textNameOf, type IdOf } from './ax-name';
-import { INTERNAL_ROLES, TreeShape, isFocusable, roleOf } from './ax-tree';
+import { TreeShape, isFocusable, isInternalRole, roleOf } from './ax-tree';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText } from '../../core/realm';
 
 type AXNode = Protocol.Accessibility.AXNode;
@@ -174,7 +174,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
 
 /** A role as CDP gives it: ARIA roles as `role`, Chrome's own as `internalRole`. */
 const roleValue = (role: string): AXValue => ({
-  type: INTERNAL_ROLES.has(role) ? 'internalRole' : 'role',
+  type: isInternalRole(role) ? 'internalRole' : 'role',
   value: role,
 });
 
