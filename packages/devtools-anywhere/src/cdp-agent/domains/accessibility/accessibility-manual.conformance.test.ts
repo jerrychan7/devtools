@@ -4,6 +4,7 @@
 // a1828981f407b6cd6dc9d7b1046a618af93d0270; MIT License, Copyright (c) 2020 Sebastian Silbermann)
 // and web-platform-tests (commit 73abd6299d0100763f0dfab7d30947282f626021; The 3-Clause BSD
 // License, Copyright © web-platform-tests contributors). The expected values are Chrome's, not theirs.
+// The licenses in full: cases/LICENSES.
 import { describeCases, readCases } from '../../../../test-support/accessibility.ts';
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
