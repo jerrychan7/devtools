@@ -51,9 +51,9 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
 }
 
 /**
- * Whether aria-owns takes none of its targets: Chrome leaves out targets that are not rendered or
- * carry aria-hidden themselves (one inside an aria-hidden subtree is still taken), and drops the
- * relation when none is left.
+ * Whether aria-owns takes none of its targets: Chrome leaves out ids that name no element, targets
+ * that are not rendered or carry aria-hidden themselves (one inside an aria-hidden subtree is still
+ * taken), and drops the relation when none is left.
  */
 function ownsNothing(el: Element): boolean {
   const root = el.getRootNode();
@@ -63,7 +63,7 @@ function ownsNothing(el: Element): boolean {
     .split(/\s+/)
     .map(idref => root.getElementById(idref))
     .filter(target => target !== null);
-  return targets.length > 0 && targets.every(t => inDisplayNone(t) || t.getAttribute('aria-hidden') === 'true');
+  return targets.every(t => inDisplayNone(t) || t.getAttribute('aria-hidden') === 'true');
 }
 
 /** The nesting level of a list item: how many lists hold it. */
