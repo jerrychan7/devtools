@@ -506,31 +506,49 @@ const ignored = (reason: IgnoredReason): Inclusion => ({ kind: 'ignored', reason
 const lifted = (reason: IgnoredReason): Inclusion => ({ kind: 'lifted', reason });
 const excluded = (reason: IgnoredReason): Inclusion => ({ kind: 'excluded', reason });
 
+/**
+ * The elements aria-owns moves in a document or shadow root, each to its owner, in the owners'
+ * order. Like Chrome, first come first served: an element owned twice stays with its first owner,
+ * and an aria-owns that would make a cycle (an element owning its ancestor in the tree, or one
+ * that owns it already) is dropped.
+ */
+export function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
+  const owner = new Map<Element, Element>();
+  for (const el of scope.querySelectorAll('[aria-owns]'))
+    for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
+      const target = scope.getElementById(id);
+      if (!target || owner.has(target)) continue;
+      let n: Node | null = el;
+      while (n && n !== target) n = (isElement(n) && owner.get(n)) || domParent(n);
+      if (!n) owner.set(target, el);
+    }
+  return owner;
+}
+
 /** The tree's structure over one document, with aria-owns resolved. */
 export class TreeShape {
   /** Elements moved by aria-owns, to their owner. */
-  private owner = new Map<Element, Element>();
+  private owner: Map<Element, Element>;
   private owned = new Map<Element, Element[]>();
   readonly doc: Document;
 
   constructor(doc: Document) {
     this.doc = doc;
-    for (const el of doc.querySelectorAll('[aria-owns]')) {
-      const ids = attr(el, 'aria-owns')?.trim().split(/\s+/) ?? [];
-      const list: Element[] = [];
-      for (const id of ids) {
-        const target = doc.getElementById(id);
-        // An element owned twice stays with its first owner; one cannot own its ancestor.
-        if (!target || this.owner.has(target) || target.contains(el)) continue;
-        this.owner.set(target, el);
-        list.push(target);
-      }
-      if (list.length) this.owned.set(el, list);
-    }
+    this.owner = ownerTable(doc);
+    for (const [target, el] of this.owner) this.owned.set(el, [...(this.owned.get(el) ?? []), target]);
   }
 
-  /** How a node takes part in the tree (Inclusion). */
+  /**
+   * How a node takes part in the tree (Inclusion). An element aria-owns moves stays in the tree
+   * when presentational or aria-hidden, ignored, as in Chrome.
+   */
   inclusion(node: Node): Inclusion {
+    const inclusion = this.ownInclusion(node);
+    return inclusion.kind === 'lifted' && this.owner.has(node as Element) ? ignored(inclusion.reason) : inclusion;
+  }
+
+  /** How a node takes part in the tree, wherever aria-owns puts it. */
+  private ownInclusion(node: Node): Inclusion {
     if (node === this.doc) return INCLUDED;
     if (isText(node)) {
       const parent = domParent(node);
@@ -622,8 +640,9 @@ export class TreeShape {
   /** The nodes in the tree under a node, in order: lifted nodes give their own. */
   children(node: Node): Node[] {
     const out: Node[] = [];
-    const visit = (child: Node) => {
-      if (isElement(child) && (this.owner.has(child) || (isHtml(child, 'area') && imageOf(child)))) return;
+    // Elements moved here (`moved`) by aria-owns or as an image's areas, the others where they are.
+    const visit = (child: Node, moved?: boolean) => {
+      if (!moved && isElement(child) && (this.owner.has(child) || (isHtml(child, 'area') && imageOf(child)))) return;
       const inclusion = this.inclusion(child);
       if (inclusion.kind === 'excluded') return;
       if (inclusion.kind === 'lifted') {
@@ -633,10 +652,8 @@ export class TreeShape {
       out.push(child);
     };
     for (const child of this.ownChildren(node)) visit(child);
-    if (isHtml(node, 'img'))
-      for (const area of areasOf(node)) if (this.inclusion(area).kind !== 'excluded') out.push(area);
-    if (isElement(node))
-      for (const el of this.owned.get(node) ?? []) if (this.inclusion(el).kind !== 'excluded') out.push(el);
+    if (isHtml(node, 'img')) for (const area of areasOf(node)) visit(area, true);
+    if (isElement(node)) for (const el of this.owned.get(node) ?? []) visit(el, true);
     return out;
   }
 

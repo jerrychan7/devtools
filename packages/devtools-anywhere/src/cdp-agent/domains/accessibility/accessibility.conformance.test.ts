@@ -37,6 +37,8 @@ const FIXTURE = `
 <img id=noalt src=x.png><img id=emptyalt alt="" src=x.png>
 <svg id=svg><title>Svg t</title></svg>
 <div id=own aria-owns="ownee">owner</div><span id=ownee>ownee</span>
+<div id=cy1 aria-owns=cy2>A</div><div id=cy2 aria-owns=cy1>B</div>
+<div id=cy3 aria-owns=cy4>C</div><div id=cy4><span id=cy5 aria-owns=cy3>D</span></div>
 </div>
 <header id=bn>Site</header>
 <article id=ar><header id=ah>art head</header><footer id=af>art foot</footer></article>
@@ -94,7 +96,24 @@ describe('Accessibility.getPartialAXTree', () => {
     });
 
   test('fetchRelatives: the children, through ignored ones, and the ancestors', async () => {
-    for (const id of ['nv', 'ul', 'tb', 'th1', 'h1', 'pp', 'own', 'ownee', 'pr', 'sp', 'dp']) {
+    for (const id of [
+      'nv',
+      'ul',
+      'tb',
+      'th1',
+      'h1',
+      'pp',
+      'own',
+      'ownee',
+      'cy1',
+      'cy2',
+      'cy3',
+      'cy4',
+      'cy5',
+      'pr',
+      'sp',
+      'dp',
+    ]) {
       const [ours, chrome] = await Promise.all(
         [t.ours, t.chrome].map(async side =>
           side.send('Accessibility.getPartialAXTree', { nodeId: await nodeIdOf(side, id), fetchRelatives: true })

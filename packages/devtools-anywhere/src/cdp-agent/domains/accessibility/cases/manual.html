@@ -8,6 +8,7 @@ with real Chrome (test-support/accessibility.ts). Imported from:
   73abd6299d0100763f0dfab7d30947282f626021, groups "wpt <path>": the file's body without its
   scripts. The 3-Clause BSD License. Copyright © web-platform-tests contributors
 Ids were added to the elements compared; whitespace is part of the input.
+Groups "devtools-anywhere …" are this project's own regression cases.
 -->
 <!-- group: dom-accessibility-api manual -->
 <div><img id="lib-DS1" data-ax-case="lib-DS1" src=foo.jpg alt="test" aria-describedby="lib-DS1-t1"><span id="lib-DS1-t1" role="presentation">foo</span></div>
@@ -738,3 +739,7 @@ Ids were added to the elements compared; whitespace is part of the input.
   </label>
 <!-- group: wpt accname/manual/name_text-title-manual.html -->
 <input type="text" id="m-name-text-title" data-ax-case="m-name-text-title" title="foo" />
+<!-- group: devtools-anywhere aria-owns cycles -->
+<div id="da-cy1" data-ax-case="da-cy1" aria-owns="da-cy2">A</div><div id="da-cy2" data-ax-case="da-cy2" aria-owns="da-cy1">B</div>
+<button id="da-cy-b1" data-ax-case="da-cy-b1" aria-labelledby="da-cy1">x</button>
+<div id="da-cy3" data-ax-case="da-cy3" aria-owns="da-cy4">C</div><div id="da-cy4"><span id="da-cy5" data-ax-case="da-cy5" aria-owns="da-cy3">D</span></div>

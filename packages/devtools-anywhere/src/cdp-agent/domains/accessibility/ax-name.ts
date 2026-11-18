@@ -15,6 +15,7 @@ import {
   hasAttr,
   isFocusable,
   isMenuList,
+  ownerTable,
   roleOf,
   scopeOf,
   SVG_NS,
@@ -407,14 +408,11 @@ function childrenOf(el: Element): Node[] {
   return children;
 }
 
-/** The element whose aria-owns moves an element, if any: the first one naming it. */
+/** The element whose aria-owns moves an element, if any: its owner in the tree (ownerTable). */
 function ownerOf(el: Element): Element | null {
-  if (!el.id) return null;
-  const root = scopeOf(el);
-  if (!root) return null;
-  for (const owner of root.querySelectorAll('[aria-owns]'))
-    if (!el.contains(owner) && targetsOf(owner, 'aria-owns').includes(el)) return owns(owner) ? owner : null;
-  return null;
+  const root = el.id && scopeOf(el);
+  const owner = root && ownerTable(root).get(el);
+  return owner && owns(owner) ? owner : null;
 }
 
 /** Whether Chrome puts a space between two consecutive pieces of a text (ShouldInsertSpaceBetweenObjectsIfNeeded). */
