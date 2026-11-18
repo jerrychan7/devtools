@@ -22,11 +22,12 @@ export type IgnoredReason =
 
 /**
  * How a DOM node takes part in the tree: `included`, ignored but kept (`reason`), left out with its
- * children taking its place (`lifted`), or left out with its subtree (`excluded`).
+ * children taking its place (`lifted`), or left out with its subtree (`excluded`). An ignored node
+ * with `noReason` is one Chrome ignores without giving a reason (a ruby annotation).
  */
 export type Inclusion =
   | { kind: 'included' }
-  | { kind: 'ignored'; reason: IgnoredReason; hiddenRoot?: Element }
+  | { kind: 'ignored'; reason: IgnoredReason; hiddenRoot?: Element; noReason?: true }
   | { kind: 'lifted'; reason: IgnoredReason }
   | { kind: 'excluded'; reason: IgnoredReason };
 
@@ -36,6 +37,11 @@ const OPAQUE = new Set(
     ' '
   )
 );
+
+/** Elements Chrome has no layout object for, ignored as not rendered. */
+const NOT_RENDERED = new Set('col colgroup map noscript source track wbr'.split(' '));
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Sectioning elements, inside which `header` and `footer` are no landmarks. */
 const SECTIONING = 'article, aside, main, nav, section';
@@ -345,6 +351,12 @@ export class TreeShape {
     if (node.closest('[data-devtools-anywhere]')) return { kind: 'excluded', reason: 'notRendered' };
     const hiddenBy = hiddenReason(node);
     if (hiddenBy) return { kind: 'excluded', reason: hiddenBy };
+    if (
+      isHtmlElement(node) &&
+      (NOT_RENDERED.has(node.localName) ||
+        (node.localName === 'embed' && !node.hasAttribute('src') && !node.hasAttribute('type')))
+    )
+      return { kind: 'excluded', reason: 'notRendered' };
     const hidden = this.hiddenRoot(node);
     // Chrome leaves the aria-hidden element out and keeps what it hides, ignored.
     if (hidden === node) return { kind: 'lifted', reason: 'ariaHiddenElement' };
@@ -353,7 +365,20 @@ export class TreeShape {
       return { kind: 'ignored', reason: 'uninteresting' };
     // An implicit or plain tbody; thead and tfoot are row groups.
     if (node.localName === 'tbody' && !node.hasAttribute('role')) return { kind: 'ignored', reason: 'uninteresting' };
+    // Chrome gives a ruby's annotation as its description only.
+    if (node.localName === 'rt' && node.parentElement?.localName === 'ruby')
+      return { kind: 'ignored', reason: 'uninteresting', noReason: true };
     const explicit = explicitRole(node);
+    // An empty root svg without a name is no image.
+    if (
+      node.localName === 'svg' &&
+      node.namespaceURI === SVG_NS &&
+      !node.firstElementChild &&
+      !explicit &&
+      !hasAuthorName(node) &&
+      (node.parentNode as Element | null)?.namespaceURI !== SVG_NS
+    )
+      return { kind: 'ignored', reason: 'uninteresting' };
     if (
       node.localName === 'img' &&
       node.getAttribute('alt') === '' &&
