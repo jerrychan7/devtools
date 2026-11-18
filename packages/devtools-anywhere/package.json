@@ -44,9 +44,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.service-worker.json && tsc -p tsconfig.cdp-agent.json",
     "dev": "node build.ts --watch"
   },
-  "dependencies": {
-    "dom-accessibility-api": "^0.7.1"
-  },
   "devDependencies": {
     "@devtools-anywhere/relay-core": "workspace:*",
     "@zumer/snapdom": "^3.3.5",

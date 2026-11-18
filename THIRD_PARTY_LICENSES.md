@@ -10,7 +10,6 @@ devtools-anywhere itself is licensed under the MIT license (see [LICENSE](LICENS
 | --- | --- | --- | --- | --- |
 | [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | devtools-anywhere |
 | [snapDOM (@zumer/snapdom)](https://github.com/zumerlab/snapdom) | 3.3.5 | MIT | ZumerLab | devtools-anywhere |
-| [dom-accessibility-api](https://github.com/eps1lon/dom-accessibility-api) | 0.7.1 | MIT | Sebastian Silbermann | devtools-anywhere |
 | [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css) | Chrome 158.0.8127.37 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
 | [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | 047c90eca37c7170d826d72245d5df9281989cf3 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
 | [acorn (DevTools front_end/third_party/acorn)](https://github.com/acornjs/acorn) | 8.10.0 | MIT | acorn contributors (see its AUTHORS) | devtools-frontend |
@@ -84,39 +83,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 MIT License
 
 Copyright (c) 2025 ZumerLab
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### dom-accessibility-api
-
-- Version: 0.7.1
-- License: MIT
-- Copyright: Sebastian Silbermann
-- Source: https://github.com/eps1lon/dom-accessibility-api
-- Included in: devtools-anywhere
-- Notes: Bundled as dist/accessibility.js, loaded on demand for the Accessibility domain.
-
-```text
-MIT License
-
-Copyright (c) 2020 Sebastian Silbermann
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
