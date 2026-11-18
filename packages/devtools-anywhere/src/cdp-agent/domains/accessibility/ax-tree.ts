@@ -41,6 +41,9 @@ const OPAQUE = new Set(
 /** Elements Chrome has no layout object for, ignored as not rendered. */
 const NOT_RENDERED = new Set('col colgroup map noscript source track wbr'.split(' '));
 
+/** SVG shapes: graphics-symbol in Chrome. */
+const SVG_SHAPES = new Set('circle ellipse line path polygon polyline rect'.split(' '));
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Sectioning elements, inside which `header` and `footer` are no landmarks. */
@@ -59,9 +62,12 @@ const DOC_ROLE =
 const GLOBAL_ARIA =
   /^aria-(atomic|busy|controls|current|describedby|description|details|dropeffect|flowto|grabbed|keyshortcuts|label|labelledby|live|owns|relevant|roledescription)$/;
 
-/** Whether an element has a name from its author: aria-labelledby (to some text), aria-label or title. */
+/**
+ * Whether an element has a name from its author: aria-labelledby (to some text), aria-label, or a
+ * title attribute, even an empty one (Chrome's IsNameFromAuthorAttribute).
+ */
 function hasAuthorName(el: Element): boolean {
-  if (el.getAttribute('aria-label')?.trim() || el.getAttribute('title')?.trim()) return true;
+  if (el.getAttribute('aria-label')?.trim() || el.hasAttribute('title')) return true;
   const root = el.getRootNode() as Document | ShadowRoot;
   return (el.getAttribute('aria-labelledby') ?? '')
     .split(/[ \t\n\r\f]+/)
@@ -77,11 +83,52 @@ function explicitRole(el: Element): string | null {
   for (const token of (el.getAttribute('role') ?? '').toLowerCase().split(/[ \t\n\r\f]+/)) {
     if (!ARIA_ROLES.has(token) && !DOC_ROLE.test(token)) continue;
     if ((token === 'region' || token === 'form') && !hasAuthorName(el)) continue;
+    if (isOrphaned(el, token)) continue;
     if (token === 'none' || token === 'presentation')
       return isFocusable(el) || [...el.attributes].some(a => GLOBAL_ARIA.test(a.name)) ? null : 'none';
     return token === 'img' ? 'image' : token === 'directory' ? 'list' : token;
   }
   return null;
+}
+
+/** The first role Chrome knows in an element's role attribute, without context checks. */
+function rawRole(el: Element): string | null {
+  for (const token of (el.getAttribute('role') ?? '').toLowerCase().split(/[ \t\n\r\f]+/))
+    if (ARIA_ROLES.has(token) || DOC_ROLE.test(token)) return token;
+  return null;
+}
+
+/** For the roles that need one, the container roles (and tags) that give them their context. */
+const REQUIRED_CONTEXT: Record<string, { roles: string[]; tags: string[] }> = {
+  listitem: { roles: ['list', 'directory', 'group'], tags: ['ul', 'ol', 'menu'] },
+  option: { roles: ['listbox', 'group'], tags: ['select'] },
+  treeitem: { roles: ['tree', 'group'], tags: [] },
+};
+
+/**
+ * Whether an ARIA role that needs a container lacks one (Chrome's HasRequiredParentContext): up the
+ * tree, past presentational elements and plain div/span/slot/custom elements (and, for a treeitem,
+ * other treeitems), the first other element must be a container for it. An aria-owns owner counts
+ * when it is one.
+ */
+function isOrphaned(el: Element, role: string): boolean {
+  const context = REQUIRED_CONTEXT[role];
+  if (!context) return false;
+  const isContainer = (parent: Element, parentRole: string | null) =>
+    context.tags.includes(parent.localName) || (!!parentRole && context.roles.includes(parentRole));
+  const owner = el.id ? el.ownerDocument.querySelector(`[aria-owns~="${CSS.escape(el.id)}"]`) : null;
+  if (owner && isContainer(owner, roleOf(owner))) return false;
+  for (let n = domParent(el); n; n = domParent(n)) {
+    if (!isElement(n)) continue;
+    const parentRole = rawRole(n);
+    if (isContainer(n, parentRole)) return false;
+    if (role === 'treeitem' && parentRole === 'treeitem') continue;
+    if (parentRole === 'none' || parentRole === 'presentation') continue;
+    const generic = /^(div|span|slot)$/.test(n.localName) || n.localName.includes('-');
+    if (!n.getAttribute('role') && generic) continue;
+    break;
+  }
+  return true;
 }
 
 /** Whether an element takes keyboard focus: in the tab order or focusable by script. */
@@ -207,6 +254,14 @@ function inputRole(el: HTMLInputElement): string {
 
 /** The role an element has without a role attribute. */
 function implicitRole(el: Element): string {
+  if (el.namespaceURI === SVG_NS && SVG_SHAPES.has(el.localName)) return 'graphics-symbol';
+  switch (el.localName) {
+    case 'th':
+    case 'td':
+      // The cells of a presentational table are plain containers.
+      const table = el.closest('table');
+      if (table && explicitRole(table) === 'none') return 'generic';
+  }
   switch (el.localName) {
     case 'th': {
       const scope = el.getAttribute('scope');
@@ -240,6 +295,8 @@ function implicitRole(el: Element): string {
   const role = TAG_ROLES[el.localName];
   if (role) return role;
   // A generic element that can be dragged or takes autofocus is a group in Chrome.
+  // Not with a role attribute, even one with no role Chrome knows.
+  if (el.getAttribute('role')?.trim()) return 'generic';
   return el.hasAttribute('draggable') || el.hasAttribute('autofocus') ? 'group' : 'generic';
 }
 
@@ -379,6 +436,14 @@ export class TreeShape {
       (node.parentNode as Element | null)?.namespaceURI !== SVG_NS
     )
       return { kind: 'ignored', reason: 'uninteresting' };
+    // A list item in a native list given another role is presentational, whatever its attributes.
+    if (
+      node.localName === 'li' &&
+      !explicit &&
+      /^(ul|ol|menu)$/.test(node.parentElement?.localName ?? '') &&
+      !/^(|list|directory)$/.test(node.parentElement?.getAttribute('role') ?? '')
+    )
+      return { kind: 'lifted', reason: 'presentationalRole' };
     if (
       node.localName === 'img' &&
       node.getAttribute('alt') === '' &&
