@@ -560,19 +560,8 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
   }
 
   const label = el.getAttribute('aria-label');
-  if (isBlank(label)) push({ type: 'attribute', attribute: 'aria-label' }, false);
-  else
-    push(
-      source(
-        {
-          type: 'attribute',
-          attribute: 'aria-label',
-          attributeValue: { type: 'string', value: label ?? '' },
-        },
-        label
-      ),
-      true
-    );
+  const labelled = !isBlank(label);
+  push(stringSource('aria-label', labelled ? label : null), labelled);
 
   nativeSources(el, role, idOf, c, push);
 
@@ -585,7 +574,7 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
   // An image with alt="" has no title source: its title describes it.
   if ((isHtml(el, 'img') || area) && el.getAttribute('alt') === '') return out;
   if (isHtmlElement(el) && el.isContentEditable && !isNativeTextField(el) && !isTextFieldRole(role))
-    push(attributeSource(el, 'aria-placeholder', 'placeholder'), false);
+    push(placeholderSource(el, 'aria-placeholder'), false);
   if (el.namespaceURI === SVG_NS) {
     const title = el.querySelector(':scope > title');
     const text = title?.textContent ?? '';
@@ -598,26 +587,30 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
 /** The title source: its text when the title is used (TextAlternativeFromTitleAttribute). */
 function titleSource(el: Element): [AXValueSource, boolean] {
   const title = titleText(el);
-  if (title === null) return [{ type: 'attribute', attribute: 'title' }, false];
-  return [
-    source(
-      {
-        type: 'attribute',
-        attribute: 'title',
-        attributeValue: { type: 'string', value: title },
-      },
-      title
-    ),
-    true,
-  ];
+  return [stringSource('title', title), title !== null];
 }
 
-/** A placeholder-like source read from an attribute, with the attribute's value when not empty. */
-function attributeSource(el: Element, attribute: string, type: AXValueSource['type'] = 'attribute'): AXValueSource {
-  const raw = el.getAttribute(attribute);
-  if (!raw) return { type, attribute };
-  return source({ type, attribute, attributeValue: { type: 'string', value: raw } }, raw);
+/** An attribute's source, with the attribute's value and its text when there is one (not null). */
+function stringSource(
+  attribute: string,
+  value: string | null,
+  type: AXValueSource['type'] = 'attribute'
+): AXValueSource {
+  return value === null
+    ? { type, attribute }
+    : source({ type, attribute, attributeValue: { type: 'string', value } }, value);
 }
+
+/** A placeholder source read from an attribute, with the attribute's value when not empty. */
+const placeholderSource = (el: Element, attribute: string) =>
+  stringSource(attribute, el.getAttribute(attribute) || null, 'placeholder');
+
+/** A native source naming related elements, with their nodes and its text when it has one (not null). */
+const nodeListSource = (
+  nativeSource: NonNullable<AXValueSource['nativeSource']>,
+  relatedNodes: AXRelatedNode[],
+  text: string | null
+) => source({ type: 'relatedElement', nativeSource, nativeSourceValue: { type: 'nodeList', relatedNodes } }, text);
 
 /** The sources the host language gives an element (NativeTextAlternative). */
 function nativeSources(
@@ -648,17 +641,7 @@ function nativeSources(
       c.naming = null;
       const relatedNodes = (fromElements?.related ?? []).map(r => relatedNode(r.el, r.text, idOf));
       const text = stripHtmlSpace(fromElements?.text ?? '');
-      push(
-        source(
-          {
-            type: 'relatedElement',
-            nativeSource,
-            nativeSourceValue: { type: 'nodeList', relatedNodes },
-          },
-          text
-        ),
-        true
-      );
+      push(nodeListSource(nativeSource, relatedNodes, text), true);
     }
   }
   if (isInputButton(el)) {
@@ -671,27 +654,15 @@ function nativeSources(
   }
   if (isNativeTextField(el)) {
     push(...titleSource(el));
-    push(attributeSource(el, 'placeholder', 'placeholder'), !!el.getAttribute('placeholder'));
+    push(placeholderSource(el, 'placeholder'), !!el.getAttribute('placeholder'));
   }
   if (isNativeTextField(el) || isTextFieldRole(role)) {
-    push(attributeSource(el, 'aria-placeholder', 'placeholder'), !!el.getAttribute('aria-placeholder'));
+    push(placeholderSource(el, 'aria-placeholder'), !!el.getAttribute('aria-placeholder'));
     return;
   }
   if (isHtml(el, 'img') || isHtml(el, 'area')) {
     const alt = el.getAttribute('alt');
-    if (alt === null) push({ type: 'attribute', attribute: 'alt' }, false);
-    else
-      push(
-        source(
-          {
-            type: 'attribute',
-            attribute: 'alt',
-            attributeValue: { type: 'string', value: alt },
-          },
-          alt
-        ),
-        true
-      );
+    push(stringSource('alt', alt), alt !== null);
     return;
   }
   if (isHtml(el, 'table')) {
@@ -699,35 +670,10 @@ function nativeSources(
     if (!caption) push({ type: 'relatedElement', nativeSource: 'tablecaption' }, false);
     else {
       const text = recursiveTextAlternative(caption, null, c)[0];
-      push(
-        source(
-          {
-            type: 'relatedElement',
-            nativeSource: 'tablecaption',
-            nativeSourceValue: {
-              type: 'nodeList',
-              relatedNodes: [relatedNode(caption, text, idOf)],
-            },
-          },
-          text
-        ),
-        true
-      );
+      push(nodeListSource('tablecaption', [relatedNode(caption, text, idOf)], text), true);
     }
     const summary = el.getAttribute('summary');
-    if (summary === null) push({ type: 'attribute', attribute: 'summary' }, false);
-    else
-      push(
-        source(
-          {
-            type: 'attribute',
-            attribute: 'summary',
-            attributeValue: { type: 'string', value: summary },
-          },
-          summary
-        ),
-        true
-      );
+    push(stringSource('summary', summary), summary !== null);
   }
   if (isHtml(el, 'fieldset')) {
     // The first legend, even hidden: it then names nothing, but counts as found.
@@ -735,20 +681,7 @@ function nativeSources(
     if (!legend || c.visited.has(legend)) push({ type: 'relatedElement', nativeSource: 'legend' }, false);
     else {
       const text = recursiveTextAlternative(legend, null, c)[0];
-      push(
-        source(
-          {
-            type: 'relatedElement',
-            nativeSource: 'legend',
-            nativeSourceValue: {
-              type: 'nodeList',
-              relatedNodes: [relatedNode(legend, text, idOf)],
-            },
-          },
-          text || null
-        ),
-        true
-      );
+      push(nodeListSource('legend', [relatedNode(legend, text, idOf)], text || null), true);
     }
   }
 }
