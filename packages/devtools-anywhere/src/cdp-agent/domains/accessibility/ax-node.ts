@@ -24,8 +24,11 @@ type AXPropertyName = Protocol.Accessibility.AXPropertyName;
 
 /** The accessibility tree of a document, as CDP AXNodes. */
 export interface AXTree {
-  /** The AXNode of a DOM node: in the tree, or one ignored with why not. */
-  node(node: Node): AXNode;
+  /**
+   * The AXNode of a DOM node: in the tree, or one ignored with why not. `queried`: an ignored node
+   * keeps its role and name, as queryAXTree gives it in Chrome.
+   */
+  node(node: Node, queried?: boolean): AXNode;
   /** The closest node in the tree above a DOM node. */
   parent(node: Node): Node | null;
   /** The DOM nodes of a node's children in the tree. */
@@ -443,6 +446,13 @@ const roleValue = (role: string): AXValue => ({
   value: role,
 });
 
+/** An ignored node's role and name, without their sources, as Chrome's queryAXTree gives them. */
+function ignoredAsQueried(node: Text | Element): Pick<AXNode, 'role' | 'name'> {
+  const role = isText(node) ? 'StaticText' : roleOf(node);
+  const name = isText(node) ? textNameOf(node) : nameOf(node, role, () => 0).name;
+  return { role: roleValue(role), name: { type: 'computedString', value: name.value } };
+}
+
 export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree {
   const shape = new TreeShape(doc);
   const id = (node: Node) => String(idOf(node));
@@ -459,7 +469,7 @@ export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree
     parent: node => shape.parent(node),
     children: node => shape.children(node),
     inTree: node => shape.inTree(node),
-    node(node) {
+    node(node, queried) {
       const inclusion = shape.inclusion(node);
       if (inclusion.kind !== 'included') {
         const relatedNodes =
@@ -482,7 +492,9 @@ export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree
           ignored: true,
           // Chrome gives some ignored nodes no reason (a ruby's annotation, folded into the ruby).
           ignoredReasons: inclusion.kind === 'ignored' && inclusion.noReason ? [] : [reason],
-          role: { type: 'role', value: 'none' },
+          ...(queried && (isText(node) || isElement(node))
+            ? ignoredAsQueried(node)
+            : { role: { type: 'role', value: 'none' } }),
         });
       }
       if (node === doc) {

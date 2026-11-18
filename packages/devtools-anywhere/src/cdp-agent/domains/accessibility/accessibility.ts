@@ -106,14 +106,12 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     ): Promise<Protocol.Accessibility.QueryAXTreeResponse> {
       const root = resolveNode(ctx, params);
       const ax = await tree(documentOf(root));
-      // The nodes in the root's subtree that match, in tree order: ignored ones too, as in Chrome.
+      // The nodes in the root's subtree that match, in tree order: ignored ones too, with their own
+      // role and name, as in Chrome.
       const out: Protocol.Accessibility.AXNode[] = [];
       const visit = (node: Node) => {
-        const axNode = ax.node(node);
-        // An ignored element's role is none here, not the role Chrome matches against.
-        const roleKnown = !axNode.ignored || axNode.role?.value !== 'none';
+        const axNode = ax.node(node, true);
         if (
-          roleKnown &&
           (params.role === undefined || axNode.role?.value === params.role) &&
           (params.accessibleName === undefined || axNode.name?.value === params.accessibleName)
         )

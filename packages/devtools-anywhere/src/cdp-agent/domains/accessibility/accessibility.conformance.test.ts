@@ -166,6 +166,13 @@ describe('the whole tree', () => {
       { role: 'textbox', accessibleName: 'Type' },
       { role: 'heading' },
       { role: 'none' },
+      // Ignored nodes come with their own role and name: those aria-hidden hides; display:none,
+      // visibility:hidden and role=presentation leave theirs out of the tree.
+      { role: 'paragraph' },
+      { accessibleName: 'hidden' },
+      { accessibleName: 'none' },
+      { accessibleName: 'vh' },
+      { accessibleName: 'pres' },
     ];
     for (const query of queries) {
       const [ours, chrome] = await Promise.all(
