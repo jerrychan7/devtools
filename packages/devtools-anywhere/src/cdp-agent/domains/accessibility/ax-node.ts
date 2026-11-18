@@ -15,7 +15,7 @@ import {
   scopeOf,
   TreeShape,
 } from './ax-tree';
-import { isElement, isHtml, isHtmlElement, isText } from '../../core/realm';
+import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 
 type AXNode = Protocol.Accessibility.AXNode;
 type AXProperty = Protocol.Accessibility.AXProperty;
@@ -153,7 +153,7 @@ function rangeValue(el: Element, role: string): number | null {
 /** A password's value masked as Chrome shows it, with the field's -webkit-text-security. */
 function masked(el: HTMLInputElement, value: string): string {
   const security = (
-    getComputedStyle(el) as CSSStyleDeclaration & {
+    styleOf(el) as CSSStyleDeclaration & {
       webkitTextSecurity?: string;
     }
   ).webkitTextSecurity;

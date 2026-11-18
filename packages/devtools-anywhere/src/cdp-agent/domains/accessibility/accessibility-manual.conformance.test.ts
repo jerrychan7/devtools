@@ -9,4 +9,18 @@ import { describeCases, readCases } from '../../../../test-support/accessibility
 /** Cases that differ from Chrome on the current implementation, by what differs. */
 const TODO = {};
 
-describeCases(readCases(new URL('cases/manual.html', import.meta.url)), { todo: TODO });
+/** Builds what HTML cannot say: nodes made in a frame's realm, moved into the page. */
+const SETUPS = {
+  'devtools-anywhere nodes of another realm': () => {
+    const frame = document.body.appendChild(document.createElement('iframe'));
+    const other = frame.contentDocument as Document;
+    for (const id of ['da-realm-1', 'da-realm-3']) {
+      const span = other.createElement('span');
+      span.append(other.createTextNode('from a frame'));
+      document.getElementById(id)?.append(span);
+    }
+    frame.remove();
+  },
+};
+
+describeCases(readCases(new URL('cases/manual.html', import.meta.url)), { todo: TODO, setups: SETUPS });

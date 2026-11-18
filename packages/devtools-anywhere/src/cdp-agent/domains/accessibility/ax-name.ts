@@ -6,7 +6,7 @@
 // name is simplified at the end (AXObject::SimplifyName). The text of a text node is its rendered
 // text (ax-text.ts).
 import type { Protocol } from 'devtools-protocol';
-import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
+import { isElement, isHtml, isHtmlElement, isNode, isText, styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
 import {
   attr,
@@ -418,7 +418,7 @@ function ownerOf(el: Element): Element | null {
 /** Whether Chrome puts a space between two consecutive pieces of a text (ShouldInsertSpaceBetweenObjectsIfNeeded). */
 function separates(el: Element, prev: Piece, next: Piece, prevFrom: From, nextFrom: From): boolean {
   const box = (p: Piece): { inline: boolean; atomic: boolean; block: Element | null } | null => {
-    if (!(p instanceof Node)) {
+    if (!isNode(p)) {
       if (styleOf(el, p.pseudo).display === 'none') return null;
       const inline = pseudoInline(el, p.pseudo);
       return {
@@ -464,10 +464,10 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
   for (let i = 0; i < pieces.length; i++) {
     const piece = pieces[i] as Piece;
     // Not the element being named, which its own label's text passes over keeping both spaces.
-    const wasVisited = piece instanceof Node && c.visited.has(piece) && piece !== c.visited.values().next().value;
+    const wasVisited = isNode(piece) && c.visited.has(piece) && piece !== c.visited.values().next().value;
     let text: string;
     let from: From = 'contents';
-    if (!(piece instanceof Node)) text = piece.text;
+    if (!isNode(piece)) text = piece.text;
     else if (isText(piece)) {
       // White space with no box has no node in the tree.
       if (isBlank(piece.data) && (!hasLayout(piece) || droppedSpace(piece) || role === 'row')) continue;
