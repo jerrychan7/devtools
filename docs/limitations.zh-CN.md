@@ -431,7 +431,7 @@ Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree
 
 - **Chrome**：在浏览器里计算，含 InlineTextBox、列表标记和 UA shadow 树里的节点。
 - **devtools-anywhere**：没有 InlineTextBox、列表标记和 UA shadow 树里的节点；input 的默认名称（如 "Submit"）是英文。
-- **事件**：不发 `loadComplete`、`nodesUpdated` 事件（待做：见[路线图](roadmap.zh-CN.md#其他能在页面里补上的功能)）。
+- **事件**：与 Chrome 一样，在域启用期间，对客户端经 `getChildAXNodes` 或 `getAXNodeAndAncestors` 拿到过、节点又变了的发 `nodesUpdated`，同一帧的合成一个事件。变化由 MutationObserver 观察 DOM、属性和文本得知：class 或 `style` 属性引起的样式变化能看到；经 CSSOM 的修改、`:hover` 等状态、媒体查询、动画或图片加载引起的，要等下一次 DOM 变化才发出（命令总是读当前的树）。Chrome 还会发出变化节点的父节点，即使其节点没变；这里只发确实不同的节点。不发 `loadComplete`：它在文档加载完成时发出，早于 agent 运行，enable 时也不发。
 
 <a id="application-issues-console"></a>
 

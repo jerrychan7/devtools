@@ -431,7 +431,7 @@ The Elements panel's Accessibility pane and `Accessibility.getPartialAXTree`, `g
 
 - **Chrome**: computes the tree in the browser, with inline text boxes, list markers and nodes of user-agent shadow trees.
 - **devtools-anywhere**: no inline text boxes, list markers or nodes of user-agent shadow trees; the default names of inputs (such as "Submit") are in English.
-- **Events**: no `loadComplete` or `nodesUpdated` events (to be done: see the [roadmap](roadmap.md#more-that-can-be-filled-in-the-page)).
+- **Events**: `nodesUpdated` is sent as in Chrome, while the domain is enabled, for the nodes the client was given by `getChildAXNodes` or `getAXNodeAndAncestors` whose node changed, those of one frame in one event. A mutation observer sees the changes to the DOM, its attributes and text: a style change from a class or a `style` attribute is seen, but one through the CSSOM, `:hover` and other states, media queries, animations or an image loading is sent with the next DOM change only (the commands always read the current tree). Chrome also sends a changed node's parent whose node is the same; this sends only the nodes that differ. `loadComplete` is not sent: it comes when a document finishes loading, before the agent runs, and not on enable.
 
 <a id="application-issues-console"></a>
 

@@ -16,7 +16,6 @@ type CommandsByDomain = { [D in DomainOf<Command>]?: MethodOf<Command, D>[] };
  * `Inspector` is about the connection itself, whose events come from it.
  */
 const NOOPS = {
-  Accessibility: ['enable'],
   Inspector: ['enable'],
   // The page has no browser log entries, so clearing them is done.
   Log: ['enable', 'clear'],
