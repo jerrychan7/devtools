@@ -8,7 +8,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
-import { domChildren, domParent, isFocusable, roleOf } from './ax-tree';
+import { domChildren, domParent, isFocusable, roleOf, wordSet } from './ax-tree';
 import {
   droppedSpace,
   hasLayout,
@@ -30,56 +30,32 @@ export type IdOf = (node: Node) => number;
 type From = 'none' | 'contents' | 'attribute' | 'relatedElement' | 'value' | 'title' | 'placeholder' | 'caption';
 
 /** ARIA roles whose name can come from their content. */
-const NAME_FROM_CONTENTS = new Set([
-  'button',
-  'cell',
-  'checkbox',
-  'columnheader',
-  'gridcell',
-  'heading',
-  'link',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'option',
-  'radio',
-  'rowheader',
-  'switch',
-  'tab',
-  'tooltip',
-  'treeitem',
-]);
-
-/** Chrome's own roles that take their name from their content. */
-const NAME_FROM_CONTENTS_INTERNAL = new Set([
-  'DisclosureTriangle',
-  'LineBreak',
-  'ListMarker',
-  'LayoutTableCell',
-  'term',
-  'math',
-]);
+const NAME_FROM_CONTENTS = wordSet(
+  'button cell checkbox columnheader gridcell heading link menuitem menuitemcheckbox menuitemradio option radio ' +
+    'rowheader switch tab tooltip treeitem ' +
+    // Chrome's own roles that take their name from their content.
+    'DisclosureTriangle LineBreak ListMarker LayoutTableCell term math'
+);
 
 /**
  * Roles that usually have no name of their own, but whose content counts towards an ancestor's
  * name (and their own name when focused).
  */
-const CONTENTS_FOR_ANCESTORS = new Set(
-  (
-    'generic Abbr Canvas caption code deletion insertion definition Details emphasis Figcaption sectionfooter ' +
+const CONTENTS_FOR_ANCESTORS = wordSet(
+  'generic Abbr Canvas caption code deletion insertion definition Details emphasis Figcaption sectionfooter ' +
     'LabelText LayoutTable LayoutTableRow Legend listitem mark none paragraph region Ruby section strong subscript ' +
     'superscript time'
-  ).split(' ')
 );
 
 /** Roles that list no `title` source in Chrome: an element that is only a container of text. */
-const NO_TITLE = new Set(
-  'generic paragraph term definition caption code deletion insertion emphasis mark strong subscript superscript time'.split(
-    ' '
-  )
+const NO_TITLE = wordSet(
+  'generic paragraph term definition caption code deletion insertion emphasis mark strong subscript superscript time'
 );
 
-const computed = (value: string): Protocol.Accessibility.AXValue => ({ type: 'computedString', value });
+const computed = (value: string): Protocol.Accessibility.AXValue => ({
+  type: 'computedString',
+  value,
+});
 
 const HTML_SPACE = /[ \t\n\f\r]/;
 const isHtmlSpace = (c: string | undefined) => !!c && HTML_SPACE.test(c);
@@ -153,32 +129,14 @@ function targetsOf(el: Element, attribute: string): Element[] {
 }
 
 /** Global ARIA attributes: role none or presentation does not apply to an element with one. */
-const GLOBAL_ARIA = [
-  'aria-label',
-  'aria-labelledby',
-  'aria-describedby',
-  'aria-description',
-  'aria-details',
-  'aria-live',
-  'aria-owns',
-  'aria-controls',
-  'aria-keyshortcuts',
-  'aria-roledescription',
-  'aria-busy',
-  'aria-atomic',
-  'aria-relevant',
-  'aria-errormessage',
-  'aria-flowto',
-  'aria-haspopup',
-  'aria-invalid',
-  'aria-current',
-];
+const GLOBAL_ARIA =
+  /^aria-(label|labelledby|describedby|description|details|live|owns|controls|keyshortcuts|roledescription|busy|atomic|relevant|errormessage|flowto|haspopup|invalid|current)$/;
 
 /** An element that only presents its content: role none or presentation (Blink's IsPresentational). */
 const isPresentational = (el: Element) =>
   /^\s*(none|presentation)(\s|$)/.test(el.getAttribute('role') ?? '') &&
   !isFocusable(el) &&
-  !GLOBAL_ARIA.some(name => el.hasAttribute(name));
+  ![...el.attributes].some(a => GLOBAL_ARIA.test(a.name));
 
 /** The text field roles (Blink's IsTextField). */
 const isTextFieldRole = (role: string) => role === 'textbox' || role === 'searchbox';
@@ -198,7 +156,7 @@ function supportsNameFromContents(el: Element, role: string, recursive: boolean)
     return false;
   }
   if (isHtml(el, 'option') && isMenuListOption(el)) return !hasOneTextChild(el);
-  if (NAME_FROM_CONTENTS.has(role) || NAME_FROM_CONTENTS_INTERNAL.has(role)) return true;
+  if (NAME_FROM_CONTENTS.has(role)) return true;
   if (role === 'list' || role === 'DescriptionList') return recursive;
   if (role === 'group' && el.localName !== 'address' && el.namespaceURI !== SVG_NS) return false;
   if (role === 'group' || CONTENTS_FOR_ANCESTORS.has(role)) {
@@ -260,18 +218,16 @@ function captionOf(table: HTMLTableElement): Element | null {
 /** A form control, which labels name. */
 const isLabelable = (el: Element): el is HTMLElement & { labels: NodeListOf<HTMLLabelElement> } =>
   (isHtml(el, 'input') && el.type !== 'hidden') ||
-  isHtml(el, 'button') ||
-  isHtml(el, 'select') ||
-  isHtml(el, 'textarea') ||
-  isHtml(el, 'meter') ||
-  isHtml(el, 'progress') ||
-  isHtml(el, 'output');
+  (isHtmlElement(el) && /^(button|select|textarea|meter|progress|output)$/.test(el.localName));
 
 const isInputButton = (el: Element): el is HTMLInputElement =>
   isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type);
 
 /** The default label of an input button, which Chrome gives in the browser's language. */
-const BUTTON_LABELS: Record<string, string> = { submit: 'Submit', reset: 'Reset' };
+const BUTTON_LABELS: Record<string, string> = {
+  submit: 'Submit',
+  reset: 'Reset',
+};
 
 /** The texts of elements (TextFromElements), with each one's text; null when none exists. */
 function textFromElements(
@@ -472,7 +428,11 @@ function separates(el: Element, prev: Piece, next: Piece, prevFrom: From, nextFr
     if (isText(p)) return { inline: true, atomic: false, block: nearestBlock(p, false) };
     if (!isElement(p)) return null;
     const inline = isInlineLevel(p);
-    return { inline, atomic: isAtomicInline(p), block: inline ? nearestBlock(p, false) : null };
+    return {
+      inline,
+      atomic: isAtomicInline(p),
+      block: inline ? nearestBlock(p, false) : null,
+    };
   };
   const a = box(prev);
   const b = box(next);
@@ -583,14 +543,23 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
       const relatedNodes = fromElements.related.map(r => relatedNode(r.el, r.text, idOf));
       push(
         source(
-          { type: 'relatedElement', attribute, attributeValue: { type: 'idrefList', value: idrefs, relatedNodes } },
+          {
+            type: 'relatedElement',
+            attribute,
+            attributeValue: { type: 'idrefList', value: idrefs, relatedNodes },
+          },
           fromElements.text
         ),
         true
       );
     } else
       push(
-        { type: 'relatedElement', attribute, attributeValue: { type: 'string', value: idrefs }, invalid: true },
+        {
+          type: 'relatedElement',
+          attribute,
+          attributeValue: { type: 'string', value: idrefs },
+          invalid: true,
+        },
         false
       );
   }
@@ -600,7 +569,11 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
   else
     push(
       source(
-        { type: 'attribute', attribute: 'aria-label', attributeValue: { type: 'string', value: label ?? '' } },
+        {
+          type: 'attribute',
+          attribute: 'aria-label',
+          attributeValue: { type: 'string', value: label ?? '' },
+        },
         label
       ),
       true
@@ -632,7 +605,14 @@ function titleSource(el: Element): [AXValueSource, boolean] {
   const title = titleText(el);
   if (title === null) return [{ type: 'attribute', attribute: 'title' }, false];
   return [
-    source({ type: 'attribute', attribute: 'title', attributeValue: { type: 'string', value: title } }, title),
+    source(
+      {
+        type: 'attribute',
+        attribute: 'title',
+        attributeValue: { type: 'string', value: title },
+      },
+      title
+    ),
     true,
   ];
 }
@@ -674,7 +654,14 @@ function nativeSources(
       const relatedNodes = (fromElements?.related ?? []).map(r => relatedNode(r.el, r.text, idOf));
       const text = stripHtmlSpace(fromElements?.text ?? '');
       push(
-        source({ type: 'relatedElement', nativeSource, nativeSourceValue: { type: 'nodeList', relatedNodes } }, text),
+        source(
+          {
+            type: 'relatedElement',
+            nativeSource,
+            nativeSourceValue: { type: 'nodeList', relatedNodes },
+          },
+          text
+        ),
         true
       );
     }
@@ -699,7 +686,17 @@ function nativeSources(
     const alt = el.getAttribute('alt');
     if (alt === null) push({ type: 'attribute', attribute: 'alt' }, false);
     else
-      push(source({ type: 'attribute', attribute: 'alt', attributeValue: { type: 'string', value: alt } }, alt), true);
+      push(
+        source(
+          {
+            type: 'attribute',
+            attribute: 'alt',
+            attributeValue: { type: 'string', value: alt },
+          },
+          alt
+        ),
+        true
+      );
     return;
   }
   if (isHtml(el, 'table')) {
@@ -712,7 +709,10 @@ function nativeSources(
           {
             type: 'relatedElement',
             nativeSource: 'tablecaption',
-            nativeSourceValue: { type: 'nodeList', relatedNodes: [relatedNode(caption, text, idOf)] },
+            nativeSourceValue: {
+              type: 'nodeList',
+              relatedNodes: [relatedNode(caption, text, idOf)],
+            },
           },
           text
         ),
@@ -724,7 +724,11 @@ function nativeSources(
     else
       push(
         source(
-          { type: 'attribute', attribute: 'summary', attributeValue: { type: 'string', value: summary } },
+          {
+            type: 'attribute',
+            attribute: 'summary',
+            attributeValue: { type: 'string', value: summary },
+          },
           summary
         ),
         true
@@ -741,7 +745,10 @@ function nativeSources(
           {
             type: 'relatedElement',
             nativeSource: 'legend',
-            nativeSourceValue: { type: 'nodeList', relatedNodes: [relatedNode(legend, text, idOf)] },
+            nativeSourceValue: {
+              type: 'nodeList',
+              relatedNodes: [relatedNode(legend, text, idOf)],
+            },
           },
           text || null
         ),
@@ -799,7 +806,10 @@ export function nameOf(
   el: Element,
   role: string,
   idOf: IdOf
-): { name: Protocol.Accessibility.AXValue; description?: Protocol.Accessibility.AXValue } {
+): {
+  name: Protocol.Accessibility.AXValue;
+  description?: Protocol.Accessibility.AXValue;
+} {
   const found = sourcesOf(el, role, idOf, { visited: new Set(), naming: null });
   const text = settle(found);
   const sources = found.map(f => f.source);
@@ -829,5 +839,8 @@ export function documentNameOf(doc: Document): Protocol.Accessibility.AXValue {
 /** A text node's name, its rendered text. */
 export function textNameOf(text: Text): Protocol.Accessibility.AXValue {
   const value = hasLayout(text) ? layoutText(text) : text.data;
-  return { ...computed(value), sources: [{ type: 'contents', value: computed(value) }] };
+  return {
+    ...computed(value),
+    sources: [{ type: 'contents', value: computed(value) }],
+  };
 }

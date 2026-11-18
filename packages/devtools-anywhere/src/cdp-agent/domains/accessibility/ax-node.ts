@@ -3,7 +3,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { contentsText, documentNameOf, nameOf, textNameOf, type IdOf } from './ax-name';
 import { inDisplayNone } from './ax-text';
-import { TreeShape, isFocusable, isInternalRole, roleOf } from './ax-tree';
+import { TreeShape, groupTable, isFocusable, isInternalRole, roleOf } from './ax-tree';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText } from '../../core/realm';
 
 type AXNode = Protocol.Accessibility.AXNode;
@@ -92,13 +92,7 @@ const ariaNumber = (el: Element, name: string) => {
 
 /** Form-associated (listed) elements: those Chrome checks the validity of. */
 const isListed = (el: Element) =>
-  isHtml(el, 'input') ||
-  isHtml(el, 'button') ||
-  isHtml(el, 'select') ||
-  isHtml(el, 'textarea') ||
-  isHtml(el, 'fieldset') ||
-  isHtml(el, 'output') ||
-  isHtml(el, 'object');
+  isHtmlElement(el) && /^(input|button|select|textarea|fieldset|output|object)$/.test(el.localName);
 
 /** Input types whose control is a text field (Chrome's atomic text field). */
 const TEXT_INPUT = /^(text|search|email|url|tel|password)$/;
@@ -147,24 +141,17 @@ function rangeValue(el: Element, role: string): number | null {
     return now;
   }
   if (isHtml(el, 'meter')) return el.value;
-  switch (role) {
-    case 'scrollbar':
-    case 'slider':
-      return min !== null && max !== null ? (min + max) / 2 : 50;
-    case 'separator':
-      return 50;
-    case 'meter':
-      return min ?? 0;
-    case 'spinbutton':
-      return 0;
-    default:
-      return null;
-  }
+  if (role === 'scrollbar' || role === 'slider') return min !== null && max !== null ? (min + max) / 2 : 50;
+  return role === 'separator' ? 50 : role === 'meter' ? (min ?? 0) : role === 'spinbutton' ? 0 : null;
 }
 
 /** A password's value masked as Chrome shows it, with the field's -webkit-text-security. */
 function masked(el: HTMLInputElement, value: string): string {
-  const security = (getComputedStyle(el) as CSSStyleDeclaration & { webkitTextSecurity?: string }).webkitTextSecurity;
+  const security = (
+    getComputedStyle(el) as CSSStyleDeclaration & {
+      webkitTextSecurity?: string;
+    }
+  ).webkitTextSecurity;
   const mask = security === 'circle' ? '◦' : security === 'square' ? '■' : security === 'none' ? '' : '•';
   return mask ? mask.repeat(value.length) : value;
 }
@@ -224,28 +211,21 @@ function isValidControl(el: Element): boolean {
   return isTextField(el) && el.required && !el.value;
 }
 
-/** Roles that take aria-orientation, with the orientation ARIA gives them by default. */
-const ORIENTATION: Record<string, string | null> = {
-  listbox: 'vertical',
-  menu: 'vertical',
-  menubar: 'horizontal',
-  scrollbar: 'vertical',
-  separator: 'horizontal',
-  slider: 'horizontal',
-  tablist: 'horizontal',
-  toolbar: 'horizontal',
-  tree: 'vertical',
-  radiogroup: null,
-  treegrid: null,
-};
+/**
+ * Roles that take aria-orientation, with the orientation ARIA gives them by default, as
+ * "orientation role role …"; combobox, radiogroup and treegrid take it with no default.
+ */
+const ORIENTATION = groupTable([
+  'vertical listbox menu scrollbar tree',
+  'horizontal menubar separator slider tablist toolbar',
+]);
 
 /** An element's orientation, explicit or the role's default. */
 function orientationOf(el: Element, role: string): string | null {
   const explicit = el.getAttribute('aria-orientation')?.trim().toLowerCase();
   const valid = explicit === 'horizontal' || explicit === 'vertical' ? explicit : null;
-  if (role === 'combobox') return valid;
-  if (!(role in ORIENTATION)) return null;
-  return valid ?? ORIENTATION[role] ?? null;
+  if (/^(combobox|radiogroup|treegrid)$/.test(role)) return valid;
+  return role in ORIENTATION ? (valid ?? ORIENTATION[role] ?? null) : null;
 }
 
 /** Roles whose items Chrome says are selected or not even without aria-selected. */
@@ -314,18 +294,15 @@ function isReadOnly(el: Element, role: string): boolean {
   return false;
 }
 
+/** The politeness of the live regions by role (ARIA's implicit aria-live), as "politeness role role …". */
+const IMPLICIT_LIVE = groupTable(['assertive alert', 'polite status log', 'off marquee timer']);
+
 /** Live region properties of a live region's root: its politeness, atomic and relevant. */
 function liveRegion(el: Element, role: string): AXProperty[] {
-  const implicit: Record<string, [string, boolean]> = {
-    alert: ['assertive', true],
-    status: ['polite', true],
-    log: ['polite', false],
-    marquee: ['off', false],
-    timer: ['off', false],
-  };
-  const live = el.getAttribute('aria-live')?.trim().toLowerCase() || implicit[role]?.[0];
+  const live = el.getAttribute('aria-live')?.trim().toLowerCase() || IMPLICIT_LIVE[role];
   if (!live || live === 'off') return [];
-  const atomic = ariaBool(el, 'aria-atomic') ?? implicit[role]?.[1] ?? false;
+  // Of the live regions by role, alert and status are atomic.
+  const atomic = ariaBool(el, 'aria-atomic') ?? (role === 'alert' || role === 'status');
   const relevant = el.getAttribute('aria-relevant')?.trim() || 'additions text';
   return [prop('live', 'token', live), bool('atomic', atomic, 'boolean'), prop('relevant', 'tokenList', relevant)];
 }
@@ -421,7 +398,12 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
       name: 'activedescendant',
       value: {
         type: 'idref',
-        relatedNodes: [{ backendDOMNodeId: idOf(active), ...(active.id && { idref: active.id }) }],
+        relatedNodes: [
+          {
+            backendDOMNodeId: idOf(active),
+            ...(active.id && { idref: active.id }),
+          },
+        ],
       },
     });
   for (const name of ['controls', 'details', 'flowto'] as const) {
@@ -431,7 +413,11 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   // labelledby: the nodes of the source that named it, aria-labelledby's or the labels'.
   const named = nameSources?.find(s => s.value && !s.superseded);
   const related = named?.attributeValue?.relatedNodes ?? named?.nativeSourceValue?.relatedNodes;
-  if (related) out.push({ name: 'labelledby', value: { type: 'nodeList', relatedNodes: related } });
+  if (related)
+    out.push({
+      name: 'labelledby',
+      value: { type: 'nodeList', relatedNodes: related },
+    });
   return out;
 }
 
@@ -485,7 +471,9 @@ export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree
             ? [
                 {
                   backendDOMNodeId: idOf(inclusion.hiddenRoot),
-                  ...(inclusion.hiddenRoot.id && { idref: inclusion.hiddenRoot.id }),
+                  ...(inclusion.hiddenRoot.id && {
+                    idref: inclusion.hiddenRoot.id,
+                  }),
                 },
               ]
             : undefined;

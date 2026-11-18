@@ -28,7 +28,12 @@ export type IgnoredReason =
  */
 export type Inclusion =
   | { kind: 'included' }
-  | { kind: 'ignored'; reason: IgnoredReason; hiddenRoot?: Element; noReason?: true }
+  | {
+      kind: 'ignored';
+      reason: IgnoredReason;
+      hiddenRoot?: Element;
+      noReason?: true;
+    }
   | { kind: 'lifted'; reason: IgnoredReason }
   | { kind: 'excluded'; reason: IgnoredReason };
 
@@ -101,7 +106,10 @@ function rawRole(el: Element): string | null {
 
 /** For the roles that need one, the container roles (and tags) that give them their context. */
 const REQUIRED_CONTEXT: Record<string, { roles: string[]; tags: string[] }> = {
-  listitem: { roles: ['list', 'directory', 'group'], tags: ['ul', 'ol', 'menu'] },
+  listitem: {
+    roles: ['list', 'directory', 'group'],
+    tags: ['ul', 'ol', 'menu'],
+  },
   option: { roles: ['listbox', 'group'], tags: ['select'] },
   treeitem: { roles: ['tree', 'group'], tags: [] },
 };
@@ -141,9 +149,7 @@ export function isFocusable(el: Element): boolean {
   if (isHtml(el, 'a') || isHtml(el, 'area')) return el.hasAttribute('href');
   if (isHtml(el, 'input')) return el.type !== 'hidden';
   if (isHtmlElement(el) && el.isContentEditable) return true;
-  return (
-    isHtml(el, 'button') || isHtml(el, 'select') || isHtml(el, 'textarea') || isHtml(el, 'option') || isSummary(el)
-  );
+  return (isHtmlElement(el) && /^(button|select|textarea|option)$/.test(el.localName)) || isSummary(el);
 }
 
 /** A details element's summary: Chrome's DisclosureTriangle. */
@@ -152,104 +158,77 @@ const isSummary = (el: Element) =>
   el.parentElement?.localName === 'details' &&
   el.parentElement.querySelector(':scope > summary') === el;
 
-/** Roles that only depend on the tag name. */
-const TAG_ROLES: Record<string, string> = {
-  abbr: 'Abbr',
-  address: 'group',
-  article: 'article',
-  audio: 'Audio',
-  blockquote: 'blockquote',
-  br: 'LineBreak',
-  button: 'button',
-  canvas: 'Canvas',
-  caption: 'caption',
-  code: 'code',
-  datalist: 'listbox',
-  dd: 'definition',
-  del: 'deletion',
-  s: 'deletion',
-  details: 'group',
-  dfn: 'term',
-  dt: 'term',
-  dialog: 'dialog',
-  dir: 'list',
-  menu: 'list',
-  ol: 'list',
-  ul: 'list',
-  dl: 'DescriptionList',
-  em: 'emphasis',
-  embed: 'EmbeddedObject',
-  fieldset: 'group',
-  figure: 'figure',
-  figcaption: 'Figcaption',
-  form: 'form',
-  h1: 'heading',
-  h2: 'heading',
-  h3: 'heading',
-  h4: 'heading',
-  h5: 'heading',
-  h6: 'heading',
-  hgroup: 'group',
-  optgroup: 'group',
-  hr: 'separator',
-  iframe: 'Iframe',
-  img: 'image',
-  svg: 'image',
-  ins: 'insertion',
-  label: 'LabelText',
-  legend: 'Legend',
-  li: 'listitem',
-  main: 'main',
-  mark: 'mark',
-  math: 'MathMLMath',
-  meter: 'meter',
-  nav: 'navigation',
-  object: 'PluginObject',
-  option: 'option',
-  output: 'status',
-  p: 'paragraph',
-  progress: 'progressbar',
-  ruby: 'Ruby',
-  search: 'search',
-  strong: 'strong',
-  sub: 'subscript',
-  sup: 'superscript',
-  table: 'table',
-  textarea: 'textbox',
-  time: 'time',
-  video: 'Video',
-};
+/** The words of a space-separated list. */
+export const words = (list: string) => list.split(' ');
+
+/** A space-separated list as a set. */
+export const wordSet = (list: string) => new Set(words(list));
+
+/** A table from groups of words, "value key key …": each key to its group's value. */
+export function groupTable(groups: string[]): Record<string, string> {
+  const table: Record<string, string> = {};
+  for (const group of groups) {
+    const [value = '', ...keys] = words(group);
+    for (const key of keys) table[key] = value;
+  }
+  return table;
+}
+
+/**
+ * Roles that only depend on the tag name (Blink's AXNodeObject::NativeRoleIgnoringAria), as
+ * "role tag tag …".
+ */
+const TAG_ROLES = groupTable([
+  'group address details fieldset hgroup optgroup',
+  'LineBreak br',
+  'listbox datalist',
+  'definition dd',
+  'deletion del s',
+  'term dfn dt',
+  'list dir menu ol ul',
+  'DescriptionList dl',
+  'emphasis em',
+  'EmbeddedObject embed',
+  'heading h1 h2 h3 h4 h5 h6',
+  'separator hr',
+  'image img svg',
+  'insertion ins',
+  'LabelText label',
+  'listitem li',
+  'MathMLMath math',
+  'navigation nav',
+  'PluginObject object',
+  'status output',
+  'paragraph p',
+  'progressbar progress',
+  'subscript sub',
+  'superscript sup',
+  'textbox textarea',
+]);
+// Tags whose role is named after them: ARIA roles, and Chrome's own roles, capitalized.
+for (const tag of words(
+  'article blockquote button caption code dialog figure form main mark meter option search strong table time'
+))
+  TAG_ROLES[tag] = tag;
+for (const tag of words('abbr audio canvas figcaption iframe legend ruby video'))
+  TAG_ROLES[tag] = tag[0]?.toUpperCase() + tag.slice(1);
+
+/** The roles of inputs by their type, as "role type type …"; other types are text fields. */
+const INPUT_ROLES = groupTable([
+  'button button submit reset image file',
+  'checkbox checkbox',
+  'radio radio',
+  'slider range',
+  'spinbutton number',
+  'ColorWell color',
+  'Date date',
+  'DateTime datetime-local month week',
+  'InputTime time',
+]);
 
 /** An input's role, by its type. */
-function inputRole(el: HTMLInputElement): string {
-  switch (el.type) {
-    case 'button':
-    case 'submit':
-    case 'reset':
-    case 'image':
-    case 'file':
-      return 'button';
-    case 'checkbox':
-    case 'radio':
-      return el.type;
-    case 'range':
-      return 'slider';
-    case 'number':
-      return 'spinbutton';
-    case 'color':
-      return 'ColorWell';
-    case 'date':
-      return 'Date';
-    case 'datetime-local':
-    case 'month':
-    case 'week':
-      return 'DateTime';
-    case 'time':
-      return 'InputTime';
-  }
-  if (el.list) return 'combobox';
-  return el.type === 'search' ? 'searchbox' : 'textbox';
-}
+const inputRole = (el: HTMLInputElement): string =>
+  INPUT_ROLES[el.type] ?? (el.list ? 'combobox' : el.type === 'search' ? 'searchbox' : 'textbox');
 
 const TABLE_LIKE = /^(table|grid|treegrid|LayoutTable)$/;
 
@@ -551,7 +530,12 @@ export class TreeShape {
     const hidden = this.hiddenRoot(node);
     // Chrome leaves the aria-hidden element out and keeps what it hides, ignored.
     if (hidden === node) return { kind: 'lifted', reason: 'ariaHiddenElement' };
-    if (hidden) return { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden };
+    if (hidden)
+      return {
+        kind: 'ignored',
+        reason: 'ariaHiddenSubtree',
+        hiddenRoot: hidden,
+      };
     if (node === this.doc.documentElement || node === this.doc.body)
       return { kind: 'ignored', reason: 'uninteresting' };
     // A tbody without a role, ARIA attribute, title, id (a possible link target) or tabindex is ignored;
