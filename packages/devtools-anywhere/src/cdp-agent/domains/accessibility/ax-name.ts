@@ -497,8 +497,11 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
   let out = '';
   let prev: Piece | null = null;
   let lastFrom: From = 'none';
+  let skipped = false;
   for (let i = 0; i < pieces.length; i++) {
     const piece = pieces[i] as Piece;
+    // Not the element being named, which its own label's text passes over keeping both spaces.
+    const wasVisited = piece instanceof Node && c.visited.has(piece) && piece !== c.visited.values().next().value;
     let text: string;
     let from: From = 'contents';
     if (!(piece instanceof Node)) text = piece.text;
@@ -530,9 +533,12 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
       separates(el, prev, piece, lastFrom, from)
     )
       out += ' ';
+    // An element already taken in this computation gives nothing and leaves its two sides' white space as one.
+    else if (skipped && text && isHtmlSpace(text[0]) && isHtmlSpace(out[out.length - 1])) text = text.slice(1);
     out += text;
     prev = piece;
     if (text) lastFrom = from;
+    skipped = !text && wasVisited ? true : text ? false : skipped;
   }
   return out;
 }

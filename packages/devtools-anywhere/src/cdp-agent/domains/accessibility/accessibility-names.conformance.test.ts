@@ -6,11 +6,7 @@
 import { describeCases, readCases } from '../../../../test-support/accessibility.ts';
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
-const TODO = {
-  'name: Chrome drops the white space after an image whose text is taken elsewhere; ours keeps a double space': `
-    name-comp-name-from-content-52
-    `,
-};
+const TODO = {};
 
 describeCases(readCases(new URL('cases/names.html', import.meta.url)), {
   todo: TODO,
