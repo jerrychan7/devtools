@@ -22,6 +22,7 @@ import {
   isFocused,
   isInternalRole,
   isMenuList,
+  isSvgLink,
   matches,
   query,
   roleOf,
@@ -481,6 +482,7 @@ function activeDescendant(el: Element): Element | null {
 /** The url Chrome gives a link (its href) or an image (the source it shows). */
 function urlOf(el: Element, role: string): string | null {
   if (role === 'link' && (isHtml(el, 'a') || isHtml(el, 'area'))) return el.href;
+  if (role === 'link' && isSvgLink(el)) return new URL(attr(el, 'href') ?? '', el.baseURI).href;
   if (role === 'image' && isHtml(el, 'img')) return el.currentSrc.trim() || null;
   return null;
 }

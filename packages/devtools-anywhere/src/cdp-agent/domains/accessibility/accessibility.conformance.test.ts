@@ -364,4 +364,27 @@ b
       Array.from({ length: 35 }, (_, i) => `tf${i + 1}`),
       ['generic', 'StaticText', 'LineBreak', 'textbox', 'combobox']
     ));
+
+  test('svg: title and desc name and describe, never nodes; image or SvgRoot; the elements kept', () =>
+    compare(
+      `<div><svg id=sv1><title>T1</title><desc>D1</desc><rect width=10 height=10></rect></svg></div>
+<div><svg id=sv2 role=img><title>T2</title></svg></div>
+<div><svg id=sv3 aria-label=AL><title>T3</title><desc>D3</desc><circle r=4></circle></svg></div>
+<div><svg id=sv4><g><title>GT</title><rect width=5 height=5></rect></g><text id=sv4t>Txt<title>TT</title></text><a id=sv4a href="#"><title>AT</title><text>link</text></a></svg></div>
+<div><svg id=sv5><desc>OnlyD</desc><rect width=3 height=3></rect></svg></div>
+<div><svg id=sv6><rect id=sv6r width=3 height=3><title>RT</title><desc>RD</desc></rect></svg></div>
+<div><svg id=sv7><title><b>x</b>Mixed</title><circle r=2></circle></svg></div>
+<div><svg id=sv8><title>Root</title><rect width=3 height=3><title>R</title></rect></svg></div>
+<div><svg id=sv9><g><rect width=3 height=3></rect></g><g aria-label=GL><circle r=1></circle></g></svg></div>
+<div><svg id=sv10><text>hello <tspan>world</tspan></text></svg></div>
+<div><svg id=sv11><rect width=3 height=3 tabindex=0></rect><use href="#x"></use><foreignObject width=50 height=20><p>fo</p></foreignObject></svg></div>
+<div><svg id=sv12 role=group><title>G</title><rect width=3 height=3><title>R</title></rect></svg></div>
+<div><svg id=sv13><svg><title>inner</title><rect width=3 height=3></rect></svg></svg></div>
+<div><svg id=sv14><title>  spaced   title </title></svg></div>
+<div><svg id=sv15><title></title><desc>dd</desc></svg></div>
+<div id=sv16><svg aria-hidden=true><title>H</title><text>x</text></svg></div>
+<div><svg id=sv17><defs><rect id=sv17r width=3 height=3><title>in defs</title></rect></defs></svg></div>`,
+      Array.from({ length: 17 }, (_, i) => `sv${i + 1}`).concat('sv4t', 'sv4a', 'sv6r'),
+      ['image', 'SvgRoot', 'graphics-symbol', 'group', 'link', 'StaticText']
+    ));
 });

@@ -489,6 +489,8 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
       else text = textOfTextNode(piece, c);
     } else if (isElement(piece)) {
       if (actions.includes(piece)) continue;
+      // An svg element's title and desc name and describe it, not its contents.
+      if (piece.namespaceURI === SVG_NS && (piece.localName === 'title' || piece.localName === 'desc')) continue;
       if (hiddenForText(piece, root)) {
         // An element hidden by visibility only is left out of the tree, and its elements that
         // are visible again take its place.
@@ -593,7 +595,14 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
 
   // An image map's area always lists its (empty) contents, before the alt="" rule below.
   const area = isHtml(el, 'area');
-  if (area || (includesContents(el, role, null, false) && !isInputButton(el))) {
+  const contents = area || (includesContents(el, role, null, false) && !isInputButton(el));
+  // An svg element with contents (a link) takes its title child first, then its title attribute.
+  const svgTitleFirst = contents && el.namespaceURI === SVG_NS;
+  if (svgTitleFirst) {
+    push(...svgTitleSource(el));
+    if (!titleProhibited(el, role)) push(...titleSource(el));
+  }
+  if (contents) {
     const text = textFromDescendants(el, null, c);
     push(source({ type: 'contents' }, text || null), !!text);
   }
@@ -608,13 +617,16 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
     !isTextFieldRole(role)
   )
     push(placeholderSource(el, 'aria-placeholder'), false);
-  if (el.namespaceURI === SVG_NS) {
-    const title = query(el, ':scope > title');
-    const text = (title && textOf(title)) ?? '';
-    push(source({ type: 'relatedElement', nativeSource: 'title' }, text || null), !!text);
-  }
+  if (el.namespaceURI === SVG_NS && !svgTitleFirst) push(...svgTitleSource(el));
   if (!titleProhibited(el, role)) push(...titleSource(el));
   return out;
+}
+
+/** An svg element's title child as a source: its text when it has one. */
+function svgTitleSource(el: Element): [AXValueSource, boolean] {
+  const title = query(el, ':scope > title');
+  const text = (title && textOf(title)) ?? '';
+  return [source({ type: 'relatedElement', nativeSource: 'title' }, text || null), !!text];
 }
 
 /** The title source: its text when the title is used (TextAlternativeFromTitleAttribute). */
@@ -745,7 +757,7 @@ export function contentsText(el: Element): string {
 /**
  * An element's description, in Chrome's order: aria-describedby's targets, aria-description, then
  * the first of what did not name it: an input button's value, a table's caption, a summary's
- * content, a ruby's annotations, the title.
+ * content, a ruby's annotations, an svg element's desc child, the title.
  */
 function descriptionOf(el: Element, name: string): string {
   const own = simplify(describedByText(el)) || simplify(attr(el, 'aria-description') ?? '');
@@ -756,10 +768,17 @@ function descriptionOf(el: Element, name: string): string {
     caption ? contentsText(caption) : '',
     el.localName === 'summary' ? contentsText(el) : '',
     el.localName === 'ruby' ? queryAll(el, 'rt').map(contentsText).join(' ') : '',
+    simplify(svgDescText(el)),
     simplify(titleText(el) ?? ''),
   ];
   const simplifiedName = simplify(name);
   return fallbacks.find(text => text && text !== simplifiedName) ?? '';
+}
+
+/** The text of an svg element's desc child. */
+function svgDescText(el: Element): string {
+  const desc = el.namespaceURI === SVG_NS ? query(el, ':scope > desc') : null;
+  return (desc && textOf(desc)) ?? '';
 }
 
 /** An element's name and description (absent when empty). */

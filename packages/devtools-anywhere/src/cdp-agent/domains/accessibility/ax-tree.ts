@@ -85,7 +85,7 @@ export type Inclusion =
 
 /** Elements whose text and children the page does not show as content: replaced by their value or a popup. */
 const OPAQUE = new Set(
-  'script style template noscript title head textarea select option input img br wbr iframe object embed video audio canvas svg'.split(
+  'script style template noscript title head textarea select option input img br wbr iframe object embed video audio canvas'.split(
     ' '
   )
 );
@@ -97,6 +97,47 @@ const NOT_RENDERED = new Set('col colgroup map noscript source track wbr'.split(
 const SVG_SHAPES = new Set('circle ellipse line path polygon polyline rect'.split(' '));
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** SVG elements that draw nothing themselves, left out with what they hold. */
+const SVG_UNDRAWN = new Set(
+  'clipPath desc filter linearGradient marker mask metadata pattern radialGradient script style symbol title'.split(' ')
+);
+
+/** An svg link. */
+export const isSvgLink = (el: Element) => el.namespaceURI === SVG_NS && el.localName === 'a';
+
+/** Whether an element is in an svg, under its root. */
+const inSvg = (el: Element) => (el.parentNode as Element | null)?.namespaceURI === SVG_NS;
+
+/**
+ * How an element in an svg without a role takes part, as in Chrome: text and links are kept; a
+ * shape, image, use, group or inner svg only when it names or describes itself (aria, a title or
+ * desc child) or takes focus, its children in its place otherwise; foreignObject is presentational;
+ * the other elements give their children.
+ */
+function svgInclusion(el: Element): Inclusion {
+  if (SVG_UNDRAWN.has(el.localName)) return excluded('notRendered');
+  if (el.localName === 'foreignObject') return ignored('presentationalRole');
+  if (el.localName === 'text' || el.localName === 'a') return INCLUDED;
+  if (!/^(circle|ellipse|line|path|polygon|polyline|rect|image|use|g|svg)$/.test(el.localName))
+    return lifted('uninteresting');
+  const interesting =
+    hasAuthorName(el) ||
+    hasAttr(el, 'aria-describedby') ||
+    hasAttr(el, 'tabindex') ||
+    !!query(el, ':scope > title, :scope > desc');
+  return interesting ? INCLUDED : lifted('uninteresting');
+}
+
+/** Whether a root svg holds anything Chrome keeps: it is then an SvgRoot, an image otherwise. */
+function hasSvgContent(svg: Element): boolean {
+  return queryAll(svg, '*').some(el => {
+    for (let p: Element | null = el; p && p !== svg; p = p.parentElement)
+      if (SVG_UNDRAWN.has(p.localName)) return false;
+    if (el.namespaceURI !== SVG_NS) return true;
+    return !!explicitRole(el) || svgInclusion(el).kind !== 'lifted';
+  });
+}
 
 /** The document or shadow root a node is in, where its ids resolve; null when detached. */
 export function scopeOf(node: Node): Document | ShadowRoot | null {
@@ -211,7 +252,7 @@ export function isFocusable(el: Element): boolean {
   // Without a box (display: contents), Chrome does not focus it.
   if (styleOf(el).display === 'contents') return false;
   if (hasAttr(el, 'tabindex')) return true;
-  if (isHtml(el, 'a') || isHtml(el, 'area')) return hasAttr(el, 'href');
+  if (isHtml(el, 'a') || isHtml(el, 'area') || isSvgLink(el)) return hasAttr(el, 'href');
   if (isHtml(el, 'input')) return el.type !== 'hidden';
   // The editing host, not the elements in it.
   if (isHtmlElement(el) && el.isContentEditable && !(el.parentElement?.isContentEditable ?? false)) return true;
@@ -381,7 +422,12 @@ const isTransparent = (color: string) => color === 'transparent' || /^rgba\(.*,\
 
 /** The role an element has without a role attribute. */
 function implicitRole(el: Element): string {
-  if (el.namespaceURI === SVG_NS && SVG_SHAPES.has(el.localName)) return 'graphics-symbol';
+  if (el.namespaceURI === SVG_NS) {
+    if (SVG_SHAPES.has(el.localName)) return 'graphics-symbol';
+    if (el.localName === 'g' || el.localName === 'foreignObject' || (el.localName === 'svg' && inSvg(el)))
+      return 'group';
+    if (el.localName === 'svg') return hasSvgContent(el) ? 'SvgRoot' : 'image';
+  }
   switch (el.localName) {
     case 'th':
     case 'td':
@@ -632,8 +678,13 @@ export class TreeShape {
       const parent = domParent(node);
       if (!parent || (isElement(parent) && (OPAQUE.has(parent.localName) || hiddenReason(parent))))
         return excluded('notRendered');
+      // In an svg, only its text elements draw text.
+      if (isElement(parent) && parent.namespaceURI === SVG_NS && !/^(text|tspan|textPath)$/.test(parent.localName))
+        return excluded('notRendered');
       if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n))) return excluded('uninteresting');
       const hidden = this.hiddenRoot(node);
+      // What aria-hidden hides in an svg is left out of the tree.
+      if (hidden && (parent as Element).namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
       return hidden ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden } : INCLUDED;
     }
     if (!isElement(node)) return excluded('uninteresting');
@@ -654,6 +705,7 @@ export class TreeShape {
     )
       return excluded('notRendered');
     const hidden = this.hiddenRoot(node);
+    if (hidden && node.namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
     // Chrome leaves the aria-hidden element out and keeps what it hides, ignored.
     if (hidden === node) return lifted('ariaHiddenElement');
     if (hidden)
@@ -677,6 +729,7 @@ export class TreeShape {
     if (node.localName === 'rt' && node.parentElement?.localName === 'ruby')
       return { kind: 'ignored', reason: 'uninteresting', noReason: true };
     const explicit = explicitRole(node);
+    if (node.namespaceURI === SVG_NS && !explicit && inSvg(node)) return svgInclusion(node);
     // An empty root svg without a name is no image.
     if (
       node.localName === 'svg' &&
