@@ -7,6 +7,7 @@
 // text (ax-text.ts).
 import type { Protocol } from 'devtools-protocol';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
+import { contentText } from './ax-counter';
 import { domChildren, domParent, isFocusable, roleOf } from './ax-tree';
 import {
   droppedSpace,
@@ -407,22 +408,16 @@ function labelsOf(el: Element & { labels: NodeListOf<HTMLLabelElement> }, c: Com
   return [...el.labels];
 }
 
-/** The strings of a `content` value, joined. */
-function contentStrings(content: string): string {
-  let out = '';
-  for (const m of content.matchAll(/"((?:[^"\\]|\\.)*)"/g)) out += (m[1] ?? '').replace(/\\(.)/g, '$1');
-  return out;
-}
-
 /**
  * A ::before or ::after pseudo-element's generated text: as rendered, or its alternative text as
- * written (`content: "text" / "alternative"`).
+ * written (`content: "text" / "alternative"`). Chrome resolves attr() in the computed value;
+ * counter() is computed here.
  */
 function generatedText(el: Element, pseudo: '::before' | '::after'): string {
   const style = styleOf(el, pseudo);
   const parts = style.content.split(/\s\/\s/);
-  if (parts.length > 1) return contentStrings(parts[parts.length - 1] ?? '');
-  let text = contentStrings(parts[0] ?? '').replace(/[ \t\n\f\r]+/g, ' ');
+  if (parts.length > 1) return contentText(parts[parts.length - 1] ?? '', el, pseudo);
+  let text = contentText(parts[0] ?? '', el, pseudo).replace(/[ \t\n\f\r]+/g, ' ');
   // Its space at the start or the end of a line does not show.
   const inline = style.display.startsWith('inline');
   if (text.startsWith(' ') && (!inline || (pseudo === '::before' && lineEdge(el, true)))) text = text.slice(1);
