@@ -6,6 +6,7 @@
 // checked against Chrome's getFullAXTree (accessibility.conformance.test.ts). The role mapping is
 // Chrome's: ARIA roles where it gives them, its own (capitalized) roles elsewhere.
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
+import { inDisplayNone } from './ax-text';
 
 /** Whether a role is one of Chrome's own, not an ARIA role (reported as `internalRole`). */
 export const isInternalRole = (role: string) => /^[A-Z]/.test(role);
@@ -216,10 +217,6 @@ const TAG_ROLES: Record<string, string> = {
   table: 'table',
   textarea: 'textbox',
   time: 'time',
-  tr: 'row',
-  thead: 'rowgroup',
-  tbody: 'rowgroup',
-  tfoot: 'rowgroup',
   video: 'Video',
 };
 
@@ -254,6 +251,90 @@ function inputRole(el: HTMLInputElement): string {
   return el.type === 'search' ? 'searchbox' : 'textbox';
 }
 
+const TABLE_LIKE = /^(table|grid|treegrid|LayoutTable)$/;
+
+/**
+ * The closest ancestor that counts within a table (Chrome's GetDOMTableAXAncestor): group,
+ * generic and rowgroup ones are passed over.
+ */
+function tableAncestor(el: Element): Element | null {
+  for (let p = el.parentElement; p; p = p.parentElement) if (!/^(group|generic|rowgroup)$/.test(roleOf(p))) return p;
+  return null;
+}
+
+/** Data table answers, kept for one synchronous pass over the tree. */
+let dataTables: WeakMap<Element, boolean> | null = null;
+
+/** Whether a table holds data rather than layout (Chrome's IsDataTable), cached for the current pass. */
+function isDataTable(table: Element): boolean {
+  if (!dataTables) {
+    dataTables = new WeakMap();
+    queueMicrotask(() => (dataTables = null));
+  }
+  let data = dataTables.get(table);
+  if (data === undefined) dataTables.set(table, (data = decideDataTable(table)));
+  return data;
+}
+
+/**
+ * Chrome's heuristic: a table is for data with a role, in editable content, with a caption, summary,
+ * thead, tfoot, rules or col, with 20 rows or more, with a th or a cell with headers, abbr, axis or
+ * scope, with empty-cells: hide, or when half its sized cells have borders, or backgrounds of their
+ * own with cell spacing, or its first rows alternate colours.
+ */
+function decideDataTable(table: Element): boolean {
+  if (!isHtml(table, 'table')) return false;
+  if (inDisplayNone(table)) return true;
+  if (table.hasAttribute('role') || table.isContentEditable) return true;
+  if (table.getAttribute('summary') || table.tHead || table.tFoot || table.caption || table.getAttribute('rules'))
+    return true;
+  if (table.querySelector(':scope > col, :scope > colgroup')) return true;
+  const rows = table.rows;
+  if (rows.length >= 20) return true;
+  if (!rows.length) return false;
+  if (rows.length === 1 && rows[0]?.cells.length === 1) return false;
+  const tableStyle = styleOf(table);
+  const tableBackground = tableStyle.backgroundColor;
+  const [h = '0', v = h] = tableStyle.borderSpacing.split(' ');
+  const spacing = parseFloat(h) > 0 && parseFloat(v) > 0;
+  let valid = 0;
+  let bordered = 0;
+  let backgrounds = 0;
+  const sides = [0, 0, 0, 0];
+  const rowColors: string[] = [];
+  for (const [r, row] of [...rows].entries()) {
+    for (const cell of row.cells) {
+      if (cell.localName === 'th') return true;
+      if (['headers', 'abbr', 'axis', 'scope'].some(a => cell.getAttribute(a))) return true;
+      const style = styleOf(cell);
+      if (inDisplayNone(cell) || !/^(table-cell|block|flow-root|inline-block|list-item|flex|grid)$/.test(style.display))
+        continue;
+      const box = cell.getBoundingClientRect();
+      if (box.width < 1 || box.height < 1) continue;
+      valid++;
+      if (style.emptyCells === 'hide') return true;
+      const widths = [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].map(
+        w => parseFloat(w) > 0
+      );
+      if ((widths[0] && widths[2]) || (widths[1] && widths[3])) bordered++;
+      widths.forEach((w, i) => w && (sides[i] = (sides[i] ?? 0) + 1));
+      const color = style.backgroundColor;
+      if (spacing && color !== tableBackground && !isTransparent(color)) backgrounds++;
+      if (bordered >= 10 || backgrounds >= 10) return true;
+      if (r < 5 && r === rowColors.length && styleOf(row).display === 'table-row')
+        rowColors.push(styleOf(row).backgroundColor);
+    }
+  }
+  if (valid <= 1) return false;
+  const needed = Math.floor(valid / 2);
+  if (bordered >= needed || sides.some(n => n >= needed) || backgrounds >= needed) return true;
+  if (rowColors.length > 2) return rowColors.every((c, k) => (k % 2 ? c !== rowColors[0] : c === rowColors[0]));
+  return false;
+}
+
+/** A computed colour with no alpha. */
+const isTransparent = (color: string) => color === 'transparent' || /^rgba\(.*,\s*0\)$/.test(color);
+
 /** The role an element has without a role attribute. */
 function implicitRole(el: Element): string {
   if (el.namespaceURI === SVG_NS && SVG_SHAPES.has(el.localName)) return 'graphics-symbol';
@@ -263,6 +344,30 @@ function implicitRole(el: Element): string {
       // The cells of a presentational table are plain containers.
       const table = el.closest('table');
       if (table && explicitRole(table) === 'none') return 'generic';
+  }
+  switch (el.localName) {
+    case 'table':
+      return isDataTable(el) ? 'table' : 'LayoutTable';
+    case 'thead':
+    case 'tbody':
+    case 'tfoot': {
+      const table = tableAncestor(el);
+      const role = table ? roleOf(table) : '';
+      return TABLE_LIKE.test(role) && role !== 'LayoutTable' ? 'rowgroup' : 'generic';
+    }
+    case 'tr': {
+      const table = tableAncestor(el);
+      const role = table ? roleOf(table) : '';
+      if (!TABLE_LIKE.test(role)) return 'generic';
+      return role === 'LayoutTable' ? 'LayoutTableRow' : 'row';
+    }
+  }
+  if (el.localName === 'th' || el.localName === 'td') {
+    const row = tableAncestor(el);
+    const rowRole = row ? roleOf(row) : '';
+    const table = row && tableAncestor(row);
+    if (!/^(row|LayoutTableRow)$/.test(rowRole) || !table || !TABLE_LIKE.test(roleOf(table))) return 'generic';
+    if (rowRole === 'LayoutTableRow') return 'LayoutTableCell';
   }
   switch (el.localName) {
     case 'th': {
@@ -449,8 +554,16 @@ export class TreeShape {
     if (hidden) return { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden };
     if (node === this.doc.documentElement || node === this.doc.body)
       return { kind: 'ignored', reason: 'uninteresting' };
-    // An implicit or plain tbody; thead and tfoot are row groups.
-    if (node.localName === 'tbody' && !node.hasAttribute('role')) return { kind: 'ignored', reason: 'uninteresting' };
+    // A tbody without a role, ARIA attribute, title, id (a possible link target) or tabindex is ignored;
+    // thead and tfoot are kept.
+    if (
+      node.localName === 'tbody' &&
+      ![...node.attributes].some(a => a.name.startsWith('aria-') || a.name === 'role') &&
+      !node.getAttribute('title') &&
+      !(node.id && !isShadowRoot(node.getRootNode())) &&
+      !node.hasAttribute('tabindex')
+    )
+      return { kind: 'ignored', reason: 'uninteresting' };
     // Chrome gives a ruby's annotation as its description only.
     if (node.localName === 'rt' && node.parentElement?.localName === 'ruby')
       return { kind: 'ignored', reason: 'uninteresting', noReason: true };

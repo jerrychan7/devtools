@@ -685,17 +685,7 @@ const groups: CaseGroup[] = Object.entries(CONFIGS).map(([file, configs]) => {
 });
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
-const TODO = {
-  'layout table: Chrome takes the table for layout and gives LayoutTable, LayoutTableRow or LayoutTableCell; ours gives the table roles': `
-    table-el-5 table-el-6 tr-td-th.tentative-el-1 tr-td-th.tentative-el-2 tr-td-th.tentative-el-3
-    tr-td-th.tentative-el-4 tr-td-th.tentative-el-5 tr-td-th.tentative-el-11 tr-td-th.tentative-el-12
-    tr-td-th.tentative-el-13 tr-td-th.tentative-el-14 tr-td-th.tentative-el-15
-    `,
-  'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
-    tr-td-th.tentative-el-21 tr-td-th.tentative-el-22 tr-td-th.tentative-el-23 tr-td-th.tentative-el-24
-    tr-td-th.tentative-el-25
-    `,
-};
+const TODO = {};
 
 describeCases(groups, {
   todo: TODO,

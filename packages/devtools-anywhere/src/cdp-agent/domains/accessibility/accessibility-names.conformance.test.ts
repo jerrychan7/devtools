@@ -10,14 +10,8 @@ const TODO = {
   'name: Chrome drops the white space after an image whose text is taken elsewhere; ours keeps a double space': `
     name-comp-name-from-content-52
     `,
-  'layout table: Chrome takes the table for layout and gives LayoutTable, LayoutTableRow or LayoutTableCell; ours gives the table roles': `
-    lib-A12 lib-P13 lib-T6
-    `,
   'name: Chrome names an SVG shape from its title child even with role=none on the title; ours gives none': `
     name-comp-host-language-label-tentative-7
-    `,
-  'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
-    name-comp-label-104
     `,
 };
 

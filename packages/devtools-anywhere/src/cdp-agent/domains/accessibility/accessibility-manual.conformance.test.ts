@@ -7,10 +7,6 @@
 import { describeCases, readCases } from '../../../../test-support/accessibility.ts';
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
-const TODO = {
-  "name: Chrome takes a layout table cell's text into the name; ours stops at the data table": `
-    m-name-from-content m-name-from-content-of-label
-    `,
-};
+const TODO = {};
 
 describeCases(readCases(new URL('cases/manual.html', import.meta.url)), { todo: TODO });

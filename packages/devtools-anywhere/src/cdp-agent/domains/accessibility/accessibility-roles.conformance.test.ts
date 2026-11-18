@@ -7,13 +7,6 @@
 import { describeCases, readCases } from '../../../../test-support/accessibility.ts';
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
-const TODO = {
-  'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
-    lib-R112 html-aam-roles-tentative-2
-    `,
-  'layout table: Chrome takes the table for layout and gives LayoutTable, LayoutTableRow or LayoutTableCell; ours gives the table roles': `
-    lib-R111 lib-R119 lib-R120 lib-R121
-    `,
-};
+const TODO = {};
 
 describeCases(readCases(new URL('cases/roles.html', import.meta.url)), { todo: TODO });
