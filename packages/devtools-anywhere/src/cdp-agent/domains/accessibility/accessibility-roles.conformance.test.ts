@@ -8,9 +8,6 @@ import { describeCases, readCases } from '../../../../test-support/accessibility
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
 const TODO = {
-  'image map area: Chrome exposes an area as a link; ours ignores it': `
-    html-aam-area-role-1 html-aam-area-role-2
-    `,
   'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
     lib-R112 html-aam-roles-tentative-2
     `,

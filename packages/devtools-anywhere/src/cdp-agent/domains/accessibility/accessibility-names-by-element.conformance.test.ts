@@ -691,9 +691,6 @@ const TODO = {
     tr-td-th.tentative-el-4 tr-td-th.tentative-el-5 tr-td-th.tentative-el-11 tr-td-th.tentative-el-12
     tr-td-th.tentative-el-13 tr-td-th.tentative-el-14 tr-td-th.tentative-el-15
     `,
-  'image map area: Chrome exposes an area as a link; ours ignores it': `
-    area-el-1 area-el-2 area-el-3 area-el-4 area-el-5 area-el-6 area-el-7
-    `,
   'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
     tr-td-th.tentative-el-21 tr-td-th.tentative-el-22 tr-td-th.tentative-el-23 tr-td-th.tentative-el-24
     tr-td-th.tentative-el-25

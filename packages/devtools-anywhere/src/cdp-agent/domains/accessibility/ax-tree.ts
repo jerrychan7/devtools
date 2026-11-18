@@ -5,7 +5,7 @@
 // which a page cannot read: these rules redo the common cases from the DOM and computed styles,
 // checked against Chrome's getFullAXTree (accessibility.conformance.test.ts). The role mapping is
 // Chrome's: ARIA roles where it gives them, its own (capitalized) roles elsewhere.
-import { isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
+import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 
 /** Whether a role is one of Chrome's own, not an ARIA role (reported as `internalRole`). */
 export const isInternalRole = (role: string) => /^[A-Z]/.test(role);
@@ -289,8 +289,10 @@ function implicitRole(el: Element): string {
       return el.localName === 'header' ? 'banner' : 'contentinfo';
     }
     case 'a':
-    case 'area':
       return el.hasAttribute('href') ? 'link' : 'generic';
+    case 'area':
+      // An image map's area without a link is text in Chrome.
+      return el.hasAttribute('href') ? 'link' : imageOf(el) ? 'StaticText' : 'generic';
     case 'select':
       if (isHtml(el, 'select')) return el.multiple || el.size > 1 ? 'listbox' : 'combobox';
   }
@@ -318,6 +320,30 @@ function hiddenReason(el: Element): IgnoredReason | null {
     if (styleOf(n).display === 'none') return 'notRendered';
   const visibility = styleOf(el).visibility;
   return visibility === 'hidden' || visibility === 'collapse' ? 'notVisible' : null;
+}
+
+/**
+ * The image an area belongs to: the first rendered img whose usemap names the area's map. Chrome
+ * puts the areas under that image, though the map itself is not rendered.
+ */
+export function imageOf(area: Element): Element | null {
+  const map = area.closest('map');
+  const name = map?.getAttribute('name') || map?.id;
+  if (!map || !name) return null;
+  const root = map.getRootNode();
+  if (!isDocument(root) && !isShadowRoot(root)) return null;
+  for (const img of root.querySelectorAll('img[usemap]'))
+    if (img.getAttribute('usemap') === `#${name}`) return hiddenReason(img) === 'notRendered' ? null : img;
+  return null;
+}
+
+/** An image's map areas, in order. */
+function areasOf(img: Element): Element[] {
+  const name = img.getAttribute('usemap')?.replace(/^#/, '');
+  const root = img.getRootNode();
+  if (!name || (!isDocument(root) && !isShadowRoot(root))) return [];
+  const map = [...root.querySelectorAll('map')].find(m => (m.getAttribute('name') || m.id) === name);
+  return map ? [...map.querySelectorAll('area')].filter(area => imageOf(area) === img) : [];
 }
 
 /** The children of a node as the tree sees them: shadow trees and slots flattened. */
@@ -408,7 +434,8 @@ export class TreeShape {
     }
     if (!isElement(node)) return { kind: 'excluded', reason: 'uninteresting' };
     if (node.closest('[data-devtools-anywhere]')) return { kind: 'excluded', reason: 'notRendered' };
-    const hiddenBy = hiddenReason(node);
+    // An image map's area is shown through its image, whatever its own box.
+    const hiddenBy = isHtml(node, 'area') && imageOf(node) ? null : hiddenReason(node);
     if (hiddenBy) return { kind: 'excluded', reason: hiddenBy };
     if (
       isHtmlElement(node) &&
@@ -476,7 +503,7 @@ export class TreeShape {
   children(node: Node): Node[] {
     const out: Node[] = [];
     const visit = (child: Node) => {
-      if (isElement(child) && this.owner.has(child)) return;
+      if (isElement(child) && (this.owner.has(child) || (isHtml(child, 'area') && imageOf(child)))) return;
       const inclusion = this.inclusion(child);
       if (inclusion.kind === 'excluded') return;
       if (inclusion.kind === 'lifted') {
@@ -486,6 +513,8 @@ export class TreeShape {
       out.push(child);
     };
     for (const child of this.ownChildren(node)) visit(child);
+    if (isHtml(node, 'img'))
+      for (const area of areasOf(node)) if (this.inclusion(area).kind !== 'excluded') out.push(area);
     if (isElement(node))
       for (const el of this.owned.get(node) ?? []) if (this.inclusion(el).kind !== 'excluded') out.push(el);
     return out;
@@ -506,7 +535,9 @@ export class TreeShape {
   /** The closest node in the tree above a node: its aria-owns owner, or its DOM ancestor. */
   parent(node: Node): Node | null {
     if (node === this.doc) return null;
-    let n: Node | null = isElement(node) ? (this.owner.get(node) ?? domParent(node)) : domParent(node);
+    let n: Node | null = isElement(node)
+      ? (this.owner.get(node) ?? (isHtml(node, 'area') ? imageOf(node) : null) ?? domParent(node))
+      : domParent(node);
     while (n && n !== this.doc && !this.inTree(n))
       n = isElement(n) ? (this.owner.get(n) ?? domParent(n)) : domParent(n);
     return n;

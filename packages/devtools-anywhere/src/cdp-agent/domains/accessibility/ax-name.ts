@@ -602,14 +602,14 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
 
   nativeSources(el, role, idOf, c, push);
 
-  if (isHtml(el, 'img') || isHtml(el, 'area')) {
-    // An image with alt="" has no title source: its title describes it.
-    if (el.getAttribute('alt') === '') return out;
-  }
-  if (includesContents(el, role, null, false) && !isInputButton(el)) {
+  // An image map's area always lists its (empty) contents, before the alt="" rule below.
+  const area = isHtml(el, 'area');
+  if (area || (includesContents(el, role, null, false) && !isInputButton(el))) {
     const text = textFromDescendants(el, null, c);
     push(source({ type: 'contents' }, text || null), !!text);
   }
+  // An image with alt="" has no title source: its title describes it.
+  if ((isHtml(el, 'img') || area) && el.getAttribute('alt') === '') return out;
   if (isHtmlElement(el) && el.isContentEditable && !isNativeTextField(el) && !isTextFieldRole(role))
     push(attributeSource(el, 'aria-placeholder', 'placeholder'), false);
   if (el.localName === 'svg' && el.namespaceURI === SVG_NS) {
