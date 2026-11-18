@@ -50,7 +50,14 @@ const NAME_FROM_CONTENTS = new Set([
 ]);
 
 /** Chrome's own roles that take their name from their content. */
-const NAME_FROM_CONTENTS_INTERNAL = new Set(['DisclosureTriangle', 'LineBreak', 'ListMarker', 'term', 'math']);
+const NAME_FROM_CONTENTS_INTERNAL = new Set([
+  'DisclosureTriangle',
+  'LineBreak',
+  'ListMarker',
+  'LayoutTableCell',
+  'term',
+  'math',
+]);
 
 /**
  * Roles that usually have no name of their own, but whose content counts towards an ancestor's
@@ -123,7 +130,7 @@ function hiddenForText(el: Element, root: Root): boolean {
   if (isHtml(el, 'noscript')) return true;
   if (el.namespaceURI === SVG_NS && (el.localName === 'title' || el.localName === 'desc')) return false;
   // An option builds its text even inside a collapsed select.
-  if (el.getAttribute('aria-hidden') !== 'true' && el.closest('select:not([multiple]) option')) return false;
+  if (el.getAttribute('aria-hidden') !== 'true' && isMenuListOption(el.closest('option'))) return false;
   // The children of a hidden aria-labelledby or aria-describedby target all count.
   if (root && !isVisible(root)) return false;
   if (el.getAttribute('aria-hidden') === 'true') return true;
@@ -144,9 +151,33 @@ function targetsOf(el: Element, attribute: string): Element[] {
   return out;
 }
 
+/** Global ARIA attributes: role none or presentation does not apply to an element with one. */
+const GLOBAL_ARIA = [
+  'aria-label',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-description',
+  'aria-details',
+  'aria-live',
+  'aria-owns',
+  'aria-controls',
+  'aria-keyshortcuts',
+  'aria-roledescription',
+  'aria-busy',
+  'aria-atomic',
+  'aria-relevant',
+  'aria-errormessage',
+  'aria-flowto',
+  'aria-haspopup',
+  'aria-invalid',
+  'aria-current',
+];
+
 /** An element that only presents its content: role none or presentation (Blink's IsPresentational). */
 const isPresentational = (el: Element) =>
-  /^\s*(none|presentation)(\s|$)/.test(el.getAttribute('role') ?? '') && !isFocusable(el);
+  /^\s*(none|presentation)(\s|$)/.test(el.getAttribute('role') ?? '') &&
+  !isFocusable(el) &&
+  !GLOBAL_ARIA.some(name => el.hasAttribute(name));
 
 /** The text field roles (Blink's IsTextField). */
 const isTextFieldRole = (role: string) => role === 'textbox' || role === 'searchbox';
@@ -165,7 +196,7 @@ function supportsNameFromContents(el: Element, role: string, recursive: boolean)
     }
     return false;
   }
-  if (isHtml(el, 'option') && el.closest('select:not([multiple])')) return !hasOneTextChild(el);
+  if (isHtml(el, 'option') && isMenuListOption(el)) return !hasOneTextChild(el);
   if (NAME_FROM_CONTENTS.has(role) || NAME_FROM_CONTENTS_INTERNAL.has(role)) return true;
   if (role === 'list' || role === 'DescriptionList') return recursive;
   if (role === 'group' && el.localName !== 'address' && el.namespaceURI !== SVG_NS) return false;
@@ -179,6 +210,12 @@ function supportsNameFromContents(el: Element, role: string, recursive: boolean)
   if (role === 'RubyAnnotation') return !recursive;
   return false;
 }
+
+/** An option of a select shown as a drop-down (Blink's MenuListOption). */
+const isMenuListOption = (el: Element | null) => {
+  const select = el && isHtml(el, 'option') ? el.closest('select') : null;
+  return !!select && !select.multiple && select.size <= 1;
+};
 
 const hasOneTextChild = (el: Element) => el.childNodes.length === 1 && isText(el.firstChild);
 
@@ -210,6 +247,12 @@ function embeddedValue(el: Element, role: string, c: Computation): string | null
       return isHtml(el, 'input') ? el.value : null;
     }
   }
+  return null;
+}
+
+/** A table's first caption that is not hidden (FirstUnhiddenTableCaption). */
+function captionOf(table: HTMLTableElement): Element | null {
+  for (const child of table.children) if (isHtml(child, 'caption') && !hiddenViaStyle(child)) return child;
   return null;
 }
 
@@ -269,7 +312,7 @@ function titleText(el: Element): string | null {
 
 /** Whether an element's name cannot come from its title: a container of text. */
 const titleProhibited = (el: Element, role: string) =>
-  NO_TITLE.has(role) && el.localName !== 'section' && !isFocusable(el);
+  NO_TITLE.has(role) && el.localName !== 'section' && el.localName !== 'aside' && !isFocusable(el);
 
 /**
  * An element's text alternative inside a name computation (TextAlternative with `recursive`):
@@ -339,16 +382,15 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     const alt = el.getAttribute('alt');
     return alt ? [alt, 'attribute'] : null;
   }
-  if (isHtml(el, 'table') && el.caption && !hiddenViaStyle(el.caption)) {
-    const text = recursiveTextAlternative(el.caption, null, c)[0];
+  const caption = isHtml(el, 'table') ? captionOf(el) : null;
+  if (caption) {
+    const text = recursiveTextAlternative(caption, null, c)[0];
     if (text) return [text, 'caption'];
   }
-  if (isHtml(el, 'fieldset')) {
-    const legend = el.querySelector(':scope > legend');
-    if (legend && !hiddenViaStyle(legend)) {
-      const text = recursiveTextAlternative(legend, null, c)[0];
-      if (text) return [text, 'relatedElement'];
-    }
+  const legend = isHtml(el, 'fieldset') ? el.querySelector(':scope > legend') : null;
+  if (legend && !c.visited.has(legend)) {
+    const text = recursiveTextAlternative(legend, null, c)[0];
+    if (text) return [text, 'relatedElement'];
   }
   if (el.localName === 'svg' && el.namespaceURI === SVG_NS) {
     const title = el.querySelector(':scope > title');
@@ -455,20 +497,30 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
   if (after) pieces.push({ pseudo: '::after', text: after });
 
   const actions = targetsOf(el, 'aria-actions');
+  // The white space between a row's cells is not in the tree.
+  const role = roleOf(el);
   let out = '';
   let prev: Piece | null = null;
   let lastFrom: From = 'none';
-  for (const piece of pieces) {
+  for (let i = 0; i < pieces.length; i++) {
+    const piece = pieces[i] as Piece;
     let text: string;
     let from: From = 'contents';
     if (!(piece instanceof Node)) text = piece.text;
     else if (isText(piece)) {
       // White space with no box has no node in the tree.
-      if (isBlank(piece.data) && (!hasLayout(piece) || droppedSpace(piece))) continue;
+      if (isBlank(piece.data) && (!hasLayout(piece) || droppedSpace(piece) || role === 'row')) continue;
       if (c.visited.has(piece) && !root) text = '';
       else text = textOfTextNode(piece, c);
     } else if (isElement(piece)) {
-      if (actions.includes(piece) || hiddenForText(piece, root)) continue;
+      if (actions.includes(piece)) continue;
+      if (hiddenForText(piece, root)) {
+        // An element hidden by visibility only is left out of the tree, and its elements that
+        // are visible again take its place.
+        if (!inDisplayNone(piece) && piece.getAttribute('aria-hidden') !== 'true')
+          pieces.splice(i + 1, 0, ...childrenOf(piece).filter(isElement));
+        continue;
+      }
       if (isPresentational(piece) && !isHtml(piece, 'br')) {
         text = textFromDescendants(piece, root, c);
         from = 'none';
@@ -611,7 +663,9 @@ function nativeSources(
     const labels = [...el.labels];
     if (!labels.length) push({ type: 'relatedElement', nativeSource: 'label' }, false);
     else {
-      const explicit = labels.some(label => label.htmlFor && label.htmlFor === el.id);
+      // Chrome names the source after the last label.
+      const last = labels[labels.length - 1];
+      const explicit = !!last?.htmlFor && last.htmlFor === el.id;
       const nativeSource = explicit ? 'labelfor' : 'labelwrapped';
       c.naming = el;
       const fromElements = textFromElements(labels, false, c);
@@ -648,7 +702,7 @@ function nativeSources(
     return;
   }
   if (isHtml(el, 'table')) {
-    const caption = el.caption && !hiddenViaStyle(el.caption) ? el.caption : null;
+    const caption = captionOf(el);
     if (!caption) push({ type: 'relatedElement', nativeSource: 'tablecaption' }, false);
     else {
       const text = recursiveTextAlternative(caption, null, c)[0];
@@ -676,9 +730,9 @@ function nativeSources(
       );
   }
   if (isHtml(el, 'fieldset')) {
-    const found = el.querySelector(':scope > legend');
-    const legend = found && !hiddenViaStyle(found) ? found : null;
-    if (!legend) push({ type: 'relatedElement', nativeSource: 'legend' }, false);
+    // The first legend, even hidden: it then names nothing, but counts as found.
+    const legend = el.querySelector(':scope > legend');
+    if (!legend || c.visited.has(legend)) push({ type: 'relatedElement', nativeSource: 'legend' }, false);
     else {
       const text = recursiveTextAlternative(legend, null, c)[0];
       push(
@@ -690,7 +744,7 @@ function nativeSources(
           },
           text || null
         ),
-        !!text
+        true
       );
     }
   }
@@ -727,12 +781,13 @@ export function contentsText(el: Element): string {
 function descriptionOf(el: Element, name: string): string {
   const own = simplify(describedByText(el)) || simplify(el.getAttribute('aria-description') ?? '');
   if (own) return own;
+  const caption = isHtml(el, 'table') ? captionOf(el) : null;
   const fallbacks = [
     isInputButton(el) ? simplify(el.value) : '',
-    isHtml(el, 'table') && el.caption ? contentsText(el.caption) : '',
+    caption ? contentsText(caption) : '',
     el.localName === 'summary' ? contentsText(el) : '',
     el.localName === 'ruby' ? [...el.querySelectorAll('rt')].map(contentsText).join(' ') : '',
-    simplify(el.getAttribute('title') ?? ''),
+    simplify(titleText(el) ?? ''),
   ];
   const simplifiedName = simplify(name);
   return fallbacks.find(text => text && text !== simplifiedName) ?? '';
@@ -751,7 +806,8 @@ export function nameOf(
   const name = isHtml(el, 'br') ? text : simplifyName(text);
   const description = descriptionOf(el, name);
   return {
-    name: { ...computed(name), sources },
+    // A slot lists no sources: it cannot be named.
+    name: { ...computed(name), ...(!isHtml(el, 'slot') && { sources }) },
     ...(description && description !== name && { description: computed(description) }),
   };
 }

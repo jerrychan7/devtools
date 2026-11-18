@@ -162,12 +162,12 @@ function lineNode(node: Node, back: boolean): Node | null {
 
 /**
  * Whether a white space only text node is left out of the tree: Chrome drops it next to a box
- * that is not an inline box (an inline-block, a field; an image is one) or to an aria-hidden element.
+ * that is not an inline box (an inline-block, a field; an image is one), or after an aria-hidden element.
  */
 export function droppedSpace(text: Text): boolean {
   return [true, false].some(back => {
     const n = lineNode(text, back);
-    return isElement(n) && (n.getAttribute('aria-hidden') === 'true' || styleOf(n).display !== 'inline');
+    return isElement(n) && ((back && n.getAttribute('aria-hidden') === 'true') || styleOf(n).display !== 'inline');
   });
 }
 
