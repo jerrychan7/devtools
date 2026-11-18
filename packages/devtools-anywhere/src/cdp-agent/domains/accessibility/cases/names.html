@@ -1023,7 +1023,7 @@ alert message" data-expectedlabel="alert message" data-testname="div with role a
   <p>text inside div group</p>
 </div>
 
-<div role="group" aria-label="self label" id="g2" aria-labelledby="g2 h2" class="ex" data-expectedlabel="self label + first heading" data-testname="div group explicitly labelledby self and heading" data-ax-case="g2">
+<div role="group" aria-label="self label" id="name-comp-labelledby-2" aria-labelledby="name-comp-labelledby-2 h2" class="ex" data-expectedlabel="self label + first heading" data-testname="div group explicitly labelledby self and heading" data-ax-case="name-comp-labelledby-2">
   <h2 id="h2">+ first heading</h2>
   <p>text inside div group</p>
 </div>
@@ -2198,22 +2198,22 @@ label</a>
 <label id="label1">
   <div id="host1">slotted</div>
 </label>
-<button id="labelled1"
+<button id="slot-labelled1"
         class="labelled"
         type="button"
         aria-labelledby="label1"
         data-expectedlabel="foo slotted bar"
-        data-testname="aria-labelledby reference to element with slotted text content" data-ax-case="labelled1"></button>
+        data-testname="aria-labelledby reference to element with slotted text content" data-ax-case="slot-labelled1"></button>
 
 <label id="label2">
   <div id="host2"></div>
 </label>
-<button id="labelled2"
+<button id="slot-labelled2"
         class="labelled"
         type="button"
         aria-labelledby="label2"
         data-expectedlabel="foo default bar"
-        data-testname="aria-labelledby reference to element with default slotted text content" data-ax-case="labelled2"></button>
+        data-testname="aria-labelledby reference to element with default slotted text content" data-ax-case="slot-labelled2"></button>
 
 <label id="label3">
   <div id="host3">slotted</div>
@@ -2294,13 +2294,13 @@ The following test can be added to names.html along with the other figure naming
   <p>These tests are a complement to <a href="https://github.com/w3c/html-aam/pull/533">w3c/html-aam#533</a>.</p>
 
   <h2>Input with hidden label</h2>
-  <label for="input-01" hidden>Hidden label</label>
+  <label for="html-aam-hidden-names-1" hidden>Hidden label</label>
   <input
-    id="input-01"
+    id="html-aam-hidden-names-1"
     class="ex-label"
     data-testname="Input with hidden label"
     data-expectedlabel=""
-   data-ax-case="input-01">
+   data-ax-case="html-aam-hidden-names-1">
 
   <h2>Table with hidden caption</h2>
   <table

@@ -102,10 +102,19 @@ export interface CaseGroup {
 export function readCases(url: URL): CaseGroup[] {
   const parts = readFileSync(url, 'utf8').split(/^<!-- group: (.+?) -->\n/m);
   const groups: CaseGroup[] = [];
+  const seen = new Map<string, string>();
   for (let i = 1; i < parts.length; i += 2) {
+    const name = parts[i] ?? '';
     const html = parts[i + 1] ?? '';
     const ids = [...html.matchAll(/\sdata-ax-case="([^"]+)"/g)].map(m => m[1] ?? '');
-    groups.push({ name: parts[i] ?? '', html, ids });
+    // Test names are the ids: a repeated one would hide a case behind another of the same name.
+    for (const id of ids) {
+      const first = seen.get(id);
+      if (first !== undefined)
+        throw new Error(`${url.pathname}: case id "${id}" in "${name}" is already used in "${first}"`);
+      seen.set(id, name);
+    }
+    groups.push({ name, html, ids });
   }
   return groups;
 }

@@ -510,8 +510,8 @@ where the returned computed role is expected to change based on whether the <cod
 </ul>
 
 
-<ul aria-owns="t"></ul>
-<li data-testname="el-li-orphaned-in-dom-but-owned-by-list-element" id=t class="ex" data-expectedrole="listitem" data-ax-case="t">x</li>
+<ul aria-owns="html-aam-roles-generic-tentative-2"></ul>
+<li data-testname="el-li-orphaned-in-dom-but-owned-by-list-element" id="html-aam-roles-generic-tentative-2" class="ex" data-expectedrole="listitem" data-ax-case="html-aam-roles-generic-tentative-2">x</li>
 
 
 <div role="list">
@@ -833,7 +833,7 @@ where the returned computed role is expected to change based on whether the <cod
     class="ex-role"
     data-testname="div[role=heading][aria-level=1] with invalid div[role=heading][aria-level=2] descendant still convey heading role"
     data-expectedrole="heading"
-   id="heading-invalid-nesting-1" data-ax-case="heading-invalid-nesting-1">
+   id="role-heading-invalid-nesting-1" data-ax-case="role-heading-invalid-nesting-1">
     <div
       role="heading"
       aria-level="2"
@@ -841,7 +841,7 @@ where the returned computed role is expected to change based on whether the <cod
       data-testname="Invalidly nested div[role=heading][aria-level=2] should have accname matching its text contents, and should still convey heading role"
       data-expectedlabel="Invalid div[role=heading][aria-level=2]"
       data-expectedrole="heading"
-     id="heading-invalid-nesting-2" data-ax-case="heading-invalid-nesting-2">Invalid div[role=heading][aria-level=2]</div>
+     id="role-heading-invalid-nesting-2" data-ax-case="role-heading-invalid-nesting-2">Invalid div[role=heading][aria-level=2]</div>
   </div>
 
   <div
@@ -850,7 +850,7 @@ where the returned computed role is expected to change based on whether the <cod
     class="ex-role"
     data-testname="div[role=heading][aria-level=4] with invalid div[role=heading][aria-level=3] descendant should still convey heading role"
     data-expectedrole="heading"
-   id="heading-invalid-nesting-3" data-ax-case="heading-invalid-nesting-3">
+   id="role-heading-invalid-nesting-3" data-ax-case="role-heading-invalid-nesting-3">
     <div
       role="heading"
       aria-level="3"
@@ -858,7 +858,7 @@ where the returned computed role is expected to change based on whether the <cod
       data-testname="Invalidly nested div[role=heading][aria-level=3] should have accname matching its text contents, and should still convey heading role"
       data-expectedlabel="Invalid div[role=heading][aria-level=3]"
       data-expectedrole="heading"
-     id="heading-invalid-nesting-4" data-ax-case="heading-invalid-nesting-4">Invalid div[role=heading][aria-level=3]</div>
+     id="role-heading-invalid-nesting-4" data-ax-case="role-heading-invalid-nesting-4">Invalid div[role=heading][aria-level=3]</div>
   </div>
 
   <div
@@ -867,7 +867,7 @@ where the returned computed role is expected to change based on whether the <cod
     class="ex-role"
     data-testname="div[role=heading][aria-level=5] with invalid div[role=heading][aria-level=6] descendant should still convey heading role"
     data-expectedrole="heading"
-   id="heading-invalid-nesting-5" data-ax-case="heading-invalid-nesting-5">
+   id="role-heading-invalid-nesting-5" data-ax-case="role-heading-invalid-nesting-5">
     <div
       role="heading"
       aria-level="6"
@@ -875,7 +875,7 @@ where the returned computed role is expected to change based on whether the <cod
       data-testname="Invalidly nested div[role=heading][aria-level=6] should have accname matching its text contents, and should still convey heading role"
       data-expectedlabel="Invalid div[role=heading][aria-level=6]"
       data-expectedrole="heading"
-     id="heading-invalid-nesting-6" data-ax-case="heading-invalid-nesting-6">Invalid div[role=heading][aria-level=6]</div>
+     id="role-heading-invalid-nesting-6" data-ax-case="role-heading-invalid-nesting-6">Invalid div[role=heading][aria-level=6]</div>
   </div>
 
   <div
@@ -884,7 +884,7 @@ where the returned computed role is expected to change based on whether the <cod
     class="ex-role"
     data-testname="div[role=heading][aria-level=1] with text contents and invalid div[role=heading][aria-level=2] descendant should still convey heading role"
     data-expectedrole="heading"
-   id="heading-invalid-nesting-7" data-ax-case="heading-invalid-nesting-7">Chocolate
+   id="role-heading-invalid-nesting-7" data-ax-case="role-heading-invalid-nesting-7">Chocolate
     <div
       role="heading"
       aria-level="2"
@@ -1394,8 +1394,8 @@ buTtOn" data-testname="div[role=buTtOn] ignoring line break, has button role" ta
 
     <!-- This test case is specifically designed to check the role, but a separate test case has been created in accname/name/comp_host_language_label.tentative.html to check the acc name -->
     <h2>HTML input with role="none" (presentational roles conflict resolution)</h2>
-    <label for="irn">input label</label>
-    <input id="irn" type="text" data-expectedrole="textbox" data-testname="HTML input[role=none] but focusable" class="ex-role" role="none" data-ax-case="irn">
+    <label for="role-role-none-conflict-resolution-tentative-2">input label</label>
+    <input id="role-role-none-conflict-resolution-tentative-2" type="text" data-expectedrole="textbox" data-testname="HTML input[role=none] but focusable" class="ex-role" role="none" data-ax-case="role-role-none-conflict-resolution-tentative-2">
 
     <!-- This test case is specifically designed to check the role, but a separate test case has been created in accname/name/comp_host_language_label.tentative.html to check the acc name -->
     <h2>HTML input with role="none" and disabled (presentational roles conflict resolution does not apply due to disabled attr)</h2>
