@@ -1,12 +1,12 @@
 // An element's accessible name with the list of where it could come from (`AXValue.sources`), which
 // the Accessibility pane shows, and its description. Part of accessibility.js (ax-node.ts).
 //
-// The name and the description themselves are dom-accessibility-api's (accname 1.2); the sources,
-// which only Chrome lists, follow the order and the fields Chrome gives each role.
+// The text of related elements (labels, aria-labelledby and aria-describedby targets) follows
+// accname 1.2 as Chrome computes it; the sources, which only Chrome lists, follow the order and the
+// fields Chrome gives each role.
 import type { Protocol } from 'devtools-protocol';
-import { computeAccessibleDescription, computeAccessibleName } from 'dom-accessibility-api';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
-import { isFocusable, renderedText } from './ax-tree';
+import { domChildren, isFocusable, renderedText, roleOf } from './ax-tree';
 
 type AXValueSource = Protocol.Accessibility.AXValueSource;
 type AXRelatedNode = Protocol.Accessibility.AXRelatedNode;
@@ -49,9 +49,135 @@ const computed = (value: string): Protocol.Accessibility.AXValue => ({ type: 'co
 /** White space collapsed and trimmed, as names are. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/** The text of a related element (a label, an aria-labelledby target): its name from content. */
-function textOf(el: Element): string {
-  return flat(computeAccessibleName(el, { hidden: true })) || collapsedContentsOf(el);
+/** How the text of an element is being computed. */
+interface Walk {
+  /** Whether hidden content counts: inside a hidden element that was referenced. */
+  hidden: boolean;
+  /** Whether an aria-labelledby or aria-describedby reference was followed already. */
+  referenced: boolean;
+}
+
+/** The control whose labels' text is being computed: it leaves itself out of it. */
+let naming: Element | null = null;
+
+/** The elements whose text is being computed, so that a loop of references ends. */
+const visiting = new Set<Element>();
+
+/** Whether an element is hidden from the name: not rendered, not visible or aria-hidden. */
+function isHidden(el: Element): boolean {
+  const style = styleOf(el);
+  return (
+    style.display === 'none' ||
+    style.visibility === 'hidden' ||
+    style.visibility === 'collapse' ||
+    el.getAttribute('aria-hidden') === 'true'
+  );
+}
+
+/** The elements an idref list attribute names, in order. */
+function targetsOf(el: Element, attribute: string): Element[] {
+  const root = el.getRootNode();
+  if (!isDocument(root) && !isShadowRoot(root)) return [];
+  const out: Element[] = [];
+  for (const idref of (el.getAttribute(attribute) ?? '').split(/\s+/)) {
+    const target = idref && root.getElementById(idref);
+    if (target) out.push(target);
+  }
+  return out;
+}
+
+/** The texts of the elements an idref list names, joined (accname step 2B). */
+function referencedText(el: Element, attribute: string, w: Walk): string {
+  return flat(
+    targetsOf(el, attribute)
+      .map(target => textAlternative(target, { hidden: w.hidden || isHidden(target), referenced: true }))
+      .join(' ')
+  );
+}
+
+/** The text of the selected options of a select or an ARIA listbox or combobox. */
+function selectedText(el: Element): string {
+  if (isHtml(el, 'select')) return [...el.selectedOptions].map(o => flat(o.text)).join(' ');
+  return [...el.querySelectorAll('[role=option][aria-selected=true]')].map(o => contentsOf(o)).join(' ');
+}
+
+/** The value an embedded control gives the text around it (accname step 2C), or null. */
+function embeddedValue(el: Element, role: string): string | null {
+  switch (role) {
+    case 'textbox':
+    case 'searchbox':
+      return isHtml(el, 'input') || isHtml(el, 'textarea') ? el.value : (el.textContent ?? '');
+    case 'combobox':
+      return isHtml(el, 'input') ? el.value : selectedText(el);
+    case 'listbox':
+      return selectedText(el);
+    case 'slider':
+    case 'spinbutton':
+    case 'progressbar':
+    case 'meter':
+    case 'scrollbar': {
+      const text = el.getAttribute('aria-valuetext') ?? el.getAttribute('aria-valuenow');
+      if (text !== null) return text;
+      return isHtml(el, 'input') ? el.value : null;
+    }
+  }
+  return null;
+}
+
+/** What the host language names an element with (accname step 2E): alt, an input button's value. */
+function nativeText(el: Element): string {
+  if (isHtml(el, 'img') || isHtml(el, 'area') || (isHtml(el, 'input') && el.type === 'image'))
+    return el.getAttribute('alt') ?? '';
+  if (isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type)) return el.value || BUTTON_LABELS[el.type] || '';
+  if (isLabelable(el)) return flat([...el.labels].map(label => textOf(label)).join(' '));
+  return '';
+}
+
+/** A ::before or ::after pseudo-element's generated text. */
+function generatedText(el: Element, pseudo: string): string {
+  // `content: "text" / "alternative"` names the pseudo-element with its alternative.
+  const content =
+    styleOf(el, pseudo)
+      .content.split(/\s\/\s/)
+      .pop() ?? '';
+  let out = '';
+  for (const m of content.matchAll(/"((?:[^"\\]|\\.)*)"/g)) out += (m[1] ?? '').replace(/\\(.)/g, '$1');
+  return out;
+}
+
+/**
+ * An element's text alternative inside a name computation (accname 2B to 2I); an embedded control
+ * gives its value, unless it is the `root` the computation starts from.
+ */
+function textAlternative(el: Element, w: Walk, root = false): string {
+  if (el === naming || visiting.has(el) || (!w.hidden && isHidden(el))) return '';
+  visiting.add(el);
+  try {
+    if (!w.referenced) {
+      const text = referencedText(el, 'aria-labelledby', w);
+      if (text) return text;
+    }
+    const value = root ? null : embeddedValue(el, roleOf(el));
+    if (value !== null) return value;
+    const label = el.getAttribute('aria-label')?.trim();
+    if (label) return label;
+    const native = nativeText(el);
+    if (native) return native;
+    const contents = collapsedContentsOf(el, w);
+    return contents.trim() ? contents : flat(el.getAttribute('title') ?? '');
+  } finally {
+    visiting.delete(el);
+  }
+}
+
+/**
+ * The text of a related element (a label, an aria-labelledby target), trimmed unless `raw`: Chrome
+ * gives a label's text with white space collapsed only. A control gives its value unless it is the
+ * `root`: a label, the element referencing itself.
+ */
+function textOf(el: Element, raw = false, root = true): string {
+  const text = textAlternative(el, { hidden: isHidden(el), referenced: true }, root) || collapsedContentsOf(el);
+  return raw ? text : flat(text);
 }
 
 /** The text of an element's content, for the `contents` source. */
@@ -59,20 +185,26 @@ export function contentsOf(el: Element): string {
   return flat(collapsedContentsOf(el));
 }
 
-/** An element's content text with white space collapsed but not trimmed, as Chrome gives a label's text. */
-function collapsedContentsOf(el: Element): string {
-  let out = '';
-  for (const child of el.childNodes) {
-    if (isText(child)) out += renderedText(child);
+/**
+ * An element's content text with white space collapsed but not trimmed, as Chrome gives a label's
+ * text: its children's text alternatives, generated content around them.
+ */
+function collapsedContentsOf(el: Element, w: Walk = { hidden: false, referenced: false }): string {
+  // White space that only separates (around blocks, white space only text) is marked U+E000: Chrome
+  // drops it at the ends, where the white space of the text itself stays.
+  let out = generatedText(el, '::before');
+  for (const child of domChildren(el)) {
+    if (isText(child)) out += child.data.trim() ? renderedText(child) : '\uE000';
     else if (isElement(child)) {
-      const style = styleOf(child);
-      if (style.display === 'none' || style.visibility === 'hidden') continue;
-      const label = child.getAttribute('aria-label')?.trim();
-      const text = label || (isHtml(child, 'img') ? (child.alt ?? '') : contentsOf(child));
-      out += style.display.startsWith('inline') ? text : ` ${text} `;
+      const text = textAlternative(child, w);
+      out += styleOf(child).display.startsWith('inline') ? text : `\uE000${text}\uE000`;
     }
   }
-  return out.replace(/\s+/g, ' ').replace(/^ /, '');
+  out += generatedText(el, '::after');
+  return out
+    .replace(/^[\s\uE000]+/, '')
+    .replace(/\s*\uE000[\s\uE000]*$/, '')
+    .replace(/[\s\uE000]+/g, ' ');
 }
 
 /** A form control, which labels name. */
@@ -101,8 +233,8 @@ function attributeSource(el: Element, attribute: string, type: AXValueSource['ty
 }
 
 /** A related element as name sources list it: its id, and its text. */
-function relatedNode(el: Element, idOf: IdOf): AXRelatedNode {
-  return { backendDOMNodeId: idOf(el), ...(el.id && { idref: el.id }), text: textOf(el) };
+function relatedNode(el: Element, idOf: IdOf, raw = false): AXRelatedNode {
+  return { backendDOMNodeId: idOf(el), ...(el.id && { idref: el.id }), text: textOf(el, raw) };
 }
 
 /** A source naming the element after a related element of its own (a caption, a legend). */
@@ -133,7 +265,7 @@ function sourcesOf(el: Element, role: string, idOf: IdOf): AXValueSource[] {
     const root = el.getRootNode();
     for (const idref of idrefs.trim().split(/\s+/).filter(Boolean)) {
       const target = isDocument(root) || isShadowRoot(root) ? root.getElementById(idref) : null;
-      if (target) related.push({ backendDOMNodeId: idOf(target), idref, text: textOf(target) });
+      if (target) related.push({ backendDOMNodeId: idOf(target), idref, text: textOf(target, false, target === el) });
     }
     sources.push(
       source(
@@ -151,7 +283,9 @@ function sourcesOf(el: Element, role: string, idOf: IdOf): AXValueSource[] {
     const labels = [...el.labels];
     if (!labels.length) sources.push({ type: 'relatedElement', nativeSource: 'label' });
     else {
-      const related = labels.map(label => relatedNode(label, idOf));
+      naming = el;
+      const related = labels.map(label => relatedNode(label, idOf, true));
+      naming = null;
       const explicit = labels.some(label => label.htmlFor);
       sources.push(
         source(
@@ -200,6 +334,15 @@ function settle(sources: AXValueSource[]): string {
   return found;
 }
 
+/** An element's description: aria-describedby's targets, aria-description, or its title. */
+function descriptionOf(el: Element): string {
+  return (
+    referencedText(el, 'aria-describedby', { hidden: false, referenced: false }) ||
+    flat(el.getAttribute('aria-description') ?? '') ||
+    flat(el.getAttribute('title') ?? '')
+  );
+}
+
 /** An element's name and description (absent when empty). */
 export function nameOf(
   el: Element,
@@ -207,9 +350,8 @@ export function nameOf(
   idOf: IdOf
 ): { name: Protocol.Accessibility.AXValue; description?: Protocol.Accessibility.AXValue } {
   const sources = sourcesOf(el, role, idOf);
-  const winner = settle(sources);
-  const name = winner;
-  const description = flat(computeAccessibleDescription(el));
+  const name = settle(sources);
+  const description = descriptionOf(el);
   return {
     name: { ...computed(name), sources },
     ...(description && description !== name && { description: computed(description) }),

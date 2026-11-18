@@ -754,7 +754,7 @@ const TODO = {
     summary-el-1 summary-el-2 summary-el-3 table-el-1 table-el-2 table-el-3
     `,
   'name: Chrome and ours compute different names': `
-    button-el-6 inputs-with-placeholders-el-76 other-form-elements-el-81
+    other-form-elements-el-81
     `,
 };
 
