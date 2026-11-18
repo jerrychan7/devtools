@@ -281,3 +281,62 @@ test('DOM methods the page replaced do not change the tree', async () => {
     await t.page.evaluate(() => (window as unknown as { __restoreDom: () => void }).__restoreDom());
   }
 });
+
+/**
+ * The nodes Chrome has under a control from its user-agent shadow tree, which the page cannot
+ * see (ax-virtual.ts): each control's subtree walked down by getChildAXNodes, its nodes whole,
+ * its ancestors and children by getPartialAXTree, and queryAXTree over the controls.
+ */
+describe('control internals', () => {
+  /** A node's relatives, and its subtree in depth-first order through getChildAXNodes. */
+  const subtree = async (side: Side, id: string) => {
+    const nodeId = await nodeIdOf(side, id);
+    const partial = await side.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: true });
+    const out: unknown[] = [];
+    const walk = async (node: Protocol.Accessibility.AXNode, depth: number) => {
+      if (node.role?.value === 'InlineTextBox') return;
+      out.push({ depth, node: comparable(node) });
+      for (const child of (await side.send('Accessibility.getChildAXNodes', { id: node.nodeId })).nodes)
+        if (child.parentId === node.nodeId) await walk(child, depth + 1);
+    };
+    const [self] = partial.nodes;
+    assert.ok(self);
+    await walk(self, 0);
+    return { partial: outline(partial.nodes), subtree: out };
+  };
+  /** Compares the subtrees of `ids`, then the nodes of `roles` queryAXTree finds under #controls. */
+  const compare = async (html: string, ids: string[], roles: string[]) => {
+    assert.ok(env);
+    const page = await openAxPage(env, `<div id=controls>${html}</div>`);
+    try {
+      for (const id of ids) {
+        const [ours, chrome] = await Promise.all([subtree(page.ours, id), subtree(page.chrome, id)]);
+        assert.deepEqual(ours, chrome, `#${id}`);
+      }
+      for (const role of roles) {
+        const [ours, chrome] = await Promise.all(
+          [page.ours, page.chrome].map(async side =>
+            side.send('Accessibility.queryAXTree', { nodeId: await nodeIdOf(side, 'controls'), role })
+          )
+        );
+        assert.ok(ours && chrome);
+        assert.deepEqual(ours.nodes.map(comparable), chrome.nodes.map(comparable), `queryAXTree ${role}`);
+      }
+    } finally {
+      await page.page.close();
+    }
+  };
+
+  test('select: options in a drop-down popup, in a list box slot, in groups', () =>
+    compare(
+      `<select id=se1 aria-label=S1><option>A</option><option selected>B</option><option disabled>C</option><option hidden>H</option><option style="display:none">N</option></select>
+<select id=se2 aria-label=S2><optgroup id=se2g label=G1><option>a1</option></optgroup><option>x</option><optgroup label=G2 disabled><option>b1</option></optgroup></select>
+<select id=se3 size=3 aria-label=S3><option>A</option><option selected>B</option><optgroup label=G><option>c</option></optgroup><option hidden>H</option></select>
+<select id=se4 multiple aria-label=S4><option selected>A</option><option selected>B</option><option disabled>C</option></select>
+<select id=se5 aria-label=S5></select>
+<select id=se6 aria-label=S6 disabled><option>A</option></select>
+<select id=se7><option label=LL>text</option><option></option><option>  sp  ace </option></select>`,
+      ['se1', 'se2', 'se2g', 'se3', 'se4', 'se5', 'se6', 'se7'],
+      ['option', 'group', 'MenuListPopup', 'generic']
+    ));
+});

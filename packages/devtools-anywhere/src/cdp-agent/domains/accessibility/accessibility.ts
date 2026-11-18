@@ -6,6 +6,7 @@ import type { Context } from '../../core/context';
 import { documentOf, isNode } from '../../core/realm';
 import { resolveNode } from '../dom/dom';
 import type { AccessibilityModule, AXTree } from './ax-node';
+import type { AXRef } from './ax-virtual';
 
 /**
  * Loads accessibility.js (ax-node.ts), which computes the tree: it is large, and only the
@@ -24,19 +25,32 @@ const OBSERVED: MutationObserverInit = {
 /**
  * The Accessibility domain: the tree computed in the page from the DOM, ARIA attributes and the
  * implicit roles (ax-tree.ts, ax-name.ts), as Chrome's getPartialAXTree gives it to the
- * Accessibility pane. Chrome's inline text boxes and the nodes of user-agent shadow trees (a
- * text field's inner editor, a select's popup) are not in it: the page cannot see them.
+ * Accessibility pane. Chrome's inline text boxes are not in it. The nodes of user-agent shadow
+ * trees (a select's popup), which the page cannot see, are redone without a DOM node
+ * (ax-virtual.ts): each gets a negative id, kept for the session, apart from the backend ids.
  *
  * Events, as Chrome 158 sends them: `nodesUpdated` only while enabled, and only for the nodes the
  * client was given by getChildAXNodes or getAXNodeAndAncestors (the Accessibility pane's
  * commands; getPartialAXTree, getFullAXTree, getRootAXNode and queryAXTree mark none), each as a
  * whole AXNode, those changed in one frame in one event. `loadComplete` comes when a document
  * finishes loading, which the agent, started in a loaded page, never sees: it is not sent, and
- * not on enable either, as Chrome does not.
+ * not on enable either, as Chrome does not. A node without a DOM node is not watched.
  */
 export function registerAccessibility(ctx: Context, load: AccessibilityLoader | undefined) {
   const { session, nodes, frames } = ctx;
   let module: Promise<AccessibilityModule> | null = null;
+  /** The ids of the nodes without a DOM node, by their host's backend id and key, and back. */
+  const virtualIds = new Map<string, number>();
+  const virtualKeys = new Map<number, { hostId: number; key: string }>();
+  const virtualIdOf = (hostId: number, key: string) => {
+    let id = virtualIds.get(`${hostId}:${key}`);
+    if (id === undefined) {
+      id = -1 - virtualIds.size;
+      virtualIds.set(`${hostId}:${key}`, id);
+      virtualKeys.set(id, { hostId, key });
+    }
+    return id;
+  };
   /**
    * The tree of a frame's document (the page's or a same-origin iframe's), over its current DOM:
    * computed again by each command, as the DOM changes between them.
@@ -54,7 +68,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
         throw e;
       }
     ));
-    return m.createAXTree(doc, node => nodes.backendIdOf(node), frames.ofNode(doc).id);
+    return m.createAXTree(doc, node => nodes.backendIdOf(node), frames.ofNode(doc).id, virtualIdOf);
   };
 
   /**
@@ -68,9 +82,11 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
   let scheduled = false;
 
   /** Records the nodes given to the client, and watches the trees they are in. */
-  function remember(given: [Node, Protocol.Accessibility.AXNode][]) {
+  function remember(given: [AXRef, Protocol.Accessibility.AXNode][]) {
     if (!enabled) return;
     for (const [node, axNode] of given) {
+      // A node without a DOM node is built again with each tree: it is not watched.
+      if (!isNode(node)) continue;
       known.set(node, JSON.stringify(axNode));
       // The document, or the shadow root the node is in: a document's observer does not see into
       // shadow trees. A change in a shadow tree whose own nodes the client was not given (a
@@ -180,7 +196,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
       // node, as in Chrome: the root's children are at 1, and so are those of an ignored body.
       const max = params.depth ?? Infinity;
       const out: Protocol.Accessibility.AXNode[] = [];
-      let level: { node: Node; depth: number }[] = [{ node: doc, depth: 0 }];
+      let level: { node: AXRef; depth: number }[] = [{ node: doc, depth: 0 }];
       while (level.length) {
         const next: typeof level = [];
         for (const { node, depth } of level) {
@@ -204,10 +220,14 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     async getChildAXNodes(
       params: Protocol.Accessibility.GetChildAXNodesRequest
     ): Promise<Protocol.Accessibility.GetChildAXNodesResponse> {
-      const node = nodes.getByBackendId(Number(params.id));
-      if (!isNode(node)) throw new CdpError('Invalid ID');
-      const ax = await tree(documentOf(node));
-      const given: [Node, Protocol.Accessibility.AXNode][] = [];
+      const id = Number(params.id);
+      const virtual = virtualKeys.get(id);
+      const host = nodes.getByBackendId(virtual ? virtual.hostId : id);
+      if (!isNode(host)) throw new CdpError('Invalid ID');
+      const ax = await tree(documentOf(host));
+      const node = virtual ? ax.virtual(host, virtual.key) : host;
+      if (!node) throw new CdpError('Invalid ID');
+      const given: [AXRef, Protocol.Accessibility.AXNode][] = [];
       childrenOf(ax, node, given);
       remember(given);
       return { nodes: given.map(([, axNode]) => axNode) };
@@ -218,7 +238,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     ): Promise<Protocol.Accessibility.GetAXNodeAndAncestorsResponse> {
       const node = resolveNode(ctx, params);
       const ax = await tree(documentOf(node));
-      const given: [Node, Protocol.Accessibility.AXNode][] = [[node, ax.node(node)]];
+      const given: [AXRef, Protocol.Accessibility.AXNode][] = [[node, ax.node(node)]];
       for (let p = ax.parent(node); p; p = ax.parent(p)) given.push([p, ax.node(p)]);
       remember(given);
       return { nodes: given.map(([, axNode]) => axNode) };
@@ -232,7 +252,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
       // The nodes in the root's subtree that match, in tree order: ignored ones too, with their own
       // role and name, as in Chrome.
       const out: Protocol.Accessibility.AXNode[] = [];
-      const visit = (node: Node) => {
+      const visit = (node: AXRef) => {
         const axNode = ax.node(node, true);
         if (
           (params.role === undefined || axNode.role?.value === params.role) &&
@@ -250,9 +270,9 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
   /** A node's children as Chrome lists them: through ignored ones, down to those not ignored. */
   function childrenOf(
     ax: AXTree,
-    parent: Node,
-    out: [Node, Protocol.Accessibility.AXNode][] = []
-  ): [Node, Protocol.Accessibility.AXNode][] {
+    parent: AXRef,
+    out: [AXRef, Protocol.Accessibility.AXNode][] = []
+  ): [AXRef, Protocol.Accessibility.AXNode][] {
     for (const child of ax.children(parent)) {
       const axChild = ax.node(child);
       out.push([child, axChild]);

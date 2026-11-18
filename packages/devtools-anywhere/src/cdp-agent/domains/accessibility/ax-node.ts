@@ -21,6 +21,7 @@ import {
 } from './ax-tree';
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import type { Probe } from '../../probe/types';
+import { isVirtual, type AXRef, type VirtualNode } from './ax-virtual';
 
 // This script has its own copy of core/natives.ts, which found the page's functions when it loaded, on
 // demand: the agent gives it those it uses instead (accessibility.ts).
@@ -37,18 +38,23 @@ export interface AXTree {
    * The AXNode of a DOM node: in the tree, or one ignored with why not. `queried`: an ignored node
    * keeps its role and name, as queryAXTree gives it in Chrome.
    */
-  node(node: Node, queried?: boolean): AXNode;
-  /** The closest node in the tree above a DOM node. */
-  parent(node: Node): Node | null;
-  /** The DOM nodes of a node's children in the tree. */
-  children(node: Node): Node[];
-  /** Whether a DOM node has a node in the tree. */
-  inTree(node: Node): boolean;
+  node(node: AXRef, queried?: boolean): AXNode;
+  /** The closest node in the tree above a node. */
+  parent(node: AXRef): AXRef | null;
+  /** The nodes of a node's children in the tree. */
+  children(node: AXRef): AXRef[];
+  /** Whether a node is in the tree. */
+  inTree(node: AXRef): boolean;
+  /** A node without a DOM node (ax-virtual.ts), by its host and key. */
+  virtual(host: Node, key: string): AXRef | null;
 }
+
+/** The id of a node without a DOM node, by its host's id and its key: negative, unlike backend ids. */
+export type VirtualIdOf = (hostId: number, key: string) => number;
 
 /** What accessibility.js exports. */
 export interface AccessibilityModule {
-  createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree;
+  createAXTree(doc: Document, idOf: IdOf, frameId: string, virtualIdOf: VirtualIdOf): AXTree;
   /** Takes the agent's native functions (`nativesInUse`), past the page's wrappers. */
   useNatives(natives: Pick<Probe, 'natives' | 'top'>): void;
 }
@@ -196,7 +202,7 @@ function textValueOf(el: Element, role: string): string {
   if (isHtml(el, 'select')) {
     if (!isMenuList(el)) return '';
     const option = el.selectedOptions[0];
-    return option ? (attr(option, 'aria-label') ?? option.text.trim()) : '';
+    return option ? (attr(option, 'aria-label') ?? option.label.trim()) : '';
   }
   if (isHtml(el, 'textarea')) return el.value;
   if (isHtml(el, 'input')) {
@@ -333,7 +339,9 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   // Global states.
   // An object element that shows no content (no plugin, no frame) is disabled.
   const emptyObject = isHtml(el, 'object') && !el.contentWindow;
-  const disabled = matches(el, ':disabled') || attr(el, 'aria-disabled') === 'true' || emptyObject;
+  // A disabled optgroup is not said to be disabled: its options are.
+  const disabled =
+    (matches(el, ':disabled') && !isHtml(el, 'optgroup')) || attr(el, 'aria-disabled') === 'true' || emptyObject;
   if (disabled) out.push(flag('disabled', true));
   const invalid = attr(el, 'aria-invalid');
   if (invalid && invalid !== 'false') out.push(token('invalid', invalid));
@@ -393,7 +401,8 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
     if (expanded === 'true' || expanded === 'false') out.push(bool('expanded', expanded === 'true'));
   }
   const selected = selectedOf(el, role);
-  if (selected !== null) out.push(bool('selected', selected));
+  // A disabled option is not said to be selected or not.
+  if (selected !== null && !(disabled && isHtml(el, 'option'))) out.push(bool('selected', selected));
   if (role === 'dialog' || role === 'alertdialog')
     out.push(flag('modal', ariaBool(el, 'aria-modal') ?? (isHtml(el, 'dialog') && matches(el, ':modal'))));
   // Relationships, then sparse attributes.
@@ -459,29 +468,65 @@ const roleValue = (role: string): AXValue => ({
 });
 
 /** An ignored node's role and name, without their sources, as Chrome's queryAXTree gives them. */
-function ignoredAsQueried(node: Text | Element): Pick<AXNode, 'role' | 'name'> {
+function ignoredAsQueried(node: Text | Element, reason: string): Pick<AXNode, 'role' | 'name'> {
   const role = isText(node) ? 'StaticText' : roleOf(node);
-  const name = isText(node) ? textNameOf(node) : nameOf(node, role, () => 0).name;
+  // A list box's hidden option has no text laid out to name it.
+  const name =
+    isHtml(node, 'option') && reason === 'notRendered'
+      ? { value: '' }
+      : isText(node)
+        ? textNameOf(node)
+        : nameOf(node, role, () => 0).name;
   return { role: roleValue(role), name: { type: 'computedString', value: name.value } };
 }
 
-export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree {
+/** A node without a DOM node, as Chrome gives those of the user-agent shadow trees. */
+function virtualNode(node: VirtualNode, queried: boolean | undefined): Omit<AXNode, 'nodeId'> {
+  const inclusion = node.inclusion;
+  if (inclusion.kind !== 'included')
+    return {
+      ignored: true,
+      ignoredReasons:
+        inclusion.kind === 'ignored' && inclusion.noReason
+          ? []
+          : [{ name: inclusion.reason, value: { type: 'boolean', value: true } }],
+      // queryAXTree gives the generic elements they are.
+      role: { type: 'role', value: queried ? node.role : 'none' },
+      ...(queried && { name: { type: 'computedString', value: '' } }),
+    };
+  const sources: Protocol.Accessibility.AXValueSource[] = [
+    { type: 'relatedElement', attribute: 'aria-labelledby' },
+    { type: 'attribute', attribute: 'aria-label' },
+  ];
+  if (node.role === 'MenuListPopup') sources.push({ type: 'attribute', attribute: 'title' });
+  return {
+    ignored: false,
+    role: roleValue(node.role),
+    name: { type: 'computedString', value: '', sources },
+    properties: [],
+  };
+}
+
+export function createAXTree(doc: Document, idOf: IdOf, frameId: string, virtualIdOf: VirtualIdOf): AXTree {
   const shape = new TreeShape(doc);
-  const id = (node: Node) => String(idOf(node));
-  const links = (node: Node, base: AXNode): AXNode => {
+  const id = (node: AXRef) => String(isVirtual(node) ? virtualIdOf(idOf(node.host), node.key) : idOf(node));
+  const links = (node: AXRef, base: AXNode): AXNode => {
     const parent = shape.parent(node);
     return {
       ...base,
       ...(parent && { parentId: id(parent) }),
       childIds: shape.children(node).map(id),
-      backendDOMNodeId: idOf(node),
+      // Chrome's nodes of the shadow trees have one; the page cannot see theirs.
+      ...(!isVirtual(node) && { backendDOMNodeId: idOf(node) }),
     };
   };
   return {
     parent: node => shape.parent(node),
     children: node => shape.children(node),
     inTree: node => shape.inTree(node),
+    virtual: (host, key) => (isElement(host) ? shape.virtual(host, key) : null),
     node(node, queried) {
+      if (isVirtual(node)) return links(node, { nodeId: id(node), ...virtualNode(node, queried) });
       const inclusion = shape.inclusion(node);
       if (inclusion.kind !== 'included') {
         const relatedNodes =
@@ -505,7 +550,7 @@ export function createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree
           // Chrome gives some ignored nodes no reason (a ruby's annotation, folded into the ruby).
           ignoredReasons: inclusion.kind === 'ignored' && inclusion.noReason ? [] : [reason],
           ...(queried && (isText(node) || isElement(node))
-            ? ignoredAsQueried(node)
+            ? ignoredAsQueried(node, inclusion.reason)
             : { role: { type: 'role', value: 'none' } }),
         });
       }

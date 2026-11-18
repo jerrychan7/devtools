@@ -8,6 +8,7 @@
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 import { nativeCall, nativeGet } from '../../core/natives';
 import { inDisplayNone } from './ax-text';
+import { isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
 
 // The DOM is read through the browser's own functions (core/natives.ts), not those on the page's
 // prototypes: a page that replaced `getAttribute` or `querySelectorAll` would otherwise see the
@@ -203,6 +204,9 @@ function isOrphaned(el: Element, role: string): boolean {
 
 /** Whether an element takes keyboard focus: in the tab order or focusable by script. */
 export function isFocusable(el: Element): boolean {
+  // An option stays focusable in a disabled select, not when it or its group is disabled.
+  if (isHtml(el, 'option'))
+    return !hasAttr(el, 'disabled') && !(isHtml(el.parentElement, 'optgroup') && hasAttr(el.parentElement, 'disabled'));
   if (matches(el, ':disabled')) return false;
   // Without a box (display: contents), Chrome does not focus it.
   if (styleOf(el).display === 'contents') return false;
@@ -590,6 +594,10 @@ export class TreeShape {
   private owned = new Map<Element, Element[]>();
   /** Inclusions computed already: a shape serves one request. */
   private inclusions = new WeakMap<Node, Inclusion>();
+  /** VirtualNodes by host, by host and key, and the VirtualNode a DOM node is placed under. */
+  private virtuals = new Map<Element, VirtualNode[] | null>();
+  private keyed = new Map<Element, Map<string, VirtualNode>>();
+  private placed = new Map<Node, VirtualNode>();
   readonly doc: Document;
 
   constructor(doc: Document) {
@@ -602,7 +610,8 @@ export class TreeShape {
    * How a node takes part in the tree (Inclusion). An element aria-owns moves stays in the tree
    * when presentational or aria-hidden, ignored, as in Chrome.
    */
-  inclusion(node: Node): Inclusion {
+  inclusion(node: AXRef): Inclusion {
+    if (isVirtual(node)) return node.inclusion;
     let inclusion = this.inclusions.get(node);
     if (!inclusion) {
       inclusion = this.ownInclusion(node);
@@ -626,7 +635,13 @@ export class TreeShape {
     if (!isElement(node)) return excluded('uninteresting');
     if (closest(node, '[data-devtools-anywhere]')) return excluded('notRendered');
     // An image map's area is shown through its image, whatever its own box.
-    const hiddenBy = isHtml(node, 'area') && imageOf(node) ? null : hiddenReason(node);
+    let hiddenBy = isHtml(node, 'area') && imageOf(node) ? null : hiddenReason(node);
+    // A hidden option is still in a drop-down's popup, and ignored in a list box.
+    const select = hiddenBy === 'notRendered' && selectOf(node);
+    if (select && !hiddenReason(select)) {
+      if (!isMenuList(select)) return ignored('notRendered');
+      hiddenBy = null;
+    }
     if (hiddenBy) return excluded(hiddenBy);
     if (
       isHtmlElement(node) &&
@@ -698,16 +713,20 @@ export class TreeShape {
   }
 
   /** Whether a node is in the tree (included or ignored). */
-  inTree(node: Node): boolean {
+  inTree(node: AXRef): boolean {
     const kind = this.inclusion(node).kind;
     return kind === 'included' || kind === 'ignored';
   }
 
   /** The nodes in the tree under a node, in order: lifted nodes give their own. */
-  children(node: Node): Node[] {
-    const out: Node[] = [];
+  children(node: AXRef): AXRef[] {
+    const out: AXRef[] = [];
     // Elements moved here (`moved`) by aria-owns or as an image's areas, the others where they are.
-    const visit = (child: Node, moved?: boolean) => {
+    const visit = (child: AXRef, moved?: boolean) => {
+      if (isVirtual(child)) {
+        out.push(child);
+        return;
+      }
       if (!moved && isElement(child) && (this.owner.has(child) || (isHtml(child, 'area') && imageOf(child)))) return;
       const inclusion = this.inclusion(child);
       if (inclusion.kind === 'excluded') return;
@@ -717,6 +736,12 @@ export class TreeShape {
       }
       out.push(child);
     };
+    if (isVirtual(node)) {
+      for (const child of node.raw) visit(child, true);
+      return out;
+    }
+    const virtuals = isElement(node) && this.virtualChildren(node);
+    if (virtuals) return virtuals;
     for (const child of this.ownChildren(node)) visit(child);
     if (isHtml(node, 'img')) for (const area of areasOf(node)) visit(area, true);
     if (isElement(node)) for (const el of this.owned.get(node) ?? []) visit(el, true);
@@ -735,9 +760,40 @@ export class TreeShape {
     return domChildren(node);
   }
 
+  /** A host's VirtualNodes (ax-virtual.ts), built once: null for an element without. */
+  virtualChildren(el: Element): VirtualNode[] | null {
+    let top = this.virtuals.get(el);
+    if (top === undefined) {
+      top = virtualChildrenOf(el, isMenuList);
+      this.virtuals.set(el, top);
+      const keys = new Map<string, VirtualNode>();
+      this.keyed.set(el, keys);
+      const register = (v: VirtualNode) => {
+        keys.set(v.key, v);
+        for (const child of v.raw)
+          if (isVirtual(child)) {
+            child.parent = v;
+            register(child);
+          } else this.placed.set(child, v);
+      };
+      for (const v of top ?? []) register(v);
+    }
+    return top;
+  }
+
+  /** The VirtualNode of a host by its key, if the host has one. */
+  virtual(host: Element, key: string): VirtualNode | null {
+    this.virtualChildren(host);
+    return this.keyed.get(host)?.get(key) ?? null;
+  }
+
   /** The closest node in the tree above a node: its aria-owns owner, or its DOM ancestor. */
-  parent(node: Node): Node | null {
+  parent(node: AXRef): AXRef | null {
+    if (isVirtual(node)) return node.parent;
     if (node === this.doc) return null;
+    const host = domParent(node);
+    const placed = isElement(host) && this.virtualChildren(host) && this.placed.get(node);
+    if (placed) return placed;
     let n: Node | null = isElement(node)
       ? (this.owner.get(node) ?? (isHtml(node, 'area') ? imageOf(node) : null) ?? domParent(node))
       : domParent(node);
