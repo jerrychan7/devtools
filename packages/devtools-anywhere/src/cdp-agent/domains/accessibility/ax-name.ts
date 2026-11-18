@@ -6,9 +6,9 @@
 // name is simplified at the end (AXObject::SimplifyName). The text of a text node is its rendered
 // text (ax-text.ts).
 import type { Protocol } from 'devtools-protocol';
-import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
+import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
-import { domChildren, domParent, isFocusable, roleOf, wordSet } from './ax-tree';
+import { SVG_NS, domChildren, domParent, isFocusable, isMenuList, roleOf, scopeOf, wordSet } from './ax-tree';
 import {
   droppedSpace,
   hasLayout,
@@ -114,12 +114,10 @@ function hiddenForText(el: Element, root: Root): boolean {
   return hiddenViaStyle(el);
 }
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
 /** The elements an idref list attribute names, in order. */
-function targetsOf(el: Element, attribute: string): Element[] {
-  const root = el.getRootNode();
-  if (!isDocument(root) && !isShadowRoot(root)) return [];
+export function targetsOf(el: Element, attribute: string): Element[] {
+  const root = scopeOf(el);
+  if (!root) return [];
   const out: Element[] = [];
   for (const idref of (el.getAttribute(attribute) ?? '').split(/\s+/)) {
     const target = idref && root.getElementById(idref);
@@ -141,7 +139,7 @@ const isPresentational = (el: Element) =>
 /** The text field roles (Blink's IsTextField). */
 const isTextFieldRole = (role: string) => role === 'textbox' || role === 'searchbox';
 
-const isNativeTextField = (el: Element) =>
+export const isNativeTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement =>
   isHtml(el, 'textarea') || (isHtml(el, 'input') && /^(text|search|email|url|tel|password|number|)$/.test(el.type));
 
 /** Whether an element's content can name it, or an ancestor when `recursive` (SupportsNameFromContents). */
@@ -171,10 +169,7 @@ function supportsNameFromContents(el: Element, role: string, recursive: boolean)
 }
 
 /** An option of a select shown as a drop-down (Blink's MenuListOption). */
-const isMenuListOption = (el: Element | null) => {
-  const select = el && isHtml(el, 'option') ? el.closest('select') : null;
-  return !!select && !select.multiple && select.size <= 1;
-};
+const isMenuListOption = (el: Element | null) => isHtml(el, 'option') && isMenuList(el.closest('select'));
 
 const hasOneTextChild = (el: Element) => el.childNodes.length === 1 && isText(el.firstChild);
 
@@ -405,8 +400,8 @@ function childrenOf(el: Element): Node[] {
 /** The element whose aria-owns moves an element, if any: the first one naming it. */
 function ownerOf(el: Element): Element | null {
   if (!el.id) return null;
-  const root = el.getRootNode();
-  if (!isDocument(root) && !isShadowRoot(root)) return null;
+  const root = scopeOf(el);
+  if (!root) return null;
   for (const owner of root.querySelectorAll('[aria-owns]'))
     if (!el.contains(owner) && targetsOf(owner, 'aria-owns').includes(el)) return owns(owner) ? owner : null;
   return null;

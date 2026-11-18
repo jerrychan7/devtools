@@ -1,10 +1,10 @@
 // Entry of accessibility.js, which the Accessibility domain loads on first use (accessibility.ts):
 // it turns the DOM into CDP AXNodes. Kept out of the bundle like snapDOM, for its size.
 import type { Protocol } from 'devtools-protocol';
-import { contentsText, documentNameOf, nameOf, textNameOf, type IdOf } from './ax-name';
+import { contentsText, documentNameOf, isNativeTextField, nameOf, targetsOf, textNameOf, type IdOf } from './ax-name';
 import { inDisplayNone } from './ax-text';
-import { TreeShape, groupTable, isFocusable, isInternalRole, roleOf } from './ax-tree';
-import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText } from '../../core/realm';
+import { TreeShape, groupTable, isFocusable, isFocused, isInternalRole, isMenuList, roleOf, scopeOf } from './ax-tree';
+import { isElement, isHtml, isHtmlElement, isText } from '../../core/realm';
 
 type AXNode = Protocol.Accessibility.AXNode;
 type AXProperty = Protocol.Accessibility.AXProperty;
@@ -41,10 +41,10 @@ const prop = (name: AXPropertyName, type: AXValue['type'], value: unknown): AXPr
 function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | null {
   const value = el.getAttribute(`aria-${name}`);
   if (value === null) return null;
-  const root = el.getRootNode();
+  const root = scopeOf(el);
   const relatedNodes: Protocol.Accessibility.AXRelatedNode[] = [];
   for (const idref of value.trim().split(/\s+/).filter(Boolean)) {
-    const target = isDocument(root) || isShadowRoot(root) ? root.getElementById(idref) : null;
+    const target = root?.getElementById(idref);
     if (target) relatedNodes.push({ backendDOMNodeId: idOf(target), idref });
   }
   return { name, value: { type: 'idrefList', value, relatedNodes } };
@@ -56,14 +56,9 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
  * taken), and drops the relation when none is left.
  */
 function ownsNothing(el: Element): boolean {
-  const root = el.getRootNode();
-  if (!isDocument(root) && !isShadowRoot(root)) return false;
-  const targets = (el.getAttribute('aria-owns') ?? '')
-    .trim()
-    .split(/\s+/)
-    .map(idref => root.getElementById(idref))
-    .filter(target => target !== null);
-  return targets.every(t => inDisplayNone(t) || t.getAttribute('aria-hidden') === 'true');
+  return (
+    !!scopeOf(el) && targetsOf(el, 'aria-owns').every(t => inDisplayNone(t) || t.getAttribute('aria-hidden') === 'true')
+  );
 }
 
 /** The nesting level of a list item: how many lists hold it. */
@@ -100,9 +95,6 @@ const TEXT_INPUT = /^(text|search|email|url|tel|password)$/;
 /** An input or textarea that edits text. */
 const isTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement =>
   isHtml(el, 'textarea') || (isHtml(el, 'input') && TEXT_INPUT.test(el.type));
-
-/** A select shown as a drop-down (Chrome's ComboBoxSelect), not as a list box. */
-const isMenuList = (el: Element): boolean => isHtml(el, 'select') && !el.multiple && el.size <= 1;
 
 /** The kind of combobox, as Chrome tells them apart: a select, a text field, or anything else. */
 function comboboxKind(el: Element, role: string): 'select' | 'textField' | 'button' | null {
@@ -239,7 +231,7 @@ function selectedOf(el: Element, role: string): boolean | null {
   if (explicit !== null) return explicit;
   if (isHtml(el, 'option')) return el.selected;
   if (!SELECT_ITEM.test(role)) return null;
-  if (el === el.ownerDocument.activeElement && el.ownerDocument.hasFocus()) return true;
+  if (isFocused(el)) return true;
   let container: Element | null = el.parentElement;
   while (container && !CONTAINER_WIDGET.test(roleOf(container))) container = container.parentElement;
   if (container) {
@@ -281,8 +273,8 @@ const SETTABLE_ROLE = /^(ColorWell|Date|DateTime|InputTime|scrollbar|searchbox|s
 
 /** Whether an element is read-only, natively or by aria-readonly (Chrome's Restriction). */
 function isReadOnly(el: Element, role: string): boolean {
-  if ((isHtml(el, 'textarea') || (isHtml(el, 'input') && TEXT_INPUT.test(el.type))) && el.readOnly) return true;
-  if (isHtml(el, 'input') && el.type === 'number' && el.readOnly) return true;
+  // A text field or a number field (ax-name's native text fields).
+  if (isNativeTextField(el) && el.readOnly) return true;
   const contentEditable = el.hasAttribute('contenteditable');
   const explicit = ariaBool(el, 'aria-readonly');
   if (!contentEditable && explicit !== null && ARIA_READONLY_ROLE.test(role)) return explicit;
@@ -321,7 +313,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   else if (isListed(el)) out.push(prop('invalid', 'token', invalid === null && !isValidControl(el) ? 'true' : 'false'));
   else if (invalid !== null) out.push(prop('invalid', 'token', 'false'));
   if (isFocusable(el) || (isHtml(el, 'dialog') && el.open)) out.push(bool('focusable', true));
-  if (el === el.ownerDocument.activeElement && el.ownerDocument.hasFocus()) out.push(bool('focused', true));
+  if (isFocused(el)) out.push(bool('focused', true));
   const field = isTextField(el) || isNativeRange(el);
   const editableField = field && (/^(textbox|searchbox|spinbutton)$/.test(role) || combobox === 'textField');
   const readOnly = isReadOnly(el, role);
@@ -429,9 +421,7 @@ function activeDescendant(el: Element): Element | null {
     return selected[selected.length - 1] ?? null;
   }
   const idref = el.getAttribute('aria-activedescendant')?.trim();
-  const root = el.getRootNode();
-  if (!idref || !(isDocument(root) || isShadowRoot(root))) return null;
-  return root.getElementById(idref);
+  return (idref && scopeOf(el)?.getElementById(idref)) || null;
 }
 
 /** The url Chrome gives a link (its href) or an image (the source it shows). */

@@ -85,45 +85,53 @@ function whitespaceHasBox(text: Text, parent: Element): boolean {
 /** What comes before or after a point in its line: nothing (the line starts or ends), a space, or content. */
 type Neighbour = 'edge' | 'space' | 'content';
 
-/** The neighbour a node gives, looking at it from after it (`back`) or before it; null if it gives none. */
-function neighbourIn(node: Node, back: boolean): Neighbour | null {
+/** The first answer `inside` gives for an inline box's children, from its end (`back`) or its start. */
+function firstInside<T>(el: Element, back: boolean, inside: (n: Node) => T | undefined): T | undefined {
+  const children = domChildren(el);
+  if (back) children.reverse();
+  for (const child of children) {
+    const found = inside(child);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Walks the line from a node, before it (`back`) or after it, out of the inline boxes it is in:
+ * the first answer `inside` gives for a node met, or `edge` where the line starts or ends.
+ */
+function walkLine<T>(node: Node, back: boolean, inside: (n: Node) => T | undefined, edge: T): T {
+  for (let current = node; ;) {
+    const parent = domParent(current);
+    if (!parent) return edge;
+    const siblings = domChildren(parent);
+    const index = siblings.indexOf(current as ChildNode);
+    if (index < 0) return edge;
+    for (let i = index + (back ? -1 : 1); i >= 0 && i < siblings.length; i += back ? -1 : 1) {
+      const found = inside(siblings[i] as Node);
+      if (found !== undefined) return found;
+    }
+    if (!isElement(parent) || !isInlineBox(parent)) return edge;
+    current = parent;
+  }
+}
+
+/** The neighbour a node gives, looking at it from after it (`back`) or before it; undefined if it gives none. */
+function neighbourIn(node: Node, back: boolean): Neighbour | undefined {
   if (isText(node)) {
-    if (!node.data) return null;
-    if (isBlank(node.data)) return back ? 'space' : null;
+    if (!node.data) return undefined;
+    if (isBlank(node.data)) return back ? 'space' : undefined;
     return back && SPACE_END.test(node.data) ? 'space' : 'content';
   }
-  if (!isElement(node)) return null;
-  if (styleOf(node).display === 'none' || outOfFlow(node)) return null;
+  if (!isElement(node)) return undefined;
+  if (styleOf(node).display === 'none' || outOfFlow(node)) return undefined;
   if (isHtml(node, 'br')) return 'edge';
-  if (isInlineBox(node)) {
-    const children = domChildren(node);
-    if (back) children.reverse();
-    for (const child of children) {
-      const found = neighbourIn(child, back);
-      if (found) return found;
-    }
-    return null;
-  }
+  if (isInlineBox(node)) return firstInside(node, back, n => neighbourIn(n, back));
   return isInlineLevel(node) ? 'content' : 'edge';
 }
 
 /** What comes before (`back`) or after a node in its line. */
-function neighbour(node: Node, back: boolean): Neighbour {
-  let current = node;
-  for (;;) {
-    const parent = domParent(current);
-    if (!parent) return 'edge';
-    const siblings = domChildren(parent);
-    const index = siblings.indexOf(current as ChildNode);
-    if (index < 0) return 'edge';
-    for (let i = index + (back ? -1 : 1); i >= 0 && i < siblings.length; i += back ? -1 : 1) {
-      const found = neighbourIn(siblings[i] as Node, back);
-      if (found) return found;
-    }
-    if (!isElement(parent) || !isInlineBox(parent)) return 'edge';
-    current = parent;
-  }
-}
+const neighbour = (node: Node, back: boolean): Neighbour => walkLine(node, back, n => neighbourIn(n, back), 'edge');
 
 /** The node next to a node in its line, before it (`back`) or after it, white space left out; null at an edge. */
 function lineNode(node: Node, back: boolean): Node | null {
@@ -133,31 +141,10 @@ function lineNode(node: Node, back: boolean): Node | null {
     if (styleOf(n).display === 'none' || outOfFlow(n)) return undefined;
     if (isHtml(n, 'br')) return null;
     if (n.getAttribute('aria-hidden') === 'true') return n;
-    if (isInlineBox(n)) {
-      const children = domChildren(n);
-      if (back) children.reverse();
-      for (const child of children) {
-        const found = inside(child);
-        if (found !== undefined) return found;
-      }
-      return undefined;
-    }
+    if (isInlineBox(n)) return firstInside(n, back, inside);
     return isInlineLevel(n) ? n : null;
   };
-  let current = node;
-  for (;;) {
-    const parent = domParent(current);
-    if (!parent) return null;
-    const siblings = domChildren(parent);
-    const index = siblings.indexOf(current as ChildNode);
-    if (index < 0) return null;
-    for (let i = index + (back ? -1 : 1); i >= 0 && i < siblings.length; i += back ? -1 : 1) {
-      const found = inside(siblings[i] as Node);
-      if (found !== undefined) return found;
-    }
-    if (!isElement(parent) || !isInlineBox(parent)) return null;
-    current = parent;
-  }
+  return walkLine<Node | null>(node, back, inside, null);
 }
 
 /**

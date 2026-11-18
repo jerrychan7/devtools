@@ -50,7 +50,19 @@ const NOT_RENDERED = new Set('col colgroup map noscript source track wbr'.split(
 /** SVG shapes: graphics-symbol in Chrome. */
 const SVG_SHAPES = new Set('circle ellipse line path polygon polyline rect'.split(' '));
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
+export const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** The document or shadow root a node is in, where its ids resolve; null when detached. */
+export function scopeOf(node: Node): Document | ShadowRoot | null {
+  const root = node.getRootNode();
+  return isDocument(root) || isShadowRoot(root) ? root : null;
+}
+
+/** A select shown as a drop-down (Chrome's MenuListSelect), not as a list box. */
+export const isMenuList = (el: Element | null): boolean => isHtml(el, 'select') && !el.multiple && el.size <= 1;
+
+/** Whether an element has focus, in a document that has it. */
+export const isFocused = (el: Element) => el === el.ownerDocument.activeElement && el.ownerDocument.hasFocus();
 
 /** Sectioning elements, inside which `header` and `footer` are no landmarks. */
 const SECTIONING = 'article, aside, main, nav, section';
@@ -74,10 +86,10 @@ const GLOBAL_ARIA =
  */
 function hasAuthorName(el: Element): boolean {
   if (el.getAttribute('aria-label')?.trim() || el.hasAttribute('title')) return true;
-  const root = el.getRootNode() as Document | ShadowRoot;
+  const root = scopeOf(el);
   return (el.getAttribute('aria-labelledby') ?? '')
     .split(/[ \t\n\r\f]+/)
-    .some(id => !!id && !!root.getElementById?.(id)?.textContent?.trim());
+    .some(id => !!id && !!root?.getElementById(id)?.textContent?.trim());
 }
 
 /**
@@ -86,8 +98,7 @@ function hasAuthorName(el: Element): boolean {
  * is focusable or has a global ARIA attribute. Null when no token applies.
  */
 function explicitRole(el: Element): string | null {
-  for (const token of (el.getAttribute('role') ?? '').toLowerCase().split(/[ \t\n\r\f]+/)) {
-    if (!ARIA_ROLES.has(token) && !DOC_ROLE.test(token)) continue;
+  for (const token of roleTokens(el)) {
     if ((token === 'region' || token === 'form') && !hasAuthorName(el)) continue;
     if (isOrphaned(el, token)) continue;
     if (token === 'none' || token === 'presentation')
@@ -97,12 +108,15 @@ function explicitRole(el: Element): string | null {
   return null;
 }
 
+/** The tokens of an element's role attribute that are roles Chrome knows (in any case), in order. */
+const roleTokens = (el: Element) =>
+  (el.getAttribute('role') ?? '')
+    .toLowerCase()
+    .split(/[ \t\n\r\f]+/)
+    .filter(token => ARIA_ROLES.has(token) || DOC_ROLE.test(token));
+
 /** The first role Chrome knows in an element's role attribute, without context checks. */
-function rawRole(el: Element): string | null {
-  for (const token of (el.getAttribute('role') ?? '').toLowerCase().split(/[ \t\n\r\f]+/))
-    if (ARIA_ROLES.has(token) || DOC_ROLE.test(token)) return token;
-  return null;
-}
+const rawRole = (el: Element): string | null => roleTokens(el)[0] ?? null;
 
 /** For the roles that need one, the container roles (and tags) that give them their context. */
 const REQUIRED_CONTEXT: Record<string, { roles: string[]; tags: string[] }> = {
@@ -378,7 +392,7 @@ function implicitRole(el: Element): string {
       // An image map's area without a link is text in Chrome.
       return el.hasAttribute('href') ? 'link' : imageOf(el) ? 'StaticText' : 'generic';
     case 'select':
-      if (isHtml(el, 'select')) return el.multiple || el.size > 1 ? 'listbox' : 'combobox';
+      if (isHtml(el, 'select')) return isMenuList(el) ? 'combobox' : 'listbox';
   }
   const role = TAG_ROLES[el.localName];
   if (role) return role;
@@ -414,8 +428,8 @@ export function imageOf(area: Element): Element | null {
   const map = area.closest('map');
   const name = map?.getAttribute('name') || map?.id;
   if (!map || !name) return null;
-  const root = map.getRootNode();
-  if (!isDocument(root) && !isShadowRoot(root)) return null;
+  const root = scopeOf(map);
+  if (!root) return null;
   for (const img of root.querySelectorAll('img[usemap]'))
     if (img.getAttribute('usemap') === `#${name}`) return hiddenReason(img) === 'notRendered' ? null : img;
   return null;
@@ -424,8 +438,8 @@ export function imageOf(area: Element): Element | null {
 /** An image's map areas, in order. */
 function areasOf(img: Element): Element[] {
   const name = img.getAttribute('usemap')?.replace(/^#/, '');
-  const root = img.getRootNode();
-  if (!name || (!isDocument(root) && !isShadowRoot(root))) return [];
+  const root = scopeOf(img);
+  if (!name || !root) return [];
   const map = [...root.querySelectorAll('map')].find(m => (m.getAttribute('name') || m.id) === name);
   return map ? [...map.querySelectorAll('area')].filter(area => imageOf(area) === img) : [];
 }
