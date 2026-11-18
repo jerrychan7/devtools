@@ -1,15 +1,17 @@
 import type { Protocol } from 'devtools-protocol';
+import { registerViolations } from './violations';
 import type { Context } from '../../core/context';
-import type { Frame } from '../../core/frames';
-import { returnOutsideFunction } from '../../core/lexer';
+import type { Frame } from '../../core/frames/frames';
+import { returnOutsideFunction } from '../../core/lexer-queries';
 import { isHtmlElement, isSvgElement, realmOf } from '../../core/realm';
-import { mergedFrames, ownerOfId } from '../../core/merged-frames';
+import { mergedFrames, ownerOfId } from '../../core/frames/merged-frames';
 import { CdpError } from '../../core/session';
-import { parseStack } from '../../core/stack';
+import { scriptIdOfFrame, stackOf } from '../../core/scripts';
 import type { ConsoleEntry, LogEntry } from '../../probe/types';
 import { executionContexts } from './contexts';
 import { globalLexicalNames } from './lexical-names';
 import { replBindings, returnLast } from './repl';
+import type { World } from './worlds';
 
 // Indirect eval runs in the global scope, like code typed into the console.
 // oxlint-disable-next-line no-eval -- evaluating console input is the point.
@@ -232,9 +234,11 @@ interface Scope {
   /** The console utilities put on window and their values, until the task boundary after the last of `utilityUsers` evaluations' synchronous part. */
   utilities: Map<string, unknown>;
   utilityUsers: number;
+  /** The isolated world the code runs in (./worlds.ts), none for the document's own context. */
+  world?: World;
 }
 
-// A merged sandboxed iframe's contexts and objects are its agent's (core/merged-frames.ts): commands
+// A merged sandboxed iframe's contexts and objects are its agent's (core/frames/merged-frames.ts): commands
 // naming them go there, the others reach every agent. Its events (executionContextCreated,
 // consoleAPICalled, exceptionThrown) carry ids of its namespace and are the client's as they are.
 mergedFrames.registerRoutes('Runtime', {
@@ -257,12 +261,14 @@ mergedFrames.registerRoutes('Runtime', {
     'Runtime.releaseObjectGroup',
     'Runtime.discardConsoleEntries',
     'Runtime.addBinding',
+    'Runtime.removeBinding',
   ],
 });
 mergedFrames.registerRoutes('Log', { fanOut: ['Log.clear'] });
 
-export function registerRuntime({ session, objects, nodes, probe, frames }: Context) {
+export function registerRuntime({ session, objects, nodes, probe, frames, worlds }: Context) {
   const topFrame = frames.top;
+  registerViolations(session, topFrame.window);
   /** Per document: a navigated frame's new document is a new realm, with bindings of its own. */
   const scopes = new WeakMap<Document, Scope>();
   function scopeOf(frame: Frame): Scope {
@@ -286,10 +292,15 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     }
     return scope;
   }
+  /** The scope of `frame`'s document, or of its isolated world `world`: its code sees the world's globals. */
+  function scopeIn(frame: Frame, world: World | undefined): Scope {
+    const scope = scopeOf(frame);
+    return world ? { ...scope, evaluate: world.evaluate, world } : scope;
+  }
   let unsubscribe: (() => void) | null = null;
   let exceptionId = 0;
   let lastResult: unknown;
-  const contexts = executionContexts(frames, (method, params) => session.emit(method, params));
+  const contexts = executionContexts(frames, worlds, (method, params) => session.emit(method, params));
   session.onReset(() => {
     contexts.disable();
     lastResult = undefined;
@@ -361,7 +372,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
   }
 
   function exceptionResult(
-    { frame, win }: Pick<Scope, 'frame' | 'win'>,
+    { frame, win, world }: Pick<Scope, 'frame' | 'win' | 'world'>,
     error: unknown,
     group?: string,
     generatePreview = false,
@@ -370,9 +381,9 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     // The context could not run the code at all: a protocol error, not the page's exception.
     if (error instanceof CdpError) throw error;
     hideEvalFrames(error, win);
-    const callFrames = isError(error, win) ? parseStack(error.stack) : [];
+    const callFrames = isError(error, win) ? stackOf(error.stack, frame.executionContextId) : [];
     // One object for both places, like V8.
-    const exception = objects.wrap(error, { generatePreview, group });
+    const exception = objects.wrap(error, { generatePreview, group, world: world?.id });
     return {
       result: exception,
       exceptionDetails: {
@@ -384,7 +395,7 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         lineNumber: 0,
         columnNumber: 0,
         exception,
-        executionContextId: frame.executionContextId,
+        executionContextId: world?.id ?? frame.executionContextId,
         ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
     };
@@ -424,11 +435,12 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         executionContextId: contextOfEntry(entry),
         timestamp: entry.time,
         // Drop the probe's console wrapper frame.
-        stackTrace: { callFrames: parseStack(entry.stack, 1) },
+        stackTrace: { callFrames: stackOf(entry.stack, contextOfEntry(entry), 1) },
       } satisfies Protocol.Runtime.ConsoleAPICalledEvent);
       return;
     }
-    const callFrames = parseStack(entry.stack);
+    const executionContextId = contextOfEntry(entry);
+    const callFrames = stackOf(entry.stack, executionContextId);
     const top = callFrames[0];
     const url = entry.url || top?.url;
     session.emit('Runtime.exceptionThrown', {
@@ -439,9 +451,10 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         lineNumber: entry.line ? entry.line - 1 : (top?.lineNumber ?? 0),
         columnNumber: entry.column ? entry.column - 1 : (top?.columnNumber ?? 0),
         ...(url ? { url } : {}),
-        scriptId: '',
+        // Like Chrome, the script the error was thrown in: the frontend places the message by it.
+        scriptId: scriptIdOfFrame(executionContextId, url ?? ''),
         exception: objects.wrap(entry.error, { generatePreview: true, group: 'console' }),
-        executionContextId: contextOfEntry(entry),
+        executionContextId,
         ...(callFrames.length ? { stackTrace: { callFrames } } : {}),
       },
     } satisfies Protocol.Runtime.ExceptionThrownEvent);
@@ -465,7 +478,10 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     async evaluate(params: Protocol.Runtime.EvaluateRequest): Promise<Protocol.Runtime.EvaluateResponse> {
       const group = params.objectGroup;
       // Like Chrome, in the context asked for, else the top page's.
-      const scope = scopeOf(contexts.frameOf(params.contextId, params.uniqueContextId));
+      const scope = scopeIn(
+        contexts.frameOf(params.contextId, params.uniqueContextId),
+        contexts.worldOf(params.contextId, params.uniqueContextId)
+      );
       const { repl } = scope;
       if (params.throwOnSideEffect && mayHaveSideEffects(params.expression, scope)) {
         return exceptionResult(
@@ -508,10 +524,11 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         const value = params.includeCommandLineAPI ? await withCommandLineApi(scope, evaluate) : await evaluate();
         if (!params.silent) lastResult = value;
         return {
-          result: objects.wrap(value, {
+          result: objects.wrap(worlds.unwrap(value), {
             generatePreview: params.generatePreview,
             returnByValue: params.returnByValue,
             group,
+            world: scope.world?.id,
           }),
         };
       } catch (e) {
@@ -530,17 +547,21 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         throw new CdpError('ObjectId, executionContextId and uniqueContextId must mutually exclude each other', -32602);
       if (targets === 0)
         throw new CdpError('Either objectId or executionContextId or uniqueContextId must be specified', -32602);
-      // An object of the other side of a merge (core/merged-frames.ts) is in another JavaScript
+      // An object of the other side of a merge (core/frames/merged-frames.ts) is in another JavaScript
       // world: V8's world check, which Chrome applies to the sandboxed iframe's objects too.
-      const world = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
-      if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== world))
+      const owner = ownerOfId(params.objectId ?? params.executionContextId ?? params.uniqueContextId);
+      if (params.arguments?.some(arg => arg.objectId !== undefined && ownerOfId(arg.objectId) !== owner))
         throw new CdpError('Argument should belong to the same JavaScript world as target object');
       const self = params.objectId ? objects.get(params.objectId) : undefined;
-      // Like Chrome, in the context asked for, else in the object's.
-      const scope = scopeOf(
-        params.executionContextId !== undefined || params.uniqueContextId !== undefined
-          ? contexts.frameOf(params.executionContextId, params.uniqueContextId)
-          : contexts.frameOfValue(self)
+      // Like Chrome, in the context asked for, else in the object's: an isolated world's object
+      // (DOM.resolveNode in it) is called there.
+      const inContext = params.executionContextId !== undefined || params.uniqueContextId !== undefined;
+      const world = inContext
+        ? contexts.worldOf(params.executionContextId, params.uniqueContextId)
+        : worlds.byId(params.objectId === undefined ? undefined : objects.worldOf(params.objectId));
+      const scope = scopeIn(
+        inContext ? contexts.frameOf(params.executionContextId, params.uniqueContextId) : contexts.frameOfValue(self),
+        world
       );
       const args = (params.arguments || []).map(arg => {
         if (arg.objectId) return objects.get(arg.objectId);
@@ -552,16 +573,18 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
         const fn = scope.evaluate(`(${params.functionDeclaration}\n)`);
         // Same error as V8 for a declaration that is not a function, a response error.
         if (typeof fn !== 'function') throw new CdpError('Given expression does not evaluate to a function');
-        let value: unknown = Reflect.apply(fn, self, args);
+        // In a world, the properties the call leaves on a node are the world's, apart from the page's.
+        let value: unknown = world ? worlds.callOn(world, self, fn, args) : Reflect.apply(fn, self, args);
         if (params.awaitPromise && isThenable(value)) {
           inPromise = true;
           value = await value;
         }
         return {
-          result: objects.wrap(value, {
+          result: objects.wrap(worlds.unwrap(value), {
             generatePreview: params.generatePreview,
             returnByValue: params.returnByValue,
             group: params.objectGroup,
+            world: world?.id,
           }),
         };
       } catch (e) {
@@ -626,7 +649,8 @@ export function registerRuntime({ session, objects, nodes, probe, frames }: Cont
     setAsyncCallStackDepth: () => {},
     setCustomObjectFormatterEnabled: () => {},
     setMaxCallStackSizeToCapture: () => {},
-    addBinding: () => {},
+    addBinding: (params: Protocol.Runtime.AddBindingRequest) => worlds.addBinding(params),
+    removeBinding: (params: Protocol.Runtime.RemoveBindingRequest) => worlds.removeBinding(params.name),
     getExceptionDetails: () => ({}),
   });
 }

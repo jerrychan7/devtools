@@ -1,3 +1,5 @@
+import type { NativeTable } from './natives';
+
 /** Global key the probe is installed under, so the CDP agent can find an earlier probe. */
 export const PROBE_KEY = '__devtoolsAnywhereProbe__';
 
@@ -143,6 +145,8 @@ export interface RequestRecord {
   errorText?: string;
   /** Whether a failed request was stopped by the page (abort), not by an error. */
   canceled?: boolean;
+  /** Why DevTools blocked the request (Network.setBlockedURLs). */
+  blockedReason?: 'inspector';
   /** The same-origin iframe document that made the request; none for the top one's. */
   frame?: FrameTag;
 }
@@ -189,6 +193,54 @@ export interface ListenerRecord {
   capture: boolean;
   passive: boolean;
   once: boolean;
+  /** The signal the listener was added with: once it is aborted, the browser has removed the listener. */
+  signal: AbortSignal | undefined;
+}
+
+/**
+ * What DevTools does to a fetch() or XHR request about to be made (Network.setBlockedURLs,
+ * setExtraHTTPHeaders, setCacheDisabled, offline, the user agent): set by the agent.
+ */
+export interface Intercept {
+  /** Fails the request without making it, with these fields in its record. */
+  fail?: Partial<ProbeRequest>;
+  /** Bypasses the HTTP cache (fetch() only). */
+  noCache?: boolean;
+}
+
+/** @internal See {@link Probe.animation}. */
+export interface AnimationNatives {
+  play: Animation['play'];
+  pause: Animation['pause'];
+  rate: PropertyDescriptor | undefined;
+  time: PropertyDescriptor | undefined;
+}
+
+/** @internal See {@link Probe.css}. */
+export interface CssNatives {
+  CSS: typeof CSS;
+  supports: (typeof CSS)['supports'];
+}
+
+/** @internal See {@link Probe.top}. */
+export interface TopNatives {
+  show: HTMLElement['showPopover'] | undefined;
+  hide: HTMLElement['hidePopover'] | undefined;
+  listen: EventTarget['addEventListener'];
+  unlisten: EventTarget['removeEventListener'];
+  MO: typeof MutationObserver;
+  observe: MutationObserver['observe'];
+  disconnect: MutationObserver['disconnect'];
+  takeRecords: MutationObserver['takeRecords'];
+  attach: Element['attachShadow'];
+  setAttr: Element['setAttribute'];
+  matches: Element['matches'];
+  raf: typeof requestAnimationFrame;
+  timeout: typeof setTimeout;
+  microtask: typeof queueMicrotask;
+  computed: typeof getComputedStyle;
+  /** `performance.now`, bound to `performance`. */
+  now: () => number;
 }
 
 /** @internal */
@@ -218,12 +270,54 @@ export interface Probe {
   shadowRoots: WeakMap<Element, ShadowRoot>;
   /** Subscribes to shadow roots being attached. */
   onShadowRoot(listener: (root: ShadowRoot) => void): () => void;
+  /**
+   * Subscribes to animations being made with `animate()` or `new Animation()`, played, paused,
+   * cancelled, reversed, finished, or given a rate or a time.
+   */
+  onAnimation(listener: (animation: Animation) => void): () => void;
+  /**
+   * `Animation.prototype`'s own `play`, `pause` and accessors of `playbackRate` and `currentTime`,
+   * taken before the probe's hooks and any the page added later: the Animation domain's changes are
+   * not seen by the page, as in Chrome. Undefined without `Animation` (or from an older probe).
+   */
+  animation?: AnimationNatives | undefined;
+  /**
+   * The `CSS` namespace and its `supports`, taken before the page's code: the CSS domain asks it
+   * whether a name the page gives setProperty() or removeProperty() is a property's, and which
+   * commented-out declarations parse, whatever the page puts in `window.CSS` later.
+   * Undefined without `CSS` (or from an older probe).
+   */
+  css?: CssNatives | undefined;
+  /**
+   * `showPopover`, `hidePopover`, `addEventListener`, `removeEventListener`, `MutationObserver` and its `observe`,
+   * `disconnect` and `takeRecords`, `attachShadow`, `setAttribute`, `matches`, `requestAnimationFrame`,
+   * `setTimeout`, `queueMicrotask`, `getComputedStyle` and `performance.now`, taken before the probe's hooks and
+   * the page's code: the vision deficiency mask goes on top and follows the top layer without the page seeing or
+   * changing it, and the agent's frames, timers and observers are not the page's. Undefined from an older probe.
+   */
+  top?: TopNatives | undefined;
+  /**
+   * The functions of the page's interfaces the agent calls (natives.ts), taken before the page's code, as `top`
+   * is. Undefined from an older probe.
+   */
+  natives?: NativeTable | undefined;
+  /**
+   * What matchMedia() reports while media is emulated (Emulation.setEmulatedMedia): `set` gives the rewrite of
+   * the page's media queries (null for none), and the query lists whose results change get a change event in
+   * an animation frame callback of the next frame (Chrome dispatches its own before that frame's callbacks, see
+   * media.ts). Hooked with the probe, in every window it hooks. Undefined from an older probe.
+   */
+  media?: { set(rewrite: ((text: string) => string) | null): void } | undefined;
   /** Event listeners currently registered with addEventListener, per target. */
   listeners: WeakMap<EventTarget, ListenerRecord[]>;
   /** URLs of devtools-anywhere's own resources (bundle, frontend), left out of the Network panel. */
   ownUrls: Set<string>;
   /** The page's fetch before it was hooked: DevTools' own requests stay out of the Network panel. */
   fetch: typeof fetch;
+  /** Asked before each hooked fetch() or XHR request is made; set by the agent. */
+  intercept?:
+    | ((url: string, type: RequestType, setHeader: (name: string, value: string) => void) => Intercept | undefined)
+    | undefined;
   /** The page's WebSocket before it was hooked: DevTools' own connections are not recorded. */
   WebSocket: typeof WebSocket;
   /**

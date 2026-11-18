@@ -17,6 +17,10 @@ import '../../panels/network/network-meta.js';
 // Registers the throttling settings the Network panel's toolbar needs.
 import '../../panels/mobile_throttling/mobile_throttling-meta.js';
 import '../../panels/application/application-meta.js';
+// The Animation, Audits and Accessibility domains are answered by the page (docs/usage.md).
+import '../../panels/animation/animation-meta.js';
+import '../../panels/issues/issues-meta.js';
+import '../../panels/accessibility/accessibility-meta.js';
 // The page as an image, with input forwarded to it: for when the page is not in view.
 import '../../panels/screencast/screencast-meta.js';
 // Device mode, in shell mode only (`can_emulate_device`): there the screencast is left out.
@@ -103,10 +107,9 @@ UI.ViewManager.registerViewExtension({
   commandPrompt: i18nLazyString(PageStrings.showPage),
   order: 2,
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
-  async loadView(universe) {
+  async loadView() {
     const SourcesModule: typeof Sources = await import('../../panels/sources/sources.js');
-    return SourcesModule.SourcesNavigator.NetworkNavigatorView.instance(
-        {forceNew: null, networkProjectManager: universe.networkProjectManager});
+    return SourcesModule.SourcesNavigator.NetworkNavigatorView.instance();
   },
 });
 

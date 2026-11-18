@@ -12,7 +12,7 @@ export type OriginPattern = { origin: string } | { protocol: string; suffix: str
  * The reserved entry of data-frame-origins that trusts this page's sandboxed iframes (no
  * allow-same-origin) showing a document of this page's origin, about:blank or about:srcdoc:
  * opaque (`null`) origins, which Chrome keeps in the page's own target, and so are merged into
- * this page's agent (core/merged-frames.ts). Off unless named.
+ * this page's agent (core/frames/merged-frames.ts). Off unless named.
  */
 export const SANDBOXED = 'sandboxed';
 

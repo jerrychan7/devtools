@@ -1,10 +1,10 @@
 // Geometry of nodes in same-origin iframes against Chrome's: box models, content quads and
 // scrolling in the top viewport (through the iframes' position, border, padding, scrolling and
 // transforms), and hit testing into the iframes' documents.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -14,43 +14,45 @@ const FIXTURE = '/packages/devtools-anywhere/test-support/frame-geometry.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.setViewport({ width: 800, height: 600 });
-  // A plain iframe with a border and padding, and a transformed one; the top page, both
-  // iframes and a scroller in the first one are scrolled.
-  await t.page.evaluate(
-    src =>
-      Promise.all(
-        [
-          'left:20px;top:200px;width:320px;height:300px;border:5px solid;padding:7px',
-          'left:380px;top:180px;width:300px;height:280px;border:4px solid;padding:3px;transform:rotate(8deg) scale(1.1)',
-        ].map(
-          (style, i) =>
-            new Promise(resolve => {
-              const frame = document.createElement('iframe');
-              frame.id = `fg-${i ? 'turned-frame' : 'frame'}`;
-              frame.style.cssText = `position:absolute;z-index:10;background:#fff;${style}`;
-              frame.onload = resolve;
-              frame.src = src;
-              document.body.append(frame);
-            })
-        )
-      ).then(() => {
-        document.body.style.minHeight = '2000px';
-        scrollTo(0, 30);
-        for (const frame of document.querySelectorAll('iframe')) {
-          const win = frame.contentWindow;
-          if (!win || !frame.id) continue;
-          win.scrollTo(0, 12);
-          win.document.getElementById('fg-scroller')?.scrollTo(0, 150);
-        }
-      }),
-    FIXTURE
-  );
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.setViewport({ width: 800, height: 600 });
+    // A plain iframe with a border and padding, and a transformed one; the top page, both
+    // iframes and a scroller in the first one are scrolled.
+    await t.page.evaluate(
+      src =>
+        Promise.all(
+          [
+            'left:20px;top:200px;width:320px;height:300px;border:5px solid;padding:7px',
+            'left:380px;top:180px;width:300px;height:280px;border:4px solid;padding:3px;transform:rotate(8deg) scale(1.1)',
+          ].map(
+            (style, i) =>
+              new Promise(resolve => {
+                const frame = document.createElement('iframe');
+                frame.id = `fg-${i ? 'turned-frame' : 'frame'}`;
+                frame.style.cssText = `position:absolute;z-index:10;background:#fff;${style}`;
+                frame.onload = resolve;
+                frame.src = src;
+                document.body.append(frame);
+              })
+          )
+        ).then(() => {
+          document.body.style.minHeight = '2000px';
+          scrollTo(0, 30);
+          for (const frame of document.querySelectorAll('iframe')) {
+            const win = frame.contentWindow;
+            if (!win || !frame.id) continue;
+            win.scrollTo(0, 12);
+            win.document.getElementById('fg-scroller')?.scrollTo(0, 150);
+          }
+        }),
+      FIXTURE
+    );
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

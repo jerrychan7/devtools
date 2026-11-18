@@ -4,10 +4,10 @@
 // out-of-process iframe. The page is on localhost, the iframe on 127.0.0.1, of the one server.
 // Skipped when the frontend has not been built.
 import { existsSync } from 'node:fs';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ElementHandle, Frame, Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
@@ -17,23 +17,25 @@ let env: Env | undefined;
 let page: Page;
 let frontend: Frame;
 
-before(async () => {
-  if (!built) return;
-  // Every site in its own process, as Chrome runs cross-site iframes for real.
-  env = await launch(['--site-per-process']);
-  page = await env.browser.newPage();
-  await page.setViewport({ width: 1000, height: 1200 });
-  const child = new URL('/packages/devtools-anywhere/test-support/frame-link-child.html', env.baseUrl);
-  child.hostname = '127.0.0.1';
-  const parent = new URL('/tests/e2e/pages/oopif-frontend.html', env.baseUrl);
-  parent.hostname = 'localhost';
-  child.searchParams.set('parentOrigins', parent.origin);
-  parent.searchParams.set('frameOrigins', child.origin);
-  parent.searchParams.set('child', child.href);
-  await page.goto(parent.href);
-  frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    if (!built) return;
+    // Every site in its own process, as Chrome runs cross-site iframes for real.
+    env = await launch(['--site-per-process']);
+    page = await env.browser.newPage();
+    await page.setViewport({ width: 1000, height: 1200 });
+    const child = new URL('/packages/devtools-anywhere/test-support/frame-link-child.html', env.baseUrl);
+    child.hostname = '127.0.0.1';
+    const parent = new URL('/tests/e2e/pages/oopif-frontend.html', env.baseUrl);
+    parent.hostname = 'localhost';
+    child.searchParams.set('parentOrigins', parent.origin);
+    parent.searchParams.set('frameOrigins', child.origin);
+    parent.searchParams.set('child', child.href);
+    await page.goto(parent.href);
+    frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
+  },
+  () => env?.close()
+);
 
 async function waitFor<T>(get: () => T | Promise<T>, timeout = 15000): Promise<NonNullable<T>> {
   const start = Date.now();

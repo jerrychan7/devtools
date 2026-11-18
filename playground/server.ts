@@ -163,7 +163,8 @@ export function startServer(port = 0): Promise<PlaygroundServer> {
         // Lets devtools-anywhere-service-worker.js control the whole site from its dist directory.
         ...(target.endsWith('-service-worker.js') ? { 'service-worker-allowed': '/' } : {}),
         // Style sheets are readable from other origins (the tests load them cross-origin).
-        ...(target.endsWith('.css') ? { 'access-control-allow-origin': '*' } : {}),
+        // ?nocors leaves the header out, for a sheet a page script cannot read.
+        ...(target.endsWith('.css') && !url.searchParams.has('nocors') ? { 'access-control-allow-origin': '*' } : {}),
       });
       // ?split=<text> sends the file in two chunks, cut right after the first <text>, to test
       // readers of streamed responses.

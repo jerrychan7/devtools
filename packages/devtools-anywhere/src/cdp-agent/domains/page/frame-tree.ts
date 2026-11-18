@@ -6,7 +6,7 @@ import {
   type OpaqueFrame,
   type OpaqueFrameChange,
   awaitsFirstDocument,
-} from '../../core/frames';
+} from '../../core/frames/frames';
 import type { CdpSession } from '../../core/session';
 
 /** Whether the frame is a sandboxed iframe's opaque one: it has no document or context of ours. */

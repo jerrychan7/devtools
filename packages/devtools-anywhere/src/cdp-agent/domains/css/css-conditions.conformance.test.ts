@@ -1,9 +1,9 @@
 // @container, @scope, @starting-style and @layer in CSS.getMatchedStylesForNode, compared
 // with Chrome: which rules match, their cascade order and the at-rules reported on them.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -39,24 +39,26 @@ const STYLE = `
   @container (unknown-feature > 1px) { #c-box2 { margin: 11px; } }
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(style => {
-    const s = document.createElement('style');
-    s.textContent = style;
-    document.head.appendChild(s);
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div class="c-wrap"><div id="c-box">y</div><div class="c-in" style="--k: v"><i id="c-box2"></i></div></div>'
-    );
-  }, STYLE);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(style => {
+      const s = document.createElement('style');
+      s.textContent = style;
+      document.head.appendChild(s);
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div class="c-wrap"><div id="c-box">y</div><div class="c-in" style="--k: v"><i id="c-box2"></i></div></div>'
+      );
+    }, STYLE);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 test('size queries of an unrendered container and containers up the flat tree match Chrome', async () => {
   await t.page.evaluate(() => {

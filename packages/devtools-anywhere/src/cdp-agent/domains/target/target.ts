@@ -7,15 +7,15 @@ import {
   childTargets,
   OWN_ID_PREFIX,
   parse,
-} from '../../core/child-targets';
+} from '../../core/frames/child-targets';
 import type { Context } from '../../core/context';
 import { isFrameOwner, sourceAttribute } from '../../core/realm';
 import { CdpError } from '../../core/session';
 
 /**
  * The Target domain: the page's cross-origin iframes as child targets of type `iframe`
- * (docs/roadmap.md, "iframes"; what Chrome does is in test-support/oopif-notes.md). Each link
- * to an iframe's agent (core/child-targets.ts) is attached as a session of its own while
+ * (docs/roadmap.md, "iframes"; what Chrome does is in test-support/oopif/oopif-notes.md). Each link
+ * to an iframe's agent (core/frames/child-targets.ts) is attached as a session of its own while
  * auto-attach is on, and the client's messages are routed to it by `sessionId`, flattened as
  * Chrome does: every session, the iframe's own children's too, talks over the one connection.
  * Like Chrome's, a target and its session outlive the iframe's navigations: the next document's

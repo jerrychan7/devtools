@@ -1,10 +1,10 @@
 // Requests of same-origin iframes, against Chrome's: their frame, loader and document URL, the
 // iframe's own document request, navigations, srcdoc iframes and requests made before the agent
 // heard of a document. Ids differ between the two sides: they are compared by how they relate.
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 type Sent = Protocol.Network.RequestWillBeSentEvent;
@@ -14,20 +14,22 @@ const BASE = '/packages/devtools-anywhere/test-support/';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'Network.requestWillBeSent',
-    'Network.responseReceived',
-    'Network.loadingFinished',
-    'Network.webSocketCreated',
-    'Network.webSocketFrameSent',
-    'Network.webSocketFrameReceived',
-  ]);
-  await t.chrome.send('Network.enable');
-  await t.ours.send('Network.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'Network.requestWillBeSent',
+      'Network.responseReceived',
+      'Network.loadingFinished',
+      'Network.webSocketCreated',
+      'Network.webSocketFrameSent',
+      'Network.webSocketFrameReceived',
+    ]);
+    await t.chrome.send('Network.enable');
+    await t.ours.send('Network.enable');
+  },
+  () => env?.close()
+);
 
 /** Waits until both sides have finished every request whose URL contains one of `markers`. */
 async function settle(...markers: string[]) {

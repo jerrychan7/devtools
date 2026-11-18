@@ -1,7 +1,7 @@
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -11,15 +11,17 @@ let t: TestPage;
 let ours: DomNode;
 let chrome: DomNode;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['CSS.styleSheetAdded']);
-  await Promise.all([t.ours.send('DOM.enable'), t.chrome.send('DOM.enable')]);
-  await Promise.all([t.ours.send('CSS.enable'), t.chrome.send('CSS.enable')]);
-  ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
-  chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['CSS.styleSheetAdded']);
+    await Promise.all([t.ours.send('DOM.enable'), t.chrome.send('DOM.enable')]);
+    await Promise.all([t.ours.send('CSS.enable'), t.chrome.send('CSS.enable')]);
+    ours = (await t.ours.send('DOM.getDocument', { depth: -1 })).root;
+    chrome = (await t.chrome.send('DOM.getDocument', { depth: -1 })).root;
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;
@@ -198,6 +200,35 @@ describe('CSS', () => {
     assert.deepEqual(seen, [1, 0, 1, 0]);
   });
 
+  test('an added rule done again keeps a shorthand the browser gives as longhands with no value', async () => {
+    // Its text reads `margin-top: ; …`: a redo inserts the text the client gave, as Chrome does.
+    const block = async (side: TestPage['ours'], name: string) => {
+      const { styleSheetId } = await side.send('CSS.createStyleSheet', {
+        frameId: (await side.send('Page.getResourceTree')).frameTree.frame.id,
+      });
+      await side.send('DOM.markUndoableState');
+      await side.send('CSS.addRule', {
+        styleSheetId,
+        ruleText: `.${name} { margin: env(safe-area-inset-left) 2px; margin-bottom: 0 }`,
+        location: { startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+      });
+      await side.send('DOM.markUndoableState');
+      await side.send('DOM.undo');
+      await side.send('DOM.redo');
+      // Chrome's inspector sheet is not one of the page's sheets: the rule is read by the margin it gives.
+      return t.page.evaluate(n => {
+        const el = document.body.appendChild(document.createElement('div'));
+        el.className = n;
+        const margin = getComputedStyle(el).margin;
+        el.remove();
+        return margin;
+      }, name);
+    };
+    const chrome = await block(t.chrome, 'redo-c');
+    assert.equal(await block(t.ours, 'redo-o'), chrome);
+    assert.equal(chrome, '0px 2px');
+  });
+
   /**
    * The fixture has two style sheets that differ only in the class name (twin-o, twin-c). Each
    * side edits its own, so the responses can be compared without one edit seeing the other's.
@@ -365,5 +396,23 @@ describe('CSS', () => {
       );
       assert.deepEqual(o, asOurs(c));
     });
+  });
+
+  test('setStyleSheetText with CSS disabled reports no sheets', async () => {
+    const [header] = await t.ours.events('CSS.styleSheetAdded');
+    assert.ok(header);
+    const { styleSheetId } = header.header;
+    const { text } = await t.ours.send('CSS.getStyleSheetText', { styleSheetId });
+    const count = (await t.ours.events('CSS.styleSheetAdded')).length;
+    await t.ours.send('CSS.disable');
+    try {
+      // The @import brings a sheet: like Chrome, a disabled CSS domain does not report it.
+      await t.ours.send('CSS.setStyleSheetText', { styleSheetId, text: `@import url("data:text/css,b{}");\n${text}` });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await t.ours.events('CSS.styleSheetAdded')).length, count);
+      await t.ours.send('CSS.setStyleSheetText', { styleSheetId, text });
+    } finally {
+      await t.ours.send('CSS.enable');
+    }
   });
 });

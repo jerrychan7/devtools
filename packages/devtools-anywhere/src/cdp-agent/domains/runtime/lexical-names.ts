@@ -1,6 +1,6 @@
 import type { ProbeView } from '../../core/probe-view';
 import { isElement, isHtml } from '../../core/realm';
-import { topLevelLexicalNames } from '../../core/lexer';
+import { topLevelLexicalNames } from '../../core/lexer-queries';
 import { refetch } from '../network/network';
 import { isDeclared } from './repl';
 

@@ -11,7 +11,8 @@
  * `isBreakOrContinue`, `isExpressionTerminator`, `isForOfBinding` and the whitespace predicates.
  * Import / export analysis and TypeScript support are not ported. Added here: a `#!` first line,
  * HTML-like comments (`<!--`, and `-->` at the start of a line) outside modules, Unicode line
- * terminators, recovery instead of failing on syntax errors, and the two queries below.
+ * terminators, recovery instead of failing on syntax errors, and `debuggerStatementSites`. The
+ * queries over the token list are in lexer-queries.ts.
  *
  * es-module-lexer is distributed under the MIT License:
  *
@@ -48,26 +49,39 @@ export const Open = {
 } as const;
 export type Open = (typeof Open)[keyof typeof Open];
 
-export type TokenKind = 'word' | 'punct' | 'string' | 'template' | 'regex';
+/** What a token is. */
+export const Kind = {
+  Word: 0,
+  Punct: 1,
+  String: 2,
+  Template: 3,
+  Regex: 4,
+} as const;
+export type Kind = (typeof Kind)[keyof typeof Kind];
 
-export interface Token {
-  kind: TokenKind;
-  start: number;
+/**
+ * The tokens of a source, one array per field (token `i` is element `i` of each). A bundle has
+ * millions of tokens: typed arrays keep them in about 15 bytes each, where objects took 80.
+ */
+export interface Tokens {
+  length: number;
+  kinds: Uint8Array;
+  starts: Int32Array;
   /** Exclusive. */
-  end: number;
+  ends: Int32Array;
   /** Open brackets around the token; an opener and its closer share their depth. */
-  depth: number;
-  /** The innermost open bracket around the token. */
-  parent: Open;
-  /** A line terminator comes between the previous token and this one. */
-  newline: boolean;
+  depths: Int32Array;
+  /** The innermost open bracket around the token (an `Open`). */
+  parents: Uint8Array;
+  /** 1 when a line terminator comes between the previous token and this one. */
+  newlines: Uint8Array;
 }
 
 export interface LexOptions {
   /** Module code: no HTML-like comments. */
   module?: boolean;
   /** The tokens of the source, already lexed with the same options: reused instead of lexing again. */
-  tokens?: Token[];
+  tokens?: Tokens;
 }
 
 interface OpenToken {
@@ -76,8 +90,14 @@ interface OpenToken {
   pos: number;
 }
 
+/** A `debugger` statement: the keyword's offset, and whether a `;` comes next. */
+export interface DebuggerSite {
+  start: number;
+  semicolon: boolean;
+}
+
 /** Tokenizes `source`. Never throws: on a syntax error it recovers and goes on. */
-export function tokenize(source: string, options: LexOptions = {}): Token[] {
+export function tokenize(source: string, options: LexOptions = {}): Tokens {
   return options.tokens ?? new Lexer(source, options.module === true).run();
 }
 
@@ -93,20 +113,92 @@ class Lexer {
   private readonly stack: OpenToken[] = [];
   private depth = 0;
   private newline = false;
-  private readonly tokens: Token[] = [];
-  /** Takes each token instead of the token list. */
-  private readonly sink: ((token: Token) => void) | undefined;
+  /** Tokens kept so far; stays 0 in debugger mode. */
+  private count = 0;
+  /** A token came before: `-->` then starts a comment only after a line break. Set in both modes. */
+  private lexed = false;
+  private kinds: Uint8Array;
+  private starts: Int32Array;
+  private ends: Int32Array;
+  private depths: Int32Array;
+  private parents: Uint8Array;
+  private newlines: Uint8Array;
+  /**
+   * Debugger mode (`debuggerStatementSites`): the `debugger` statements found so far, kept instead
+   * of the tokens. Only the previous token and a candidate keyword are remembered.
+   */
+  private readonly sites: DebuggerSite[] | undefined;
+  private prevKind = -1;
+  private prevStart = 0;
+  private prevEnd = 0;
+  /** The start of a `debugger` keyword whose next token is still to come (-1 for none). */
+  private candidate = -1;
+  /** The candidate begins an object literal member: a `(` after it on a later line still makes it a method name. */
+  private member = false;
+  /**
+   * The code unit at `peekPos`, read ahead by a scan that stopped before it (the end of a word,
+   * the line break after a comment, what follows a `/`): the main loop takes it from here instead
+   * of reading it again. The source does not change, so an old one is still right.
+   */
+  private peekPos = -1;
+  private peek = 0;
 
-  constructor(source: string, module: boolean, sink?: (token: Token) => void) {
+  constructor(source: string, module: boolean, sites?: DebuggerSite[]) {
     this.src = source;
     this.module = module;
     this.end = source.length;
-    this.sink = sink;
+    this.sites = sites;
+    // Sources range from a token every 2 code units to one every 50 or more (a token every 4 to 5
+    // in minified code): the arrays start small and grow to what the source read so far suggests.
+    const capacity = sites ? 0 : Math.ceil(source.length / FIRST_GUESS) + 16;
+    this.kinds = new Uint8Array(capacity);
+    this.starts = new Int32Array(capacity);
+    this.ends = new Int32Array(capacity);
+    this.depths = new Int32Array(capacity);
+    this.parents = new Uint8Array(capacity);
+    this.newlines = new Uint8Array(capacity);
   }
 
-  /** The code unit at `i`, 0 outside the source (lexer.c pads its buffer the same way). */
+  /**
+   * Room for the tokens of the whole source at the density seen up to `at` (plus 1/16), and at
+   * least 1/8 more than now so that few grows are ever needed. Growing once from a small first
+   * guess to about the final count costs less memory than a large first guess that `result` then
+   * copies to free its spare room.
+   */
+  private grow(at: number) {
+    const have = this.kinds.length;
+    const expected = Math.ceil(((have / Math.max(at, 1)) * this.end * 17) / 16);
+    const n = Math.max(expected, have + (have >> 3)) + 16;
+    this.kinds = resized(this.kinds, n);
+    this.starts = resized(this.starts, n);
+    this.ends = resized(this.ends, n);
+    this.depths = resized(this.depths, n);
+    this.parents = resized(this.parents, n);
+    this.newlines = resized(this.newlines, n);
+  }
+
+  /** The tokens kept, in arrays of their length: copied when the spare room is worth freeing. */
+  private result(): Tokens {
+    const n = this.count;
+    const copy = this.kinds.length - n > n >> 3;
+    const cut = <T extends Uint8Array | Int32Array>(a: T): T => (copy ? a.slice(0, n) : a.subarray(0, n)) as T;
+    return {
+      length: n,
+      kinds: cut(this.kinds),
+      starts: cut(this.starts),
+      ends: cut(this.ends),
+      depths: cut(this.depths),
+      parents: cut(this.parents),
+      newlines: cut(this.newlines),
+    };
+  }
+
+  /**
+   * The code unit at `i`, 0 outside the source (lexer.c pads its buffer the same way): there
+   * `charCodeAt` gives NaN, and `NaN | 0` is 0, without a bounds check of our own.
+   */
   private c(i: number): number {
-    return i >= 0 && i < this.end ? this.src.charCodeAt(i) : 0;
+    return this.src.charCodeAt(i) | 0;
   }
 
   private top(index: number): OpenToken {
@@ -118,54 +210,122 @@ class Lexer {
     this.stack[this.depth++] = { token, pos };
   }
 
-  private emit(kind: TokenKind, start: number, end: number, depth: number) {
-    const token: Token = {
-      kind,
-      start,
-      end,
-      depth,
-      parent: depth > 0 ? this.top(depth - 1).token : Open.None,
-      newline: this.newline,
-    };
-    if (this.sink) this.sink(token);
-    else this.tokens.push(token);
+  private emit(kind: Kind, start: number, end: number, depth: number) {
+    const parent = depth > 0 ? this.top(depth - 1).token : Open.None;
+    if (this.sites) this.debuggerToken(kind, start, end, parent, depth);
+    else {
+      const i = this.count++;
+      if (i === this.kinds.length) this.grow(end);
+      this.kinds[i] = kind;
+      this.starts[i] = start;
+      this.ends[i] = end;
+      this.depths[i] = depth;
+      this.parents[i] = parent;
+      this.newlines[i] = this.newline ? 1 : 0;
+    }
     this.newline = false;
+    this.lexed = true;
+  }
+
+  /** Debugger mode, for each token: settles the candidate before it, and tells whether it is one. */
+  private debuggerToken(kind: Kind, start: number, end: number, parent: Open, depth: number) {
+    if (this.candidate !== -1) this.decide(kind, start, this.newline);
+    this.candidate = -1;
+    const src = this.src;
+    const prev = this.prevKind === Kind.Punct ? src.charCodeAt(this.prevStart) : -1;
+    if (
+      kind === Kind.Word &&
+      parent !== Open.ClassBrace &&
+      isDebuggerWord(src, start, end) &&
+      prev !== 46 /* . */ &&
+      src.charCodeAt(start - 1) !== 35 /* # */
+    ) {
+      this.candidate = start;
+      this.member = parent === Open.AnyBrace && this.memberStart(prev, depth);
+    }
+    this.prevKind = kind;
+    this.prevStart = start;
+    this.prevEnd = end;
+  }
+
+  /**
+   * A word after the previous token (punctuator `prev`, -1 for none) in the brace at `depth - 1`
+   * begins an object literal member: after `,` or `*`, after `get`/`set`/`async` on its line, or
+   * first in a brace opened where an expression goes (after `(`, `[`, `,`, `?` or `=`).
+   */
+  private memberStart(prev: number, depth: number): boolean {
+    if (prev === 44 /* , */ || prev === 42 /* * */) return true;
+    const src = this.src;
+    if (prev === -1) {
+      const length = this.prevEnd - this.prevStart;
+      return (
+        this.prevKind === Kind.Word &&
+        !this.newline &&
+        ((length === 3 && (src.startsWith('get', this.prevStart) || src.startsWith('set', this.prevStart))) ||
+          (length === 5 && src.startsWith('async', this.prevStart)))
+      );
+    }
+    if (prev !== 123 /* { */) return false;
+    const at = this.top(depth - 1).pos;
+    const before = at < 0 ? -1 : src.charCodeAt(at);
+    return (
+      before === 40 /* ( */ ||
+      before === 91 /* [ */ ||
+      before === 44 /* , */ ||
+      before === 63 /* ? */ ||
+      before === 61 /* = */
+    );
+  }
+
+  /** The candidate is a statement unless the token after it (kind -1 for none) makes it a name. */
+  private decide(kind: number, start: number, newline: boolean) {
+    const next = kind === Kind.Punct ? this.src.charCodeAt(start) : -1;
+    if (next === 58 /* : */ || (next === 40 /* ( */ && (!newline || this.member))) return;
+    this.sites?.push({ start: this.candidate, semicolon: next === 59 /* ; */ });
+  }
+
+  /** Debugger mode: lexes the whole source, and settles a candidate at its end. */
+  debuggerSites(): void {
+    this.run();
+    if (this.candidate !== -1) this.decide(-1, 0, false);
   }
 
   /** lexer.c `parse` (main loop only). */
-  run(): Token[] {
+  run(): Tokens {
     if (this.c(0) === 35 /* # */ && this.c(1) === 33 /* ! */) {
-      this.pos = 2;
+      // From the `!`: the comment may be empty, its line terminator at 2.
+      this.pos = 1;
       this.lineComment();
+      this.pos++;
     }
+    const src = this.src;
     for (; this.pos < this.end; this.pos++) {
-      const ch = this.c(this.pos);
+      const ch = this.pos === this.peekPos ? this.peek : src.charCodeAt(this.pos);
       if (isBrOrWs(ch)) {
         if (isBr(ch)) this.newline = true;
         continue;
       }
       this.consumeToken(ch);
     }
-    return this.tokens;
+    return this.result();
   }
 
   /** lexer.c `consumeToken`, without the import / export and TypeScript cases. */
   private consumeToken(ch: number) {
     const start = this.pos;
-    let kind: TokenKind = 'punct';
+    let kind: Kind = Kind.Punct;
     let depth = this.depth;
     switch (ch) {
       case 99 /* c */:
         // `class{` too (minified code). Only the brace at the keyword's depth is the body, not one
         // in the heritage (`class A extends f({}) {`).
-        if (
-          this.src.startsWith('class', this.pos) &&
-          this.keywordStart(this.pos) &&
-          (isBrOrWs(this.c(this.pos + 5)) || this.c(this.pos + 5) === 123) /* { */
-        )
-          this.classDepth = this.depth;
-        kind = 'word';
-        this.skipTokenRun();
+        // keywordStart reads the code units before the keyword again: only for a `class`.
+        if (this.src.startsWith('class', this.pos) && this.keywordStart(this.pos)) {
+          const after = this.c(this.pos + 5);
+          if (isBrOrWs(after) || after === 123 /* { */) this.classDepth = this.depth;
+        }
+        kind = Kind.Word;
+        this.skipTokenRun(ch);
         break;
       case 40 /* ( */:
         this.push(Open.AnyParen, this.lastTokenPos);
@@ -188,7 +348,7 @@ class Lexer {
         if (this.depth === 0) break;
         depth = --this.depth;
         if (this.top(this.depth).token === Open.TemplateBrace) {
-          this.emit('template', start, start + 1, depth);
+          this.emit(Kind.Template, start, start + 1, depth);
           this.templateString(start);
           this.lastTokenPos = this.pos;
           return;
@@ -196,12 +356,12 @@ class Lexer {
         break;
       case 39 /* ' */:
       case 34 /* " */:
-        kind = 'string';
+        kind = Kind.String;
         this.stringLiteral(ch);
         break;
       case 47 /* / */: {
         // lexer.c `handleSlash`.
-        const next = this.c(this.pos + 1);
+        const next = this.ahead(this.pos + 1);
         if (next === 47) {
           this.lineComment();
           return;
@@ -211,9 +371,9 @@ class Lexer {
           return;
         }
         if (this.lastTokenEndsExpression()) {
-          kind = 'regex';
+          kind = Kind.Regex;
           this.regularExpression();
-          while (isTokenRunChar(this.c(this.pos + 1))) this.pos++;
+          while (isTokenRunChar(this.ahead(this.pos + 1))) this.pos++;
           this.lastSlashWasDivision = false;
         } else {
           this.lastSlashWasDivision = true;
@@ -221,13 +381,18 @@ class Lexer {
         break;
       }
       case 96 /* ` */:
-        this.emit('template', start, start + 1, depth);
+        this.emit(Kind.Template, start, start + 1, depth);
         this.push(Open.Template, this.lastTokenPos);
         this.templateString(start);
         this.lastTokenPos = this.pos;
         return;
       case 60 /* < */:
-        if (!this.module && this.c(this.pos + 1) === 33 && this.c(this.pos + 2) === 45 && this.c(this.pos + 3) === 45) {
+        if (
+          !this.module &&
+          this.ahead(this.pos + 1) === 33 &&
+          this.c(this.pos + 2) === 45 &&
+          this.c(this.pos + 3) === 45
+        ) {
           this.lineComment();
           return;
         }
@@ -235,9 +400,9 @@ class Lexer {
       case 45 /* - */:
         if (
           !this.module &&
-          this.c(this.pos + 1) === 45 &&
+          this.ahead(this.pos + 1) === 45 &&
           this.c(this.pos + 2) === 62 &&
-          (this.newline || this.tokens.length === 0)
+          (this.newline || !this.lexed)
         ) {
           this.lineComment();
           return;
@@ -245,31 +410,50 @@ class Lexer {
         break;
       default:
         if (!isTokenRunChar(ch)) break;
-        kind = 'word';
-        this.skipTokenRun();
+        kind = Kind.Word;
+        this.skipTokenRun(ch);
     }
     this.emit(kind, start, this.pos + 1, depth);
     this.lastTokenPos = this.pos;
   }
 
-  /** Skips the rest of a word; a `\\u{…}` escape is part of it (lexer.c `skipBracedEscape`). */
-  private skipTokenRun() {
-    for (;;) {
-      this.skipBracedEscape();
-      if (!isTokenRunChar(this.c(this.pos + 1))) return;
-      this.pos++;
-    }
+  /** The code unit at `i`, from the one read ahead when it is that one, else read and kept as it. */
+  private ahead(i: number): number {
+    if (i === this.peekPos) return this.peek;
+    const code = this.src.charCodeAt(i) | 0;
+    this.peekPos = i;
+    this.peek = code;
+    return code;
   }
 
-  private skipBracedEscape() {
-    if (this.c(this.pos) !== 92 || this.c(this.pos + 1) !== 117 || this.c(this.pos + 2) !== 123) return;
-    const close = this.src.indexOf('}', this.pos + 3);
-    if (close > 0 && /^[0-9a-fA-F]+$/.test(this.src.slice(this.pos + 3, close))) this.pos = close;
+  /**
+   * Skips the rest of a word whose code unit at `pos` is `ch`, each code unit read once; a `\\u{…}`
+   * escape is part of it (lexer.c `skipBracedEscape`). Leaves the code unit after it read ahead.
+   */
+  private skipTokenRun(ch: number) {
+    const src = this.src;
+    let pos = this.pos;
+    for (;;) {
+      if (ch === 92 && src.charCodeAt(pos + 1) === 117 && src.charCodeAt(pos + 2) === 123) {
+        const close = src.indexOf('}', pos + 3);
+        if (close > 0 && /^[0-9a-fA-F]+$/.test(src.slice(pos + 3, close))) pos = close;
+      }
+      const next = src.charCodeAt(pos + 1) | 0;
+      if (!isTokenRunChar(next)) {
+        this.pos = pos;
+        this.peekPos = pos + 1;
+        this.peek = next;
+        return;
+      }
+      pos++;
+      ch = next;
+    }
   }
 
   /**
    * lexer.c `lastTokenEndsExpression`: true when the last token cannot end an operand, so a `/`
-   * here starts a regular expression.
+   * here starts a regular expression. It reads the last token and the keyword before it again:
+   * only on a `/`, and the history it needs is not worth keeping for every token.
    */
   private lastTokenEndsExpression(): boolean {
     const p = this.lastTokenPos;
@@ -302,10 +486,10 @@ class Lexer {
     return this.isBreakOrContinue(tokenPos);
   }
 
-  /** lexer.c `templateString`: scans to the closing backtick or to a `${`. */
+  /** lexer.c `templateString`: scans to the closing backtick or to a `${` (a `$` alone reads what follows twice). */
   private templateString(start: number) {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === 36 && this.c(this.pos + 1) === 123) {
         this.pos++;
         this.push(Open.TemplateBrace, this.pos);
@@ -324,38 +508,61 @@ class Lexer {
   }
 
   private extendTemplate(start: number) {
-    const token = this.tokens[this.tokens.length - 1];
-    if (token?.start === start) token.end = Math.min(this.pos + 1, this.end);
+    const last = this.count - 1;
+    if (last >= 0 && this.starts[last] === start) this.ends[last] = Math.min(this.pos + 1, this.end);
   }
 
-  /** lexer.c `blockComment`. */
+  /** lexer.c `blockComment`, each code unit read once: the `*` before the `/` is remembered. */
   private blockComment() {
-    this.pos++;
-    while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
-      if (isBr(ch)) this.newline = true;
-      else if (ch === 42 && this.c(this.pos + 1) === 47) {
-        this.pos++;
+    const src = this.src;
+    const end = this.end;
+    let pos = this.pos + 1;
+    let prev = 0;
+    while (++pos < end) {
+      const ch = src.charCodeAt(pos);
+      if (prev === 42 && ch === 47) {
+        this.pos = pos;
         return;
       }
+      if (isBr(ch)) this.newline = true;
+      prev = ch;
     }
+    this.pos = end;
   }
 
-  /** lexer.c `lineComment`. Leaves `pos` before the line terminator. */
+  /** lexer.c `lineComment`. Leaves `pos` before the line terminator, read ahead. */
   private lineComment() {
-    while (this.pos + 1 < this.end && !isBr(this.c(this.pos + 1))) this.pos++;
+    const src = this.src;
+    let pos = this.pos;
+    while (pos + 1 < this.end) {
+      const ch = src.charCodeAt(pos + 1);
+      if (isBr(ch)) {
+        this.peekPos = pos + 1;
+        this.peek = ch;
+        break;
+      }
+      pos++;
+    }
+    this.pos = pos;
+  }
+
+  /** Steps back before the line terminator `ch` at `pos`, left read ahead: an unterminated literal ends there. */
+  private backBefore(ch: number) {
+    this.peekPos = this.pos;
+    this.peek = ch;
+    this.pos--;
   }
 
   /** lexer.c `stringLiteral`. An unterminated string ends before the line break. */
   private stringLiteral(quote: number) {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === quote) return;
       if (ch === 92) {
         const next = this.c(++this.pos);
         if (next === 13 && this.c(this.pos + 1) === 10) this.pos++;
       } else if (ch === 10 || ch === 13) {
-        this.pos--;
+        this.backBefore(ch);
         return;
       }
     }
@@ -365,13 +572,13 @@ class Lexer {
   /** lexer.c `regularExpression`. An unterminated literal ends before the line break. */
   private regularExpression() {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === 47) return;
       if (ch === 91) {
         if (!this.regexCharacterClass()) return;
       } else if (ch === 92) this.pos++;
       else if (isBr(ch)) {
-        this.pos--;
+        this.backBefore(ch);
         return;
       }
     }
@@ -381,11 +588,11 @@ class Lexer {
   /** lexer.c `regexCharacterClass`. */
   private regexCharacterClass(): boolean {
     while (++this.pos < this.end) {
-      const ch = this.c(this.pos);
+      const ch = this.src.charCodeAt(this.pos);
       if (ch === 93) return true;
       if (ch === 92) this.pos++;
       else if (isBr(ch)) {
-        this.pos--;
+        this.backBefore(ch);
         return false;
       }
     }
@@ -531,6 +738,16 @@ class Lexer {
   }
 }
 
+/** Code units per token the token arrays are first sized for. */
+const FIRST_GUESS = 8;
+
+/** `array` copied into a new array of `length` elements. */
+function resized<T extends Uint8Array | Int32Array>(array: T, length: number): T {
+  const copy = new (array.constructor as new (length: number) => T)(length);
+  copy.set(array);
+  return copy;
+}
+
 /** lexer.c `isBr`, plus U+2028 / U+2029. */
 function isBr(c: number): boolean {
   return c === 10 || c === 13 || c === 0x2028 || c === 0x2029;
@@ -553,9 +770,28 @@ function isWsNotBr(c: number): boolean {
   );
 }
 
+/** Classes of ASCII code units, a bit each. */
+const WS = 1;
+const RUN = 2;
+const PUNCT = 4;
+const EXPRESSION_PUNCT = 8;
+
+/** What each ASCII code unit is: one load instead of a chain of comparisons in the hot loops. */
+const ASCII = new Uint8Array(128);
+function mark(chars: string, bit: number) {
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars.charCodeAt(i);
+    ASCII[c] = (ASCII[c] ?? 0) | bit;
+  }
+}
+mark('\t\n\v\f\r ', WS);
+mark('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$_\\', RUN);
+mark('!%&()*+,-./:;<=>?[]^{}|~', PUNCT);
+mark('!%&(*+,-.:;<=>?[^{|~', EXPRESSION_PUNCT);
+
 /** lexer.c `isBrOrWs`. */
 function isBrOrWs(c: number): boolean {
-  return isBr(c) || isWsNotBr(c);
+  return c < 128 ? ((ASCII[c] ?? 0) & WS) !== 0 : isBr(c) || isWsNotBr(c);
 }
 
 /** lexer.c `isBrOrWsOrPunctuatorNotDot`. */
@@ -563,489 +799,19 @@ function isBrOrWsOrPunctuatorNotDot(c: number): boolean {
   return isBrOrWs(c) || (isPunctuator(c) && c !== 46);
 }
 
-/** lexer.c `isTokenRunChar`: identifier, keyword and number characters. */
+/** lexer.c `isTokenRunChar`: identifier, keyword and number characters ([A-Za-z0-9$_\\] in ASCII). */
 function isTokenRunChar(c: number): boolean {
-  return (
-    (c >= 97 && c <= 122) ||
-    (c >= 65 && c <= 90) ||
-    (c >= 48 && c <= 57) ||
-    c === 36 ||
-    c === 95 ||
-    c === 92 ||
-    (c > 127 && !isBrOrWs(c))
-  );
+  return c < 128 ? ((ASCII[c] ?? 0) & RUN) !== 0 : !isBr(c) && !isWsNotBr(c);
 }
 
 /** lexer.c `isPunctuator`: !%&()*+,-./:;<=>?[]^{}|~ */
 function isPunctuator(ch: number): boolean {
-  return (
-    ch === 33 ||
-    ch === 37 ||
-    ch === 38 ||
-    (ch > 39 && ch < 48) ||
-    (ch > 57 && ch < 64) ||
-    ch === 91 ||
-    ch === 93 ||
-    ch === 94 ||
-    (ch > 122 && ch < 127)
-  );
+  return ch < 128 && ((ASCII[ch] ?? 0) & PUNCT) !== 0;
 }
 
 /** lexer.c `isExpressionPunctuator`: !%&(*+,-.:;<=>?[^{|~ */
 function isExpressionPunctuator(ch: number): boolean {
-  return (
-    ch === 33 ||
-    ch === 37 ||
-    ch === 38 ||
-    (ch > 39 && ch < 47 && ch !== 41) ||
-    (ch > 57 && ch < 64) ||
-    ch === 91 ||
-    ch === 94 ||
-    (ch > 122 && ch < 127 && ch !== 125)
-  );
-}
-
-// Queries over the token stream (not in es-module-lexer).
-
-const IDENTIFIER = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*$/u;
-
-/** Reserved words, which never bind a name (`await` and `yield` do in sloppy scripts). */
-const RESERVED = new Set([
-  'await',
-  'break',
-  'case',
-  'catch',
-  'class',
-  'const',
-  'continue',
-  'debugger',
-  'default',
-  'delete',
-  'do',
-  'else',
-  'enum',
-  'export',
-  'extends',
-  'false',
-  'finally',
-  'for',
-  'function',
-  'if',
-  'import',
-  'in',
-  'instanceof',
-  'new',
-  'null',
-  'return',
-  'super',
-  'switch',
-  'this',
-  'throw',
-  'true',
-  'try',
-  'typeof',
-  'var',
-  'void',
-  'while',
-  'with',
-]);
-
-/** Words after which a line break does not end the statement. */
-const CONTINUING_WORDS = new Set([
-  'else',
-  'do',
-  'in',
-  'of',
-  'instanceof',
-  'typeof',
-  'void',
-  'delete',
-  'new',
-  'case',
-  'extends',
-  'var',
-  'let',
-  'const',
-  'class',
-]);
-
-/** The token's text, with the `\\uXXXX` / `\\u{…}` escapes of a word decoded. */
-function text(source: string, token: Token | undefined): string {
-  if (token === undefined) return '';
-  const raw = source.slice(token.start, token.end);
-  if (token.kind !== 'word' || !raw.includes('\\')) return raw;
-  return raw.replace(/\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))/g, (escape, braced, plain) => {
-    const code = Number.parseInt(typeof braced === 'string' ? braced : String(plain), 16);
-    return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
-  });
-}
-
-function isPunct(source: string, token: Token | undefined, value: string): boolean {
-  return token?.kind === 'punct' && source.charCodeAt(token.start) === value.charCodeAt(0);
-}
-
-/** The token before `i` can end a statement (so a line break there may insert a semicolon). */
-function canEndStatement(source: string, tokens: Token[], i: number): boolean {
-  const prev = tokens[i - 1];
-  if (prev === undefined) return true;
-  if (prev.kind === 'word') return !CONTINUING_WORDS.has(text(source, prev));
-  if (prev.kind !== 'punct') return true;
-  const ch = source[prev.start];
-  if (ch === ')' || ch === ']' || ch === '}') return true;
-  // Postfix `++` / `--`.
-  return (ch === '+' || ch === '-') && isPunct(source, tokens[i - 2], ch);
-}
-
-/** Token `i` can continue the expression before it across a line break. */
-function continuesExpression(source: string, tokens: Token[], i: number): boolean {
-  const token = tokens[i];
-  if (token === undefined) return false;
-  if (token.kind === 'word') {
-    const word = text(source, token);
-    return word === 'in' || word === 'instanceof';
-  }
-  if (token.kind === 'template') return source[token.start] === '`';
-  if (token.kind !== 'punct') return false;
-  const ch = source[token.start];
-  if (ch === '+' || ch === '-') return source[token.start + 1] !== ch;
-  // A closer ends a bracket opened earlier on: the expression goes on.
-  return ch !== '!' && ch !== '~' && ch !== ';' && ch !== '{';
-}
-
-/** Token `i` begins a statement at its depth. */
-function statementStart(source: string, tokens: Token[], i: number): boolean {
-  const prev = tokens[i - 1];
-  const token = tokens[i];
-  if (prev === undefined || token === undefined) return true;
-  if (isPunct(source, prev, ';') || isPunct(source, prev, '}')) return true;
-  // `export\nconst a`, `export default\nclass A {}`: part of an export declaration.
-  if (prev.kind === 'word' && !isPunct(source, tokens[i - 2], '.')) {
-    const word = text(source, prev);
-    if (word === 'export' || (word === 'default' && text(source, tokens[i - 2]) === 'export')) return false;
-  }
-  return token.newline && canEndStatement(source, tokens, i);
-}
-
-/** Acorn's `isLet`: `let` at statement start followed by `[`, `{` or an identifier declares. */
-function isLetDeclaration(source: string, tokens: Token[], i: number): boolean {
-  const next = tokens[i + 1];
-  if (next === undefined) return false;
-  if (isPunct(source, next, '[') || isPunct(source, next, '{')) return true;
-  if (next.kind !== 'word') return false;
-  const word = text(source, next);
-  if (/^[0-9]/.test(word)) return false;
-  return word !== 'in' && word !== 'instanceof';
-}
-
-/**
- * Names declared by top-level `let`, `const` and `class` statements, in source order. Destructuring
- * patterns contribute every bound identifier. Best effort on invalid code.
- */
-export function topLevelLexicalNames(source: string, options: LexOptions = {}): string[] {
-  return topLevelLexicalDeclarations(source, options).flatMap(declaration => declaration.names);
-}
-
-export interface LexicalDeclaration {
-  kind: 'let' | 'const' | 'class';
-  names: string[];
-  /** The names declared without an initializer (`let a`), not in a pattern. */
-  bare: string[];
-  /** Offset of the keyword. */
-  start: number;
-  /** Offset after the declaration's last token (its `;` when it has one). */
-  end: number;
-}
-
-/** The top-level `let`, `const` and `class` declarations, in source order. Best effort on invalid code. */
-export function topLevelLexicalDeclarations(source: string, options: LexOptions = {}): LexicalDeclaration[] {
-  const tokens = tokenize(source, options);
-  const declarations: LexicalDeclaration[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === undefined || token.depth !== 0 || token.kind !== 'word') continue;
-    const kind = text(source, token);
-    if (kind !== 'let' && kind !== 'const' && kind !== 'class') continue;
-    if (!statementStart(source, tokens, i)) continue;
-    const names: string[] = [];
-    const bare: string[] = [];
-    let last = i;
-    if (kind === 'class') {
-      const name = tokens[i + 1];
-      if (name?.kind !== 'word' || text(source, name) === 'extends') continue;
-      names.push(text(source, name));
-      // The class body: the first brace at depth 0, to its closer.
-      let j = i + 2;
-      while (j < tokens.length && !(tokens[j]?.depth === 0 && isPunct(source, tokens[j], '{'))) j++;
-      j++;
-      while (j < tokens.length && !(tokens[j]?.depth === 0 && isPunct(source, tokens[j], '}'))) j++;
-      last = Math.min(j, tokens.length - 1);
-    } else {
-      if (kind === 'let' && !isLetDeclaration(source, tokens, i)) continue;
-      const after = readDeclarations(source, tokens, i + 1, names, bare);
-      last = isPunct(source, tokens[after], ';') ? after : after - 1;
-      i = last;
-    }
-    declarations.push({ kind, names, bare, start: token.start, end: tokens[last]?.end ?? source.length });
-  }
-  return declarations;
-}
-
-/** Words that start a statement other than an expression statement. */
-const STATEMENT_WORDS = new Set([
-  'var',
-  'let',
-  'const',
-  'class',
-  'function',
-  'async',
-  'if',
-  'for',
-  'while',
-  'do',
-  'switch',
-  'try',
-  'return',
-  'throw',
-  'break',
-  'continue',
-  'import',
-  'export',
-  'debugger',
-  'with',
-]);
-
-/**
- * Offset of the last top-level statement when it is an expression statement (its value is the
- * input's completion value), else undefined. Best effort.
- */
-export function lastExpressionStatement(source: string, options: LexOptions = {}): number | undefined {
-  const tokens = tokenize(source, options);
-  let start = -1;
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token?.depth !== 0) continue;
-    const prev = tokens[i - 1];
-    if (
-      i === 0 ||
-      isPunct(source, prev, ';') ||
-      (token.newline && canEndStatement(source, tokens, i) && !continuesExpression(source, tokens, i))
-    )
-      start = i;
-  }
-  const first = tokens[start];
-  if (first === undefined || isPunct(source, first, ';') || isPunct(source, first, '{')) return undefined;
-  if (first.kind === 'word') {
-    const word = text(source, first);
-    // `let` as an identifier, `async` as one, labels: left to a statement, like a declaration.
-    if (STATEMENT_WORDS.has(word) || isPunct(source, tokens[start + 1], ':')) return undefined;
-  }
-  return first.start;
-}
-
-/** Words before `(…) {` where the braces are a statement's block, not a function body. */
-const CONTROL_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'await']);
-
-/**
- * A `return` or `new.target` outside every function body: what a function body takes and a
- * script does not. Function bodies are the braces after `=>` and after `(…)` unless a statement
- * keyword comes before the parentheses (`if`, `for`, …); arrow functions count for `return` only,
- * as they have no `new.target` of their own. Best effort.
- */
-export function returnOutsideFunction(source: string, options: LexOptions = {}): boolean {
-  const tokens = tokenize(source, options);
-  /** Per depth, what the bracket open at that depth is. */
-  const open: ('function' | 'arrow' | 'other')[] = [];
-  /** Per depth, the index of the `(` open there. */
-  const paren: number[] = [];
-  const word = (i: number) => {
-    const token = tokens[i];
-    return token?.kind === 'word' ? text(source, token) : '';
-  };
-  const inside = (depth: number, arrows: boolean) =>
-    open.slice(0, depth).some(kind => kind === 'function' || (arrows && kind === 'arrow'));
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === undefined) continue;
-    if (token.kind === 'template') {
-      open[token.depth] = 'other';
-      open[token.depth + 1] = 'other';
-      continue;
-    }
-    if (token.kind === 'punct') {
-      const ch = source[token.start];
-      if (ch === '(') {
-        open[token.depth] = 'other';
-        paren[token.depth] = i;
-      } else if (ch === '[') open[token.depth] = 'other';
-      else if (ch === '{') {
-        const prev = tokens[i - 1];
-        let kind: 'function' | 'arrow' | 'other' = 'other';
-        if (isPunct(source, prev, '>') && source[(prev?.start ?? 0) - 1] === '=') kind = 'arrow';
-        else if (isPunct(source, prev, ')') && prev !== undefined) {
-          const before = (paren[prev.depth] ?? 0) - 1;
-          if (!CONTROL_WORDS.has(word(before))) kind = 'function';
-        }
-        open[token.depth] = kind;
-      }
-      continue;
-    }
-    const value = word(i);
-    // A property name: `x.return`, `x?.return`, `{ return: 1 }`, a method `return() {}` (its body
-    // is a function body like any `(…) {`).
-    // Directly in a class body, any word is part of a member's name or modifiers.
-    if (token.parent === Open.ClassBrace) continue;
-    if (isPunct(source, tokens[i - 1], '.') || isPunct(source, tokens[i + 1], ':')) continue;
-    if (value === 'return' && !inside(token.depth, true)) {
-      // `return(…) {` is a method named return; only scanned for that word, not every call.
-      if (isPunct(source, tokens[i + 1], '(')) {
-        let close = i + 2;
-        while (close < tokens.length && !(tokens[close]?.depth === token.depth && isPunct(source, tokens[close], ')')))
-          close++;
-        if (isPunct(source, tokens[close + 1], '{')) continue;
-      }
-      return true;
-    }
-    if (
-      value === 'new' &&
-      isPunct(source, tokens[i + 1], '.') &&
-      word(i + 2) === 'target' &&
-      !inside(token.depth, false)
-    )
-      return true;
-  }
-  return false;
-}
-
-/** Names declared by top-level `var` statements (not the ones in blocks). Best effort on invalid code. */
-export function topLevelVarNames(source: string, options: LexOptions = {}): string[] {
-  const tokens = tokenize(source, options);
-  const names: string[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token?.depth !== 0 || token.kind !== 'word' || text(source, token) !== 'var') continue;
-    if (statementStart(source, tokens, i)) i = readDeclarations(source, tokens, i + 1, names) - 1;
-  }
-  return names;
-}
-
-/**
- * Reads `a = 1, [b, c] = d, …` from `i`; returns the index after the declaration. `bare` gets the
- * plain names without an initializer.
- */
-function readDeclarations(source: string, tokens: Token[], i: number, names: string[], bare: string[] = []): number {
-  for (;;) {
-    const target = tokens[i];
-    i = readBindingTarget(source, tokens, i, names);
-    if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, 0);
-    else if (target?.kind === 'word') bare.push(text(source, target));
-    if (isPunct(source, tokens[i], ',') && tokens[i]?.depth === 0) {
-      i++;
-      continue;
-    }
-    return i;
-  }
-}
-
-/** An identifier or a destructuring pattern; returns the index after it. */
-function readBindingTarget(source: string, tokens: Token[], i: number, names: string[]): number {
-  const token = tokens[i];
-  if (token === undefined) return i;
-  if (token.kind === 'word') {
-    // Only an identifier binds (not `0` in `let[0] = 1`, sloppy code where `let` is a name).
-    const name = text(source, token);
-    if (IDENTIFIER.test(name) && !RESERVED.has(name)) names.push(name);
-    return i + 1;
-  }
-  if (isPunct(source, token, '[')) return readArrayPattern(source, tokens, i, names);
-  if (isPunct(source, token, '{')) return readObjectPattern(source, tokens, i, names);
-  return i;
-}
-
-function isCloser(source: string, token: Token | undefined, depth: number): boolean {
-  if (token === undefined || token.kind !== 'punct' || token.depth !== depth) return false;
-  const ch = source[token.start];
-  return ch === ']' || ch === '}' || ch === ')';
-}
-
-/** Skips `...` written as three `.` tokens. */
-function skipSpread(source: string, tokens: Token[], i: number): number {
-  if (isPunct(source, tokens[i], '.') && isPunct(source, tokens[i + 1], '.') && isPunct(source, tokens[i + 2], '.'))
-    return i + 3;
-  return i;
-}
-
-function readArrayPattern(source: string, tokens: Token[], open: number, names: string[]): number {
-  const depth = tokens[open]?.depth ?? 0;
-  let i = open + 1;
-  while (i < tokens.length && !isCloser(source, tokens[i], depth)) {
-    if (isPunct(source, tokens[i], ',')) {
-      i++;
-      continue;
-    }
-    // A token nothing reads (a `;` in `let [a;`) ends the pattern, which is invalid code.
-    const from = i;
-    i = readBindingTarget(source, tokens, skipSpread(source, tokens, i), names);
-    if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
-    if (!isPunct(source, tokens[i], ',') && !isCloser(source, tokens[i], depth))
-      i = skipExpression(source, tokens, i, depth + 1);
-    if (i === from) return i;
-  }
-  return i + 1;
-}
-
-function readObjectPattern(source: string, tokens: Token[], open: number, names: string[]): number {
-  const depth = tokens[open]?.depth ?? 0;
-  let i = open + 1;
-  while (i < tokens.length && !isCloser(source, tokens[i], depth)) {
-    if (isPunct(source, tokens[i], ',')) {
-      i++;
-      continue;
-    }
-    // A token nothing reads (a `;` in `let [a;`) ends the pattern, which is invalid code.
-    const from = i;
-    const spread = skipSpread(source, tokens, i);
-    if (spread !== i) {
-      i = readBindingTarget(source, tokens, spread, names);
-    } else if (isPunct(source, tokens[i], '[')) {
-      // Computed key: `[k]: target`.
-      i = skipExpression(source, tokens, i + 1, depth + 2) + 1;
-      if (isPunct(source, tokens[i], ':')) i = readBindingTarget(source, tokens, i + 1, names);
-    } else if (isPunct(source, tokens[i + 1], ':')) {
-      i = readBindingTarget(source, tokens, i + 2, names);
-    } else {
-      const key = tokens[i];
-      if (key?.kind === 'word') names.push(text(source, key));
-      i++;
-    }
-    if (isPunct(source, tokens[i], '=')) i = skipExpression(source, tokens, i + 1, depth + 1);
-    if (!isPunct(source, tokens[i], ',') && !isCloser(source, tokens[i], depth))
-      i = skipExpression(source, tokens, i, depth + 1);
-    if (i === from) return i;
-  }
-  return i + 1;
-}
-
-/**
- * Skips an expression at `depth`: stops at a `,` at that depth, the enclosing closer, a `;`, or (at depth 0) a
- * line break where a semicolon would be inserted.
- */
-function skipExpression(source: string, tokens: Token[], i: number, depth: number): number {
-  const first = i;
-  for (; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === undefined || token.depth < depth) return i;
-    if (token.depth > depth) continue;
-    if (isPunct(source, token, ',') || isPunct(source, token, ';')) return i;
-    if (
-      depth === 0 &&
-      i > first &&
-      token.newline &&
-      canEndStatement(source, tokens, i) &&
-      !continuesExpression(source, tokens, i)
-    )
-      return i;
-  }
-  return i;
+  return ch < 128 && ((ASCII[ch] ?? 0) & EXPRESSION_PUNCT) !== 0;
 }
 
 /**
@@ -1057,35 +823,34 @@ export function debuggerStatements(source: string, options: LexOptions = {}): nu
 }
 
 /** Like `debuggerStatements`, also telling whether the next token is a `;` (ending the statement). */
-export function debuggerStatementSites(
-  source: string,
-  options: LexOptions = {}
-): { start: number; semicolon: boolean }[] {
-  const sites: { start: number; semicolon: boolean }[] = [];
-  // Streamed: a whole bundle's tokens are not kept, only the previous one and a candidate.
-  let prev: Token | undefined;
-  let candidate: Token | undefined;
-  const decide = (keyword: Token, next: Token | undefined) => {
-    if (isPunct(source, next, ':')) return;
-    if (isPunct(source, next, '(') && next?.newline === false) return;
-    sites.push({ start: keyword.start, semicolon: isPunct(source, next, ';') });
-  };
-  const take = (token: Token) => {
-    if (candidate) decide(candidate, token);
-    candidate = undefined;
-    if (
-      token.kind === 'word' &&
-      token.parent !== Open.ClassBrace &&
-      // Cheap check first: most words are shorter (an escaped `debugger` is longer).
-      token.end - token.start >= 8 &&
-      text(source, token) === 'debugger' &&
-      !isPunct(source, prev, '.') &&
-      source[token.start - 1] !== '#'
-    )
-      candidate = token;
-    prev = token;
-  };
-  new Lexer(source, options.module === true, take).run();
-  if (candidate) decide(candidate, undefined);
+export function debuggerStatementSites(source: string, options: LexOptions = {}): DebuggerSite[] {
+  const sites: DebuggerSite[] = [];
+  // Streamed: a whole bundle's tokens are not kept.
+  new Lexer(source, options.module === true, sites).debuggerSites();
   return sites;
+}
+
+/** The word from `start` to `end` is `debugger`, written as is or with escapes (then longer). */
+function isDebuggerWord(source: string, start: number, end: number): boolean {
+  const length = end - start;
+  if (length === 8) return source.startsWith('debugger', start);
+  // Longer only with escapes: no slice for a plain long word.
+  if (length <= 8) return false;
+  for (let i = start; i < end; i++)
+    if (source.charCodeAt(i) === 92 /* \\ */) return word(source, start, end) === 'debugger';
+  return false;
+}
+
+/** A word's text from `start` to `end`, escapes decoded. */
+function word(source: string, start: number, end: number): string {
+  const raw = source.slice(start, end);
+  return raw.includes('\\') ? unescapeWord(raw) : raw;
+}
+
+/** `raw` with its `\\uXXXX` / `\\u{…}` escapes decoded. */
+export function unescapeWord(raw: string): string {
+  return raw.replace(/\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))/g, (escape, braced, plain) => {
+    const code = Number.parseInt(typeof braced === 'string' ? braced : String(plain), 16);
+    return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
+  });
 }

@@ -2,7 +2,7 @@
 //
 // A same-origin iframe's nodes are not instances of the top page's `Element`, `Node`, …, and
 // their document is not the global `document` (docs/roadmap.md, "iframes"). New code checks
-// node types and uses the node's own window (cdp-agent/core/realm.ts, core/frames.ts) instead.
+// node types and uses the node's own window (cdp-agent/core/realm.ts, core/frames/frames.ts) instead.
 // The uses already there are counted per file in scripts/check-realms.json: a file may have
 // fewer, not more. Run with `--update` after removing some, to lower the counts.
 //
@@ -19,7 +19,7 @@ const PATTERNS = [
   /(?<![.\w$])(document|window|getComputedStyle)\b(?!\s*:)/g,
 ];
 /** Where the top page's realm is meant. */
-const EXEMPT = new Set(['core/realm.ts', 'core/frames.ts']);
+const EXEMPT = new Set(['core/realm.ts', 'core/frames/frames.ts']);
 
 function sources(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

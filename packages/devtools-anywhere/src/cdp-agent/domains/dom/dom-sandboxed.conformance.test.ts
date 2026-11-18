@@ -1,23 +1,32 @@
 // The DOM of a sandboxed iframe without allow-same-origin merged into the page's agent
-// (core/merged-frames.ts, domains/dom/merged.ts), against Chrome, which keeps such a frame in the
+// (core/frames/merged-frames.ts, domains/dom/merged.ts), against Chrome, which keeps such a frame in the
 // page's target: its document grafted under the iframe, its nodes on the page's session.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide, type Received } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import {
+  chromeSide,
+  get,
+  type MergedSide,
+  oursSide,
+  type Received,
+} from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 const sides: { name: string; side: MergedSide }[] = [];
 
-before(async () => {
-  env = await launchOopif();
-  sides.push({ name: 'chrome', side: await chromeSide(env) }, { name: 'ours', side: await oursSide(env) });
-});
-after(async () => {
-  for (const { side } of sides) await side.close();
-  await env?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    sides.push({ name: 'chrome', side: await chromeSide(env) }, { name: 'ours', side: await oursSide(env) });
+  },
+  async () => {
+    for (const { side } of sides) await side.close();
+    await env?.close();
+  }
+);
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const children = (node: unknown): unknown[] => {

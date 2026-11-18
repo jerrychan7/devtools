@@ -17,7 +17,7 @@ Real Chrome DevTools inside any web page, phones included.
 | | devtools-anywhere | eruda / vConsole | Chii |
 |---|---|---|---|
 | UI | The latest Chrome DevTools | A panel of their own | An old Chrome DevTools (about 122) |
-| The page's earliest logs and errors | ✅ From the first script | ❌ Lost until they load | ✅ |
+| The page's earliest logs and errors | Captured from the first script | Lost until they load | Captured |
 | Setup | One `<script>` or a Vite plugin | One `<script>` | Cumbersome |
 
 ## Quick start
@@ -68,16 +68,16 @@ Shell mode (on by default) puts the page in an iframe, so DevTools stay open acr
 
 | Panel | Support |
 |---|---|
-| Elements, Styles | ✅ Without the browser's default styles |
-| Console | ✅ Including the page's earliest output |
-| Network | ✅ No real timing; no WebSocket handshake headers |
-| Sources | ⚠️ Files and snippets, no breakpoints |
-| Application | ✅ |
-| Device mode | ⚠️ Shell mode only; size only, not pixel ratio, user agent or touch |
-| Screencast, screenshots | ⚠️ Redrawn from the DOM, not the screen's pixels |
-| Performance, Memory, Profiler | ❌ Page scripts cannot get this data |
+| Elements, Styles | Supported: without the browser's default styles |
+| Console | Supported: including the page's earliest output |
+| Network | Supported: no real timing; no WebSocket handshake headers |
+| Sources | Partly supported: files and snippets, no breakpoints |
+| Application | Supported |
+| Device mode | Partly supported: shell mode only; size only, not pixel ratio, user agent or touch |
+| Screencast, screenshots | Partly supported: redrawn from the DOM, not the screen's pixels |
+| Performance, Memory, Profiler | Not supported: page scripts cannot get this data |
 
-The page side uses only standard web APIs and works in any modern browser; the DevTools UI is verified in Chrome only. All the limits: see the [usage guide](docs/usage.md#limitations).
+The page side uses only standard web APIs and works in any modern browser; the DevTools UI is verified in Chrome only. All the limits: see [limitations](docs/limitations.md).
 
 ## Packages
 
@@ -91,7 +91,8 @@ The page side uses only standard web APIs and works in any modern browser; the D
 
 ## Documentation
 
-- [Usage guide](docs/usage.md): every way to set it up, the options, the limits
+- [Usage guide](docs/usage.md): every way to set it up, the options
+- [Limitations](docs/limitations.md): what cannot be done, and where it differs from Chrome
 - [Design](docs/design.md): how it works and why
 - [Development guide](DEV.md): setup, tests, releases
 

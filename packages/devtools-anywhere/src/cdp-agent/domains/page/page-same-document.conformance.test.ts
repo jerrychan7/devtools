@@ -1,9 +1,16 @@
 // Navigations within the document of a frame (fragments, the History API, traversals), in
 // same-origin iframes and the top page, against Chrome's Page.navigatedWithinDocument.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 for (const key of ['id', 'parentId']) VOLATILE.add(key);
@@ -13,19 +20,21 @@ const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['Page.navigatedWithinDocument', 'Page.frameNavigated']);
-  await t.page.evaluate(
-    src =>
-      new Promise(resolve => {
-        document.body.append(Object.assign(document.createElement('iframe'), { id: 'f', src, onload: resolve }));
-      }),
-    CHILD
-  );
-  for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['Page.navigatedWithinDocument', 'Page.frameNavigated']);
+    await t.page.evaluate(
+      src =>
+        new Promise(resolve => {
+          document.body.append(Object.assign(document.createElement('iframe'), { id: 'f', src, onload: resolve }));
+        }),
+      CHILD
+    );
+    for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 const both = async <T>(fn: (side: Side) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 

@@ -1,10 +1,5 @@
-import {
-  type LexOptions,
-  lastExpressionStatement,
-  tokenize,
-  topLevelLexicalDeclarations,
-  topLevelVarNames,
-} from '../../core/lexer';
+import { type LexOptions, tokenize } from '../../core/lexer';
+import { lastExpressionStatement, topLevelLexicalDeclarations, topLevelVarNames } from '../../core/lexer-queries';
 
 /** `code` with its last statement returned when it is an expression statement. */
 export function returnLast(code: string, options?: LexOptions): string {

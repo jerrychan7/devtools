@@ -10,7 +10,17 @@ export type Handler = (params: never) => unknown;
 export const errorMessage = (e: unknown) => String(e instanceof Error ? e.message : e);
 
 /** Domains that keep state while enabled; a new frontend instance must start from disabled. */
-const STATEFUL_DOMAINS = ['Runtime', 'Network', 'Debugger', 'CSS', 'DOM', 'DOMStorage', 'Overlay', 'WebMCP'];
+const STATEFUL_DOMAINS = [
+  'Runtime',
+  'Network',
+  'Debugger',
+  'CSS',
+  'DOM',
+  'DOMStorage',
+  'Overlay',
+  'WebMCP',
+  'Animation',
+];
 
 /**
  * The calls that end what a frontend started in the page, like a new Chrome session: e.g.
@@ -52,7 +62,7 @@ export class CdpSession {
   /**
    * Looks at each of the client's commands (on this session, not a child target's) before its
    * handler: a promise it returns is the command's answer instead, its rejection the error;
-   * undefined lets the handler answer. Set by core/merged-frames.ts, which routes the commands for
+   * undefined lets the handler answer. Set by core/frames/merged-frames.ts, which routes the commands for
    * merged frames to their agents' sessions, and runs others there too.
    */
   intercept: ((method: string, params: object) => Promise<unknown> | undefined) | null = null;

@@ -1,9 +1,9 @@
 // Page.getResourceTree with same-origin frames: like Chrome, each frame lists the resources of
 // the document it shows, and the top one none of theirs. Against Chrome's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 const NETWORK = '/packages/devtools-anywhere/test-support/frame-network.html';
@@ -30,16 +30,18 @@ const append = (tag: 'iframe' | 'object' | 'img', id: string, url: string) =>
     url
   );
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await append('img', 'top-img', `${IMAGE}?n=top`);
-  await append('iframe', 'net', NETWORK);
-  await append('object', 'obj', CHILD);
-  await append('object', 'obj-img', `${IMAGE}?n=object`);
-  for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await append('img', 'top-img', `${IMAGE}?n=top`);
+    await append('iframe', 'net', NETWORK);
+    await append('object', 'obj', CHILD);
+    await append('object', 'obj-img', `${IMAGE}?n=object`);
+    for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 /** Each frame's resources, by frame name, as `type path`, sorted. */
 async function resources(side: Side) {

@@ -67,7 +67,7 @@ jobs:
           Stable Chrome is now $VERSION, which ships devtools-frontend [\`$DEVTOOLS\`](https://chromium.googlesource.com/devtools/devtools-frontend/+/$DEVTOOLS); \`REVISION\` pins \`$pinned\` (Chrome $chrome).
 
           \`\`\`bash
-          pnpm --filter @devtools-anywhere/devtools-frontend update
+          pnpm --filter @devtools-anywhere/devtools-frontend run update
           \`\`\`
 
           Then as in DEV.md, "Working on the frontend": the patches, \`pnpm test\`, \`pnpm licenses:update\`, and the changelogs.

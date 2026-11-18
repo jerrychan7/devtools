@@ -2,23 +2,26 @@
 // against Chrome, which keeps such a frame in the page's target: the edits' events on the page's
 // session, their node ids describable there, and DOM.undo / DOM.redo over the page's and the
 // frame's edits as one history, in the order they were made.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 const sides: { name: string; side: MergedSide }[] = [];
 
-before(async () => {
-  env = await launchOopif();
-  sides.push({ name: 'chrome', side: await chromeSide(env) }, { name: 'ours', side: await oursSide(env) });
-});
-after(async () => {
-  for (const { side } of sides) await side.close();
-  await env?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    sides.push({ name: 'chrome', side: await chromeSide(env) }, { name: 'ours', side: await oursSide(env) });
+  },
+  async () => {
+    for (const { side } of sides) await side.close();
+    await env?.close();
+  }
+);
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const children = (node: unknown): unknown[] => {

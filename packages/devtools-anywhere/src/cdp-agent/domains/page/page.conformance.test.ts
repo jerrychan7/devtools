@@ -1,6 +1,6 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
@@ -9,12 +9,14 @@ const OTHER = '/packages/devtools-anywhere/test-support/frame-other.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.chrome.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.chrome.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 test('getAppManifest without a manifest', async () => {
   const [ours, chrome] = await Promise.all([t.ours.send('Page.getAppManifest'), t.chrome.send('Page.getAppManifest')]);
@@ -384,3 +386,71 @@ test('Page.navigate with a frameId navigates that frame, not the page', async ()
   );
   assert.equal(await t.page.evaluate(() => location.href), top);
 });
+
+test('captureScreenshot is filtered by an emulated vision deficiency, as in Chrome', async () => {
+  const { s, ours, chrome, look } = await screenshotPage();
+  try {
+    const clip = { x: 10, y: 520, width: 100, height: 50, scale: 1 };
+    const type = 'deuteranopia';
+    await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type });
+    const theirs = await look((await chrome({ clip })).data);
+    await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+    await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type });
+    const mine = await look((await ours({ clip })).data);
+    await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+    assert.notDeepEqual(theirs.center, [255, 0, 0]);
+    assert.ok(
+      mine.center.every((v, i) => Math.abs((v ?? NaN) - (theirs.center[i] ?? 0)) <= 2),
+      `ours ${JSON.stringify(mine.center)}, Chrome's ${JSON.stringify(theirs.center)}`
+    );
+  } finally {
+    await s.page.close();
+  }
+});
+
+for (const [scale, dpr] of [
+  [2, 1],
+  [1, 2],
+] as const)
+  test(`captureScreenshot blurs as Chrome does at clip scale ${scale}, devicePixelRatio ${dpr}`, async () => {
+    const { s, ours, chrome } = await screenshotPage();
+    if (dpr !== 1) {
+      const { width, height } = s.page.viewport() ?? { width: 800, height: 600 };
+      await s.page.setViewport({ width, height, deviceScaleFactor: dpr });
+      await s.page.evaluate(() => scrollTo(0, 500));
+    }
+    /** The green channel across the box's right edge (CSS x 110), at y 545. */
+    const row = (data: string) =>
+      s.page.evaluate(async d => {
+        const img = new Image();
+        img.src = 'data:image;base64,' + d;
+        await img.decode();
+        const canvas = Object.assign(document.createElement('canvas'), { width: img.width, height: img.height });
+        const g = canvas.getContext('2d');
+        if (!g) throw new Error('no 2d context');
+        g.drawImage(img, 0, 0);
+        const y = img.height >> 1;
+        return Array.from(g.getImageData(0, y, img.width, 1).data).filter((_, i) => i % 4 === 1);
+      }, data);
+    try {
+      const clip = { x: 100, y: 540, width: 20, height: 10, scale };
+      await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type: 'blurredVision' });
+      const theirs = await row((await chrome({ clip })).data);
+      await s.chrome.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+      await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'blurredVision' });
+      const mine = await row((await ours({ clip })).data);
+      await s.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
+      // Away from the image's own edges, where the two fade differently.
+      const inner = (r: number[]) => r.slice(10, 30);
+      assert.ok(
+        inner(mine).every((v, i) => Math.abs(v - (inner(theirs)[i] ?? 0)) <= 6),
+        `ours ${JSON.stringify(inner(mine))}, Chrome's ${JSON.stringify(inner(theirs))}`
+      );
+      assert.ok(
+        inner(theirs).some(v => v > 10 && v < 245),
+        'the edge is blurred'
+      );
+    } finally {
+      await s.page.close();
+    }
+  });

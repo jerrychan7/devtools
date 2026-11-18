@@ -1,10 +1,10 @@
 // The order of child frames: Chrome lists them in the order it made them, not in tree order. An
 // `<iframe>` gets its frame as it is inserted, an `<object>` or `<embed>` later; a moved iframe is
 // a new frame, listed last; navigating keeps a frame's place. Against Chrome's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
@@ -12,12 +12,14 @@ const CHILD = '/packages/devtools-anywhere/test-support/frame-child.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    for (const side of [t.ours, t.chrome]) await side.send('Page.enable');
+  },
+  () => env?.close()
+);
 
 /** Names of a frame tree, nested like it: [name, ...children]. */
 type Names = [string, ...Names[]];

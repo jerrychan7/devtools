@@ -1,6 +1,6 @@
-import { parentOf } from '../../core/container-query';
+import { parentOf } from '../../core/style/container-query';
 import { realmOf } from '../../core/realm';
-import { splitTopLevel } from '../../core/selectors';
+import { splitTopLevel } from '../../core/style/selectors';
 
 /** Channels of a computed `rgb()` / `rgba()` color, or null for other notations. */
 function rgba(value: string): [number, number, number, number] | null {

@@ -1,10 +1,17 @@
 // Same-origin iframes in the DOM domain: their documents as `contentDocument`, commands on the
 // nodes inside them, and their mutations, navigations and removal, against Chrome's.
-import { after, before, describe, test } from 'node:test';
+import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, EventName, EventParams, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -19,45 +26,47 @@ const OTHER = '/packages/devtools-anywhere/test-support/frame-other.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'DOM.setChildNodes',
-    'DOM.childNodeInserted',
-    'DOM.childNodeRemoved',
-    'DOM.attributeModified',
-    'DOM.characterDataModified',
-    'DOM.childNodeCountUpdated',
-  ]);
-  // A srcdoc iframe with fallback content and a same-origin src one, loaded.
-  await t.page.evaluate(
-    src =>
-      Promise.all(
-        [
-          (f: HTMLIFrameElement) => {
-            f.id = 'sd';
-            f.srcdoc = '<p id="in">hi <b>x</b></p>';
-            f.textContent = 'fallback';
-          },
-          (f: HTMLIFrameElement) => {
-            f.id = 'src';
-            f.src = src;
-          },
-        ].map(
-          init =>
-            new Promise(resolve => {
-              const frame = document.createElement('iframe');
-              init(frame);
-              frame.onload = resolve;
-              document.body.append(frame);
-            })
-        )
-      ),
-    CHILD
-  );
-  for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'DOM.setChildNodes',
+      'DOM.childNodeInserted',
+      'DOM.childNodeRemoved',
+      'DOM.attributeModified',
+      'DOM.characterDataModified',
+      'DOM.childNodeCountUpdated',
+    ]);
+    // A srcdoc iframe with fallback content and a same-origin src one, loaded.
+    await t.page.evaluate(
+      src =>
+        Promise.all(
+          [
+            (f: HTMLIFrameElement) => {
+              f.id = 'sd';
+              f.srcdoc = '<p id="in">hi <b>x</b></p>';
+              f.textContent = 'fallback';
+            },
+            (f: HTMLIFrameElement) => {
+              f.id = 'src';
+              f.src = src;
+            },
+          ].map(
+            init =>
+              new Promise(resolve => {
+                const frame = document.createElement('iframe');
+                init(frame);
+                frame.onload = resolve;
+                document.body.append(frame);
+              })
+          )
+        ),
+      CHILD
+    );
+    for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
+  },
+  () => env?.close()
+);
 
 const both = <M extends keyof Commands>(method: M, ...params: Commands[M]['paramsType']) =>
   Promise.all([t.ours.send(method, ...params), t.chrome.send(method, ...params)]);

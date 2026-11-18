@@ -1,0 +1,22 @@
+diff --git a/front_end/panels/animation/AnimationTimeline.ts b/front_end/panels/animation/AnimationTimeline.ts
+--- a/front_end/panels/animation/AnimationTimeline.ts
++++ b/front_end/panels/animation/AnimationTimeline.ts
+@@ -231,7 +231,6 @@
+   #previewContainer!: HTMLElement;
+   #timelineScrubber!: HTMLElement;
+   #currentTime!: HTMLElement;
+-  #clearButton!: UI.Toolbar.ToolbarButton;
+   #selectedGroup!: SDK.AnimationModel.AnimationGroup|null;
+   #renderQueue!: AnimationUI[];
+   #duration: number;
+@@ -826,7 +825,9 @@
+
+     const groupLength = this.#groupBuffer.length;
+     if (groupLength === 0) {
+-      (this.#clearButton.element as HTMLElement).focus();
++      // Upstream focuses `#clearButton`, which is never assigned since the toolbar became a lit
++      // view: focus the view's own "Clear all" button instead.
++      this.#toolbarViewContainer.querySelector<HTMLElement>('devtools-button')?.focus();
+       return;
+     }
+     const nextGroup = currentGroupIndex >= this.#groupBuffer.length ?

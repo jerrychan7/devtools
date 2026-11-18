@@ -1,10 +1,17 @@
 // Same-origin documents in `<object>` and `<embed>`: Chrome gives each a frame like an iframe's,
 // in the Page frame tree and events, as a DOM contentDocument and with an execution context; not
 // to an `<object>` showing an image. Against Chrome's.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { VOLATILE, diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import {
+  VOLATILE,
+  diffSubset,
+  launch,
+  openPage,
+  waitForBoth,
+  setUpAndTearDown,
+} from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 for (const key of ['id', 'parentId', 'parentFrameId']) VOLATILE.add(key);
@@ -32,22 +39,24 @@ const append = (tag: 'object' | 'embed', id: string, url: string) =>
     url
   );
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'Page.frameAttached',
-    'Page.frameNavigated',
-    'Page.frameDetached',
-    'Runtime.executionContextCreated',
-  ]);
-  await append('object', 'obj', CHILD);
-  await append('object', 'img', IMAGE);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('Page.enable');
-    await side.send('Runtime.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'Page.frameAttached',
+      'Page.frameNavigated',
+      'Page.frameDetached',
+      'Runtime.executionContextCreated',
+    ]);
+    await append('object', 'obj', CHILD);
+    await append('object', 'img', IMAGE);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('Page.enable');
+      await side.send('Runtime.enable');
+    }
+  },
+  () => env?.close()
+);
 
 const both = async <T>(fn: (side: Side) => Promise<T>) => Promise.all([fn(t.ours), fn(t.chrome)]);
 

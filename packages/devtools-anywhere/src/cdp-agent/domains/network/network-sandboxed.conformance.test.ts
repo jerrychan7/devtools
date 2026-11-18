@@ -1,13 +1,20 @@
 // Requests of a sandboxed iframe (no allow-same-origin, on the page's origin) merged into the
-// page's agent (core/merged-frames.ts), against Chrome, which keeps the iframe in the page's
+// page's agent (core/frames/merged-frames.ts), against Chrome, which keeps the iframe in the page's
 // target: its fetch, XHR and WebSocket on the page's session, each once, of the iframe's frame and
 // document loader; its document request once, by the page; bodies asked by request id; cookies the
 // page's. Ids differ between the two sides: they are compared by how they relate.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide, type Received } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import {
+  chromeSide,
+  get,
+  type MergedSide,
+  oursSide,
+  type Received,
+} from '../../../../test-support/oopif/merged-sides.ts';
 
 const ASSET = '/packages/devtools-anywhere/test-support/assets/frame.css';
 
@@ -38,20 +45,21 @@ async function runInFrame(side: MergedSide, frameId: string, expression: string)
   assert.equal(get(reply, 'exceptionDetails'), undefined, JSON.stringify(reply));
 }
 
-before(async () => {
-  env = await launchOopif();
-  const chrome = await chromeSide(env);
-  const ours = await oursSide(env);
-  for (const [name, side] of [
-    ['chrome', chrome],
-    ['ours', ours],
-  ] as const) {
-    const frameId = await sandboxedFrameId(side);
-    sides.push({ name, side, frameId });
-    await runInFrame(
-      side,
-      frameId,
-      `(async () => {
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    const chrome = await chromeSide(env);
+    const ours = await oursSide(env);
+    for (const [name, side] of [
+      ['chrome', chrome],
+      ['ours', ours],
+    ] as const) {
+      const frameId = await sandboxedFrameId(side);
+      sides.push({ name, side, frameId });
+      await runInFrame(
+        side,
+        frameId,
+        `(async () => {
         await (await fetch('${ASSET}?sbfetch')).text();
         await new Promise(resolve => {
           const xhr = new XMLHttpRequest();
@@ -66,18 +74,19 @@ before(async () => {
           ws.onclose = resolve;
         });
       })()`
-    );
-    // Settled: no event for a while.
-    for (let seen = -1, now = 0; seen !== now; await new Promise(r => setTimeout(r, 300))) {
-      seen = now;
-      now = (await side.events()).length;
+      );
+      // Settled: no event for a while.
+      for (let seen = -1, now = 0; seen !== now; await new Promise(r => setTimeout(r, 300))) {
+        seen = now;
+        now = (await side.events()).length;
+      }
     }
+  },
+  async () => {
+    for (const { side } of sides) await side.close();
+    await env?.close();
   }
-});
-after(async () => {
-  for (const { side } of sides) await side.close();
-  await env?.close();
-});
+);
 
 /** The requests whose URL's path and query (not the page's, which has the iframe's) has `marker`. */
 const sentTo = (events: Received[], marker: string) =>

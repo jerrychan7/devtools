@@ -1,19 +1,22 @@
 // A linked cross-origin iframe's lifecycle and nesting, ours against Chrome on the same pages: a
 // parent on localhost, its iframe on 127.0.0.1, which has one of its own on THIRD_HOST, all with
 // the probe and trusting each other (oopif-sides.ts, `nested`), driven as the frontend drives
-// Chrome. What Chrome does is in test-support/oopif-notes.md (Lifecycle, Nesting).
-import { after, before, test } from 'node:test';
+// Chrome. What Chrome does is in test-support/oopif/oopif-notes.md (Lifecycle, Nesting).
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
-import { chromeSide, get, oursSide, type Received, type Side } from '../../../../test-support/oopif-sides.ts';
-import { fixtureUrl, launchOopif, THIRD_HOST } from '../../../../test-support/oopif.ts';
+import { chromeSide, get, oursSide, type Received, type Side } from '../../../../test-support/oopif/oopif-sides.ts';
+import { fixtureUrl, launchOopif, THIRD_HOST } from '../../../../test-support/oopif/oopif.ts';
 import type { Env } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 
-before(async () => {
-  env = await launchOopif();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+  },
+  () => env?.close()
+);
 
 /** Waits until no event has come for a while. */
 async function settle(side: Side) {

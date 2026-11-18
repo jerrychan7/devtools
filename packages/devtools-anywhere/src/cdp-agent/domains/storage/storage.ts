@@ -2,6 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 import { deleteCookie, parseCookies } from '../network/network';
+import { registerStorageTracking } from './tracking';
 
 const storageKey = () => location.origin + '/';
 
@@ -436,6 +437,7 @@ export function registerStorage(ctx: Context) {
     clearCookies,
     getTrustTokens: () => ({ tokens: [] }),
   });
+  registerStorageTracking(session, storageKey());
 
   session.register('Network', {
     getAllCookies: (): Protocol.Network.GetAllCookiesResponse => ({ cookies: parseCookies() }),

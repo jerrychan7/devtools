@@ -56,7 +56,6 @@ export class Grip {
         'width:3px;height:3px;border-radius:50%;background:var(--grip-dot,#5f6368);pointer-events:none';
       el.append(dot);
     }
-    this.coarse.addEventListener('change', this.onPointerChange);
     this.setupDrag();
     this.render();
   }
@@ -72,8 +71,23 @@ export class Grip {
     this.element.style.display = shown ? 'flex' : 'none';
   }
 
-  dispose() {
+  /**
+   * Follows the pointer (mouse or touch) for its size while its owner is in the document; the
+   * query's listener would otherwise keep the grip, and what holds it, alive for good. Catches up
+   * with a change missed while detached.
+   */
+  attach() {
+    this.coarse.addEventListener('change', this.onPointerChange);
+    this.render();
+  }
+
+  /** Stops following the pointer, for its owner leaving the document; attach() resumes. */
+  detach() {
     this.coarse.removeEventListener('change', this.onPointerChange);
+  }
+
+  dispose() {
+    this.detach();
     this.element.remove();
   }
 

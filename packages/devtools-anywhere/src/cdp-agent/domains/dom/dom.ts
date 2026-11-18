@@ -1,14 +1,16 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
+import { nativeCall, nativeGet } from '../../core/natives';
 import {
-  FORCE_ATTRIBUTE,
+  HIDDEN_ATTRIBUTES,
+  HIDDEN_SELECTOR,
   PseudoElement,
   closestOwn,
   isCrossOrigin,
   isOwn,
   truncateNodeValue,
   visibleAttributes,
-} from '../../core/nodes';
+} from '../../core/nodes/nodes';
 import {
   editAttributes,
   editNodeValue,
@@ -16,7 +18,9 @@ import {
   editReplace,
   historyOf,
   patchOuterHTML,
-} from '../../core/history';
+} from '../../core/nodes/history';
+import { sinkMutations } from '../../core/nodes/own-mutations';
+import { hasWritten, shownAttribute, shownCopy } from '../../core/nodes/written-attributes';
 import {
   type FrameOwner,
   isDocument,
@@ -36,8 +40,8 @@ import {
   sourceAttribute,
 } from '../../core/realm';
 import { CdpError } from '../../core/session';
-import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames';
-import { childTargets } from '../../core/child-targets';
+import { type Frame, type FrameChange, touchesFrames, walkFrameOwners } from '../../core/frames/frames';
+import { childTargets, SCROLL_PARENT } from '../../core/frames/child-targets';
 import { attachShadowHook } from './attach-shadow';
 import { mergedDom, type SearchPart } from './merged';
 import {
@@ -56,7 +60,7 @@ import {
   svgRootLayout,
   unmapRects,
   untransformedBoxes,
-} from '../../core/geometry';
+} from '../../core/frames/geometry';
 
 type NodeRef = { nodeId?: number; backendNodeId?: number; objectId?: string };
 
@@ -262,7 +266,13 @@ function searchNodes(
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (isElement(node)) {
         if (node.localName.includes(needle)) found.add(node);
-        else if (Array.from(node.attributes).some(a => `${a.name}="${a.value}"`.toLowerCase().includes(needle)))
+        else if (
+          Array.from(nativeGet<NamedNodeMap>(node, 'attributes')).some(
+            a =>
+              !HIDDEN_ATTRIBUTES.includes(a.name) &&
+              `${a.name}="${shownAttribute(node, a.name, a.value) ?? a.value}"`.toLowerCase().includes(needle)
+          )
+        )
           found.add(node);
         const shadowRoot = shadowRootOf(node);
         if (shadowRoot) walk(shadowRoot);
@@ -285,7 +295,7 @@ function searchNodes(
   }
   for (const doc of documents) {
     try {
-      doc.querySelectorAll(query).forEach(el => isVisible(el) && found.add(el));
+      nativeCall<NodeListOf<Element>>(doc, 'querySelectorAll', query).forEach(el => isVisible(el) && found.add(el));
     } catch {
       // Not a selector.
     }
@@ -293,15 +303,20 @@ function searchNodes(
   return Array.from(found);
 }
 
-/** Markup of `node` as DOM.getOuterHTML returns it: without forced pseudo-class markers. */
+/** Markup of `node` as DOM.getOuterHTML returns it: without devtools-anywhere's own attributes. */
 function outerHTML(node: Node): string {
   if (isElement(node)) {
-    if (!node.matches(`[${FORCE_ATTRIBUTE}]`) && !node.querySelector(`[${FORCE_ATTRIBUTE}]`)) return node.outerHTML;
-    // Leave out forced pseudo-class markers.
-    const copy = node.cloneNode(true);
+    if (
+      !nativeCall<boolean>(node, 'matches', HIDDEN_SELECTOR) &&
+      !nativeCall<Element | null>(node, 'querySelector', HIDDEN_SELECTOR) &&
+      !hasWritten(node)
+    )
+      return node.outerHTML;
+    // Leave out devtools-anywhere's own attributes, and show the attributes the page gave.
+    const copy = shownCopy(node);
     if (!isElement(copy)) return node.outerHTML;
-    for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
-      el.removeAttribute(FORCE_ATTRIBUTE);
+    for (const el of [copy, ...Array.from(nativeCall<NodeListOf<Element>>(copy, 'querySelectorAll', HIDDEN_SELECTOR))])
+      for (const name of HIDDEN_ATTRIBUTES) nativeCall(el, 'removeAttribute', name);
     return copy.outerHTML;
   }
   // The whole document, doctype included, like Chrome.
@@ -323,14 +338,16 @@ function outerHTML(node: Node): string {
  */
 function loadsAnotherDocument(owner: FrameOwner, doc: Document): boolean {
   if (doc.URL !== 'about:blank') return false;
-  if (owner.hasAttribute('srcdoc')) return true;
-  const src = owner.getAttribute(sourceAttribute(owner))?.trim();
+  if (nativeCall<boolean>(owner, 'hasAttribute', 'srcdoc')) return true;
+  const src = nativeCall<string | null>(owner, 'getAttribute', sourceAttribute(owner))?.trim();
   return !!src && new URL(src, owner.baseURI).href !== 'about:blank';
 }
 
 export function registerDom(ctx: Context) {
   const { session, nodes, objects } = ctx;
   let observer: MutationObserver | null = null;
+  /** Keeps the agent's own writes out of the observer's records (core/nodes/own-mutations.ts). */
+  let unsinkMutations: (() => void) | null = null;
   /** Each search's results: the page's nodes, then each merged frame's part (domains/dom/merged.ts). */
   const searches = new Map<string, { found: Node[]; parts: SearchPart[] }>();
   const merged = mergedDom(ctx);
@@ -492,7 +509,10 @@ export function registerDom(ctx: Context) {
       if (!record || record.type !== 'attributes' || !name || !isElement(record.target)) continue;
       const values = later.get(record.target) ?? new Map<string, string | null>();
       later.set(record.target, values);
-      valueAfter.set(record, values.has(name) ? (values.get(name) ?? null) : record.target.getAttribute(name));
+      valueAfter.set(
+        record,
+        values.has(name) ? (values.get(name) ?? null) : nativeCall<string | null>(record.target, 'getAttribute', name)
+      );
       values.set(name, record.oldValue);
     }
     for (const record of records) {
@@ -536,8 +556,11 @@ export function registerDom(ctx: Context) {
         });
       } else if (record.type === 'attributes' && targetId !== undefined && isElement(target)) {
         const name = record.attributeName;
-        if (name === null || name === FORCE_ATTRIBUTE) continue;
-        const value = valueAfter.has(record) ? (valueAfter.get(record) ?? null) : target.getAttribute(name);
+        if (name === null || HIDDEN_ATTRIBUTES.includes(name)) continue;
+        const written = valueAfter.has(record)
+          ? (valueAfter.get(record) ?? null)
+          : nativeCall<string | null>(target, 'getAttribute', name);
+        const value = shownAttribute(target, name, written);
         if (value === null) session.emit('DOM.attributeRemoved', { nodeId: targetId, name });
         else session.emit('DOM.attributeModified', { nodeId: targetId, name, value });
       } else if (record.type === 'characterData' && targetId !== undefined) {
@@ -565,6 +588,8 @@ export function registerDom(ctx: Context) {
   function observe() {
     observer?.disconnect();
     observer = new MutationObserver(onMutations);
+    unsinkMutations?.();
+    unsinkMutations = sinkMutations(observer, onMutations);
     observer.observe(ctx.frames.top.document, OBSERVE);
     stopFrames ??= ctx.frames.onChange(onFrameChange);
     // A merged frame's document is its agent's: sent again when the frame links again (reloaded).
@@ -601,6 +626,8 @@ export function registerDom(ctx: Context) {
     disable() {
       observer?.disconnect();
       observer = null;
+      unsinkMutations?.();
+      unsinkMutations = null;
       stopFrames?.();
       stopFrames = null;
       changedFrames = null;
@@ -646,7 +673,14 @@ export function registerDom(ctx: Context) {
     },
 
     resolveNode(params: Protocol.DOM.ResolveNodeRequest): Protocol.DOM.ResolveNodeResponse {
-      return { object: objects.wrap(resolveNode(ctx, params), { group: params.objectGroup }) };
+      const node = resolveNode(ctx, params);
+      const id = params.executionContextId;
+      // In an isolated world (Page.createIsolatedWorld), an object of its own. Like Chrome, any
+      // frame's context takes any node; an unknown one is refused with Chrome's words.
+      const world = ctx.worlds.byId(id);
+      if (id !== undefined && !world && !ctx.frames.byContext(id))
+        throw new CdpError('Node with given id does not belong to the document');
+      return { object: objects.wrap(node, { group: params.objectGroup, world: world?.id }) };
     },
 
     requestNode(params: Protocol.DOM.RequestNodeRequest): Protocol.DOM.RequestNodeResponse {
@@ -691,7 +725,7 @@ export function registerDom(ctx: Context) {
 
     setAttributeValue(params: Protocol.DOM.SetAttributeValueRequest) {
       const el = element(params);
-      history.record(editAttributes(el, () => el.setAttribute(params.name, params.value)));
+      history.record(editAttributes(el, () => nativeCall(el, 'setAttribute', params.name, params.value)));
     },
 
     setAttributesAsText(params: Protocol.DOM.SetAttributesAsTextRequest) {
@@ -704,19 +738,20 @@ export function registerDom(ctx: Context) {
         : `<div ${params.text}></div>`;
       const outer = parsed.content.firstElementChild;
       const source = context ? outer?.firstElementChild : outer;
-      const attrs = Array.from(source?.attributes ?? []);
+      const attrs = source ? Array.from(nativeGet<NamedNodeMap>(source, 'attributes')) : [];
       // Like Chrome, an attribute that is set again keeps its place and is only reported as modified.
       history.record(
         editAttributes(el, () => {
-          if (params.name && !attrs.some(attr => attr.name === params.name)) el.removeAttribute(params.name);
-          for (const attr of attrs) el.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+          if (params.name && !attrs.some(attr => attr.name === params.name))
+            nativeCall(el, 'removeAttribute', params.name);
+          for (const attr of attrs) nativeCall(el, 'setAttributeNS', attr.namespaceURI, attr.name, attr.value);
         })
       );
     },
 
     removeAttribute(params: Protocol.DOM.RemoveAttributeRequest) {
       const el = element(params);
-      history.record(editAttributes(el, () => el.removeAttribute(params.name)));
+      history.record(editAttributes(el, () => nativeCall(el, 'removeAttribute', params.name)));
     },
 
     setNodeValue(params: Protocol.DOM.SetNodeValueRequest) {
@@ -740,8 +775,15 @@ export function registerDom(ctx: Context) {
     setNodeName(params: Protocol.DOM.SetNodeNameRequest): Protocol.DOM.SetNodeNameResponse {
       const el = element(params);
       const renamed = el.ownerDocument.createElement(params.name);
-      for (const attr of Array.from(el.attributes))
-        if (attr.name !== FORCE_ATTRIBUTE) renamed.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+      for (const attr of Array.from(nativeGet<NamedNodeMap>(el, 'attributes')))
+        if (!HIDDEN_ATTRIBUTES.includes(attr.name))
+          nativeCall(
+            renamed,
+            'setAttributeNS',
+            attr.namespaceURI,
+            attr.name,
+            shownAttribute(el, attr.name, attr.value) ?? attr.value
+          );
       history.record(
         editReplace(
           el,
@@ -784,11 +826,14 @@ export function registerDom(ctx: Context) {
           merged.recordEdit(ns);
           return result;
         });
-      const copy = resolveNode(ctx, params).cloneNode(true);
+      const copy = shownCopy(resolveNode(ctx, params));
       // The copy is not forced into any pseudo-class state.
       if (isElement(copy))
-        for (const el of [copy, ...Array.from(copy.querySelectorAll(`[${FORCE_ATTRIBUTE}]`))])
-          el.removeAttribute(FORCE_ATTRIBUTE);
+        for (const el of [
+          copy,
+          ...Array.from(nativeCall<NodeListOf<Element>>(copy, 'querySelectorAll', HIDDEN_SELECTOR)),
+        ])
+          for (const name of HIDDEN_ATTRIBUTES) nativeCall(el, 'removeAttribute', name);
       const target = resolveNode(ctx, { nodeId: params.targetNodeId });
       const before = params.insertBeforeNodeId ? resolveNode(ctx, { nodeId: params.insertBeforeNodeId }) : null;
       history.record(editPosition(copy, () => target.insertBefore(copy, before)));
@@ -797,12 +842,14 @@ export function registerDom(ctx: Context) {
     },
 
     querySelector(params: Protocol.DOM.QuerySelectorRequest): Protocol.DOM.QuerySelectorResponse {
-      const found = resolveContainer(ctx, params).querySelector(params.selector);
+      const found = nativeCall<Element | null>(resolveContainer(ctx, params), 'querySelector', params.selector);
       return { nodeId: found ? nodes.push(found, parent => emitChildren(parent)) : 0 };
     },
 
     querySelectorAll(params: Protocol.DOM.QuerySelectorAllRequest): Protocol.DOM.QuerySelectorAllResponse {
-      const found = Array.from(resolveContainer(ctx, params).querySelectorAll(params.selector));
+      const found = Array.from(
+        nativeCall<NodeListOf<Element>>(resolveContainer(ctx, params), 'querySelectorAll', params.selector)
+      );
       return { nodeIds: found.map(node => nodes.push(node, parent => emitChildren(parent))) };
     },
 
@@ -896,7 +943,8 @@ export function registerDom(ctx: Context) {
     collectClassNamesFromSubtree(params: Protocol.DOM.CollectClassNamesFromSubtreeRequest) {
       const root = element(params);
       const names = new Set<string>();
-      for (const el of [root, ...Array.from(root.querySelectorAll('[class]'))]) el.classList.forEach(c => names.add(c));
+      const classed = Array.from(nativeCall<NodeListOf<Element>>(root, 'querySelectorAll', '[class]'));
+      for (const el of [root, ...classed]) el.classList.forEach(c => names.add(c));
       return { classNames: Array.from(names) };
     },
 
@@ -910,7 +958,10 @@ export function registerDom(ctx: Context) {
     },
 
     scrollIntoViewIfNeeded(params: Protocol.DOM.ScrollIntoViewIfNeededRequest) {
-      scrollIntoViewIfNeeded(element(params), params.rect);
+      const { rect, doc } = scrollIntoViewIfNeeded(element(params), params.rect);
+      // In a cross-origin iframe, its parent's agent scrolls on outward.
+      if (doc === ctx.frames.top.document)
+        childTargets.parent?.send(JSON.stringify({ method: SCROLL_PARENT, params: { rect } }));
     },
 
     /** Elements whose computed style matches any of the given ones (e.g. the Layout pane's grids). */
@@ -919,7 +970,7 @@ export function registerDom(ctx: Context) {
     ): Protocol.DOM.GetNodesForSubtreeByStyleResponse {
       const found: Element[] = [];
       const visit = (root: ParentNode) => {
-        for (const el of root.querySelectorAll('*')) {
+        for (const el of nativeCall<NodeListOf<Element>>(root, 'querySelectorAll', '*')) {
           if (!nodes.isVisible(el) || closestOwn(el)) continue;
           const style = styleOf(el);
           if (params.computedStyles.some(({ name, value }) => style.getPropertyValue(name) === value)) found.push(el);

@@ -88,7 +88,7 @@ tests/            跨包的测试
   e2e/            探针 → CDP → 前端的完整流程
   support/        启动 Chrome 和静态服务器
 playground/       开发调试用的页面和服务器
-docs/             使用指南、设计文档和 README 的截图
+docs/             使用指南、能力边界、设计文档和 README 的截图
 experiments/      验证记录
 ```
 
@@ -96,11 +96,11 @@ experiments/      验证记录
 
 | 改动 | 位置 | 怎么验证 |
 |---|---|---|
-| 早期捕获（console、异常、请求） | `packages/devtools-anywhere/src/cdp-agent/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积（min+gzip） |
+| 早期捕获（console、异常、请求） | `packages/devtools-anywhere/src/cdp-agent/probe/` | 保持精简：它在页面代码之前同步执行。留意 `probe.iife.js` 的体积：minify 后的原始字节（`wc -c`），不按 gzip 计 |
 | CDP 域 | `packages/devtools-anywhere/src/cdp-agent/domains/` | playground，并加一致性测试 |
 | 组件、连接、外壳模式、Service Worker | `packages/devtools-anywhere/src/` | playground、端到端测试 |
 | Vite 集成 | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts`（示例应用在 `tests/e2e/vite-app/`） |
-| 远程调试 | `packages/remote-server/src/`（中继、服务端）、`packages/devtools-anywhere/src/remote.ts`（页面端） | `tests/e2e/remote.test.ts`；`node packages/remote-server/dist/cli.js` |
+| 远程调试 | `packages/remote-server/src/`（中继、服务端）、`packages/devtools-anywhere/src/remote.ts`（页面端） | `tests/e2e/remote/remote.test.ts`；`node packages/remote-server/dist/cli.js` |
 | DevTools 前端 | `packages/devtools-frontend/` | 见下文 |
 
 ### 约束与注意事项
@@ -108,7 +108,7 @@ experiments/      验证记录
 - 所有 `postMessage` 都必须校验 `event.origin` 和 `event.source`，否则任意页面都能向 CDP 运行时发送命令。
 - 判断"是否处于外壳内"要通过 postMessage 握手完成，不要直接读取 `window.parent` 上的属性，否则跨域时会抛出 SecurityError。
 - 握手的两端都要有缓冲：devtools 尚未加载完成时，消息不能丢弃。
-- agent 也服务同源 iframe：iframe 里的节点不是顶层页面 `Element` 等类的实例，它的文档也不是全局 `document`。判断节点用 `cdp-agent/core/realm.ts`（按 `nodeType`，或 `realmOf(node)`），查 frame 用 `core/frames.ts`。`pnpm lint` 会按文件把剩下的顶层 realm 用法和 `scripts/check-realms.json` 对比（`scripts/check-realms.ts`），每个文件只许减少、不许增加。确实要用顶层页面的地方（探针、叠加层），运行 `node scripts/check-realms.ts --update`。
+- agent 也服务同源 iframe：iframe 里的节点不是顶层页面 `Element` 等类的实例，它的文档也不是全局 `document`。判断节点用 `cdp-agent/core/realm.ts`（按 `nodeType`，或 `realmOf(node)`），查 frame 用 `core/frames/frames.ts`。`pnpm lint` 会按文件把剩下的顶层 realm 用法和 `scripts/check-realms.json` 对比（`scripts/check-realms.ts`），每个文件只许减少、不许增加。确实要用顶层页面的地方（探针、叠加层），运行 `node scripts/check-realms.ts --update`。
 - 前端资源应当支持自托管，不依赖 unpkg、jsdelivr 等第三方 CDN。
 - 使用 Service Worker 注入时：
   - 只处理 `destination === 'iframe'` 的导航请求，其他请求一律放行。
@@ -144,6 +144,8 @@ pnpm typecheck                                # 先构建，再检查所有包�
 - `tests/e2e/`：连接层、外壳模式、零配置接入、Vite 插件和真实前端。测试打开的页面在 `pages/`（脚本与样式在 `pages/assets/`），替身前端在 `frontends/`。
 
 需要读取包内部状态的测试加载 `packages/devtools-anywhere/dist-test/` 而不是 `dist/`：`build.ts` 在那里把两个脚本再构建一遍（不发布），并设置 `DEVTOOLS_ANYWHERE_TEST`，只有这份构建会把内部状态暴露为 `window.__devtoolsAnywhereTest`（`iife.ts`；类型在 `tests/globals.d.ts`）。测试专用的钩子加在那里、放在 `DEVTOOLS_ANYWHERE_TEST` 之后，不要加进发布的包或其 API。
+
+基准测试放在被测代码旁的 `bench/` 目录里，命名为 `*.bench.ts`，并附 `README.md` 说明运行方法和参考结果；它们随测试一起做类型检查，但 `pnpm test` 不运行它们。CSS 词法器的基准（[`domains/css/sheets/parse/bench/`](packages/devtools-anywhere/src/cdp-agent/domains/css/sheets/parse/bench/README.zh-CN.md)）可以与任意历史版本比较耗时，并核对词元是否不变：修改词法器时两者都要跑，并把数据写进提交信息。
 
 ### 修改前端
 
@@ -182,10 +184,10 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 前端跟随稳定版 Chrome，也就是大多数用户手上的版本，小版本更新也要跟：每次都会换一个 devtools-frontend 提交。`.github/workflows/chrome-update.yml` 每天检查一次，稳定版 Chrome 的提交与 `REVISION` 不一致时开一个 issue（同时关闭还没处理的旧 issue）。用下面的命令升级：
 
 ```bash
-pnpm --filter @devtools-anywhere/devtools-frontend update
+pnpm --filter @devtools-anywhere/devtools-frontend run update
 ```
 
-它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`，并把对应的 Chrome 版本写进各包的 `chrome` 字段。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`；这时 `chrome` 字段要手动填）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。
+它会构建当前稳定版 Chrome 所带的 devtools-frontend 提交（位于该里程碑的分支 `chromium/<分支号>` 上，不在上游 `main` 上；由 Chromium Dash 的 `fetch_releases` 查得），成功后写入 `REVISION`，并把对应的 Chrome 版本写进各包的 `chrome` 字段。Chromium Dash 没有应答时，手动把这个提交写进 `REVISION`，再运行 `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`。如果某个补丁打不上，构建会停下；在检出目录里执行 `git apply --3way <补丁>` 会留下冲突标记：解决冲突、重新生成补丁，再运行 `node scripts/build.ts --no-sync --latest`（构建检出目录的 `HEAD` 并写入 `REVISION`；这时 `chrome` 字段要手动填）。之后跑 `pnpm test`：新版前端可能会调用 CDP agent 尚未应答的方法（在浏览器控制台里找 "wasn't found"）。`chrome` 字段变了之后还要运行 `node scripts/sync-user-agent-css.ts`：它为浏览器默认样式取回该版本 Chrome 的 `html.css`（`--check` 只检查副本是否对得上；对不上时构建会警告），然后按它的提示更新该目录 `README.md` 里的链接。
 
 ## 3. 开发完成
 
@@ -202,18 +204,18 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 
 构建时用 API Extractor 把各包的类型声明按入口合并成单个文件（`dist/index.d.ts`），并把包的 API 写进 `packages/<包>/etc/`：`*.public.api.md` 是公开 API（对外的承诺），`*.api.md` 是全部导出（含内部）（`scripts/api-extract.ts`，配置见 `api-extractor.base.json`；API Extractor 会丢掉 `declare global` 块，脚本会把它们补进合并后的文件）。`devtools-anywhere` 没有运行时入口：它的 `dist/index.d.ts` 只有类型，脚本都构建成 IIFE。报告有变化时与引起它的改动一起提交：公开 API 的变化靠它在评审中看到。设置 `CI=true` 时（GitHub Actions 会自动设置），报告与 API 不一致会让构建失败，所以忘了提交的报告会被 CI 拦下。入口的每个导出都要有发布标签：`@public` 只给 README 写明的用法（remote-server 的 `startRemoteServer` / `createRemoteHandler`、Vite 插件），其余一律 `@internal`，只供本仓库各包之间使用（一起构建、一起发布），随时可改；拿不准就标 `@internal`，入口用不到的就不导出。文档注释按 TSDoc 写：`@devtools-anywhere/...` 这类包名放进反引号，代码示例放进围栏代码块。
 
-行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南、`docs/usage.md` 和 `docs/design.md` 的两种语言版本），并在 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 的 `Unreleased` 下各给用户写一行说明（前端升级到新的 Chrome 里程碑时，还要改它的 `Based on Chrome` 那一行）。
+行为、用法或限制有变化时，同时更新 `README.md` 和 `README.zh-CN.md`（以及本指南、`docs/usage.md`、`docs/limitations.md` 和 `docs/design.md` 的两种语言版本），并在 `CHANGELOG.md` 和 `CHANGELOG.zh-CN.md` 的 `Unreleased` 下各给用户写一行说明（前端升级到新的 Chrome 里程碑时，还要改它的 `Based on Chrome` 那一行）。
 
 新增或升级会进入产物的依赖、移植其它项目的代码（包括把 DevTools 前端换到新的 `REVISION`）时，运行 `pnpm licenses:update` 重新生成根目录和各包的 `THIRD_PARTY_LICENSES.md`（新增的库先加进 `scripts/third-party-licenses.ts` 的清单）。
 
 ### 提交
 
 - 每个提交只做一步。
-- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`docs`、`test`、`build`、`ci`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
+- 提交信息格式：`type(scope): 概要`，空一行后用英文写正文，说明改了什么、为什么改。type 有 `feat`、`fix`、`perf`、`docs`、`test`、`build`、`ci`、`refactor`、`chore`；scope 用包名或模块名，例如 `cdp-agent`、`network`、`devtools-frontend`、`service-worker`、`readme`。
 
 ### 分支与 PR
 
-`main` 存放已发布的内容：发布在它上面打 tag，只能通过 PR 修改。下一个 minor 的开发放在它的开发分支 `dev/x.y.0` 上（现在是 `dev/0.3.0`），可以随时推送；发布该 minor 时经 `release/x.y.0` 进入 `main`：`dev` → `release` → `main`。
+`main` 存放已发布的内容：发布在它上面打 tag，只能通过 PR 修改。下一个 minor 的开发放在它的开发分支 `dev/x.y.0` 上（现在是 `dev/0.4.0`），可以随时推送；发布该 minor 时经 `release/x.y.0` 进入 `main`：`dev` → `release` → `main`。
 
 | 分支 | 用途 | 规则 |
 | --- | --- | --- |
@@ -223,10 +225,10 @@ pre-commit 钩子（husky + lint-staged）只处理暂存的文件：先用 oxfm
 | `release/x.y.z` | 准备 x.y.z 发布的 PR（版本号和 changelog） | 从 `dev/x.y.0` 拉出（patch 从 `main` 拉出），合进 `main`，然后在 `main` 上打 tag |
 | `release/x.y` | 只在需要时用来给旧的 minor 打补丁（见「给旧版本打补丁」） | 从 tag `vx.y.0` 拉出，在该 minor 需要补丁期间保留 |
 
-不能等到下一个 minor 的修复，走从 `main` 拉出的 `fix/…` 分支合进 `main`，从那里作为 patch 发布；然后把 `main` 合并进 `dev/x.y.0`，让修复也进入开发分支。x.y.0 发布后删除 `dev/x.y.0`，再从 `main` 拉出 `dev/x.(y+1).0`。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。推送到 `dev/x.y.0` 不运行，免得开发中的推送排队：由 `release/x.y.0` 的 PR 检查，或者手动在该分支上运行 CI（`gh workflow run ci.yml --ref dev/0.3.0`）。
+不能等到下一个 minor 的修复，走从 `main` 拉出的 `fix/…` 分支合进 `main`，从那里作为 patch 发布；然后把 `main` 合并进 `dev/x.y.0`，让修复也进入开发分支。x.y.0 发布后删除 `dev/x.y.0`，再从 `main` 拉出 `dev/x.(y+1).0`。CI（`.github/workflows/ci.yml`）在每个 PR 和每次推送到 `main` 时运行：lint、类型检查、构建前端、跑全部测试。推送到 `dev/x.y.0` 不运行，免得开发中的推送排队：由 `release/x.y.0` 的 PR 检查，或者手动在该分支上运行 CI（`gh workflow run ci.yml --ref dev/0.4.0`）。
 
 ```bash
-git switch -c feat/my-change dev/0.3.0
+git switch -c feat/my-change dev/0.4.0
 # … 提交 …
 git push -u origin feat/my-change
 gh pr create --fill

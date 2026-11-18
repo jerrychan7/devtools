@@ -4,7 +4,9 @@
 // uncaught errors, fetch/XHR and WebSocket once, keeps recent events in ring buffers, and the CDP
 // agent reads those buffers later. The CDP agent installs it itself when no earlier
 // probe exists, so every API is hooked exactly once either way.
+import { hookMedia, mediaState } from './media';
 import { hookNetwork, keep, now, type NetworkSink } from './network';
+import { captureNatives, captureTop } from './natives';
 import {
   PROBE_KEY,
   type ListenerRecord,
@@ -26,11 +28,18 @@ export { keep } from './network';
 const LIMIT = 10_000;
 const MAX_TOOL_OUTCOMES = 50;
 
+/** The browser's own `console.error`, if the page had not wrapped it: for devtools-anywhere's own errors. */
+let ownError: (...args: unknown[]) => void = () => {};
+
 /** @internal */
 export function installProbe(): Probe {
   const w = window;
   const existing: Probe | undefined = Reflect.get(w, PROBE_KEY);
   if (existing) return existing;
+  // Before the console is hooked: our own errors go to the browser's console only. One the page
+  // wrapped already (an error reporter's) would hand them to the page: they are dropped then.
+  const error = console.error;
+  if (/\{\s*\[native code\]\s*\}$/.test(Function.prototype.toString.call(error))) ownError = error.bind(console);
 
   const logs: ProbeLog[] = [];
   const requests: ProbeRequest[] = [];
@@ -40,7 +49,14 @@ export function installProbe(): Probe {
   const socketListeners = new Set<(record: SocketRecord) => void>();
 
   const shadowRootListeners = new Set<(root: ShadowRoot) => void>();
+  const animationListeners = new Set<(animation: Animation) => void>();
   const hooked = new WeakSet<Console>();
+  const animProto = w.Animation?.prototype;
+  const own = (name: string) => Object.getOwnPropertyDescriptor(animProto, name);
+  // Before hookListeners() and hookShadowRoots() below.
+  const natives = captureTop();
+  const table = captureNatives();
+  const media = mediaState(natives);
   const probe: Probe = {
     version: 1,
     hookNetwork(win, frame) {
@@ -76,12 +92,29 @@ export function installProbe(): Probe {
       hookDebugger(add, win);
       hookErrors(add, win);
       hookShadowRoots(probe.shadowRoots, shadowRootListeners, win);
+      hookAnimations(animationListeners, win);
+      hookMedia(win, media);
     },
     shadowRoots: new WeakMap(),
     onShadowRoot(listener) {
       shadowRootListeners.add(listener);
       return () => void shadowRootListeners.delete(listener);
     },
+    onAnimation(listener) {
+      animationListeners.add(listener);
+      return () => void animationListeners.delete(listener);
+    },
+    // Before hookAnimations() below.
+    animation: animProto && {
+      play: animProto.play,
+      pause: animProto.pause,
+      rate: own('playbackRate'),
+      time: own('currentTime'),
+    },
+    css: w.CSS && { CSS: w.CSS, supports: w.CSS.supports },
+    top: natives,
+    natives: table,
+    media: { set: media.set },
     listeners: new WeakMap(),
     ownUrls: new Set(),
     // Old WebViews without fetch: a rejection callers handle like any failed request.
@@ -102,9 +135,13 @@ export function installProbe(): Probe {
   hookDebugger(addLog);
   hookErrors(addLog);
   hookShadowRoots(probe.shadowRoots, shadowRootListeners, w);
+  hookAnimations(animationListeners, w);
   // The network hooks' own listeners are not the page's.
   const listen = EventTarget.prototype.addEventListener;
   hookListeners(probe.listeners);
+  // After the listener wrapper, which it then wraps: the options a page gives are converted once, by the media hook, and
+  // the wrapper is given the converted ones (media.ts).
+  hookMedia(w, media);
   hookModelContext(probe.tools);
 
   let seq = 0;
@@ -249,6 +286,60 @@ function hookShadowRoots(
   };
 }
 
+/**
+ * Tells of every animation made with `animate()` or `new Animation()`, as they are made: those
+ * `getAnimations()` never lists (no target, a target out of the document, finished or cancelled
+ * before anyone looked) are in Chrome's Animations panel too. Nothing is kept here.
+ */
+function hookAnimations(listeners: Set<(animation: Animation) => void>, w: Window & typeof globalThis) {
+  const ctor = w.Animation;
+  const proto = w.Element.prototype;
+  const animate = proto.animate;
+  if (!ctor || !animate) return;
+  // A listener's error is ours, not the page's: it must neither fail the page's call (nor stop the
+  // other listeners), nor pass for one the page's call threw, nor reach the page's error handlers
+  // or the Console panel. Written to the browser's own console, with the console unhooked.
+  const tell = (animation: Animation) => {
+    for (const listener of listeners)
+      try {
+        listener(animation);
+      } catch (error) {
+        ownError('devtools-anywhere: internal error in an animation listener', error);
+      }
+    return animation;
+  };
+  // Proxies of the page's functions, not functions of our own: their name and length stay the
+  // page's, and calls without `new`, or on another `this`, throw as before. `toString()` keeps the
+  // native form but loses the name: "function () { [native code] }" for "function animate() {...}".
+  proto.animate = new Proxy(animate, { apply: (f, self, args) => tell(Reflect.apply(f, self, args)) });
+  // And on whatever plays, pauses, ends or moves one: ended ones are not looked at every frame, and
+  // getAnimations() may miss them, while reverse(), a new rate or a new time runs one again;
+  // pausing one is reported too.
+  const animProto = ctor.prototype;
+  const after = <F extends Function>(f: F) =>
+    new Proxy(f, {
+      apply: (target, self, args) => {
+        Reflect.apply(target, self, args);
+        tell(self);
+      },
+    });
+  for (const name of ['play', 'pause', 'cancel', 'reverse', 'finish', 'updatePlaybackRate']) {
+    const f: unknown = Reflect.get(animProto, name);
+    if (typeof f === 'function') Reflect.set(animProto, name, after(f));
+  }
+  for (const name of ['currentTime', 'startTime', 'playbackRate']) {
+    const own = Object.getOwnPropertyDescriptor(animProto, name);
+    if (own?.set) Object.defineProperty(animProto, name, { ...own, set: after(own.set) });
+  }
+  // Subclasses and `instanceof` work through it; `constructor` names it, so that
+  // `animation.constructor === Animation` holds as before.
+  const proxy = new Proxy(ctor, {
+    construct: (target, args, newTarget) => tell(Reflect.construct(target, args, newTarget)),
+  });
+  Object.defineProperty(animProto, 'constructor', { value: proxy });
+  w.Animation = proxy;
+}
+
 // ---- WebMCP ----
 
 /**
@@ -323,31 +414,39 @@ function forgetTool(tools: Probe['tools'], name: string, record: ToolRecord) {
 // ---- event listeners ----
 
 /**
- * Records listeners as the DOM keeps them: duplicates are ignored, `once` listeners are
- * forgotten after they run, and listeners with an aborted `signal` are forgotten too.
+ * Records listeners as the DOM keeps them: duplicates are ignored, `once` listeners are forgotten after they run,
+ * and a listener whose `signal` is aborted is gone from then on: its record is dropped at the next
+ * listener added to the target, and is not listed before that (the DOMDebugger domain leaves it out), with no `abort`
+ * listener of the probe's on the signal: one there would come after the page's own, which may stop the abort event or
+ * add the listener again, and would hold the target for as long as the signal lives.
  */
 function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
   const proto = EventTarget.prototype;
   const add = proto.addEventListener;
   const remove = proto.removeEventListener;
-  // Undoes what was added alongside a record (see below), for when the page removes it first.
+  // Takes away the helper added alongside a `once` record (see below), for when the page removes the listener first.
   const cleanups = new WeakMap<ListenerRecord, () => void>();
   const captureOf = (options?: boolean | EventListenerOptions) =>
     typeof options === 'boolean' ? options : !!options?.capture;
 
   proto.addEventListener = function (this: EventTarget, type, listener, options) {
-    add.call(this, type, listener, options);
     // Unqualified calls like addEventListener('load', f) run on the global object.
     const target: EventTarget = this ?? globalThis;
     const opts = typeof options === 'object' ? options : undefined;
-    if (!listener || opts?.signal?.aborted) return;
     const capture = captureOf(options);
+    const signal = opts?.signal;
     let found = listeners.get(target);
+    // The records of the listeners an aborted signal has removed go now: one of them may be this listener's.
+    if (found) for (let i = found.length; i--;) if (found[i]?.signal?.aborted) found.splice(i, 1);
+    if (
+      !listener ||
+      signal?.aborted ||
+      found?.some(r => r.type === type && r.listener === listener && r.capture === capture)
+    )
+      return add.call(this, type, listener, options);
     if (!found) listeners.set(target, (found = []));
     const list = found;
-    if (list.some(r => r.type === type && r.listener === listener && r.capture === capture)) return;
-    const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once };
-    list.push(record);
+    const record: ListenerRecord = { type, listener, capture, passive: !!opts?.passive, once: !!opts?.once, signal };
     // A method keeps its name through minification, so browser DevTools attached to the
     // page (which also list this helper) show what it is.
     const forget = {
@@ -356,14 +455,19 @@ function hookListeners(listeners: WeakMap<EventTarget, ListenerRecord[]>) {
         if (i >= 0) list.splice(i, 1);
       },
     }.devtoolsAnywhereForget;
-    const signal = opts?.signal;
-    if (record.once) add.call(target, type, forget, { capture, once: true });
-    if (signal) add.call(signal, 'abort', forget, { once: true });
-    if (record.once || signal)
-      cleanups.set(record, () => {
-        if (record.once) remove.call(target, type, forget, { capture });
-        if (signal) remove.call(signal, 'abort', forget);
-      });
+    // Before the page's listener: where this one runs, that one runs next, even if it stops the event for the
+    // listeners after it. Added after it, a listener that did so would leave this one on the target. It is added
+    // to the target with the page's signal as its option (no listener on the signal itself), so the browser
+    // removes both when that is aborted.
+    if (record.once) add.call(target, type, forget, { capture, once: true, signal } as AddEventListenerOptions);
+    try {
+      add.call(this, type, listener, options);
+    } catch (e) {
+      if (record.once) remove.call(target, type, forget, { capture });
+      throw e;
+    }
+    list.push(record);
+    if (record.once) cleanups.set(record, () => remove.call(target, type, forget, { capture }));
   };
 
   proto.removeEventListener = function (this: EventTarget, type, listener, options) {

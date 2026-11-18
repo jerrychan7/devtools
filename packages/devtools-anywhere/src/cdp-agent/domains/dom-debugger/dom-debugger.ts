@@ -2,9 +2,9 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 import { contentDocumentOf, isFrameOwner } from '../../core/realm';
-import { mergedFrames } from '../../core/merged-frames';
+import { mergedFrames } from '../../core/frames/merged-frames';
 
-/** A merged sandboxed iframe's object (core/merged-frames.ts) is its agent's to list. */
+/** A merged sandboxed iframe's object (core/frames/merged-frames.ts) is its agent's to list. */
 mergedFrames.registerRoutes('DOMDebugger', { routeBy: { 'DOMDebugger.getEventListeners': ['objectId'] } });
 
 type EventListener = Protocol.DOMDebugger.EventListener;
@@ -51,7 +51,9 @@ export function registerDomDebugger(ctx: Context) {
       if (target instanceof Node) listener.backendNodeId = nodes.backendIdOf(target);
       return listener;
     };
-    const result = (probe.listeners.get(target) ?? []).map(r => ({
+    // A listener whose signal is aborted is gone: the probe drops its record later (probe/index.ts, hookListeners).
+    const live = (probe.listeners.get(target) ?? []).filter(r => !r.signal?.aborted);
+    const result = live.map(r => ({
       ...base(r.type, r.listener),
       useCapture: r.capture,
       passive: r.passive,

@@ -32,7 +32,7 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 
 ### 1. 探针
 
-压缩后约 6.2 KB（min+gzip，包含外壳模式、自动挂载和远程调试）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
+minify 后约 27 KB（原始字节，不按 gzip；包含外壳模式、自动挂载和远程调试）的同步脚本，必须是 `<head>` 中第一个执行的脚本。
 
 - 立即 hook `console`、`window.onerror`、`unhandledrejection`、`fetch`、`XHR` 和 `WebSocket`，把事件连同时间戳写入缓冲。WebSocket 帧按原样保存，二进制负载到 CDP agent 才转成 base64。CDP 会话挂载之前，每类记录（控制台消息、请求、WebSocket、每个 WebSocket 的帧）各保留最近 1 万条，作为从不加载 CDP agent 的页面的兜底；CDP 会话挂载后改由它设定上限：控制台消息与 V8 一样保留最近 1000 条；请求和 WebSocket 与 Chrome 一样全部保留，只在超出 `Network.enable` 给定的缓冲大小（未给时用 Chrome 的默认值）后丢弃最早的响应体。
 - 无法 hook 的请求（文档、样式表、脚本、图片、字体等）通过 Resource Timing 记录；带 `buffered` 的 `PerformanceObserver` 还能拿到探针运行之前的请求。这些记录有 URL、类型、时序、大小，以及浏览器公开时的状态码和 MIME 类型，但没有请求头和响应头；响应体在需要时从 HTTP 缓存重新读取。外壳模式下启用了 Service Worker 时，它会为同源请求补上请求头和响应头。之所以仍以 hook 为主：hook 从最开始就生效、带调用栈、无需部署；Service Worker 要安装后才能接管页面，会和网站自己的 Service Worker 冲突，而且要代理请求才能看到响应。
@@ -69,7 +69,7 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 
 ### 4. 跨域 iframe
 
-页面无法访问跨域 iframe 的内部，所以同样加载了探针和 bundle 的 iframe 页面由它自己的 CDP agent 调试，并与父页面的 agent 建立链接，和 Chrome 把进程外 iframe 当作独立 target 调试一样（`src/frame-links/`、`src/cdp-agent/core/child-targets.ts`）。
+页面无法访问跨域 iframe 的内部，所以同样加载了探针和 bundle 的 iframe 页面由它自己的 CDP agent 调试，并与父页面的 agent 建立链接，和 Chrome 把进程外 iframe 当作独立 target 调试一样（`src/frame-links/`、`src/cdp-agent/core/frames/child-targets.ts`）。
 
 - **双向信任。** 父页面列出它的 DevTools 可以调试的 iframe（`data-frame-origins`），iframe 列出可以调试它的页面（`data-parent-origins`）；两个名单默认都为空，只有双方互相列出才会建立链接。只有一方不够：父页面的名单防止页面把自己的 DevTools 交给它没选择的 iframe，iframe 的名单防止任何嵌入它的页面读取它。
 - **握手。** iframe 的 agent 就绪时（或父页面 ping 时：父页面的 agent 就绪、从往返缓存恢复、或自己被链接到它的父页面）向父页面发 hello。hello 和 ping 不带页面的任何内容，所以名单含通配符时可以发往任意源；父页面对受信任的 hello 回一个 welcome，只发往从 hello 读到的 iframe 的确切源，带上 frame id 和一个 `MessagePort`，iframe 再校验 welcome 的来源。端口上传 CDP 消息；由于端口没有关闭事件，关闭的一方发 bye。
@@ -78,7 +78,7 @@ devtools-anywhere 的工作原理和设计取舍。使用方法见[使用指南]
 
 ### 5. 沙箱 iframe（并入）
 
-没有 `allow-same-origin` 的沙箱 iframe（`src` 与页面同源、`about:blank` 或 `srcdoc`）在 Chrome 里属于页面自己的 target，所以它的 agent 像跨域 iframe 那样建立链接，但并入父页面的 target，而不是成为子 target（`src/frame-links/`、`src/cdp-agent/core/merged-frames.ts`）。
+没有 `allow-same-origin` 的沙箱 iframe（`src` 与页面同源、`about:blank` 或 `srcdoc`）在 Chrome 里属于页面自己的 target，所以它的 agent 像跨域 iframe 那样建立链接，但并入父页面的 target，而不是成为子 target（`src/frame-links/`、`src/cdp-agent/core/frames/merged-frames.ts`）。
 
 - **信任。** 父页面的 `data-frame-origins` 写了 `sandboxed` 才开启；任何源和通配符都不匹配 `null`。父页面只接受满足以下条件的 `null` 源 hello：消息受信任，来自 owner 元素自己的 `contentWindow`，并且该 owner 是页面里的不透明沙箱 frame（`src` 跨源的拒绝，同站的也一样）。welcome 没法发往不透明源，只能发往 `*`，但只投递给那个 window，带上 hello 的 nonce，并且要确认 hello 之后 frame 的文档（它的 loader id）没变。welcome 写明 `merge`，带上 id 号段和文档的 loader id；iframe 只有自己的源是 `null` 时才接受 merge。hello 的格式是 `{ type, id, ns? }`。
 - **id。** 每个新文档分配新的号段；同一文档重新链接（被 ping、从往返缓存恢复）时在 hello 里带上原号段并沿用，前提是它等于该元素最近一次分到的号段。文档离开时，父页面替它发 `Runtime.executionContextDestroyed`；重新加载后的执行上下文 id 不复用，与 Chrome 一致。iframe 的 agent 在自己的号段里分配 id：节点、backend 节点和执行上下文 id 从 `ns × 2^32` 起，对象、样式表、脚本、请求和 loader 的 id 加 `m{ns}.` 前缀。id 的归属直接从 id 上读出，不用维护映射表。

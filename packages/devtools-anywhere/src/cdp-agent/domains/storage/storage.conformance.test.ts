@@ -1,8 +1,8 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
-import { diffSubset, launch, openPage, waitForBoth } from '../../../../test-support/conformance.ts';
+import { diffSubset, launch, openPage, waitForBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 type Commands = ProtocolMapping.Commands;
@@ -12,44 +12,46 @@ let t: TestPage;
 let origin: string;
 let storageKey: string;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'DOMStorage.domStorageItemAdded',
-    'DOMStorage.domStorageItemUpdated',
-    'DOMStorage.domStorageItemRemoved',
-  ]);
-  origin = new URL(env.baseUrl).origin;
-  storageKey = origin + '/';
-  await t.page.evaluate(async () => {
-    localStorage.clear();
-    localStorage.setItem('a', '1');
-    localStorage.setItem('b', 'two');
-    sessionStorage.setItem('s', 'session');
-    await new Promise<void>((resolve, reject) => {
-      const open = indexedDB.open('db1', 3);
-      open.onupgradeneeded = () => {
-        const store = open.result.createObjectStore('users', { keyPath: 'id' });
-        store.createIndex('byName', 'name', { unique: false });
-        open.result.createObjectStore('plain', { autoIncrement: true });
-      };
-      open.onsuccess = () => {
-        const tx = open.result.transaction('users', 'readwrite');
-        tx.objectStore('users').put({ id: 1, name: 'ann' });
-        tx.objectStore('users').put({ id: 2, name: 'bob' });
-        tx.objectStore('users').put({ id: 3, name: 'cid' });
-        tx.oncomplete = () => {
-          open.result.close();
-          resolve();
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'DOMStorage.domStorageItemAdded',
+      'DOMStorage.domStorageItemUpdated',
+      'DOMStorage.domStorageItemRemoved',
+    ]);
+    origin = new URL(env.baseUrl).origin;
+    storageKey = origin + '/';
+    await t.page.evaluate(async () => {
+      localStorage.clear();
+      localStorage.setItem('a', '1');
+      localStorage.setItem('b', 'two');
+      sessionStorage.setItem('s', 'session');
+      await new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('db1', 3);
+        open.onupgradeneeded = () => {
+          const store = open.result.createObjectStore('users', { keyPath: 'id' });
+          store.createIndex('byName', 'name', { unique: false });
+          open.result.createObjectStore('plain', { autoIncrement: true });
         };
-      };
-      open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const tx = open.result.transaction('users', 'readwrite');
+          tx.objectStore('users').put({ id: 1, name: 'ann' });
+          tx.objectStore('users').put({ id: 2, name: 'bob' });
+          tx.objectStore('users').put({ id: 3, name: 'cid' });
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+        };
+        open.onerror = () => reject(open.error);
+      });
+      const cache = await caches.open('c1');
+      await cache.put('/cached?x=1', new Response('hello', { headers: { 'content-type': 'text/plain' } }));
     });
-    const cache = await caches.open('c1');
-    await cache.put('/cached?x=1', new Response('hello', { headers: { 'content-type': 'text/plain' } }));
-  });
-});
-after(() => env?.close());
+  },
+  () => env?.close()
+);
 
 const both = <M extends keyof Commands>(method: M, ...params: Commands[M]['paramsType']) =>
   Promise.all([t.ours.send(method, ...params), t.chrome.send(method, ...params)]);

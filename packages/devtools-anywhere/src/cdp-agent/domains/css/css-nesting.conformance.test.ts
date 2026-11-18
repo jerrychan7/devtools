@@ -1,9 +1,9 @@
 // CSS nesting in CSS.getMatchedStylesForNode: nested rules, nested declarations and forced
 // pseudo-classes in nested rules (`&:hover`), compared with Chrome.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -21,24 +21,26 @@ const STYLE = `
   .n-hover { &:hover { outline-color: rgb(5, 0, 0); } }
 `;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(style => {
-    const s = document.createElement('style');
-    s.textContent = style;
-    document.head.appendChild(s);
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div class="n-outer" id="n-o"><p class="n-inner" id="n-p">x</p><b id="n-b"></b></div><i class="n-hover" id="n-h"></i>'
-    );
-  }, STYLE);
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('CSS.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(style => {
+      const s = document.createElement('style');
+      s.textContent = style;
+      document.head.appendChild(s);
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div class="n-outer" id="n-o"><p class="n-inner" id="n-p">x</p><b id="n-b"></b></div><i class="n-hover" id="n-h"></i>'
+      );
+    }, STYLE);
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('CSS.enable');
+    }
+  },
+  () => env?.close()
+);
 
 async function nodeId(side: Side, selector: string) {
   const { root } = await side.send('DOM.getDocument', { depth: -1 });

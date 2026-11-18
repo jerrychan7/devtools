@@ -1,19 +1,21 @@
 // The probe's options: a locked shell mode, data-no-toggler, and the global <devtools-anywhere>
 // the probe mounts under <html>, whatever the page has.
-import { after, before, beforeEach, test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 const warnings: string[] = [];
 
-before(async () => {
-  env = await launch();
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+  },
+  () => env?.close()
+);
 beforeEach(async () => {
   await page?.close();
   assert.ok(env);

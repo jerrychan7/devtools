@@ -2,22 +2,24 @@
 // const / class kept across commands and seen by page scripts, declared again without error, a
 // const that cannot be assigned, top-level await. Each side gets its own page, since the
 // declarations are global.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let chromePage: TestPage;
 let oursPage: TestPage;
 
-before(async () => {
-  env = await launch();
-  chromePage = await openPage(env, []);
-  oursPage = await openPage(env, []);
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    chromePage = await openPage(env, []);
+    oursPage = await openPage(env, []);
+  },
+  () => env?.close()
+);
 
 /** What a result says, without object ids and stacks. */
 function outcome(response: Protocol.Runtime.EvaluateResponse) {

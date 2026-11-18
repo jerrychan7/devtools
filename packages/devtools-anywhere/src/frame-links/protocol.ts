@@ -1,5 +1,5 @@
 // The handshake between a page and a cross-origin iframe's page that link their CDP agents (see
-// cdp-agent/core/child-targets.ts), both with the bundle loaded, each trusting the other's origin
+// cdp-agent/core/frames/child-targets.ts), both with the bundle loaded, each trusting the other's origin
 // (probe-script.ts, data-frame-origins and data-parent-origins):
 //
 //   iframe → parent window   { type: FRAME_HELLO, id, ns? }  when its agent is ready, or pinged
@@ -18,7 +18,7 @@
 //
 // A sandboxed iframe's (opaque origin, `null`, when data-frame-origins names `sandboxed`) welcome
 // can only go to `*`, which no origin check backs: it goes to that iframe's window alone, once its
-// element is known to show an opaque frame of this page (core/frames.ts, OpaqueFrame) whose
+// element is known to show an opaque frame of this page (core/frames/frames.ts, OpaqueFrame) whose
 // document has not changed since the hello (its loader id), and carries the hello's id, the only
 // one the iframe accepts; the iframe takes a `merge` welcome only when its own origin is opaque.
 import type { OriginPattern } from './origins';
@@ -48,7 +48,7 @@ export interface FrameHello {
   /**
    * A merged iframe's document linked before (pinged, back from the back/forward cache): the
    * namespace its ids are in, which the parent gives it again if it gave it to that element last
-   * (cdp-agent/core/merged-frames.ts, nsFor).
+   * (cdp-agent/core/frames/merged-frames.ts, nsFor).
    */
   ns?: number;
 }
@@ -64,14 +64,14 @@ export interface FrameWelcome {
   /**
    * `target`: the iframe is a child target of the parent's. `merge`: an opaque-origin (sandboxed)
    * iframe, which Chrome keeps in the parent's target: its agent is merged into the parent's
-   * (cdp-agent/core/merged-frames.ts), its ids in namespace `ns`.
+   * (cdp-agent/core/frames/merged-frames.ts), its ids in namespace `ns`.
    */
   mode: 'target' | 'merge';
   /** The namespace of the merged iframe's ids (1 or more); 0 for a child target. */
   ns: number;
   /**
    * A merged iframe's: the loader id the parent gives its document, which Chrome gives the
-   * document's requests too (cdp-agent/core/frames.ts, opaqueLoaderId).
+   * document's requests too (cdp-agent/core/frames/frames.ts, opaqueLoaderId).
    */
   loaderId?: string;
 }

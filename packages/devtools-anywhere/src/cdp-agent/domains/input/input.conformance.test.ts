@@ -1,6 +1,6 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -32,14 +32,15 @@ const RECORDED = [
   'submit',
 ];
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.setViewport({ width: 800, height: 600 });
-  await t.page.evaluate(RECORDED => {
-    document.body.insertAdjacentHTML(
-      'afterbegin',
-      `<div id="input-test" style="position: fixed; inset: 0; background: #fff; z-index: 1">
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.setViewport({ width: 800, height: 600 });
+    await t.page.evaluate(RECORDED => {
+      document.body.insertAdjacentHTML(
+        'afterbegin',
+        `<div id="input-test" style="position: fixed; inset: 0; background: #fff; z-index: 1">
         <button id="btn" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 40px">button</button>
         <form id="form" onsubmit="event.preventDefault()">
           <input id="field" style="position: absolute; left: 10px; top: 70px; width: 200px; height: 30px" />
@@ -48,14 +49,15 @@ before(async () => {
           <div style="height: 1000px">tall</div>
         </div>
       </div>`
-    );
-    const events: string[] = [];
-    for (const type of RECORDED)
-      addEventListener(type, e => events.push(`${type}:${e.target instanceof Element ? e.target.id : ''}`), true);
-    window.__inputEvents = events;
-  }, RECORDED);
-});
-after(() => env?.close());
+      );
+      const events: string[] = [];
+      for (const type of RECORDED)
+        addEventListener(type, e => events.push(`${type}:${e.target instanceof Element ? e.target.id : ''}`), true);
+      window.__inputEvents = events;
+    }, RECORDED);
+  },
+  () => env?.close()
+);
 
 /** Resets the page, runs the steps through one side and returns what the page saw. */
 async function run(side: Side, steps: (side: Side) => Promise<unknown>) {

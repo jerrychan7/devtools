@@ -1,18 +1,19 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      `<div id="bm-host" style="position:absolute;left:300px;top:200px">
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(() =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<div id="bm-host" style="position:absolute;left:300px;top:200px">
         <div id="bm-plain" style="width:50px;height:20px;margin:4px;border:2px solid;padding:3px"></div>
         <div id="bm-scale" style="width:50px;height:20px;margin:4px;border:2px solid;padding:3px;transform:scale(2);translate:10% 50%"></div>
         <div id="bm-rotate" style="width:50px;height:20px;margin:4px;border:2px solid;padding:3px;transform:rotate(30deg)"></div>
@@ -30,15 +31,16 @@ before(async () => {
       <div style="transform:rotateX(30deg);width:150px;height:60px"><div id="bm-flat" style="width:60px;height:40px;transform:rotateY(30deg)"></div></div>
       <svg width="200" height="120" style="margin:5px;border:1px solid" viewBox="0 0 100 60"><g transform="translate(10 5)"><rect id="bm-svg-rect" x="5" y="6" width="30" height="20" stroke="black" stroke-width="4"/><circle id="bm-svg-circle" cx="60" cy="30" r="10" transform="rotate(30)"/></g></svg>
       <div style="width:120px;transform:rotate(10deg)"><span id="bm-inline" style="padding:2px;border:1px solid">some words that wrap over lines here</span></div>`
-    )
-  );
-  await t.page.evaluate(() => {
-    scrollTo(0, 25);
-    const scroller = document.getElementById('bm-scroller');
-    if (scroller) scroller.scrollTop = 60;
-  });
-});
-after(() => env?.close());
+      )
+    );
+    await t.page.evaluate(() => {
+      scrollTo(0, 25);
+      const scroller = document.getElementById('bm-scroller');
+      if (scroller) scroller.scrollTop = 60;
+    });
+  },
+  () => env?.close()
+);
 
 async function nodeId(side: TestPage['chrome'], selector: string) {
   const { root } = await side.send('DOM.getDocument', { depth: 0 });

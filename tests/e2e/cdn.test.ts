@@ -3,10 +3,10 @@
 // CDN is played by the static server, through request interception: the probe's package from the
 // build, the frontend's entry page from the fake frontend.
 import { existsSync } from 'node:fs';
-import { after, before, beforeEach, test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { HTTPRequest, Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
+import { launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 const CDN = 'https://cdn.jsdelivr.net/npm/';
@@ -17,11 +17,13 @@ let env: Env | undefined;
 let page: Page;
 let url = '';
 
-before(async () => {
-  env = await launch();
-  url = env.baseUrl + '/cdn.html';
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    url = env.baseUrl + '/cdn.html';
+  },
+  () => env?.close()
+);
 beforeEach(async () => {
   await page?.close();
   assert.ok(env);

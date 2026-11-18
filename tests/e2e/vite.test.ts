@@ -1,5 +1,5 @@
 // The Vite plugin injects the probe first in <head> and serves everything it needs.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -10,7 +10,7 @@ import type { Protocol } from 'devtools-protocol';
 import { createServer } from 'vite';
 import type { ViteDevServer } from 'vite';
 import devtoolsAnywhere from '@devtools-anywhere/vite-plugin';
-import { frontendRequest } from '../support/browser.ts';
+import { frontendRequest, setUpAndTearDown } from '../support/browser.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let server: ViteDevServer | undefined;
@@ -24,33 +24,35 @@ const localUrl = () => {
   return url;
 };
 
-before(async () => {
-  server = await createServer({
-    root: path.join(here, 'vite-app'),
-    logLevel: 'silent',
-    server: { port: 0, strictPort: false },
-    plugins: [
-      devtoolsAnywhere({
-        devtoolsFrontendPath: path.join(here, 'frontends', 'fake-frontend.html'),
-        openImmediately: true,
-        defaultShellMode: 'off',
-        shellModeLocked: true,
-        noToggler: true,
-      }),
-    ],
-  });
-  await server.listen();
-  browser = await puppeteer.launch({
-    executablePath: process.env['CHROME_PATH'] || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: true,
-  });
-  page = await browser.newPage();
-  await page.goto(localUrl());
-});
-after(async () => {
-  await browser?.close();
-  await server?.close();
-});
+setUpAndTearDown(
+  async () => {
+    server = await createServer({
+      root: path.join(here, 'vite-app'),
+      logLevel: 'silent',
+      server: { port: 0, strictPort: false },
+      plugins: [
+        devtoolsAnywhere({
+          devtoolsFrontendPath: path.join(here, 'frontends', 'fake-frontend.html'),
+          openImmediately: true,
+          defaultShellMode: 'off',
+          shellModeLocked: true,
+          noToggler: true,
+        }),
+      ],
+    });
+    await server.listen();
+    browser = await puppeteer.launch({
+      executablePath: process.env['CHROME_PATH'] || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      headless: true,
+    });
+    page = await browser.newPage();
+    await page.goto(localUrl());
+  },
+  async () => {
+    await browser?.close();
+    await server?.close();
+  }
+);
 
 test('the probe is the first script to run', async () => {
   // Module scripts (like Vite's own client) are deferred; the probe must be the first classic one.

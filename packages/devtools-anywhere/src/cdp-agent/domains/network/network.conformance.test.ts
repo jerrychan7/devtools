@@ -1,24 +1,26 @@
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, EventName, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'Network.requestWillBeSent',
-    'Network.responseReceived',
-    'Network.loadingFinished',
-    'Network.loadingFailed',
-  ]);
-  await t.chrome.send('Network.enable');
-  await t.ours.send('Network.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'Network.requestWillBeSent',
+      'Network.responseReceived',
+      'Network.loadingFinished',
+      'Network.loadingFailed',
+    ]);
+    await t.chrome.send('Network.enable');
+    await t.ours.send('Network.enable');
+  },
+  () => env?.close()
+);
 
 const header = (headers: Record<string, unknown>, name: string) =>
   Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];

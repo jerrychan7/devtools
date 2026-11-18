@@ -211,6 +211,9 @@ importers:
       '@zumer/snapdom':
         specifier: ^3.3.5
         version: 3.3.5
+      dom-accessibility-api:
+        specifier: ^0.7.1
+        version: 0.7.1
     devDependencies:
       '@devtools-anywhere/relay-core':
         specifier: workspace:*
@@ -1346,6 +1349,9 @@ packages:
     resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
     engines: {node: '>=0.3.1'}
 
+  dom-accessibility-api@0.7.1:
+    resolution: {integrity: sha512-vdnCeZD+3wZ+8h8xXL/ZtBlvvoobOFyPzSiIfO6sGOZDqjFx4aLMAjZhl4rawj5xYz3UwP6Tgvyh0iH4IOCVnQ==}
+
   emoji-regex@8.0.0:
     resolution: {integrity: sha1-6Bj9ac5cz8tARZT4QpY79TFkzDc=}
 
@@ -2445,6 +2451,8 @@ snapshots:
   devtools-protocol@0.0.1721318: {}
 
   diff@8.0.4: {}
+
+  dom-accessibility-api@0.7.1: {}
 
   emoji-regex@8.0.0: {}
 

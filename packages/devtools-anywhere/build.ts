@@ -1,8 +1,9 @@
 // Bundles the package with esbuild. Type declarations are emitted separately by tsc.
 // `--watch` rebuilds on every change (`pnpm dev`).
 import { context, type BuildOptions } from 'esbuild';
-import { rmSync } from 'node:fs';
-import { BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
+import { createHash } from 'node:crypto';
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { ACCESSIBILITY_SCRIPT, BUNDLE_SCRIPT, PROBE_SCRIPT, SNAPDOM_SCRIPT } from './src/embedder.ts';
 
 const watch = process.argv.includes('--watch');
 // In watch mode the other packages' watchers read this dist/: keep it in place.
@@ -11,13 +12,24 @@ if (!watch) for (const dir of ['dist', 'dist-test']) rmSync(dir, { recursive: tr
 /** An entry point's name, for the file it is built to. */
 const entry = (file: string) => file.replace(/\.js$/, '');
 
+/**
+ * The Service Worker's `debugger` rewrite, as a hash of the code that finds the sites: a record of
+ * sites another build wrote is ignored (src/debugger-rewrite/cache.ts).
+ */
+const rewriteBuild = createHash('sha256')
+  .update(
+    ['src/cdp-agent/core/lexer.ts', 'src/debugger-rewrite/rewrite.ts'].map(f => readFileSync(f, 'utf8')).join('\0')
+  )
+  .digest('hex')
+  .slice(0, 16);
+
 const common: BuildOptions = { bundle: true, target: 'es2020', sourcemap: true, logLevel: 'info' };
 
 const builds: BuildOptions[] = [
   // No ESM build: the package's runtime is the two scripts, and its index only types.
   {
     ...common,
-    define: { DEVTOOLS_ANYWHERE_TEST: 'false' },
+    define: { DEVTOOLS_ANYWHERE_TEST: 'false', DEVTOOLS_ANYWHERE_REWRITE_BUILD: JSON.stringify(rewriteBuild) },
     entryPoints: {
       [entry(BUNDLE_SCRIPT)]: 'src/iife.ts',
       [entry(PROBE_SCRIPT)]: 'src/probe.ts',
@@ -37,6 +49,14 @@ const builds: BuildOptions[] = [
     minify: true,
     outdir: 'dist',
   },
+  // The accessibility tree's computation, for the Accessibility domain to load on demand.
+  {
+    ...common,
+    entryPoints: { [entry(ACCESSIBILITY_SCRIPT)]: 'src/cdp-agent/domains/accessibility/ax-node.ts' },
+    format: 'esm',
+    minify: true,
+    outdir: 'dist',
+  },
   // The two scripts again for the tests, in dist-test/ (not published): the bundle also exposes
   // internals the tests read in the page, as `window.__devtoolsAnywhereTest`.
   {
@@ -49,6 +69,16 @@ const builds: BuildOptions[] = [
     external: ['@zumer/snapdom'],
   },
 ];
+
+// Chromium's user agent style sheet, which the bundle loads from next to it on demand
+// (src/cdp-agent/domains/css/user-agent/README.md); it must be that of the pinned Chrome.
+const userAgent = 'src/cdp-agent/domains/css/user-agent';
+mkdirSync('dist', { recursive: true });
+copyFileSync(`${userAgent}/html.css`, 'dist/chromium-html.css');
+copyFileSync(`${userAgent}/COPYING.LIB`, 'dist/chromium-html.LICENSE.txt');
+const pinned: unknown = JSON.parse(readFileSync('package.json', 'utf8')).chrome;
+if (readFileSync(`${userAgent}/CHROME_VERSION`, 'utf8').trim() !== pinned)
+  console.warn(`${userAgent}/html.css is not Chrome ${String(pinned)}'s: run scripts/sync-user-agent-css.ts`);
 
 const contexts = await Promise.all(builds.map(options => context(options)));
 if (watch) {

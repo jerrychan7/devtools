@@ -7,6 +7,7 @@ import {
   isShellPage,
   isTrusted,
   markOwn,
+  markOwnPopover,
   OWN_ATTRIBUTE,
   readShellConfig,
   refuseShell,
@@ -15,10 +16,11 @@ import {
   storeShellOpen,
   type CdpSession,
   type ParentLink,
+  type AccessibilityLoader,
   type SnapdomLoader,
 } from '../cdp-agent';
 import { connectFrontend, emulateInShell, relayShell } from '../connection';
-import { SHELL_HANDSHAKE } from '../shell-messages';
+import { REWRITE_CACHE, SHELL_HANDSHAKE } from '../shell-messages';
 import type { Grip } from '../grip';
 import { isDockSide, isEmbedderRequest } from './request';
 import {
@@ -54,6 +56,7 @@ import {
   HIDDEN_NOTICE,
   PROBE_SCRIPT,
   SNAPDOM_SCRIPT,
+  ACCESSIBILITY_SCRIPT,
   REQUEST_KEY,
   type DockSide,
   type FrontendNotice,
@@ -69,6 +72,7 @@ let bundleUrl = '';
 export function setBundleUrl(url: string) {
   bundleUrl = url;
   loadSnapdom = () => import(/* @vite-ignore */ new URL(SNAPDOM_SCRIPT, url).href);
+  loadAccessibility = () => import(/* @vite-ignore */ new URL(ACCESSIBILITY_SCRIPT, url).href);
 }
 
 /**
@@ -77,8 +81,16 @@ export function setBundleUrl(url: string) {
  */
 let loadSnapdom: SnapdomLoader = () => Promise.reject(new Error('snapDOM: the bundle URL is not known'));
 
-/** The CDP session of a page, with the screencast's renderer, and in shell mode the shell's device metrics. */
-export const createPageSession = () => emulateInShell(createCdpSession({ loadSnapdom: () => loadSnapdom() }));
+/** The accessibility tree's computation, loaded like snapDOM: the copy next to the bundle (accessibility.js). */
+let loadAccessibility: AccessibilityLoader = () =>
+  Promise.reject(new Error('accessibility.js: the bundle URL is not known'));
+
+/**
+ * The CDP session of a page, with the screencast's renderer and the accessibility tree, and in
+ * shell mode the shell's device metrics.
+ */
+export const createPageSession = () =>
+  emulateInShell(createCdpSession({ loadSnapdom: () => loadSnapdom(), loadAccessibility: () => loadAccessibility() }));
 
 /**
  * Whether the browser has the top layer for popovers. There the toggler and the panel are above
@@ -124,6 +136,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   private toggler: HTMLButtonElement;
   private frame: HTMLIFrameElement;
   private loadedUrl = '';
+  /** Stops hiding it while linked to the parent's DevTools (hideWhileLinked), while connected. */
+  private unwatchLink: (() => void) | null = null;
   private disconnect: (() => void) | null = null;
   private frontendOrigin = '';
   /** Whether DevTools is shown. */
@@ -169,6 +183,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
     this.panel = part<HTMLDivElement>('.panel');
     this.frame = part<HTMLIFrameElement>('iframe');
     this.toggler = part<HTMLButtonElement>('.toggler');
+    markOwn(this.panel);
+    markOwn(this.toggler);
     this.toggler.addEventListener('click', () => {
       // The F12 button in the shell's page toggles the shell's element.
       if (!shellTogglers.has(this)) this.setOpen(!this.isOpen);
@@ -391,6 +407,8 @@ export class DevtoolsAnywhereElement extends HTMLElement {
           ?.getRegistration(config.serviceWorker)
           .catch(() => undefined);
         await registration?.unregister();
+        // The worker's notes on the scripts it rewrote are of no use without it.
+        await globalThis.caches?.delete(REWRITE_CACHE).catch(() => {});
       }
     } finally {
       // Reload even if the worker could not be unregistered: shell mode is already off.
@@ -481,12 +499,16 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Connects the page's CDP session (or, with `shell`, registers the Service Worker) and lays out the panel. */
   connectedCallback() {
+    markOwnPopover(this.panel);
+    markOwnPopover(this.toggler);
     // Registers the element so the CDP domains hide it from the Elements panel; the
     // attribute only isolates its styles, as the page can set it too. A page that writes
     // <devtools-anywhere> itself (a supported way to mount it) gets it hidden too, with
     // whatever it puts inside.
     markOwn(this);
     this.setAttribute(OWN_ATTRIBUTE, '');
+    this.grip.attach();
+    if (globalElements.has(this)) this.unwatchLink ??= hideWhileLinked(this);
     // Only an element the page placed lets it style DevTools' iframe; known once connected, as a
     // global element is marked after it is created.
     this.frame.part.toggle('iframe', isCustom(this));
@@ -543,6 +565,12 @@ export class DevtoolsAnywhereElement extends HTMLElement {
 
   /** Disconnects the frontend and stops listening to it. */
   disconnectedCallback() {
+    markOwnPopover(this.panel, false);
+    markOwnPopover(this.toggler, false);
+    // Its pointer listener would keep the element alive once the page drops it.
+    this.grip.detach();
+    this.unwatchLink?.();
+    this.unwatchLink = null;
     // Removed by the page: the shell shows its own button again until it is back.
     if (shellTogglers.has(this)) this.shellLink?.detach();
     customElementsLoading.delete(this);
@@ -642,20 +670,40 @@ export class DevtoolsAnywhereElement extends HTMLElement {
   }
 }
 
+/** The global elements hidden for a link to the parent's DevTools. */
+const hiddenByLink = new WeakSet<HTMLElement>();
+
 /**
  * Hides a global element, its F12 button and panel, while the page, in a cross-origin iframe, is
- * debugged from its parent's DevTools (frame-links/); shows it again once the link closes.
+ * debugged from its parent's DevTools (frame-links/); shows it again once the link closes. For
+ * as long as the element is connected: returns what stops it, as the page's links are module
+ * state that would otherwise keep a removed element alive.
  */
-function hideWhileLinked(element: HTMLElement) {
+function hideWhileLinked(element: HTMLElement): () => void {
+  let offClose: (() => void) | undefined;
+  const show = () => {
+    hiddenByLink.delete(element);
+    // Global elements after the first stay hidden.
+    if (!inactiveGlobals.has(element) && !childTargets.parent) element.style.removeProperty('display');
+  };
   const follow = (link: ParentLink) => {
+    hiddenByLink.add(element);
     element.style.setProperty('display', 'none', 'important');
-    link.onClose(() => {
-      // Global elements after the first stay hidden.
-      if (!inactiveGlobals.has(element) && !childTargets.parent) element.style.removeProperty('display');
+    offClose?.();
+    offClose = link.onClose(() => {
+      offClose = undefined;
+      show();
     });
   };
   if (childTargets.parent) follow(childTargets.parent);
-  childTargets.onParent(follow);
+  // Hidden for a link that closed while it was out of the document.
+  else if (hiddenByLink.has(element)) show();
+  const offParent = childTargets.onParent(follow);
+  return () => {
+    offParent();
+    offClose?.();
+    offClose = undefined;
+  };
 }
 
 /** Creates a global element with the probe's options: only the first one connected works. @internal */
@@ -664,7 +712,6 @@ export function createGlobalElement(config: GlobalElementConfig): DevtoolsAnywhe
     const element = new DevtoolsAnywhereElement();
     globalElements.add(element);
     globalConfigs.set(element, config);
-    hideWhileLinked(element);
     if (config.frontend && !globals.probeFrontend) {
       globals.probeFrontend = config.frontend;
       customElementsLoading.forEach(load => load());

@@ -1,32 +1,34 @@
 // <devtools-anywhere> in the top layer: nothing the page draws covers the panel or the toggler,
 // and the page's own popovers keep working.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { chooseDockSide, clickF12, frontendRequest, launch } from '../support/browser.ts';
+import { chooseDockSide, clickF12, frontendRequest, launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.setViewport({ width: 1000, height: 800 });
-  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
-  await page.waitForFunction(() => {
-    const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
-    return !!panel && getComputedStyle(panel).display !== 'none';
-  });
-  // A page element at the highest z-index, after the element: without the top layer it would win.
-  await page.evaluate(() =>
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<div id="cover" style="position:fixed;inset:0;z-index:2147483647;background:rgba(255,0,0,.1)"></div>'
-    )
-  );
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.setViewport({ width: 1000, height: 800 });
+    await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('devtools-anywhere')?.shadowRoot?.querySelector('.panel');
+      return !!panel && getComputedStyle(panel).display !== 'none';
+    });
+    // A page element at the highest z-index, after the element: without the top layer it would win.
+    await page.evaluate(() =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<div id="cover" style="position:fixed;inset:0;z-index:2147483647;background:rgba(255,0,0,.1)"></div>'
+      )
+    );
+  },
+  () => env?.close()
+);
 
 /** The element's part, its box, and what is hit at its center. */
 const probe = (selector: string) =>

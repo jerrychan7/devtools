@@ -1,37 +1,39 @@
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  // Registered after the CDP agent (and so the probe) is installed.
-  await t.page.evaluate(() => {
-    const el = document.getElementById('app');
-    if (!el) throw new Error('#app not found');
-    el.addEventListener('click', function onClick() {});
-    el.addEventListener('click', function onClickCapture() {}, true);
-    el.addEventListener('scroll', function onScroll() {}, { passive: true });
-    el.addEventListener('keydown', function onceKey() {}, { once: true });
-    el.addEventListener('focus', { handleEvent() {} });
-    const dup = function duplicate() {};
-    el.addEventListener('blur', dup);
-    el.addEventListener('blur', dup);
-    const removed = function removed() {};
-    el.addEventListener('input', removed);
-    el.removeEventListener('input', removed);
-    const controller = new AbortController();
-    el.addEventListener('change', function aborted() {}, { signal: controller.signal });
-    controller.abort();
-    el.onmouseover = function onMouseOver() {};
-    window.__fireOnce = () => el.dispatchEvent(new KeyboardEvent('keydown'));
-  });
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    // Registered after the CDP agent (and so the probe) is installed.
+    await t.page.evaluate(() => {
+      const el = document.getElementById('app');
+      if (!el) throw new Error('#app not found');
+      el.addEventListener('click', function onClick() {});
+      el.addEventListener('click', function onClickCapture() {}, true);
+      el.addEventListener('scroll', function onScroll() {}, { passive: true });
+      el.addEventListener('keydown', function onceKey() {}, { once: true });
+      el.addEventListener('focus', { handleEvent() {} });
+      const dup = function duplicate() {};
+      el.addEventListener('blur', dup);
+      el.addEventListener('blur', dup);
+      const removed = function removed() {};
+      el.addEventListener('input', removed);
+      el.removeEventListener('input', removed);
+      const controller = new AbortController();
+      el.addEventListener('change', function aborted() {}, { signal: controller.signal });
+      controller.abort();
+      el.onmouseover = function onMouseOver() {};
+      window.__fireOnce = () => el.dispatchEvent(new KeyboardEvent('keydown'));
+    });
+  },
+  () => env?.close()
+);
 
 async function listeners(side: Side) {
   const { result } = await side.send('Runtime.evaluate', {

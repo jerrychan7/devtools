@@ -6,11 +6,11 @@ This package contains the third-party code below, with its copyright notices and
 
 | Component | Version | License | Copyright | Included in |
 | --- | --- | --- | --- | --- |
-| [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | 8c62f844ad8e0664ff41a633bfc17c472f1c5fd6 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
+| [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | 047c90eca37c7170d826d72245d5df9281989cf3 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
 
 ### Chrome DevTools frontend
 
-- Version: 8c62f844ad8e0664ff41a633bfc17c472f1c5fd6
+- Version: 047c90eca37c7170d826d72245d5df9281989cf3
 - License: BSD-3-Clause
 - Copyright: The Chromium Authors
 - Source: https://chromium.googlesource.com/devtools/devtools-frontend

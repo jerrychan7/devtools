@@ -53,7 +53,7 @@ import {
 import type { DevtoolsAnywhereApi } from './api';
 import { BUNDLE_SCRIPT, PROBE_SCRIPT } from './embedder';
 import type { ProbeScriptAttributes } from './probe-script';
-import { SHELL_QUERY, SHELL_REMOTE } from './shell-messages';
+import { REWRITE_CACHE, SHELL_QUERY, SHELL_REMOTE } from './shell-messages';
 
 const script = document.currentScript as HTMLScriptElement | null;
 // Shell configs may only point where this script trusts (trust.ts).
@@ -171,6 +171,7 @@ try {
             if (!worker || !isShellWorker(worker.scriptURL)) return;
             if (r.active && (await shellOpen(r.active))) return;
             await r.unregister();
+            await globalThis.caches?.delete(REWRITE_CACHE).catch(() => {});
           })
         )
       )

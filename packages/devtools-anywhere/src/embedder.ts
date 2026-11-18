@@ -68,6 +68,11 @@ export const PROBE_SCRIPT = 'probe.iife.js';
 export const BUNDLE_SCRIPT = 'devtools-anywhere.iife.js';
 /** snapDOM, the screencast's renderer, loaded on demand. */
 export const SNAPDOM_SCRIPT = 'snapdom.js';
+/**
+ * The accessibility tree's computation, loaded on demand. Not in OWN_SCRIPTS: the frontend's
+ * stored ignore-list rule names those three, and users keep it in their settings.
+ */
+export const ACCESSIBILITY_SCRIPT = 'accessibility.js';
 export const OWN_SCRIPTS: readonly string[] = [PROBE_SCRIPT, BUNDLE_SCRIPT, SNAPDOM_SCRIPT];
 
 /** What the embedder passes the frontend in its URL's hash (`#?embedded=…&dock=…`). */

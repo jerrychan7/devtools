@@ -314,6 +314,8 @@ function hookFetch(track: Track, update: Update, probe: Probe, w: Realm) {
       // An invalid URL or header: fetch itself rejects, without making a request.
       return origFetch.call(this, input, init);
     }
+    // What DevTools does to it (Network.setBlockedURLs, …): its headers are the ones reported.
+    const x = probe.intercept?.(url, 'Fetch', (k, v) => requestHeaders.set(k, v));
     const postData = bodyToString(init?.body);
     // Other bodies (in a Request, FormData, Blob, buffers) are read from a copy, afterwards.
     let copy: Request | undefined;
@@ -342,9 +344,18 @@ function hookFetch(track: Track, update: Update, probe: Probe, w: Realm) {
       },
       () => {}
     );
+    if (x?.fail) {
+      update(rec, { state: 'failed', ...x.fail, endTime: now() });
+      return Promise.reject(new w.TypeError('Failed to fetch'));
+    }
     let promise: Promise<Response>;
     try {
-      promise = origFetch.call(this, input, init);
+      promise = x
+        ? origFetch.call(
+            this,
+            new w.Request(input, { ...init, headers: requestHeaders, ...(x.noCache && { cache: 'no-store' }) })
+          )
+        : origFetch.call(this, input, init);
     } catch (err) {
       failed(rec, err);
       return Promise.reject(err);
@@ -418,6 +429,7 @@ interface XhrInfo {
   method: string;
   url: string;
   headers: Record<string, string>;
+  async: boolean;
 }
 
 function hookXhr(track: Track, update: Update, listen: Listen, probe: Probe, w: Realm) {
@@ -444,6 +456,7 @@ function hookXhr(track: Track, update: Update, listen: Listen, probe: Probe, w: 
       method: String(args[0]).toUpperCase(),
       url: new URL(String(args[1]), w.document.baseURI).href,
       headers: {},
+      async: args[2] !== false,
     });
     return Reflect.apply(origOpen, this, args);
   } as typeof proto.open;
@@ -458,15 +471,26 @@ function hookXhr(track: Track, update: Update, listen: Listen, probe: Probe, w: 
     const info = infos.get(this);
     if (info) {
       const previous = current.get(this);
+      const requestHeaders = { ...info.headers };
+      const x = probe.intercept?.(info.url, 'XHR', (k, v) => {
+        origSetRequestHeader.call(this, k, v);
+        requestHeaders[k] = v;
+      });
       // Tracked before sending: a synchronous request completes within send().
       const rec = track({
         type: 'XHR',
         method: info.method,
         url: info.url,
-        requestHeaders: info.headers,
+        requestHeaders,
         postData: bodyToString(body),
         stack: new Error().stack,
       });
+      if (x?.fail) {
+        update(rec, { state: 'failed', ...x.fail, endTime: now() });
+        // A URL that cannot load fails it as the network would: an error event, or a throw when synchronous.
+        origOpen.call(this, info.method, 'x:', info.async);
+        return origSend.call(this);
+      }
       if (!watched.has(this)) {
         watched.add(this);
         watchXhr(this, current, update, listen, probe, w);

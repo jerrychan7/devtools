@@ -88,7 +88,7 @@ tests/            tests that span packages
   e2e/            probe → CDP → frontend
   support/        launches Chrome with the static server
 playground/       pages and server for development
-docs/             usage guide, design and the README's screenshots
+docs/             usage guide, limitations, design and the README's screenshots
 experiments/      validation records
 ```
 
@@ -96,11 +96,11 @@ experiments/      validation records
 
 | Change | Where | How to see it |
 |---|---|---|
-| Early capture (console, errors, requests) | `packages/devtools-anywhere/src/cdp-agent/probe/` | Keep it small: it runs synchronously before the page's code. Check `probe.iife.js` size (min+gzip) |
+| Early capture (console, errors, requests) | `packages/devtools-anywhere/src/cdp-agent/probe/` | Keep it small: it runs synchronously before the page's code. Check the size of `probe.iife.js` as raw bytes after minification (`wc -c`), not gzip |
 | A CDP domain | `packages/devtools-anywhere/src/cdp-agent/domains/` | Playground, plus a conformance test |
 | The element, connection, shell mode, Service Worker | `packages/devtools-anywhere/src/` | Playground, e2e tests |
 | Vite integration | `packages/vite-plugin/src/` | `tests/e2e/vite.test.ts` (app in `tests/e2e/vite-app/`) |
-| Remote debugging | `packages/remote-server/src/` (relay, server), `packages/devtools-anywhere/src/remote.ts` (page side) | `tests/e2e/remote.test.ts`; `node packages/remote-server/dist/cli.js` |
+| Remote debugging | `packages/remote-server/src/` (relay, server), `packages/devtools-anywhere/src/remote.ts` (page side) | `tests/e2e/remote/remote.test.ts`; `node packages/remote-server/dist/cli.js` |
 | DevTools frontend | `packages/devtools-frontend/` | See below |
 
 ### Constraints and caveats
@@ -108,7 +108,7 @@ experiments/      validation records
 - Every `postMessage` must check `event.origin` and `event.source`; otherwise any page could send CDP commands to the runtime.
 - Detect whether the page is inside the shell through a postMessage handshake rather than reading properties on `window.parent`, which throws a SecurityError across origins.
 - Both ends of the handshake need buffering: messages must not be dropped while DevTools is still loading.
-- The agent serves same-origin iframes too, whose nodes are not instances of the top page's `Element`, … and whose document is not the global `document`. Check nodes with `cdp-agent/core/realm.ts` (by `nodeType`, `realmOf(node)`) and look frames up in `core/frames.ts`. `pnpm lint` counts the remaining uses of the top page's realm per file against `scripts/check-realms.json` (`scripts/check-realms.ts`): a file may have fewer, not more. Where the top page is meant (the probe, the overlay), run `node scripts/check-realms.ts --update`.
+- The agent serves same-origin iframes too, whose nodes are not instances of the top page's `Element`, … and whose document is not the global `document`. Check nodes with `cdp-agent/core/realm.ts` (by `nodeType`, `realmOf(node)`) and look frames up in `core/frames/frames.ts`. `pnpm lint` counts the remaining uses of the top page's realm per file against `scripts/check-realms.json` (`scripts/check-realms.ts`): a file may have fewer, not more. Where the top page is meant (the probe, the overlay), run `node scripts/check-realms.ts --update`.
 - Frontend assets should be self-hostable, with no dependency on third-party CDNs such as unpkg or jsDelivr.
 - When injecting with a Service Worker:
   - Only handle navigation requests with `destination === 'iframe'`, and let everything else pass through.
@@ -144,6 +144,8 @@ A test sits next to what it tests, as `<name>.test.ts`; only tests that span pac
 - `tests/e2e/`: the connection layer, shell mode, zero-config setup, the Vite plugin and the real frontend. The pages they open are in `pages/` (their scripts and styles in `pages/assets/`), the stand-in frontends in `frontends/`.
 
 A test that needs the bundle's internals loads `packages/devtools-anywhere/dist-test/` instead of `dist/`: `build.ts` builds the two scripts there a second time (not published) with `DEVTOOLS_ANYWHERE_TEST` set, and only that build exposes them as `window.__devtoolsAnywhereTest` (`iife.ts`; its type is in `tests/globals.d.ts`). Add a test-only hook there, behind `DEVTOOLS_ANYWHERE_TEST`, never to the published bundle or its API.
+
+Benchmarks sit in a `bench/` directory next to what they measure, as `*.bench.ts`, with a `README.md` saying how to run them and giving reference results; they are type-checked with the tests but not run by `pnpm test`. The CSS lexer's ([`domains/css/sheets/parse/bench/`](packages/devtools-anywhere/src/cdp-agent/domains/css/sheets/parse/bench/README.md)) times it against any earlier revision and checks that its tokens stay the same: run both when the lexer changes and put the numbers in the commit message.
 
 ### Working on the frontend
 
@@ -182,10 +184,10 @@ git diff HEAD -- front_end/panels/console/ConsolePanel.ts > ../../packages/devto
 The frontend follows stable Chrome, which is what most users have, minor updates included: each one ships another devtools-frontend commit. `.github/workflows/chrome-update.yml` checks every day and opens an issue when stable Chrome's commit is not the one in `REVISION` (closing an older one not done yet). Move to it with
 
 ```bash
-pnpm --filter @devtools-anywhere/devtools-frontend update
+pnpm --filter @devtools-anywhere/devtools-frontend run update
 ```
 
-It builds the devtools-frontend commit the current stable Chrome ships (on its milestone's branch, `chromium/<branch>`, not on upstream's `main`; Chromium Dash's `fetch_releases` says which) and pins it in `REVISION`, and its Chrome version in the packages' `chrome` field, on success. Should Chromium Dash not answer, write that commit into `REVISION` by hand and run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it; set `chrome` by hand then). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console).
+It builds the devtools-frontend commit the current stable Chrome ships (on its milestone's branch, `chromium/<branch>`, not on upstream's `main`; Chromium Dash's `fetch_releases` says which) and pins it in `REVISION`, and its Chrome version in the packages' `chrome` field, on success. Should Chromium Dash not answer, write that commit into `REVISION` by hand and run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend`. If a patch no longer applies, the build stops; in the checkout, `git apply --3way <patch>` leaves conflict markers: resolve them, regenerate the patch, and run `node scripts/build.ts --no-sync --latest` (it builds the checkout's `HEAD` and pins it; set `chrome` by hand then). Then run `pnpm test`: a newer frontend may call CDP methods the server does not answer yet (look for "wasn't found" in the browser console). Also run `node scripts/sync-user-agent-css.ts` once the `chrome` field has changed: it fetches that Chrome's `html.css` for the browser default styles (`--check` only tells whether the copy matches; the build warns when it does not), then update the link it names in that directory's `README.md`.
 
 ## 3. Finishing a change
 
@@ -202,18 +204,18 @@ The pre-commit hook (husky + lint-staged) runs on the staged files only: it form
 
 The build rolls each package's type declarations up into one file per entry point (`dist/index.d.ts`) with API Extractor, and writes the package's API to `packages/<package>/etc/`: `*.public.api.md` for the public API (what is promised), `*.api.md` for everything exported, internal included (`scripts/api-extract.ts`, configured by `api-extractor.base.json`; it copies `declare global` blocks into the rolled-up file, which API Extractor leaves out). `devtools-anywhere` has no runtime entry: its `dist/index.d.ts` is types only, and its scripts are built as IIFEs. Commit a changed report with the change that caused it: it is how a change to the public API shows in review. With `CI=true`, which GitHub Actions sets, a report that no longer matches fails the build, so CI catches a report left uncommitted. Every export of an entry point needs a release tag: `@public` only for what the README documents (remote-server's `startRemoteServer` / `createRemoteHandler`, the Vite plugin), `@internal` for everything else, which is used only between this repository's packages, built and released together, and may change at any time; when in doubt, `@internal`, and export nothing an entry point does not need. Doc comments are TSDoc: put package names such as `@devtools-anywhere/...` in backticks and code examples in fenced blocks.
 
-Also update both `README.md` and `README.zh-CN.md` (and this guide, `docs/usage.md` and `docs/design.md` in both languages) when behavior, usage or limitations change, and add a line for users under `Unreleased` in both `CHANGELOG.md` and `CHANGELOG.zh-CN.md` (moving the frontend to a new Chrome milestone also changes its `Based on Chrome` line).
+Also update both `README.md` and `README.zh-CN.md` (and this guide, `docs/usage.md`, `docs/limitations.md` and `docs/design.md` in both languages) when behavior, usage or limitations change, and add a line for users under `Unreleased` in both `CHANGELOG.md` and `CHANGELOG.zh-CN.md` (moving the frontend to a new Chrome milestone also changes its `Based on Chrome` line).
 
 When a dependency that ends up in a build output is added or upgraded, or code is ported from another project (including moving the DevTools frontend to a new `REVISION`), run `pnpm licenses:update` to regenerate `THIRD_PARTY_LICENSES.md` at the root and in the packages (for a new library, add it to the list in `scripts/third-party-licenses.ts` first). It needs the frontend built: the build writes the `front_end/third_party` libraries that end up in `dist/` to `packages/devtools-frontend/dist-third-party.ignore.json` (next to `dist/`, not published), which the script checks its list against; `build:frontend --copy-only` regenerates it from the last build.
 
 ### Commits
 
 - One logical step per commit.
-- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `docs`, `test`, `build`, `ci`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `service-worker`, `readme`.
+- Message format: `type(scope): summary`, then a blank line and an English body explaining what changed and why. Types: `feat`, `fix`, `perf`, `docs`, `test`, `build`, `ci`, `refactor`, `chore`. Scopes are package or area names, e.g. `cdp-agent`, `network`, `devtools-frontend`, `service-worker`, `readme`.
 
 ### Branches and pull requests
 
-`main` holds what is released: releases are tagged on it, and it changes only through pull requests. Work for the next minor goes on its development branch, `dev/x.y.0` (now `dev/0.3.0`), pushed freely; it reaches `main` through `release/x.y.0` when that minor is released: `dev` → `release` → `main`.
+`main` holds what is released: releases are tagged on it, and it changes only through pull requests. Work for the next minor goes on its development branch, `dev/x.y.0` (now `dev/0.4.0`), pushed freely; it reaches `main` through `release/x.y.0` when that minor is released: `dev` → `release` → `main`.
 
 | Branch | For | Rules |
 | --- | --- | --- |
@@ -223,10 +225,10 @@ When a dependency that ends up in a build output is added or upgraded, or code i
 | `release/x.y.z` | The pull request that prepares release x.y.z (version and changelog) | Branched from `dev/x.y.0` (or from `main` for a patch), merged into `main`, then the tag goes on `main` |
 | `release/x.y` | Patches to an older minor, only when needed (see "Patching an older release") | Branched from the tag `vx.y.0`, kept while that minor is patched |
 
-A fix that should not wait for the next minor goes through a `fix/…` branch from `main` into `main` and is released as a patch from there; then `main` is merged into `dev/x.y.0`, so the fix is there too. Once x.y.0 is released, `dev/x.y.0` is deleted and `dev/x.(y+1).0` branched from `main`. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: lint, typecheck, the frontend build and all the tests. Pushes to `dev/x.y.0` are not checked, so that work in progress does not queue runs: the `release/x.y.0` pull request checks them, or run CI on the branch by hand (`gh workflow run ci.yml --ref dev/0.3.0`).
+A fix that should not wait for the next minor goes through a `fix/…` branch from `main` into `main` and is released as a patch from there; then `main` is merged into `dev/x.y.0`, so the fix is there too. Once x.y.0 is released, `dev/x.y.0` is deleted and `dev/x.(y+1).0` branched from `main`. CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: lint, typecheck, the frontend build and all the tests. Pushes to `dev/x.y.0` are not checked, so that work in progress does not queue runs: the `release/x.y.0` pull request checks them, or run CI on the branch by hand (`gh workflow run ci.yml --ref dev/0.4.0`).
 
 ```bash
-git switch -c feat/my-change dev/0.3.0
+git switch -c feat/my-change dev/0.4.0
 # … commits …
 git push -u origin feat/my-change
 gh pr create --fill

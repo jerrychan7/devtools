@@ -50,7 +50,9 @@ export function isHtml<K extends keyof HTMLElementTagNameMap>(
   return isElement(node) && node.namespaceURI === HTML_NS && node.localName === name;
 }
 
-const nodeTypeGetter = Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType')?.get;
+// Guarded: the modules importing this one load where there is no DOM too (the unit tests of the CSS sources).
+const nodeTypeGetter =
+  typeof Node === 'undefined' ? undefined : Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType')?.get;
 
 /**
  * Whether `value` is a DOM node of any realm. The top page's `Node.prototype.nodeType` getter
@@ -141,13 +143,17 @@ type CssomName =
   | 'CSSStyleRule'
   | 'CSSNestedDeclarations'
   | 'CSSImportRule'
+  | 'CSSNamespaceRule'
   | 'CSSMediaRule'
   | 'CSSSupportsRule'
   | 'CSSContainerRule'
   | 'CSSScopeRule'
   | 'CSSStartingStyleRule'
   | 'CSSLayerBlockRule'
-  | 'CSSLayerStatementRule';
+  | 'CSSLayerStatementRule'
+  | 'CSSKeyframesRule'
+  | 'CSSKeyframeRule'
+  | 'CSSStyleDeclaration';
 
 /**
  * Whether `value` implements the CSSOM interface `name` (or one inheriting from it) in any realm:

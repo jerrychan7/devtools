@@ -1,8 +1,8 @@
 // DOM.undo / DOM.redo / DOM.markUndoableState. Both sides edit the same page, so each scenario
 // runs on Chrome and then on ours, from the same markup, and the snapshots are compared.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
@@ -11,18 +11,20 @@ let t: TestPage;
 const MARKUP =
   '<div id="a" class="x" title="t"><span id="s">one</span><b id="b">two</b></div><p id="p">text</p><section id="dst"></section>';
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, [
-    'DOM.childNodeRemoved',
-    'DOM.childNodeInserted',
-    'DOM.attributeModified',
-    'DOM.attributeRemoved',
-    'DOM.characterDataModified',
-  ]);
-  for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, [
+      'DOM.childNodeRemoved',
+      'DOM.childNodeInserted',
+      'DOM.attributeModified',
+      'DOM.attributeRemoved',
+      'DOM.characterDataModified',
+    ]);
+    for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
+  },
+  () => env?.close()
+);
 
 type Scenario = (side: Side, id: (selector: string) => Promise<number>, snap: () => Promise<void>) => Promise<void>;
 
@@ -352,4 +354,72 @@ test('DOM.getDocument discards the undo history like Chrome', async () => {
     await snap();
   });
   assert.deepEqual(ours, chrome);
+});
+
+test("a page wrapping the element's attribute writes after load does not see the undo or redo calls", async () => {
+  // Wrapped once the agent has taken its natives: each write made on #undo-attr is recorded. The undo and
+  // redo write only; the reads of the change reports (domains/dom/dom.ts) are not the history's, and not checked.
+  await t.page.evaluate(() => {
+    const seen: string[] = [];
+    const names = ['setAttribute', 'removeAttribute', 'setAttributeNS'] as const;
+    const originals = names.map(name => Object.getOwnPropertyDescriptor(Element.prototype, name));
+    Reflect.set(window, 'undoWrapped', { seen, originals });
+    names.forEach((name, i) => {
+      const native: unknown = originals[i]?.value;
+      if (typeof native !== 'function') throw new Error(`no ${name}`);
+      Object.defineProperty(Element.prototype, name, {
+        configurable: true,
+        writable: true,
+        value(this: Element, ...args: unknown[]) {
+          if (this.id === 'undo-attr') seen.push(`${name} ${args.join(' ')}`);
+          return Reflect.apply(native, this, args);
+        },
+      });
+    });
+    const root = document.getElementById('undo-root') ?? document.body.appendChild(document.createElement('main'));
+    root.id = 'undo-root';
+    root.insertAdjacentHTML('beforeend', '<div id="undo-attr" class="x" title="t">attr</div>');
+  });
+  try {
+    const side = t.ours;
+    const { root } = await side.send('DOM.getDocument', { depth: -1 });
+    const id = async () =>
+      (await side.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#undo-attr' })).nodeId;
+    // An edit of the whole element, patched attribute by attribute through the history's helpers.
+    await side.send('DOM.setOuterHTML', {
+      nodeId: await id(),
+      outerHTML: '<div id="undo-attr" class="y" lang="en">attr</div>',
+    });
+    await side.send('DOM.markUndoableState');
+    // An edit of one attribute, undone through the history's attribute edit.
+    await side.send('DOM.setAttributeValue', { nodeId: await id(), name: 'lang', value: 'fr' });
+    await side.send('DOM.markUndoableState');
+    // The page's own writes of the edits are not the undo's: only the calls from here on are checked.
+    await t.page.evaluate(() => (Reflect.get(window, 'undoWrapped') as { seen: string[] }).seen.splice(0));
+    // The attributes are read back after each step, so an undo or redo that did nothing would show.
+    const attrs = () =>
+      t.page.evaluate(() => {
+        const el = document.getElementById('undo-attr');
+        return [el?.getAttribute('class'), el?.getAttribute('title'), el?.getAttribute('lang')];
+      });
+    await side.send('DOM.undo');
+    assert.deepEqual(await attrs(), ['y', null, 'en']);
+    await side.send('DOM.undo');
+    assert.deepEqual(await attrs(), ['x', 't', null]);
+    await side.send('DOM.redo');
+    assert.deepEqual(await attrs(), ['y', null, 'en']);
+    await side.send('DOM.redo');
+    assert.deepEqual(await attrs(), ['y', null, 'fr']);
+    const seen = await t.page.evaluate(() => (Reflect.get(window, 'undoWrapped') as { seen: string[] }).seen);
+    assert.deepEqual(seen, []);
+  } finally {
+    await t.page.evaluate(() => {
+      const { originals } = Reflect.get(window, 'undoWrapped') as { originals: (PropertyDescriptor | undefined)[] };
+      ['setAttribute', 'removeAttribute', 'setAttributeNS'].forEach((name, i) => {
+        const descriptor = originals[i];
+        if (descriptor) Object.defineProperty(Element.prototype, name, descriptor);
+      });
+      document.getElementById('undo-attr')?.remove();
+    });
+  }
 });

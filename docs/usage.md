@@ -2,7 +2,7 @@
 
 English | [简体中文](usage.zh-CN.md)
 
-Reference for setting devtools-anywhere up. Quick start: [README](../README.md). How it works: [design](design.md).
+Reference for setting devtools-anywhere up. Quick start: [README](../README.md). How it works: [design](design.md). What works, what cannot be done, and how it differs from Chrome: [limitations](limitations.md).
 
 ## Pick a setup
 
@@ -36,7 +36,7 @@ From jsDelivr or unpkg, pin an exact version: the probe loads the frontend of th
 | | Self-hosted | CDN (jsDelivr, unpkg) |
 |---|---|---|
 | `data-devtools-frontend-url` | Required | Optional: the frontend of the same version on the CDN |
-| Shell mode | ✅ On by default | ✅ On by default, without the [Service Worker](#service-worker) |
+| Shell mode | On by default | On by default, without the [Service Worker](#service-worker) |
 | UI languages | All, with `@devtools-anywhere/devtools-frontend-locales` in the frontend's directory | English and Chinese |
 
 - After the page loads, the probe mounts one `<devtools-anywhere>` under `<html>`, whatever the page has; a second probe only warns.
@@ -74,6 +74,7 @@ A page cannot reach a cross-origin iframe's document. When the iframe's page loa
 - An entry is an exact origin, or `https://*.example.com` for every subdomain at any depth (not `example.com` itself); scheme and port are exact. `*` alone is ignored, with a warning.
 - While linked, the iframe's own F12 button and panel are hidden.
 - The link survives the iframe's reloads and navigations to pages that link again; iframes in the iframe link the same way, level by level.
+- Without the probe in the iframe's page or both lists, the iframe is shown as elements only. Linked, it differs from Chrome in a few places (its document's request, breakpoints after a navigation, detaching, `DOM.scrollIntoViewIfNeeded` answering before the parents scroll): see [limitations](limitations.md#cross-origin-iframes).
 
 ### Sandboxed iframes
 
@@ -89,7 +90,8 @@ An iframe sandboxed without `allow-same-origin` has an opaque (`null`) origin: t
 - Off by default: `sandboxed` in the parent's `data-frame-origins` (it can be listed with origins) turns it on, and the sandboxed document lists the parent's origin in `data-parent-origins`. The parent's DevTools can run any code in the iframe, and the iframe may load third-party scripts.
 - Only for a `src` of the page's origin, `about:blank` or `srcdoc`. One whose `src` is of another origin is refused, of the same site too (which Chrome keeps in the page's target): shown as elements only, not listed in the frame tree.
 - The check is on the iframe's `src`, not on the document it holds: a sandboxed document has the `null` origin, so the page cannot tell where it came from. Once the iframe navigates (a link followed in it, or its `src` redirected) to another origin, a document there that speaks the probe's handshake is merged too, and what it reports shows up in the page's DevTools. Turn it on only for iframes that stay on your own pages.
-- Without it, or without the probe in the sandboxed document, the iframe is shown as in the [limitations](#limitations).
+- Merged, it differs from Chrome in a few places: see [limitations](limitations.md#sandboxed-iframes).
+- Without it, or without the probe in the sandboxed document, the iframe is [shown as elements only](limitations.md#sandboxed-iframes-not-merged).
 
 ## Vite
 
@@ -163,7 +165,7 @@ The top-level page is replaced by a shell: the page runs in an iframe next to De
 | | Shell mode | Without |
 |---|---|---|
 | DevTools across reloads and navigations | Stays open, logs kept | Reopens with the page |
-| Device mode | ✅ | Screencast instead |
+| Device mode | Available | Screencast instead |
 | Layout | The page shrinks next to DevTools | The panel covers the page |
 
 On by default for the top-level page, when the bundle and frontend (and Service Worker) are where the probe trusts: on its origin, or from jsDelivr or unpkg, in the probe's package and the frontend's at the same version. It is off when:
@@ -175,10 +177,7 @@ On by default for the top-level page, when the bundle and frontend (and Service 
 | The page cannot be framed (`X-Frame-Options`, CSP `frame-ancestors`) | For the rest of the session |
 | The page keeps navigating the shell away | For the rest of the session |
 
-Caveats:
-
-- In an iframe, `100vh`, `position: fixed`, `window.top` and the viewport may behave differently.
-- The page's HTML is requested twice; a page returned for a form POST is requested again with GET.
+Caveats: in an iframe, [`100vh`, `position: fixed`, `window.top` and the viewport may behave differently, and the page's HTML is requested twice](limitations.md#shell-mode).
 
 ### Service Worker
 
@@ -225,7 +224,7 @@ The server serves the probe, bundle and frontend itself, and the frontend runs o
 - Several DevTools windows can inspect one page, each in its own session.
 - The target list can be filtered and shows how many DevTools each page has.
 - With a frontend too (`data-devtools-frontend-url`, or the probe from jsDelivr or unpkg), the page also has its own panel; `data-no-panel` goes without it.
-- Breakpoints still need the browser's own debugger (`chrome://inspect`, Safari Web Inspector): the page runs the same in-page agent.
+- [Breakpoints still need the browser's own debugger](limitations.md#breakpoints-and-profiling) (`chrome://inspect`, Safari Web Inspector).
 
 `data-remote` with a value names the server, when the probe comes from elsewhere. It resolves like a link:
 
@@ -253,49 +252,14 @@ In shell mode:
 | `/json/list` | Targets, in Chrome's format (needs the token) |
 | `anywhere_app.html?ws=<host:port/path>` | A frontend opened by itself connects to a target, as Chrome's `devtools_app.html?ws=` (`wss=` over HTTPS; also `#?ws=`) |
 
-## Limitations
-
-Gaps are filled exactly or not at all: nothing approximate is shown as fact.
-
-| Feature | Status | Details |
-|---|---|---|
-| Breakpoints, Profiler, Memory, Performance | ❌ Panels not included | No JS API. `debugger;` does not pause; in shell mode it logs a warning with its stack |
-| Network timing | ❌ | No JS API |
-| Sources | ⚠️ | Documents, external scripts and style sheets, images, fonts; no inline scripts; snippets work |
-| Browser default styles | ⚠️ | Not shown in Styles yet ([roadmap](roadmap.md#more-that-can-be-filled-in-the-page)) |
-| Event listeners | ⚠️ | Only those added after the probe ran; no source location |
-| WebSocket | ⚠️ | Connections and frames; no handshake headers |
-| Same-origin iframes | ⚠️ | An iframe's navigation is seen at its load event, later than in Chrome: logs and requests before it are missing, except in srcdoc and blank iframes; so are closed shadow roots its scripts attach before it. No isolated worlds (`Page.createIsolatedWorld`) |
-| Sandboxed iframes (no `allow-same-origin`) | ⚠️ | [Merged](#sandboxed-iframes) into the page's target, as in Chrome: their DOM, styles, execution context, console, requests and scripts in the page's, highlighted, inspected and given input. Merged: moving or copying a node across the iframe's edge fails; `DOM.performSearch` lists the page's results first, then the iframe's; when the iframe's document reloads, its new `contentDocument` comes with its child count, without `childNodeCountUpdated` or `scrollableFlagUpdated`; the execution context Chrome reports for the iframe's initial about:blank is missing; a request to the iframe for its document, a node or a point unanswered within 1 s is taken as the iframe not answering (its document is not grafted, a point over it hits the `<iframe>` itself); an uncaught error thrown later by code run from the Console in the iframe (in a timer, say) has no exception object (`exception` is null), no position and no stack, as the iframe's document sees the probe's script as cross-origin and mutes its errors; its own scripts' errors are not affected; its scripts' sources are fetched again by the page from their URLs, so only those the page can fetch; in inspect mode the hover highlight is clipped by the iframe, and a `highlightNode` highlight of its node does not follow scrolling; `frameNavigated` keeps the same `loaderId` after the iframe's document navigates; after the frame navigates to a page without the probe, the page still shows the old document. Not merged (off, or no probe in it): listed in the frame tree as in Chrome, but shown as elements only, with no execution context or child frames of their own, and of its requests only its document's. The URL is the iframe's `src` (or `srcdoc`) as of its last load, not where its scripts navigated it; the MIME type is always text/html; the name is the iframe's `name` attribute, not a name its scripts set. The navigation is seen at the load event |
-| Cross-origin iframes | ⚠️ | Only with the probe in the iframe's page and both [origin lists](#cross-origin-iframes); otherwise shown as elements only. Linked once the iframe's probe runs: its document's own request is reported in its session, not the parent's; breakpoints by URL are not set again after it navigates. A page that does not link again after a navigation is detached up to 10 s later |
-| Cross-origin style sheets | ⚠️ | Need CORS; read-only |
-| Forced `:hover`, `:focus`, … | ⚠️ | Not for `@import` and `adoptedStyleSheets` sheets |
-| Screencast (device button outside shell mode) | ⚠️ | Redrawn by [snapDOM](https://github.com/zumerlab/snapdom) from the DOM: canvas, video and cross-origin images may be missing; ≤ 2 fps. Input replayed with `isTrusted: false` |
-| Screenshots | ⚠️ | See [below](#screenshots) |
-| Device mode | ⚠️ | Shell mode only. Sets the size only: no pixel ratio, user agent or touch; its screenshots are snapDOM's, at the page's pixel ratio. `Emulation.setDeviceMetricsOverride` works there from any client (a remote agent too), the last one set applying, as in Chrome; elsewhere it fails. Remote clients' overrides survive page reloads, as in Chrome. The override's params are checked as Chrome checks them, with Chrome's errors, except that "Invalid parameters" data leaves out Chrome's "at position N" (a byte offset in Chrome's own encoding), and a `devicePosture` of an unknown type is taken, where Chrome stops answering |
-| Fullscreen pages | ⚠️ | While an element is fullscreen, DevTools cannot be used, in shell mode too. Esc leaves fullscreen |
-| Rendering panel emulation | ⚠️ | "Emulate a focused page" cannot be done: using DevTools in the page really takes focus from its elements, and their `:focus` styles go; turning it on fails. Auto dark mode and resetting the pinch zoom cannot be done either and fail. Every command the page cannot carry out fails with "Not supported in the page: <why>"; those that could be done but are not yet are in the [roadmap](roadmap.md) |
-| Frontend on the page's origin | ⚠️ | DevTools' settings share the page's `localStorage`: host it on another origin |
-| Browsers | ⚠️ | Page side: any modern browser. DevTools UI: verified in Chrome only; newer frontends may need compatibility patches |
-
-snapDOM (about 90 KB gzip) loads only for the screencast and screenshots.
-
-### Screenshots
-
-`Page.captureScreenshot`, for tools and agents that drive the page over CDP:
-
-- Rendered by snapDOM like the screencast, and marked `approximate: true` (a field Chrome does not send).
-- `clip` is in page coordinates; the image is in device pixels (`devicePixelRatio` × `clip.scale`).
-- `captureBeyondViewport` without `clip` takes the whole page.
-- Past the canvas limits (32767 px a side, 16384 on Safari, 16384 × 16384 in area) the image is scaled down; snapDOM warns in the console.
-- WebP falls back to PNG where it cannot be encoded (Safari).
-
 ## Packages
 
 | Package | Contents |
 |---|---|
-| `devtools-anywhere` | `probe.iife.js`, `devtools-anywhere.iife.js` (the element), `devtools-anywhere-service-worker.js`, `snapdom.js`; TypeScript types for the element, its events and the attributes. No module to import |
+| `devtools-anywhere` | `probe.iife.js`, `devtools-anywhere.iife.js` (the element), `devtools-anywhere-service-worker.js`, `snapdom.js`, `accessibility.js`, `chromium-html.css` (with `chromium-html.LICENSE.txt`); TypeScript types for the element, its events and the attributes. No module to import |
 | `@devtools-anywhere/devtools-frontend` | The frontend, English and Chinese UI |
 | `@devtools-anywhere/devtools-frontend-locales` | The other 80 UI languages; serve from the frontend's directory. Missing languages fall back to English |
 | `@devtools-anywhere/vite-plugin` | Vite plugin |
 | `@devtools-anywhere/remote-server` | Remote debugging server and CLI (`devtools-anywhere-remote`) |
+
+snapDOM (about 90 KB gzip) loads only for the screencast and screenshots; `accessibility.js` only for the accessibility tree; `chromium-html.css` only for the browser default styles. It is a copy of Chromium's `html.css`, the package's only file under the LGPL (2.0 or later; its license is next to it as `chromium-html.LICENSE.txt`, and in THIRD_PARTY_LICENSES.md). A site that does not want it can leave both files out: Styles then shows no user agent stylesheet rules, and nothing else changes.

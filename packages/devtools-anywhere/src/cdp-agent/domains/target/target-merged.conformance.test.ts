@@ -1,26 +1,29 @@
 // A sandboxed iframe without allow-same-origin, on the page's origin, merged into the page's agent
-// (core/merged-frames.ts), against Chrome, which keeps it in the page's target: no child target,
+// (core/frames/merged-frames.ts), against Chrome, which keeps it in the page's target: no child target,
 // and its execution context on the page's session.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import assert from 'node:assert/strict';
 import type { Env } from '../../../../../../tests/support/browser.ts';
-import { launchOopif } from '../../../../test-support/oopif.ts';
-import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/merged-sides.ts';
+import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { chromeSide, get, type MergedSide, oursSide } from '../../../../test-support/oopif/merged-sides.ts';
 
 let env: Env | undefined;
 let ours: MergedSide | undefined;
 let chrome: MergedSide | undefined;
 
-before(async () => {
-  env = await launchOopif();
-  chrome = await chromeSide(env);
-  ours = await oursSide(env);
-});
-after(async () => {
-  await ours?.close();
-  await chrome?.close();
-  await env?.close();
-});
+setUpAndTearDown(
+  async () => {
+    env = await launchOopif();
+    chrome = await chromeSide(env);
+    ours = await oursSide(env);
+  },
+  async () => {
+    await ours?.close();
+    await chrome?.close();
+    await env?.close();
+  }
+);
 
 /** The sandboxed frame's id, from the page's frame tree. */
 async function sandboxedFrameId(side: MergedSide): Promise<string> {

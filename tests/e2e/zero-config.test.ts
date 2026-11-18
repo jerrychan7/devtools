@@ -1,20 +1,22 @@
 // The single-script setup, and the Service Worker that injects the probe in shell mode.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import type { Protocol } from 'devtools-protocol';
-import { chooseDockSide, devtoolsShown, frontendRequest, launch } from '../support/browser.ts';
+import { chooseDockSide, devtoolsShown, frontendRequest, launch, setUpAndTearDown } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
 
 let env: Env | undefined;
 let page: Page;
 
-before(async () => {
-  env = await launch();
-  page = await env.browser.newPage();
-  await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    page = await env.browser.newPage();
+    await page.goto(env.baseUrl + '/tests/e2e/pages/zero-config.html');
+  },
+  () => env?.close()
+);
 
 /** Messages the fake frontend received, in or outside shell mode. */
 const received = () =>
@@ -256,6 +258,34 @@ test('the Service Worker makes debugger statements log a warning', async () => {
     return pageWindow.fetch('/tests/e2e/pages/assets/debugger-classic.js').then(r => r.text());
   });
   assert.match(source, /^ {2}const é = x; debugger$/m);
+  // The test server sends every file with `Cache-Control: no-store`: the worker keeps the plans
+  // in memory only, and writes nothing about these scripts to the Cache API.
+  const record = () =>
+    page.evaluate(async () => {
+      if (!(await caches.has('devtools-anywhere-service-worker-rewrites'))) return undefined;
+      const cache = await caches.open('devtools-anywhere-service-worker-rewrites');
+      return (await cache.match('/__devtools-anywhere-rewrites'))?.text();
+    });
+  assert.doesNotMatch((await record()) ?? '', /"entries":\[\[/, 'no-store scripts are not persisted');
+
+  // Loaded again, the scripts are rewritten from the plans the worker kept for them.
+  const before = (await hits()).length;
+  await navigatePageFrame('/tests/e2e/pages/no-probe.html');
+  await navigatePageFrame('/tests/e2e/pages/debugger-page.html');
+  await waitFor(async () => (await hits()).length >= before + 5);
+  const again = (await hits()).slice(before);
+  assert.deepEqual(
+    again
+      .map(m => (m.params as Protocol.Runtime.ConsoleAPICalledEvent).stackTrace?.callFrames[0])
+      .filter(f => f?.url.endsWith('debugger-classic.js'))
+      .map(f => [f?.lineNumber, f?.columnNumber]),
+    [
+      [5, 15],
+      [7, 9],
+      [8, 9],
+      [9, 9],
+    ]
+  );
 });
 
 test('the Service Worker leaves the same-origin DevTools frontend alone', async () => {
@@ -362,6 +392,8 @@ test('leaving shell mode unregisters the Service Worker', async () => {
   await waitFor(() => page.evaluate(() => !document.getElementById('devtools-anywhere-page')));
   const registrations = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
   assert.equal(registrations, 0);
+  // Nor are the plans of its rewrites left behind.
+  assert.equal(await page.evaluate(() => caches.has('devtools-anywhere-service-worker-rewrites')), false);
 });
 
 test('the Service Worker passes requests through once the shell is gone without leaving it', async () => {

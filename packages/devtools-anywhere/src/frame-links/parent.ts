@@ -7,6 +7,9 @@ import {
   frames,
   mergedFrames,
   ownerOfWindow,
+  readScrollParent,
+  SCROLL_PARENT,
+  scrollFrameAreaIntoView,
   watchOwner,
 } from '../cdp-agent';
 import { type OriginPattern, matchOrigin } from './origins';
@@ -131,6 +134,15 @@ export function linkChildren(patterns: readonly OriginPattern[]): () => void {
     }
     end.onClose(() => {
       if (linked.get(owner)?.end === end) linked.delete(owner);
+    });
+    // DOM.scrollIntoViewIfNeeded in the iframe: scrolled on outward from its element, and on to
+    // this page's own parent when it is a cross-origin iframe too.
+    end.onMessage(message => {
+      const area = readScrollParent(message);
+      if (!area || !owner.isConnected) return;
+      const { rect, doc } = scrollFrameAreaIntoView(owner, area);
+      if (doc === frames.top.document)
+        childTargets.parent?.send(JSON.stringify({ method: SCROLL_PARENT, params: { rect } }));
     });
     if (ns) mergedFrames.addMerged(link, ns);
     else childTargets.addChild(link);

@@ -1,9 +1,9 @@
 // The overlay on nodes of same-origin iframes: highlights drawn in the top page where Chrome
 // places the node, and inspect mode picking the node under the mouse inside an iframe.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -13,33 +13,35 @@ const FIXTURE = '/packages/devtools-anywhere/test-support/frame-geometry.html';
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, ['Overlay.inspectNodeRequested']);
-  await t.page.setViewport({ width: 800, height: 600 });
-  // A rotated iframe, scrolled inside.
-  await t.page.evaluate(
-    src =>
-      new Promise<void>(resolve => {
-        const frame = document.createElement('iframe');
-        frame.id = 'ov-frame';
-        frame.style.cssText =
-          'position:absolute;z-index:10;background:#fff;left:300px;top:150px;width:320px;height:300px;border:4px solid;padding:3px;transform:rotate(6deg)';
-        frame.onload = () => {
-          frame.contentWindow?.scrollTo(0, 10);
-          resolve();
-        };
-        frame.src = src;
-        document.body.append(frame);
-      }),
-    FIXTURE
-  );
-  for (const side of [t.ours, t.chrome]) {
-    await side.send('DOM.enable');
-    await side.send('Overlay.enable');
-  }
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, ['Overlay.inspectNodeRequested']);
+    await t.page.setViewport({ width: 800, height: 600 });
+    // A rotated iframe, scrolled inside.
+    await t.page.evaluate(
+      src =>
+        new Promise<void>(resolve => {
+          const frame = document.createElement('iframe');
+          frame.id = 'ov-frame';
+          frame.style.cssText =
+            'position:absolute;z-index:10;background:#fff;left:300px;top:150px;width:320px;height:300px;border:4px solid;padding:3px;transform:rotate(6deg)';
+          frame.onload = () => {
+            frame.contentWindow?.scrollTo(0, 10);
+            resolve();
+          };
+          frame.src = src;
+          document.body.append(frame);
+        }),
+      FIXTURE
+    );
+    for (const side of [t.ours, t.chrome]) {
+      await side.send('DOM.enable');
+      await side.send('Overlay.enable');
+    }
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, id: string): DomNode | null {
   if ((node.attributes ?? []).some((v, i) => i % 2 === 0 && v === 'id' && node.attributes?.[i + 1] === id)) return node;

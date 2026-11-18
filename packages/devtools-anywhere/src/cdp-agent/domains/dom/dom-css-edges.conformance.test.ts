@@ -1,9 +1,9 @@
 // Edge cases of the DOM and CSS domains: template content, and commands sent to nodes they
 // cannot act on.
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { diffSubset, launch, openPage, VOLATILE } from '../../../../test-support/conformance.ts';
+import { diffSubset, launch, openPage, VOLATILE, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, EventName, EventParams, TestPage } from '../../../../test-support/conformance.ts';
 
 type DomNode = Protocol.DOM.Node;
@@ -14,21 +14,23 @@ for (const key of ['nodeId', 'backendNodeId', 'parentId', 'frameId']) VOLATILE.a
 let env: Env | undefined;
 let t: TestPage;
 
-before(async () => {
-  env = await launch();
-  t = await openPage(env, []);
-  await t.page.evaluate(() => {
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<template id="tpl"><p class="in-template">hi</p><i></i></template><div id="text-host">text</div>'
-    );
-    const xml = document.createElementNS('urn:x-test', 'plain');
-    xml.id = 'xml';
-    document.body.appendChild(xml);
-  });
-  for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
-});
-after(() => env?.close());
+setUpAndTearDown(
+  async () => {
+    env = await launch();
+    t = await openPage(env, []);
+    await t.page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<template id="tpl"><p class="in-template">hi</p><i></i></template><div id="text-host">text</div>'
+      );
+      const xml = document.createElementNS('urn:x-test', 'plain');
+      xml.id = 'xml';
+      document.body.appendChild(xml);
+    });
+    for (const side of [t.ours, t.chrome]) await side.send('DOM.enable');
+  },
+  () => env?.close()
+);
 
 function find(node: DomNode, predicate: (n: DomNode) => boolean): DomNode | null {
   if (predicate(node)) return node;

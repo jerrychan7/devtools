@@ -1,56 +1,26 @@
 // The DevTools frontend built from the official sources (packages/devtools-frontend),
-// against the in-page CDP agent. Skipped when the frontend has not been built.
-import { existsSync } from 'node:fs';
-import { after, before, test } from 'node:test';
+// against the in-page CDP agent. Skipped when the frontend has not been built. The Animations
+// panel's tests are in animations-frontend.test.ts.
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ElementHandle, Frame, JSHandle, Page } from 'puppeteer-core';
-import { launch } from '../support/browser.ts';
 import type { Env } from '../support/browser.ts';
-
-const built = existsSync(new URL('../../packages/devtools-frontend/dist/anywhere_app.html', import.meta.url));
-const skip = built ? false : 'run `pnpm --filter @devtools-anywhere/devtools-frontend build:frontend` first';
+import { built, frontendHelpers, openRealFrontend, skip, waitFor, setUpAndTearDown } from '../support/real-frontend.ts';
 
 let env: Env | undefined;
 let page: Page;
 let frontend: Frame;
 /** Uncaught errors in the frontend. */
 const errors: string[] = [];
+const { text, showView, shownText } = frontendHelpers(() => frontend);
 
-before(async () => {
-  if (!built) return;
-  env = await launch();
-  page = await env.browser.newPage();
-  page.on('pageerror', error => errors.push(error instanceof Error ? error.message : String(error)));
-  // Tall enough for the Network panel to render its rows below the overview.
-  await page.setViewport({ width: 1000, height: 1600 });
-  await page.goto(env.baseUrl + '/tests/e2e/pages/real-frontend.html');
-  frontend = await waitFor(() => page.frames().find(f => new URL(f.url()).pathname.endsWith('/anywhere_app.html')));
-});
-after(() => env?.close());
-
-async function waitFor<T>(get: () => T | Promise<T>, timeout = 15000): Promise<NonNullable<T>> {
-  const start = Date.now();
-  for (;;) {
-    const value = await Promise.resolve()
-      .then(get)
-      .catch(() => null);
-    if (value) return value;
-    if (Date.now() - start > timeout) throw new Error('timed out');
-    await new Promise(r => setTimeout(r, 100));
-  }
-}
-
-/** Text of the frontend, including shadow DOM. */
-const text = () =>
-  frontend.evaluate(() => {
-    const parts: (string | null)[] = [];
-    const walk = (root: Document | ShadowRoot) => {
-      parts.push(root === document ? document.documentElement.textContent : root.textContent);
-      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
-    };
-    walk(document);
-    return parts.join('\n');
-  });
+setUpAndTearDown(
+  async () => {
+    if (!built) return;
+    ({ env, page, frontend } = await openRealFrontend(errors));
+  },
+  () => env?.close()
+);
 
 /** Clicks a panel's tab in the main tabbed pane (inside shadow DOM). */
 async function showPanel(id: string) {
@@ -872,6 +842,44 @@ test('hidden, DevTools leaves inspect mode and the page gets its clicks back', {
       return !!panel && getComputedStyle(panel).display !== 'none';
     })
   );
+});
+
+test("the Issues panel shows the page's issues", { skip }, async () => {
+  await page.evaluate(() => {
+    const label = document.createElement('label');
+    label.htmlFor = 'rf-no-such-input';
+    label.textContent = 'label';
+    document.body.append(label);
+  });
+  await showView('issues-pane');
+  await waitFor(async () => (await shownText()).some(line => line.includes('Incorrect use of <label for=')));
+});
+
+test("the Accessibility pane shows the selected node's role and name", { skip }, async () => {
+  await showPanel('elements');
+  // Selects the heading in the Elements tree.
+  await waitFor(() =>
+    frontend.evaluate(() => {
+      const find = (root: Document | ShadowRoot): Element | null => {
+        for (const li of root.querySelectorAll('li')) if (li.textContent.includes('real-frontend-marker')) return li;
+        for (const el of root.querySelectorAll('*')) {
+          const found = el.shadowRoot && find(el.shadowRoot);
+          if (found) return found;
+        }
+        return null;
+      };
+      const li = find(document);
+      li?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      return !!li;
+    })
+  );
+  await showView('accessibility.view');
+  await waitFor(async () => {
+    const lines = await shownText();
+    const at = lines.indexOf('Computed properties');
+    const shown = lines.slice(at, at + 30);
+    return at >= 0 && shown.includes('"hello"') && shown.includes('heading');
+  });
 });
 
 // Last: it reloads the page into shell mode and back.
