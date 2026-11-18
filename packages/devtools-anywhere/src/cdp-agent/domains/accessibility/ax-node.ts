@@ -1,7 +1,7 @@
 // Entry of accessibility.js, which the Accessibility domain loads on first use (accessibility.ts):
 // it turns the DOM into CDP AXNodes. Kept out of the bundle like snapDOM, for its size.
 import type { Protocol } from 'devtools-protocol';
-import { contentsOf, documentNameOf, nameOf, textNameOf, type IdOf } from './ax-name';
+import { contentsText, documentNameOf, nameOf, textNameOf, type IdOf } from './ax-name';
 import { TreeShape, isFocusable, isInternalRole, roleOf } from './ax-tree';
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText } from '../../core/realm';
 
@@ -181,7 +181,7 @@ function textValueOf(el: Element, role: string): string {
     return el.type === 'password' ? masked(el, el.value) : el.value;
   }
   // A focusable ARIA combobox (Chrome's ComboBoxMenuButton) shows its content as its value.
-  if (comboboxKind(el, role) === 'button') return isFocusable(el) ? contentsOf(el) : '';
+  if (comboboxKind(el, role) === 'button') return isFocusable(el) ? contentsText(el) : '';
   if (role === 'textbox' || role === 'searchbox' || isEditingHost(el)) return el.textContent ?? '';
   return '';
 }
