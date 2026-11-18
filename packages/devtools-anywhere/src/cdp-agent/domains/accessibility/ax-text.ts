@@ -2,7 +2,7 @@
 // box, which block it flows in, and a text node's text as rendered (Blink's LayoutText::PlainText).
 // Part of accessibility.js (ax-name.ts).
 import { isElement, isHtml, isText, styleOf } from '../../core/realm';
-import { domChildren, domParent } from './ax-tree';
+import { attr, domChildren, domParent } from './ax-tree';
 
 /** Elements laid out as one box that text cannot flow into. */
 const REPLACED = new Set(
@@ -140,7 +140,7 @@ function lineNode(node: Node, back: boolean): Node | null {
     if (!isElement(n)) return undefined;
     if (styleOf(n).display === 'none' || outOfFlow(n)) return undefined;
     if (isHtml(n, 'br')) return null;
-    if (n.getAttribute('aria-hidden') === 'true') return n;
+    if (attr(n, 'aria-hidden') === 'true') return n;
     if (isInlineBox(n)) return firstInside(n, back, inside);
     return isInlineLevel(n) ? n : null;
   };
@@ -154,7 +154,7 @@ function lineNode(node: Node, back: boolean): Node | null {
 export function droppedSpace(text: Text): boolean {
   return [true, false].some(back => {
     const n = lineNode(text, back);
-    return isElement(n) && ((back && n.getAttribute('aria-hidden') === 'true') || styleOf(n).display !== 'inline');
+    return isElement(n) && ((back && attr(n, 'aria-hidden') === 'true') || styleOf(n).display !== 'inline');
   });
 }
 

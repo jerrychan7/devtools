@@ -8,7 +8,18 @@
 import type { Protocol } from 'devtools-protocol';
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
-import { SVG_NS, domChildren, domParent, isFocusable, isMenuList, roleOf, scopeOf, wordSet } from './ax-tree';
+import {
+  attr,
+  domChildren,
+  domParent,
+  hasAttr,
+  isFocusable,
+  isMenuList,
+  roleOf,
+  scopeOf,
+  SVG_NS,
+  wordSet,
+} from './ax-tree';
 import {
   droppedSpace,
   hasLayout,
@@ -94,8 +105,7 @@ function hiddenViaStyle(el: Element): boolean {
 
 /** Whether an element or one of its ancestors has aria-hidden="true". */
 function inAriaHidden(el: Element): boolean {
-  for (let n: Node | null = el; n && isElement(n); n = domParent(n))
-    if (n.getAttribute('aria-hidden') === 'true') return true;
+  for (let n: Node | null = el; n && isElement(n); n = domParent(n)) if (attr(n, 'aria-hidden') === 'true') return true;
   return false;
 }
 
@@ -107,10 +117,10 @@ function hiddenForText(el: Element, root: Root): boolean {
   if (isHtml(el, 'noscript')) return true;
   if (el.namespaceURI === SVG_NS && (el.localName === 'title' || el.localName === 'desc')) return false;
   // An option builds its text even inside a collapsed select.
-  if (el.getAttribute('aria-hidden') !== 'true' && isMenuListOption(el.closest('option'))) return false;
+  if (attr(el, 'aria-hidden') !== 'true' && isMenuListOption(el.closest('option'))) return false;
   // The children of a hidden aria-labelledby or aria-describedby target all count.
   if (root && !isVisible(root)) return false;
-  if (el.getAttribute('aria-hidden') === 'true') return true;
+  if (attr(el, 'aria-hidden') === 'true') return true;
   return hiddenViaStyle(el);
 }
 
@@ -119,7 +129,7 @@ export function targetsOf(el: Element, attribute: string): Element[] {
   const root = scopeOf(el);
   if (!root) return [];
   const out: Element[] = [];
-  for (const idref of (el.getAttribute(attribute) ?? '').split(/\s+/)) {
+  for (const idref of (attr(el, attribute) ?? '').split(/\s+/)) {
     const target = idref && root.getElementById(idref);
     if (target) out.push(target);
   }
@@ -132,7 +142,7 @@ const GLOBAL_ARIA =
 
 /** An element that only presents its content: role none or presentation (Blink's IsPresentational). */
 const isPresentational = (el: Element) =>
-  /^\s*(none|presentation)(\s|$)/.test(el.getAttribute('role') ?? '') &&
+  /^\s*(none|presentation)(\s|$)/.test(attr(el, 'role') ?? '') &&
   !isFocusable(el) &&
   ![...el.attributes].some(a => GLOBAL_ARIA.test(a.name));
 
@@ -161,7 +171,7 @@ function supportsNameFromContents(el: Element, role: string, recursive: boolean)
     if (role === 'generic' && (isHtml(el, 'body') || el === el.ownerDocument.documentElement)) return false;
     if (recursive) return true;
     if (isHtmlElement(el) && el.isContentEditable) return false;
-    if (el.hasAttribute('aria-activedescendant')) return false;
+    if (hasAttr(el, 'aria-activedescendant')) return false;
     return el === el.ownerDocument.activeElement;
   }
   if (role === 'RubyAnnotation') return !recursive;
@@ -196,7 +206,7 @@ function embeddedValue(el: Element, role: string, c: Computation): string | null
     case 'progressbar':
     case 'meter':
     case 'scrollbar': {
-      const text = el.getAttribute('aria-valuetext') ?? el.getAttribute('aria-valuenow');
+      const text = attr(el, 'aria-valuetext') ?? attr(el, 'aria-valuenow');
       if (text !== null) return text;
       return isHtml(el, 'input') ? el.value : null;
     }
@@ -256,7 +266,7 @@ function textOfTextNode(text: Text, c: Computation): string {
 
 /** The text of an element's title, unless it repeats its content (TextAlternativeFromTitleAttribute). */
 function titleText(el: Element): string | null {
-  const title = el.getAttribute('title');
+  const title = attr(el, 'title');
   if (title === null) return null;
   const inner = isHtmlElement(el) ? el.innerText : (el.textContent ?? '');
   return title.trim() !== inner.trim() ? title : null;
@@ -283,16 +293,16 @@ function textAlternative(el: Element, root: Root, c: Computation): [string, From
   if (!isHtml(el, 'slot')) {
     if (hiddenForText(el, root)) return ['', 'none'];
     if (!root && !already) {
-      const attribute = el.hasAttribute('aria-labelledby') ? 'aria-labelledby' : 'aria-labeledby';
+      const attribute = hasAttr(el, 'aria-labelledby') ? 'aria-labelledby' : 'aria-labeledby';
       const fromElements = textFromElements(targetsOf(el, attribute), true, c);
       if (fromElements && !isBlank(fromElements.text)) return [fromElements.text, 'relatedElement'];
     }
-    const label = el.getAttribute('aria-label');
+    const label = attr(el, 'aria-label');
     if (!isBlank(label)) return [label ?? '', 'attribute'];
   }
   const native = nativeText(el, c);
   if (native) return native;
-  const emptyAlt = (isHtml(el, 'img') || isHtml(el, 'area')) && el.getAttribute('alt') === '';
+  const emptyAlt = (isHtml(el, 'img') || isHtml(el, 'area')) && attr(el, 'alt') === '';
   if (includesContents(el, role, root, true)) {
     const text = textFromDescendants(el, root, c);
     if (text) return [text, 'contents'];
@@ -323,15 +333,15 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     }
   }
   if (isInputButton(el)) {
-    const value = el.getAttribute('value') ?? (BUTTON_LABELS[el.type] || '');
+    const value = attr(el, 'value') ?? (BUTTON_LABELS[el.type] || '');
     return value ? [value, 'value'] : null;
   }
   if (isHtml(el, 'input') && el.type === 'image') {
-    const alt = el.getAttribute('alt');
+    const alt = attr(el, 'alt');
     if (alt) return [alt, 'attribute'];
   }
   if (isHtml(el, 'img') || isHtml(el, 'area')) {
-    const alt = el.getAttribute('alt');
+    const alt = attr(el, 'alt');
     return alt ? [alt, 'attribute'] : null;
   }
   const caption = isHtml(el, 'table') ? captionOf(el) : null;
@@ -383,7 +393,7 @@ type Piece = Node | { pseudo: string; text: string };
 const pseudoInline = (el: Element, pseudo: string) => styleOf(el, pseudo).display.startsWith('inline');
 
 /** Whether an element's aria-owns moves elements: Chrome ignores it on hidden elements. */
-const owns = (el: Element) => el.hasAttribute('aria-owns') && !inDisplayNone(el) && !inAriaHidden(el);
+const owns = (el: Element) => hasAttr(el, 'aria-owns') && !inDisplayNone(el) && !inAriaHidden(el);
 
 /**
  * The children of an element as the tree has them: without those aria-owns moved elsewhere, with
@@ -470,7 +480,7 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
       if (hiddenForText(piece, root)) {
         // An element hidden by visibility only is left out of the tree, and its elements that
         // are visible again take its place.
-        if (!inDisplayNone(piece) && piece.getAttribute('aria-hidden') !== 'true')
+        if (!inDisplayNone(piece) && attr(piece, 'aria-hidden') !== 'true')
           pieces.splice(i + 1, 0, ...childrenOf(piece).filter(isElement));
         continue;
       }
@@ -529,8 +539,8 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
 
   // aria-labelledby (or the misspelled aria-labeledby): the named elements' texts, in order.
   const attribute =
-    el.hasAttribute('aria-labelledby') || !el.hasAttribute('aria-labeledby') ? 'aria-labelledby' : 'aria-labeledby';
-  const idrefs = el.getAttribute(attribute);
+    hasAttr(el, 'aria-labelledby') || !hasAttr(el, 'aria-labeledby') ? 'aria-labelledby' : 'aria-labeledby';
+  const idrefs = attr(el, attribute);
   if (idrefs === null) push({ type: 'relatedElement', attribute }, false);
   else {
     const fromElements = textFromElements(targetsOf(el, attribute), true, c);
@@ -559,7 +569,7 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
       );
   }
 
-  const label = el.getAttribute('aria-label');
+  const label = attr(el, 'aria-label');
   const labelled = !isBlank(label);
   push(stringSource('aria-label', labelled ? label : null), labelled);
 
@@ -572,7 +582,7 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
     push(source({ type: 'contents' }, text || null), !!text);
   }
   // An image with alt="" has no title source: its title describes it.
-  if ((isHtml(el, 'img') || area) && el.getAttribute('alt') === '') return out;
+  if ((isHtml(el, 'img') || area) && attr(el, 'alt') === '') return out;
   if (isHtmlElement(el) && el.isContentEditable && !isNativeTextField(el) && !isTextFieldRole(role))
     push(placeholderSource(el, 'aria-placeholder'), false);
   if (el.namespaceURI === SVG_NS) {
@@ -603,7 +613,7 @@ function stringSource(
 
 /** A placeholder source read from an attribute, with the attribute's value when not empty. */
 const placeholderSource = (el: Element, attribute: string) =>
-  stringSource(attribute, el.getAttribute(attribute) || null, 'placeholder');
+  stringSource(attribute, attr(el, attribute) || null, 'placeholder');
 
 /** A native source naming related elements, with their nodes and its text when it has one (not null). */
 const nodeListSource = (
@@ -645,7 +655,7 @@ function nativeSources(
     }
   }
   if (isInputButton(el)) {
-    const value = el.getAttribute('value');
+    const value = attr(el, 'value');
     push(source({ type: 'attribute', attribute: 'value' }, value), value !== null);
     // Its content: the value, or the default label.
     const text = el.value || BUTTON_LABELS[el.type] || '';
@@ -654,14 +664,14 @@ function nativeSources(
   }
   if (isNativeTextField(el)) {
     push(...titleSource(el));
-    push(placeholderSource(el, 'placeholder'), !!el.getAttribute('placeholder'));
+    push(placeholderSource(el, 'placeholder'), !!attr(el, 'placeholder'));
   }
   if (isNativeTextField(el) || isTextFieldRole(role)) {
-    push(placeholderSource(el, 'aria-placeholder'), !!el.getAttribute('aria-placeholder'));
+    push(placeholderSource(el, 'aria-placeholder'), !!attr(el, 'aria-placeholder'));
     return;
   }
   if (isHtml(el, 'img') || isHtml(el, 'area')) {
-    const alt = el.getAttribute('alt');
+    const alt = attr(el, 'alt');
     push(stringSource('alt', alt), alt !== null);
     return;
   }
@@ -672,7 +682,7 @@ function nativeSources(
       const text = recursiveTextAlternative(caption, null, c)[0];
       push(nodeListSource('tablecaption', [relatedNode(caption, text, idOf)], text), true);
     }
-    const summary = el.getAttribute('summary');
+    const summary = attr(el, 'summary');
     push(stringSource('summary', summary), summary !== null);
   }
   if (isHtml(el, 'fieldset')) {
@@ -715,7 +725,7 @@ export function contentsText(el: Element): string {
  * content, a ruby's annotations, the title.
  */
 function descriptionOf(el: Element, name: string): string {
-  const own = simplify(describedByText(el)) || simplify(el.getAttribute('aria-description') ?? '');
+  const own = simplify(describedByText(el)) || simplify(attr(el, 'aria-description') ?? '');
   if (own) return own;
   const caption = isHtml(el, 'table') ? captionOf(el) : null;
   const fallbacks = [

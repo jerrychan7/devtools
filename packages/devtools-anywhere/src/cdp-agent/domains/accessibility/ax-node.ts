@@ -3,7 +3,18 @@
 import type { Protocol } from 'devtools-protocol';
 import { contentsText, documentNameOf, isNativeTextField, nameOf, targetsOf, textNameOf, type IdOf } from './ax-name';
 import { inDisplayNone } from './ax-text';
-import { TreeShape, groupTable, isFocusable, isFocused, isInternalRole, isMenuList, roleOf, scopeOf } from './ax-tree';
+import {
+  attr,
+  groupTable,
+  hasAttr,
+  isFocusable,
+  isFocused,
+  isInternalRole,
+  isMenuList,
+  roleOf,
+  scopeOf,
+  TreeShape,
+} from './ax-tree';
 import { isElement, isHtml, isHtmlElement, isText } from '../../core/realm';
 
 type AXNode = Protocol.Accessibility.AXNode;
@@ -39,7 +50,7 @@ const prop = (name: AXPropertyName, type: AXValue['type'], value: unknown): AXPr
 
 /** The idrefs of an attribute, with the nodes they name. */
 function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | null {
-  const value = el.getAttribute(`aria-${name}`);
+  const value = attr(el, `aria-${name}`);
   if (value === null) return null;
   const root = scopeOf(el);
   const relatedNodes: Protocol.Accessibility.AXRelatedNode[] = [];
@@ -56,9 +67,7 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
  * taken), and drops the relation when none is left.
  */
 function ownsNothing(el: Element): boolean {
-  return (
-    !!scopeOf(el) && targetsOf(el, 'aria-owns').every(t => inDisplayNone(t) || t.getAttribute('aria-hidden') === 'true')
-  );
+  return !!scopeOf(el) && targetsOf(el, 'aria-owns').every(t => inDisplayNone(t) || attr(t, 'aria-hidden') === 'true');
 }
 
 /** The nesting level of a list item: how many lists hold it. */
@@ -73,13 +82,13 @@ const tristate = (value: string | null) => (value === 'true' || value === 'false
 
 /** A true/false ARIA attribute, if set to either. */
 const ariaBool = (el: Element, name: string) => {
-  const value = el.getAttribute(name)?.trim().toLowerCase();
+  const value = attr(el, name)?.trim().toLowerCase();
   return value === 'true' ? true : value === 'false' ? false : null;
 };
 
 /** A number ARIA attribute, if set to one. */
 const ariaNumber = (el: Element, name: string) => {
-  const value = el.getAttribute(name);
+  const value = attr(el, name);
   if (value === null || !value.trim()) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -155,7 +164,7 @@ const VALUELESS_INPUT = /^(button|checkbox|image|radio|reset|submit|file|hidden)
 function valueOf(el: Element, role: string): AXValue | undefined {
   if (isNativeRange(el))
     return Number.isNaN(el.valueAsNumber) ? undefined : { type: 'number', value: el.valueAsNumber };
-  if (isHtml(el, 'progress')) return el.hasAttribute('value') ? { type: 'number', value: el.value } : undefined;
+  if (isHtml(el, 'progress')) return hasAttr(el, 'value') ? { type: 'number', value: el.value } : undefined;
   if (isRange(el, role)) {
     const value = rangeValue(el, role);
     return value === null ? undefined : { type: 'number', value };
@@ -169,7 +178,7 @@ function textValueOf(el: Element, role: string): string {
   if (isHtml(el, 'select')) {
     if (!isMenuList(el)) return '';
     const option = el.selectedOptions[0];
-    return option ? (option.getAttribute('aria-label') ?? option.text.trim()) : '';
+    return option ? (attr(option, 'aria-label') ?? option.text.trim()) : '';
   }
   if (isHtml(el, 'textarea')) return el.value;
   if (isHtml(el, 'input')) {
@@ -188,7 +197,7 @@ const isEditingHost = (el: Element) =>
 
 /** aria-haspopup's popup, `true` meaning a menu. */
 function hasPopup(el: Element): string | null {
-  const value = el.getAttribute('aria-haspopup');
+  const value = attr(el, 'aria-haspopup');
   if (value === 'true') return 'menu';
   return value && /^(menu|listbox|tree|grid|dialog)$/.test(value) ? value : null;
 }
@@ -214,7 +223,7 @@ const ORIENTATION = groupTable([
 
 /** An element's orientation, explicit or the role's default. */
 function orientationOf(el: Element, role: string): string | null {
-  const explicit = el.getAttribute('aria-orientation')?.trim().toLowerCase();
+  const explicit = attr(el, 'aria-orientation')?.trim().toLowerCase();
   const valid = explicit === 'horizontal' || explicit === 'vertical' ? explicit : null;
   if (/^(combobox|radiogroup|treegrid)$/.test(role)) return valid;
   return role in ORIENTATION ? (valid ?? ORIENTATION[role] ?? null) : null;
@@ -243,7 +252,7 @@ function selectedOf(el: Element, role: string): boolean | null {
 
 /** The nesting level Chrome gives an element (aria-level, or counted for some roles). */
 function levelOf(el: Element, role: string): number | null {
-  const ariaLevel = Number(el.getAttribute('aria-level'));
+  const ariaLevel = Number(attr(el, 'aria-level'));
   if (Number.isInteger(ariaLevel) && ariaLevel > 0) return ariaLevel;
   // A heading without a level is at level 2, as in Chrome.
   if (/^h[1-6]$/.test(el.localName)) return Number(el.localName[1]);
@@ -275,7 +284,7 @@ const SETTABLE_ROLE = /^(ColorWell|Date|DateTime|InputTime|scrollbar|searchbox|s
 function isReadOnly(el: Element, role: string): boolean {
   // A text field or a number field (ax-name's native text fields).
   if (isNativeTextField(el) && el.readOnly) return true;
-  const contentEditable = el.hasAttribute('contenteditable');
+  const contentEditable = hasAttr(el, 'contenteditable');
   const explicit = ariaBool(el, 'aria-readonly');
   if (!contentEditable && explicit !== null && ARIA_READONLY_ROLE.test(role)) return explicit;
   if (/^(gridcell|columnheader|rowheader)$/.test(role)) {
@@ -291,11 +300,11 @@ const IMPLICIT_LIVE = groupTable(['assertive alert', 'polite status log', 'off m
 
 /** Live region properties of a live region's root: its politeness, atomic and relevant. */
 function liveRegion(el: Element, role: string): AXProperty[] {
-  const live = el.getAttribute('aria-live')?.trim().toLowerCase() || IMPLICIT_LIVE[role];
+  const live = attr(el, 'aria-live')?.trim().toLowerCase() || IMPLICIT_LIVE[role];
   if (!live || live === 'off') return [];
   // Of the live regions by role, alert and status are atomic.
   const atomic = ariaBool(el, 'aria-atomic') ?? (role === 'alert' || role === 'status');
-  const relevant = el.getAttribute('aria-relevant')?.trim() || 'additions text';
+  const relevant = attr(el, 'aria-relevant')?.trim() || 'additions text';
   return [prop('live', 'token', live), bool('atomic', atomic, 'boolean'), prop('relevant', 'tokenList', relevant)];
 }
 
@@ -306,9 +315,9 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   // Global states.
   // An object element that shows no content (no plugin, no frame) is disabled.
   const emptyObject = isHtml(el, 'object') && !el.contentWindow;
-  const disabled = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true' || emptyObject;
+  const disabled = el.matches(':disabled') || attr(el, 'aria-disabled') === 'true' || emptyObject;
   if (disabled) out.push(bool('disabled', true, 'boolean'));
-  const invalid = el.getAttribute('aria-invalid');
+  const invalid = attr(el, 'aria-invalid');
   if (invalid && invalid !== 'false') out.push(prop('invalid', 'token', invalid));
   else if (isListed(el)) out.push(prop('invalid', 'token', invalid === null && !isValidControl(el) ? 'true' : 'false'));
   else if (invalid !== null) out.push(prop('invalid', 'token', 'false'));
@@ -340,7 +349,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   if (READONLY_ROLE.test(role)) out.push(bool('readonly', readOnly, 'boolean'));
   if (REQUIRED_ROLE.test(role) || combobox === 'textField' || combobox === 'button') {
     const native = (isTextField(el) || isNativeRange(el) || isHtml(el, 'select')) && el.required;
-    out.push(bool('required', native || el.getAttribute('aria-required') === 'true', 'boolean'));
+    out.push(bool('required', native || attr(el, 'aria-required') === 'true', 'boolean'));
   }
   if (isNativeRange(el)) {
     const max = el.type === 'range' ? 100 : 0;
@@ -359,17 +368,17 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
     out.push(prop('valuetext', 'string', ''));
   }
   // Widget states.
-  const pressed = role === 'button' ? tristate(el.getAttribute('aria-pressed')) : null;
+  const pressed = role === 'button' ? tristate(attr(el, 'aria-pressed')) : null;
   if (pressed) out.push(prop('pressed', 'tristate', pressed));
   else if (isHtml(el, 'input') && (el.type === 'checkbox' || el.type === 'radio'))
     out.push(prop('checked', 'tristate', el.indeterminate ? 'mixed' : String(el.checked)));
   else if (/^(checkbox|radio|switch|menuitemcheckbox|menuitemradio)$/.test(role))
-    out.push(prop('checked', 'tristate', tristate(el.getAttribute('aria-checked')) ?? 'false'));
+    out.push(prop('checked', 'tristate', tristate(attr(el, 'aria-checked')) ?? 'false'));
   if (combobox === 'select') out.push(bool('expanded', false));
   else if (role === 'DisclosureTriangle' && isHtml(el.parentElement, 'details'))
     out.push(bool('expanded', el.parentElement.open));
   else if (!isHtml(el, 'select')) {
-    const expanded = el.getAttribute('aria-expanded');
+    const expanded = attr(el, 'aria-expanded');
     if (expanded === 'true' || expanded === 'false') out.push(bool('expanded', expanded === 'true'));
   }
   const selected = selectedOf(el, role);
@@ -420,7 +429,7 @@ function activeDescendant(el: Element): Element | null {
     const selected = el.selectedOptions;
     return selected[selected.length - 1] ?? null;
   }
-  const idref = el.getAttribute('aria-activedescendant')?.trim();
+  const idref = attr(el, 'aria-activedescendant')?.trim();
   return (idref && scopeOf(el)?.getElementById(idref)) || null;
 }
 

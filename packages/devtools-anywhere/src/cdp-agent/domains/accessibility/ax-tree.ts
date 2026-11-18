@@ -8,6 +8,12 @@
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 import { inDisplayNone } from './ax-text';
 
+/** An element's attribute, or null (`getAttribute`, which minification cannot shorten). */
+export const attr = (el: Element, name: string) => el.getAttribute(name);
+
+/** Whether an element has an attribute (`hasAttribute`). */
+export const hasAttr = (el: Element, name: string) => el.hasAttribute(name);
+
 /** Whether a role is one of Chrome's own, not an ARIA role (reported as `internalRole`). */
 export const isInternalRole = (role: string) => /^[A-Z]/.test(role);
 
@@ -85,9 +91,9 @@ const GLOBAL_ARIA =
  * title attribute, even an empty one (Chrome's IsNameFromAuthorAttribute).
  */
 function hasAuthorName(el: Element): boolean {
-  if (el.getAttribute('aria-label')?.trim() || el.hasAttribute('title')) return true;
+  if (attr(el, 'aria-label')?.trim() || hasAttr(el, 'title')) return true;
   const root = scopeOf(el);
-  return (el.getAttribute('aria-labelledby') ?? '')
+  return (attr(el, 'aria-labelledby') ?? '')
     .split(/[ \t\n\r\f]+/)
     .some(id => !!id && !!root?.getElementById(id)?.textContent?.trim());
 }
@@ -110,7 +116,7 @@ function explicitRole(el: Element): string | null {
 
 /** The tokens of an element's role attribute that are roles Chrome knows (in any case), in order. */
 const roleTokens = (el: Element) =>
-  (el.getAttribute('role') ?? '')
+  (attr(el, 'role') ?? '')
     .toLowerCase()
     .split(/[ \t\n\r\f]+/)
     .filter(token => ARIA_ROLES.has(token) || DOC_ROLE.test(token));
@@ -148,7 +154,7 @@ function isOrphaned(el: Element, role: string): boolean {
     if (role === 'treeitem' && parentRole === 'treeitem') continue;
     if (parentRole === 'none' || parentRole === 'presentation') continue;
     const generic = /^(div|span|slot)$/.test(n.localName) || n.localName.includes('-');
-    if (!n.getAttribute('role') && generic) continue;
+    if (!attr(n, 'role') && generic) continue;
     break;
   }
   return true;
@@ -159,8 +165,8 @@ export function isFocusable(el: Element): boolean {
   if (el.matches(':disabled')) return false;
   // Without a box (display: contents), Chrome does not focus it.
   if (styleOf(el).display === 'contents') return false;
-  if (el.hasAttribute('tabindex')) return true;
-  if (isHtml(el, 'a') || isHtml(el, 'area')) return el.hasAttribute('href');
+  if (hasAttr(el, 'tabindex')) return true;
+  if (isHtml(el, 'a') || isHtml(el, 'area')) return hasAttr(el, 'href');
   if (isHtml(el, 'input')) return el.type !== 'hidden';
   if (isHtmlElement(el) && el.isContentEditable) return true;
   return (isHtmlElement(el) && /^(button|select|textarea|option)$/.test(el.localName)) || isSummary(el);
@@ -278,9 +284,8 @@ function isDataTable(table: Element): boolean {
 function decideDataTable(table: Element): boolean {
   if (!isHtml(table, 'table')) return false;
   if (inDisplayNone(table)) return true;
-  if (table.hasAttribute('role') || table.isContentEditable) return true;
-  if (table.getAttribute('summary') || table.tHead || table.tFoot || table.caption || table.getAttribute('rules'))
-    return true;
+  if (hasAttr(table, 'role') || table.isContentEditable) return true;
+  if (attr(table, 'summary') || table.tHead || table.tFoot || table.caption || attr(table, 'rules')) return true;
   if (table.querySelector(':scope > col, :scope > colgroup')) return true;
   const rows = table.rows;
   if (rows.length >= 20) return true;
@@ -298,7 +303,7 @@ function decideDataTable(table: Element): boolean {
   for (const [r, row] of [...rows].entries()) {
     for (const cell of row.cells) {
       if (cell.localName === 'th') return true;
-      if (['headers', 'abbr', 'axis', 'scope'].some(a => cell.getAttribute(a))) return true;
+      if (['headers', 'abbr', 'axis', 'scope'].some(a => attr(cell, a))) return true;
       const style = styleOf(cell);
       if (inDisplayNone(cell) || !/^(table-cell|block|flow-root|inline-block|list-item|flex|grid)$/.test(style.display))
         continue;
@@ -364,7 +369,7 @@ function implicitRole(el: Element): string {
   }
   switch (el.localName) {
     case 'th': {
-      const scope = el.getAttribute('scope');
+      const scope = attr(el, 'scope');
       if (scope === 'row' || scope === 'rowgroup') return 'rowheader';
       if (scope === 'col' || scope === 'colgroup') return 'columnheader';
       return el.parentElement?.querySelector(':scope > td') ? 'rowheader' : 'columnheader';
@@ -387,10 +392,10 @@ function implicitRole(el: Element): string {
       return el.localName === 'header' ? 'banner' : 'contentinfo';
     }
     case 'a':
-      return el.hasAttribute('href') ? 'link' : 'generic';
+      return hasAttr(el, 'href') ? 'link' : 'generic';
     case 'area':
       // An image map's area without a link is text in Chrome.
-      return el.hasAttribute('href') ? 'link' : imageOf(el) ? 'StaticText' : 'generic';
+      return hasAttr(el, 'href') ? 'link' : imageOf(el) ? 'StaticText' : 'generic';
     case 'select':
       if (isHtml(el, 'select')) return isMenuList(el) ? 'combobox' : 'listbox';
   }
@@ -398,8 +403,8 @@ function implicitRole(el: Element): string {
   if (role) return role;
   // A generic element that can be dragged or takes autofocus is a group in Chrome.
   // Not with a role attribute, even one with no role Chrome knows.
-  if (el.getAttribute('role')?.trim()) return 'generic';
-  return el.hasAttribute('draggable') || el.hasAttribute('autofocus') ? 'group' : 'generic';
+  if (attr(el, 'role')?.trim()) return 'generic';
+  return hasAttr(el, 'draggable') || hasAttr(el, 'autofocus') ? 'group' : 'generic';
 }
 
 /** The role Chrome gives an element: an ARIA role, or one of its own (isInternalRole). */
@@ -431,16 +436,16 @@ export function imageOf(area: Element): Element | null {
   const root = scopeOf(map);
   if (!root) return null;
   for (const img of root.querySelectorAll('img[usemap]'))
-    if (img.getAttribute('usemap') === `#${name}`) return hiddenReason(img) === 'notRendered' ? null : img;
+    if (attr(img, 'usemap') === `#${name}`) return hiddenReason(img) === 'notRendered' ? null : img;
   return null;
 }
 
 /** An image's map areas, in order. */
 function areasOf(img: Element): Element[] {
-  const name = img.getAttribute('usemap')?.replace(/^#/, '');
+  const name = attr(img, 'usemap')?.replace(/^#/, '');
   const root = scopeOf(img);
   if (!name || !root) return [];
-  const map = [...root.querySelectorAll('map')].find(m => (m.getAttribute('name') || m.id) === name);
+  const map = [...root.querySelectorAll('map')].find(m => (attr(m, 'name') || m.id) === name);
   return map ? [...map.querySelectorAll('area')].filter(area => imageOf(area) === img) : [];
 }
 
@@ -505,7 +510,7 @@ export class TreeShape {
   constructor(doc: Document) {
     this.doc = doc;
     for (const el of doc.querySelectorAll('[aria-owns]')) {
-      const ids = el.getAttribute('aria-owns')?.trim().split(/\s+/) ?? [];
+      const ids = attr(el, 'aria-owns')?.trim().split(/\s+/) ?? [];
       const list: Element[] = [];
       for (const id of ids) {
         const target = doc.getElementById(id);
@@ -538,7 +543,7 @@ export class TreeShape {
     if (
       isHtmlElement(node) &&
       (NOT_RENDERED.has(node.localName) ||
-        (node.localName === 'embed' && !node.hasAttribute('src') && !node.hasAttribute('type')))
+        (node.localName === 'embed' && !hasAttr(node, 'src') && !hasAttr(node, 'type')))
     )
       return { kind: 'excluded', reason: 'notRendered' };
     const hidden = this.hiddenRoot(node);
@@ -557,9 +562,9 @@ export class TreeShape {
     if (
       node.localName === 'tbody' &&
       ![...node.attributes].some(a => a.name.startsWith('aria-') || a.name === 'role') &&
-      !node.getAttribute('title') &&
+      !attr(node, 'title') &&
       !(node.id && !isShadowRoot(node.getRootNode())) &&
-      !node.hasAttribute('tabindex')
+      !hasAttr(node, 'tabindex')
     )
       return { kind: 'ignored', reason: 'uninteresting' };
     // Chrome gives a ruby's annotation as its description only.
@@ -586,11 +591,11 @@ export class TreeShape {
       return { kind: 'lifted', reason: 'presentationalRole' };
     if (
       node.localName === 'img' &&
-      node.getAttribute('alt') === '' &&
+      attr(node, 'alt') === '' &&
       !explicit &&
-      !node.hasAttribute('aria-label') &&
-      !node.hasAttribute('aria-labelledby') &&
-      !node.getAttribute('title')
+      !hasAttr(node, 'aria-label') &&
+      !hasAttr(node, 'aria-labelledby') &&
+      !attr(node, 'title')
     )
       return { kind: 'lifted', reason: 'emptyAlt' };
     if (explicit === 'none') return { kind: 'lifted', reason: 'presentationalRole' };
@@ -600,7 +605,7 @@ export class TreeShape {
   /** The element with aria-hidden="true" that hides a node, if any. */
   private hiddenRoot(node: Node): Element | null {
     for (let n: Node | null = node; n && n !== this.doc; n = domParent(n))
-      if (isElement(n) && n.getAttribute('aria-hidden') === 'true') return n;
+      if (isElement(n) && attr(n, 'aria-hidden') === 'true') return n;
     return null;
   }
 
