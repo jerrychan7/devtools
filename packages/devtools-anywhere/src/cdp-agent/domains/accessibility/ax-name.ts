@@ -242,6 +242,9 @@ const BUTTON_LABELS: Record<string, string> = {
   reset: 'Reset',
 };
 
+/** The text an input button shows: its value, or its default label. */
+export const inputButtonText = (el: HTMLInputElement) => attr(el, 'value') ?? (BUTTON_LABELS[el.type] || '');
+
 /** The texts of elements (TextFromElements), with each one's text; null when none exists. */
 function textFromElements(
   elements: Element[],
@@ -341,7 +344,7 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     }
   }
   if (isInputButton(el)) {
-    const value = attr(el, 'value') ?? (BUTTON_LABELS[el.type] || '');
+    const value = inputButtonText(el);
     return value ? [value, 'value'] : null;
   }
   if (isHtml(el, 'input') && el.type === 'image') {
@@ -596,7 +599,14 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
   }
   // An image with alt="" has no title source: its title describes it.
   if ((isHtml(el, 'img') || area) && attr(el, 'alt') === '') return out;
-  if (isHtmlElement(el) && el.isContentEditable && !isNativeTextField(el) && !isTextFieldRole(role))
+  // An editing host, not the elements in it.
+  if (
+    isHtmlElement(el) &&
+    el.isContentEditable &&
+    !(el.parentElement?.isContentEditable ?? false) &&
+    !isNativeTextField(el) &&
+    !isTextFieldRole(role)
+  )
     push(placeholderSource(el, 'aria-placeholder'), false);
   if (el.namespaceURI === SVG_NS) {
     const title = query(el, ':scope > title');
@@ -670,8 +680,8 @@ function nativeSources(
   if (isInputButton(el)) {
     const value = attr(el, 'value');
     push(source({ type: 'attribute', attribute: 'value' }, value), value !== null);
-    // Its content: the value, or the default label.
-    const text = el.value || BUTTON_LABELS[el.type] || '';
+    // Its content: the value, or the default label without one (an empty value shows nothing).
+    const text = inputButtonText(el);
     push(source({ type: 'contents' }, text || null), !!text);
     return;
   }

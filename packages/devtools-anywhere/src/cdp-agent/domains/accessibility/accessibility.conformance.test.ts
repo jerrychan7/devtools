@@ -339,4 +339,29 @@ describe('control internals', () => {
       ['se1', 'se2', 'se2g', 'se3', 'se4', 'se5', 'se6', 'se7'],
       ['option', 'group', 'MenuListPopup', 'generic']
     ));
+
+  // Left out: date and time fields, file and image inputs, whose nodes Chrome names in the
+  // browser's language.
+  test('text fields: placeholder, wrappers, inner editor and its text; other inputs; contenteditable', () =>
+    compare(
+      `<input id=tf1 aria-label=T value="  a  b "><input id=tf2 aria-label=E>
+<input id=tf3 placeholder=PH><input id=tf4 placeholder=PH value=v><input id=tf5 placeholder="">
+<input id=tf6 type=search value=q><input id=tf7 type=search placeholder=P>
+<input id=tf8 type=password value=sec><input id=tf9 type=number value=4><input id=tf10 type=number placeholder=P value=3>
+<input id=tf11 type=email value=a@b><input id=tf12 type=url><input id=tf13 type=tel value=1>
+<input id=tf14 list=tfl placeholder=P><input id=tf15 type=search list=tfl><datalist id=tfl><option>z</option></datalist>
+<input id=tf16 disabled value=dis><input id=tf17 readonly value=ro>
+<textarea id=tf18>line1
+line2</textarea><textarea id=tf19>a
+
+b
+</textarea><textarea id=tf20 placeholder=TP></textarea><textarea id=tf21 placeholder=P>x</textarea><textarea id=tf22 readonly>r</textarea>
+<input id=tf23 type=button value=Btn><input id=tf24 type=reset value=R><input id=tf25 type=submit value=""><input id=tf26 type=button>
+<input id=tf27 type=color value=#ff0000><input id=tf28 type=range value=3><input id=tf29 type=checkbox checked><input id=tf30 type=radio>
+<div contenteditable id=tf31>edit <b id=tf31b>bold</b></div><div contenteditable id=tf32></div>
+<div contenteditable id=tf33>line1<br>line2</div><div role=textbox contenteditable id=tf34>tb</div>
+<div contenteditable=plaintext-only id=tf35>pt</div>`,
+      Array.from({ length: 35 }, (_, i) => `tf${i + 1}`),
+      ['generic', 'StaticText', 'LineBreak', 'textbox', 'combobox']
+    ));
 });

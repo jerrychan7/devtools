@@ -1,13 +1,23 @@
 // Entry of accessibility.js, which the Accessibility domain loads on first use (accessibility.ts):
 // it turns the DOM into CDP AXNodes. Kept out of the bundle like snapDOM, for its size.
 import type { Protocol } from 'devtools-protocol';
-import { contentsText, documentNameOf, isNativeTextField, nameOf, targetsOf, textNameOf, type IdOf } from './ax-name';
+import {
+  contentsText,
+  documentNameOf,
+  inputButtonText,
+  isNativeTextField,
+  nameOf,
+  targetsOf,
+  textNameOf,
+  type IdOf,
+} from './ax-name';
 import { inDisplayNone } from './ax-text';
 import {
   attr,
   byId,
   groupTable,
   hasAttr,
+  innerTextOf,
   isFocusable,
   isFocused,
   isInternalRole,
@@ -211,13 +221,23 @@ function textValueOf(el: Element, role: string): string {
   }
   // A focusable ARIA combobox (Chrome's ComboBoxMenuButton) shows its content as its value.
   if (comboboxKind(el, role) === 'button') return isFocusable(el) ? contentsText(el) : '';
-  if (role === 'textbox' || role === 'searchbox' || isEditingHost(el)) return textOf(el) ?? '';
+  // An editing host's text as shown, its line breaks kept.
+  if (isEditingHost(el)) return innerTextOf(el as HTMLElement);
+  if (role === 'textbox' || role === 'searchbox') return textOf(el) ?? '';
   return '';
 }
 
 /** An element with contenteditable on it (not inherited). */
 const isEditingHost = (el: Element) =>
   isHtmlElement(el) && el.isContentEditable && !(el.parentElement?.isContentEditable ?? false);
+
+/** What content in an editing host edits: plain text under contenteditable=plaintext-only. */
+function editableKind(el: Element | null): 'richtext' | 'plaintext' | null {
+  if (!isHtmlElement(el) || !el.isContentEditable) return null;
+  let host: HTMLElement = el;
+  while (host.parentElement?.isContentEditable) host = host.parentElement;
+  return attr(host, 'contenteditable')?.trim().toLowerCase() === 'plaintext-only' ? 'plaintext' : 'richtext';
+}
 
 /** aria-haspopup's popup, `true` meaning a menu. */
 function hasPopup(el: Element): string | null {
@@ -353,9 +373,13 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   const editableField = field && (/^(textbox|searchbox|spinbutton)$/.test(role) || combobox === 'textField');
   const readOnly = isReadOnly(el, role);
   if (editableField) out.push(token('editable', 'plaintext'));
-  else if (isEditingHost(el)) out.push(token('editable', 'richtext'));
+  else if (editableKind(el))
+    // The host and the elements in it; Chrome says a line break edits plain text, whatever the host.
+    out.push(token('editable', isHtml(el, 'br') ? 'plaintext' : (editableKind(el) ?? 'richtext')));
   const settable = SETTABLE_ROLE.test(role) || combobox === 'textField';
   if (settable && !disabled && !readOnly) out.push(bool('settable', true));
+  // A text field's datalist completes it.
+  if (combobox === 'textField' && isHtml(el, 'input') && el.list) out.push(token('autocomplete', 'list'));
   // Widget properties.
   if (combobox === 'select') out.push(token('hasPopup', 'menu'));
   else {
@@ -371,7 +395,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   const orientation = isNativeRange(el) && el.type === 'range' ? 'horizontal' : orientationOf(el, role);
   if (orientation) out.push(token('orientation', orientation));
   if (role === 'textbox')
-    out.push(flag('multiline', isHtml(el, 'textarea') || ariaBool(el, 'aria-multiline') === true));
+    out.push(flag('multiline', isHtml(el, 'textarea') || (ariaBool(el, 'aria-multiline') ?? isEditingHost(el))));
   if (READONLY_ROLE.test(role)) out.push(flag('readonly', readOnly));
   if (REQUIRED_ROLE.test(role) || combobox === 'textField' || combobox === 'button') {
     const native = (isTextField(el) || isNativeRange(el) || isHtml(el, 'select')) && el.required;
@@ -494,6 +518,18 @@ function virtualNode(node: VirtualNode, queried: boolean | undefined): Omit<AXNo
       role: { type: 'role', value: queried ? node.role : 'none' },
       ...(queried && { name: { type: 'computedString', value: '' } }),
     };
+  const editable = node.editable ? [token('editable', 'plaintext')] : [];
+  if (node.role === 'StaticText' || node.role === 'LineBreak')
+    return {
+      ignored: false,
+      role: roleValue(node.role),
+      name: {
+        type: 'computedString',
+        value: node.text,
+        sources: [{ type: 'contents', value: { type: 'computedString', value: node.text } }],
+      },
+      properties: editable,
+    };
   const sources: Protocol.Accessibility.AXValueSource[] = [
     { type: 'relatedElement', attribute: 'aria-labelledby' },
     { type: 'attribute', attribute: 'aria-label' },
@@ -503,12 +539,16 @@ function virtualNode(node: VirtualNode, queried: boolean | undefined): Omit<AXNo
     ignored: false,
     role: roleValue(node.role),
     name: { type: 'computedString', value: '', sources },
-    properties: [],
+    properties: editable,
   };
 }
 
+/** The text a text field or input button shows (ax-virtual.ts). */
+const fieldText = (el: Element) =>
+  isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type) ? inputButtonText(el) : textValueOf(el, roleOf(el));
+
 export function createAXTree(doc: Document, idOf: IdOf, frameId: string, virtualIdOf: VirtualIdOf): AXTree {
-  const shape = new TreeShape(doc);
+  const shape = new TreeShape(doc, fieldText);
   const id = (node: AXRef) => String(isVirtual(node) ? virtualIdOf(idOf(node.host), node.key) : idOf(node));
   const links = (node: AXRef, base: AXNode): AXNode => {
     const parent = shape.parent(node);
@@ -570,13 +610,14 @@ export function createAXTree(doc: Document, idOf: IdOf, frameId: string, virtual
           frameId,
         };
       }
+      const editable = isText(node) && editableKind(node.parentElement);
       if (isText(node))
         return links(node, {
           nodeId: id(node),
           ignored: false,
           role: roleValue('StaticText'),
           name: textNameOf(node),
-          properties: [],
+          properties: editable ? [token('editable', editable)] : [],
         });
       if (!isElement(node)) throw new Error('not an element');
       const role = roleOf(node);

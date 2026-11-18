@@ -1,8 +1,9 @@
 // The nodes Chrome's tree has under a control without a DOM node the page can see: those of the
-// user-agent shadow tree (a select's popup, the slot of a list box or an optgroup). Each is a
+// user-agent shadow tree (a select's popup, the slot of a list box or an optgroup, a text field's
+// placeholder and inner editor with its text, an input button's text, a color well's swatch). Each is a
 // VirtualNode, found again by its host element and a key unique in that host: the Accessibility
 // domain gives it an id of its own (accessibility.ts), apart from the DOM nodes' backend ids.
-import { domChildren, type Inclusion } from './ax-tree';
+import { domChildren, hasAttr, isMenuList, matches, type Inclusion } from './ax-tree';
 import { isElement, isHtml } from '../../core/realm';
 
 /** A node of the tree or its DOM node. */
@@ -18,6 +19,10 @@ export class VirtualNode {
   readonly raw: AXRef[];
   /** Set when the host's nodes are built: the host, or the VirtualNode above. */
   parent: AXRef;
+  /** The text of a StaticText or LineBreak. */
+  text = '';
+  /** Whether it is in a text field the user can edit (`editable` plaintext). */
+  editable = false;
   constructor(host: Element, key: string, role: string, inclusion: Inclusion, raw: AXRef[] = []) {
     this.host = host;
     this.key = key;
@@ -32,6 +37,8 @@ export const isVirtual = (ref: AXRef): ref is VirtualNode => ref instanceof Virt
 
 const INCLUDED: Inclusion = { kind: 'included' };
 const UNINTERESTING: Inclusion = { kind: 'ignored', reason: 'uninteresting' };
+/** Ignored without a reason given, as Chrome does a text field's wrappers. */
+const NO_REASON: Inclusion = { kind: 'ignored', reason: 'uninteresting', noReason: true };
 
 /** The options and groups of a select or an optgroup, as Chrome lists them. */
 const optionsOf = (el: Element): Node[] =>
@@ -46,17 +53,69 @@ export function selectOf(el: Element): HTMLSelectElement | null {
 
 /**
  * The VirtualNodes Chrome puts between a host and its children, null for an element without:
- * a drop-down select's MenuListPopup and a list box's slot over the options, an optgroup's slot.
+ * a drop-down select's MenuListPopup and a list box's slot over the options, an optgroup's slot,
+ * a text field's nodes, an input button's text, a color well's swatch. `fieldText`: the text a field or button shows.
  */
-export function virtualChildrenOf(el: Element, menuList: (select: Element) => boolean): VirtualNode[] | null {
+export function virtualChildrenOf(el: Element, fieldText: (el: Element) => string): VirtualNode[] | null {
   if (!isElement(el)) return null;
   if (isHtml(el, 'select'))
     return [
-      menuList(el)
+      isMenuList(el)
         ? new VirtualNode(el, 'popup', 'MenuListPopup', INCLUDED, optionsOf(el))
         : new VirtualNode(el, 'slot', 'generic', UNINTERESTING, optionsOf(el)),
     ];
   if (isHtml(el, 'optgroup') && selectOf(el))
     return [new VirtualNode(el, 'slot', 'generic', UNINTERESTING, optionsOf(el))];
+  if (isHtml(el, 'textarea') || (isHtml(el, 'input') && TEXT_FIELD.test(el.type)))
+    return textFieldChildren(el, fieldText(el));
+  if (isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type)) {
+    const text = fieldText(el);
+    return text ? [textNode(el, 'text', 'StaticText', text, false)] : [];
+  }
+  // A color well's swatch, in its wrapper.
+  if (isHtml(el, 'input') && el.type === 'color')
+    return [
+      new VirtualNode(el, 'wrapper', 'generic', UNINTERESTING, [
+        new VirtualNode(el, 'swatch', 'generic', UNINTERESTING),
+      ]),
+    ];
   return null;
+}
+
+/** The inputs that edit text in an inner editor. */
+const TEXT_FIELD = /^(text|search|email|url|tel|password|number)$/;
+
+function textNode(host: Element, key: string, role: string, text: string, editable: boolean): VirtualNode {
+  const node = new VirtualNode(host, key, role, INCLUDED);
+  node.text = text;
+  node.editable = editable;
+  return node;
+}
+
+/**
+ * A text field's nodes: its placeholder (ignored, not rendered once there is a value), then its
+ * inner editor (generic), in the wrappers of a search, number or datalist field, holding the text
+ * shown, a textarea's lines apart with a LineBreak for each line feed.
+ */
+function textFieldChildren(el: HTMLInputElement | HTMLTextAreaElement, text: string): VirtualNode[] {
+  const editable = !matches(el, ':disabled') && !el.readOnly;
+  const texts: VirtualNode[] = [];
+  if (isHtml(el, 'textarea')) {
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      if (i) texts.push(textNode(el, `br${i}`, 'LineBreak', '\n', editable));
+      if (line) texts.push(textNode(el, `text${i}`, 'StaticText', line, editable));
+    });
+    // A last line feed shows an empty line, which Chrome ends with one more break.
+    if (lines.length > 1 && !lines[lines.length - 1]) texts.push(textNode(el, 'br', 'LineBreak', '\n', editable));
+  } else if (text) texts.push(textNode(el, 'text0', 'StaticText', text, editable));
+  let inner = new VirtualNode(el, 'editor', 'generic', INCLUDED, texts);
+  inner.editable = editable;
+  const search = isHtml(el, 'input') && el.type === 'search';
+  const wrappers = isHtml(el, 'input') ? (search || el.type === 'number' ? 1 : el.list ? 2 : 0) : 0;
+  for (let i = 0; i < wrappers; i++) inner = new VirtualNode(el, `wrapper${i}`, 'generic', NO_REASON, [inner]);
+  if (!hasAttr(el, 'placeholder')) return [inner];
+  const shown: Inclusion = el.value ? { kind: 'ignored', reason: 'notRendered' } : NO_REASON;
+  const placeholder = new VirtualNode(el, 'placeholder', 'generic', shown);
+  return [placeholder, inner];
 }

@@ -213,7 +213,8 @@ export function isFocusable(el: Element): boolean {
   if (hasAttr(el, 'tabindex')) return true;
   if (isHtml(el, 'a') || isHtml(el, 'area')) return hasAttr(el, 'href');
   if (isHtml(el, 'input')) return el.type !== 'hidden';
-  if (isHtmlElement(el) && el.isContentEditable) return true;
+  // The editing host, not the elements in it.
+  if (isHtmlElement(el) && el.isContentEditable && !(el.parentElement?.isContentEditable ?? false)) return true;
   return (isHtmlElement(el) && /^(button|select|textarea|option)$/.test(el.localName)) || isSummary(el);
 }
 
@@ -599,9 +600,12 @@ export class TreeShape {
   private keyed = new Map<Element, Map<string, VirtualNode>>();
   private placed = new Map<Node, VirtualNode>();
   readonly doc: Document;
+  /** The text a text field or input button shows, for its VirtualNodes. */
+  private fieldText: (el: Element) => string;
 
-  constructor(doc: Document) {
+  constructor(doc: Document, fieldText: (el: Element) => string = () => '') {
     this.doc = doc;
+    this.fieldText = fieldText;
     this.owner = ownersOf(doc);
     for (const [target, el] of this.owner) this.owned.set(el, [...(this.owned.get(el) ?? []), target]);
   }
@@ -764,7 +768,7 @@ export class TreeShape {
   virtualChildren(el: Element): VirtualNode[] | null {
     let top = this.virtuals.get(el);
     if (top === undefined) {
-      top = virtualChildrenOf(el, isMenuList);
+      top = virtualChildrenOf(el, this.fieldText);
       this.virtuals.set(el, top);
       const keys = new Map<string, VirtualNode>();
       this.keyed.set(el, keys);
