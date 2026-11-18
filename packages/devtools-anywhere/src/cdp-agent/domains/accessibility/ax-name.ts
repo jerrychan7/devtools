@@ -334,13 +334,24 @@ function settle(sources: AXValueSource[]): string {
   return found;
 }
 
-/** An element's description: aria-describedby's targets, aria-description, or its title. */
-function descriptionOf(el: Element): string {
-  return (
+/**
+ * An element's description, in Chrome's order: aria-describedby's targets, aria-description, then
+ * the first of what did not name it: an input button's value, a table's caption, a summary's
+ * content, a ruby's annotations, the title.
+ */
+function descriptionOf(el: Element, name: string): string {
+  const own =
     referencedText(el, 'aria-describedby', { hidden: false, referenced: false }) ||
-    flat(el.getAttribute('aria-description') ?? '') ||
-    flat(el.getAttribute('title') ?? '')
-  );
+    flat(el.getAttribute('aria-description') ?? '');
+  if (own) return own;
+  const fallbacks = [
+    isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type) ? flat(el.value) : '',
+    isHtml(el, 'table') && el.caption ? textOf(el.caption) : '',
+    el.localName === 'summary' ? contentsOf(el) : '',
+    el.localName === 'ruby' ? [...el.querySelectorAll('rt')].map(contentsOf).join(' ') : '',
+    flat(el.getAttribute('title') ?? ''),
+  ];
+  return fallbacks.find(text => text && text !== name) ?? '';
 }
 
 /** An element's name and description (absent when empty). */
@@ -351,7 +362,7 @@ export function nameOf(
 ): { name: Protocol.Accessibility.AXValue; description?: Protocol.Accessibility.AXValue } {
   const sources = sourcesOf(el, role, idOf);
   const name = settle(sources);
-  const description = descriptionOf(el);
+  const description = descriptionOf(el, name);
   return {
     name: { ...computed(name), sources },
     ...(description && description !== name && { description: computed(description) }),

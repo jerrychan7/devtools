@@ -133,9 +133,6 @@ const TODO = {
   'properties: Chrome and ours differ in focusable, modal': `
     name-comp-name-from-heading-tentative-5
     `,
-  'description: Chrome and ours compute different descriptions': `
-    html-aam-summary-1
-    `,
 };
 
 describeCases(readCases(new URL('cases/names.html', import.meta.url)), {

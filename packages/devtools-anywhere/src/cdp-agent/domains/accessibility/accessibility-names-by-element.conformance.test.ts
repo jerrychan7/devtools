@@ -700,8 +700,7 @@ const TODO = {
     other-form-elements-el-66 other-form-elements-el-67 other-form-elements-el-68
     other-form-elements-el-69 other-form-elements-el-70 other-form-elements-el-71
     other-form-elements-el-72 other-form-elements-el-73 other-form-elements-el-74
-    other-form-elements-el-75 other-form-elements-el-76 other-form-elements-el-77 phrasing-elements-el-6
-    phrasing-elements-el-7 phrasing-elements-el-8 phrasing-elements-el-9 phrasing-elements-el-10
+    other-form-elements-el-75 other-form-elements-el-76 other-form-elements-el-77
     phrasing-elements-el-36 phrasing-elements-el-37 phrasing-elements-el-38 phrasing-elements-el-39
     phrasing-elements-el-40 table-el-5 table-el-6 tr-td-th.tentative-el-1 tr-td-th.tentative-el-2
     tr-td-th.tentative-el-3 tr-td-th.tentative-el-4 tr-td-th.tentative-el-5 tr-td-th.tentative-el-11
@@ -749,9 +748,6 @@ const TODO = {
     `,
   'properties: Chrome and ours differ in atomic, invalid, live, relevant': `
     output-el-1 output-el-2 output-el-3 output-el-4 output-el-5 output-el-6 output-el-7
-    `,
-  'description: Chrome and ours compute different descriptions': `
-    summary-el-1 summary-el-2 summary-el-3 table-el-1 table-el-2 table-el-3
     `,
   'name: Chrome and ours compute different names': `
     other-form-elements-el-81
