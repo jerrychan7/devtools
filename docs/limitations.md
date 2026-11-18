@@ -427,7 +427,7 @@ Not merged (off, or no probe in it):
 
 ## Accessibility tree
 
-The Elements panel's Accessibility pane and `Accessibility.getPartialAXTree`, `getFullAXTree`, `queryAXTree`, `getRootAXNode`, `getChildAXNodes`, `getAXNodeAndAncestors` are computed in the page from the DOM, ARIA attributes and computed styles, compared with Chrome's. Computed by `accessibility.js` (about 40 KB), loaded on first use from next to the bundle: self-hosted, serve it in the same directory.
+The Elements panel's Accessibility pane and `Accessibility.getPartialAXTree`, `getFullAXTree`, `queryAXTree`, `getRootAXNode`, `getChildAXNodes`, `getAXNodeAndAncestors` are computed in the page from the DOM, ARIA attributes and computed styles, compared with Chrome's. Computed by `accessibility.js` (about 44 KB), loaded on first use from next to the bundle: self-hosted, serve it in the same directory.
 
 - **Chrome**: computes the tree in the browser, with inline text boxes, list markers and nodes of user-agent shadow trees.
 - **devtools-anywhere**: no inline text boxes, list markers or nodes of user-agent shadow trees; the default names of inputs (such as "Submit") are in English.

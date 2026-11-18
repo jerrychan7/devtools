@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-- 无障碍树不再使用 dom-accessibility-api：角色、label 文字和描述改由项目自己的代码计算，并用从该库的测试和 web-platform-tests 导入的用例与 Chrome 对照。更多节点的角色与 Chrome 一致（`role` 首个 token 无效时回退到下一个，`del`、`em`、`time`、`abbr`、`canvas` 等元素给出 Chrome 自己的角色），名称、描述、value 和 properties 也按 Chrome 的规则计算：导入的约 1800 条用例全部与 Chrome 一致，包括布局表格、图像热区和生成内容里的 CSS 计数器。`accessibility.js` 从约 29 KB 增至约 40 KB。
+- 无障碍树不再使用 dom-accessibility-api：角色、label 文字和描述改由项目自己的代码计算，并用从该库的测试和 web-platform-tests 导入的用例与 Chrome 对照。更多节点的角色与 Chrome 一致（`role` 首个 token 无效时回退到下一个，`del`、`em`、`time`、`abbr`、`canvas` 等元素给出 Chrome 自己的角色），名称、描述、value 和 properties 也按 Chrome 的规则计算：导入的约 1800 条用例全部与 Chrome 一致，包括布局表格、图像热区和生成内容里的 CSS 计数器。`accessibility.js` 从约 29 KB 增至约 44 KB。
 - `devtools-anywhere` 不再有运行时依赖：snapDOM 本来就已打进 `dist/snapdom.js`，改为开发依赖；dom-accessibility-api 已去掉。
 
 ## 0.4.0
@@ -44,7 +44,7 @@
 公开 API（以 `packages/*/etc/*.public.api.md` 为准）与 0.3.0 相比没有变化。
 
 - `devtools-anywhere` 的 `dist/` 新增两个首次使用时才加载的文件：`accessibility.js`（导出为 `./accessibility.js`，附带 source map `accessibility.js.map`）和 `chromium-html.css`；自托管时和 bundle 放在一起。`chromium-html.css` 采用 LGPL（2.0 或更高版本），是包里唯一不属于 MIT 或 BSD 的文件；许可全文随附为 `chromium-html.LICENSE.txt`，两个文件都删掉只会少掉 user agent stylesheet 规则。新增依赖 `dom-accessibility-api`。
-- 探针 minify 后从 18948 字节增到 27489 字节（原始字节，不是 gzip；保存 agent 调用的页面函数之前为 25409 字节），主要是 Animations 面板用的挂钩、`matchMedia()` 的挂钩，为其和色觉缺陷遮罩保存的浏览器原生函数，以及 agent 调用的函数（属于探针的内部接口，不是公开 API）。
+- 探针 minify 后从 18948 字节增到 27643 字节（原始字节，不是 gzip；保存 agent 调用的页面函数之前为 25409 字节），主要是 Animations 面板用的挂钩、`matchMedia()` 的挂钩，为其和色觉缺陷遮罩保存的浏览器原生函数，以及 agent 和无障碍树调用的函数（属于探针的内部接口，不是公开 API）。
 - 壳模式下 Service Worker 把 `debugger` 改写记录存在 Cache API 的 `devtools-anywhere-service-worker-rewrites` 里；新 worker 激活时、退出壳模式时，以及不在壳模式的页面注销遗留的壳 worker 时删除。
 - 跨域 iframe 里的探针和父页面之间的消息新增内部事件 `DevtoolsAnywhere.scrollParent`：两边请使用同一版本的探针。
 

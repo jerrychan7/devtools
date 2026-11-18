@@ -10,15 +10,22 @@ import { isElement, isHtml, isHtmlElement, isNode, isText, styleOf } from '../..
 import { contentText } from './ax-counter';
 import {
   attr,
+  attrNames,
+  byId,
+  closest,
   domChildren,
   domParent,
   hasAttr,
   isFocusable,
   isMenuList,
+  innerTextOf,
   ownersOf,
+  query,
+  queryAll,
   roleOf,
   scopeOf,
   SVG_NS,
+  textOf,
   wordSet,
 } from './ax-tree';
 import {
@@ -118,7 +125,7 @@ function hiddenForText(el: Element, root: Root): boolean {
   if (isHtml(el, 'noscript')) return true;
   if (el.namespaceURI === SVG_NS && (el.localName === 'title' || el.localName === 'desc')) return false;
   // An option builds its text even inside a collapsed select.
-  if (attr(el, 'aria-hidden') !== 'true' && isMenuListOption(el.closest('option'))) return false;
+  if (attr(el, 'aria-hidden') !== 'true' && isMenuListOption(closest(el, 'option'))) return false;
   // The children of a hidden aria-labelledby or aria-describedby target all count.
   if (root && !isVisible(root)) return false;
   if (attr(el, 'aria-hidden') === 'true') return true;
@@ -131,7 +138,7 @@ export function targetsOf(el: Element, attribute: string): Element[] {
   if (!root) return [];
   const out: Element[] = [];
   for (const idref of (attr(el, attribute) ?? '').split(/\s+/)) {
-    const target = idref && root.getElementById(idref);
+    const target = idref && byId(root, idref);
     if (target) out.push(target);
   }
   return out;
@@ -145,7 +152,7 @@ const GLOBAL_ARIA =
 const isPresentational = (el: Element) =>
   /^\s*(none|presentation)(\s|$)/.test(attr(el, 'role') ?? '') &&
   !isFocusable(el) &&
-  ![...el.attributes].some(a => GLOBAL_ARIA.test(a.name));
+  !attrNames(el).some(n => GLOBAL_ARIA.test(n));
 
 /** The text field roles (Blink's IsTextField). */
 const isTextFieldRole = (role: string) => role === 'textbox' || role === 'searchbox';
@@ -180,14 +187,14 @@ function supportsNameFromContents(el: Element, role: string, recursive: boolean)
 }
 
 /** An option of a select shown as a drop-down (Blink's MenuListOption). */
-const isMenuListOption = (el: Element | null) => isHtml(el, 'option') && isMenuList(el.closest('select'));
+const isMenuListOption = (el: Element | null) => isHtml(el, 'option') && isMenuList(closest(el, 'select'));
 
 const hasOneTextChild = (el: Element) => el.childNodes.length === 1 && isText(el.firstChild);
 
 /** The text of the selected options of a select or an ARIA listbox or combobox. */
 function selectedText(el: Element, c: Computation): string {
   if (isHtml(el, 'select')) return [...el.selectedOptions].map(o => simplify(o.text)).join(' ');
-  return [...el.querySelectorAll('[role=option][aria-selected=true]')]
+  return queryAll(el, '[role=option][aria-selected=true]')
     .map(o => textAlternative(o, null, c)[0])
     .join(' ');
 }
@@ -197,7 +204,7 @@ function embeddedValue(el: Element, role: string, c: Computation): string | null
   switch (role) {
     case 'textbox':
     case 'searchbox':
-      return isHtml(el, 'input') || isHtml(el, 'textarea') ? el.value : (el.textContent ?? '');
+      return isHtml(el, 'input') || isHtml(el, 'textarea') ? el.value : (textOf(el) ?? '');
     case 'combobox':
       return isHtml(el, 'input') ? el.value : selectedText(el, c);
     case 'listbox':
@@ -269,7 +276,7 @@ function textOfTextNode(text: Text, c: Computation): string {
 function titleText(el: Element): string | null {
   const title = attr(el, 'title');
   if (title === null) return null;
-  const inner = isHtmlElement(el) ? el.innerText : (el.textContent ?? '');
+  const inner = isHtmlElement(el) ? innerTextOf(el) : (textOf(el) ?? '');
   return title.trim() !== inner.trim() ? title : null;
 }
 
@@ -350,14 +357,15 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     const text = recursiveTextAlternative(caption, null, c)[0];
     if (text) return [text, 'caption'];
   }
-  const legend = isHtml(el, 'fieldset') ? el.querySelector(':scope > legend') : null;
+  const legend = isHtml(el, 'fieldset') ? query(el, ':scope > legend') : null;
   if (legend && !c.visited.has(legend)) {
     const text = recursiveTextAlternative(legend, null, c)[0];
     if (text) return [text, 'relatedElement'];
   }
   if (el.namespaceURI === SVG_NS) {
-    const title = el.querySelector(':scope > title');
-    if (title?.textContent) return [title.textContent, 'relatedElement'];
+    const title = query(el, ':scope > title');
+    const titleText = title && textOf(title);
+    if (titleText) return [titleText, 'relatedElement'];
   }
   return null;
 }
@@ -591,8 +599,8 @@ function sourcesOf(el: Element, role: string, idOf: IdOf, c: Computation): Found
   if (isHtmlElement(el) && el.isContentEditable && !isNativeTextField(el) && !isTextFieldRole(role))
     push(placeholderSource(el, 'aria-placeholder'), false);
   if (el.namespaceURI === SVG_NS) {
-    const title = el.querySelector(':scope > title');
-    const text = title?.textContent ?? '';
+    const title = query(el, ':scope > title');
+    const text = (title && textOf(title)) ?? '';
     push(source({ type: 'relatedElement', nativeSource: 'title' }, text || null), !!text);
   }
   if (!titleProhibited(el, role)) push(...titleSource(el));
@@ -692,7 +700,7 @@ function nativeSources(
   }
   if (isHtml(el, 'fieldset')) {
     // The first legend, even hidden: it then names nothing, but counts as found.
-    const legend = el.querySelector(':scope > legend');
+    const legend = query(el, ':scope > legend');
     if (!legend || c.visited.has(legend)) push({ type: 'relatedElement', nativeSource: 'legend' }, false);
     else {
       const text = recursiveTextAlternative(legend, null, c)[0];
@@ -737,7 +745,7 @@ function descriptionOf(el: Element, name: string): string {
     isInputButton(el) ? simplify(el.value) : '',
     caption ? contentsText(caption) : '',
     el.localName === 'summary' ? contentsText(el) : '',
-    el.localName === 'ruby' ? [...el.querySelectorAll('rt')].map(contentsText).join(' ') : '',
+    el.localName === 'ruby' ? queryAll(el, 'rt').map(contentsText).join(' ') : '',
     simplify(titleText(el) ?? ''),
   ];
   const simplifiedName = simplify(name);

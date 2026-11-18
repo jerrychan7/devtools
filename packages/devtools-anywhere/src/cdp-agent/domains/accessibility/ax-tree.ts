@@ -6,13 +6,52 @@
 // checked against Chrome's getFullAXTree (accessibility.conformance.test.ts). The role mapping is
 // Chrome's: ARIA roles where it gives them, its own (capitalized) roles elsewhere.
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
+import { nativeCall, nativeGet } from '../../core/natives';
 import { inDisplayNone } from './ax-text';
 
-/** An element's attribute, or null (`getAttribute`, which minification cannot shorten). */
-export const attr = (el: Element, name: string) => el.getAttribute(name);
+// The DOM is read through the browser's own functions (core/natives.ts), not those on the page's
+// prototypes: a page that replaced `getAttribute` or `querySelectorAll` would otherwise see the
+// tree being built, could change what it finds, or make it throw.
+
+/** An element's attribute, or null (`getAttribute`). */
+export const attr = (el: Element, name: string) => nativeCall<string | null>(el, 'getAttribute', name);
 
 /** Whether an element has an attribute (`hasAttribute`). */
-export const hasAttr = (el: Element, name: string) => el.hasAttribute(name);
+export const hasAttr = (el: Element, name: string) => nativeCall<boolean>(el, 'hasAttribute', name);
+
+/** The names of an element's attributes (`getAttributeNames`). */
+export const attrNames = (el: Element) => nativeCall<string[]>(el, 'getAttributeNames');
+
+/** The first element under `scope` that matches `selector` (`querySelector`). */
+export const query = (scope: ParentNode, selector: string) =>
+  nativeCall<Element | null>(scope, 'querySelector', selector);
+
+/** The elements under `scope` that match `selector` (`querySelectorAll`). */
+export const queryAll = (scope: ParentNode, selector: string): Element[] => [
+  ...nativeCall<NodeListOf<Element>>(scope, 'querySelectorAll', selector),
+];
+
+/** The closest inclusive ancestor of `el` that matches `selector` (`closest`). */
+export const closest = (el: Element, selector: string) => nativeCall<Element | null>(el, 'closest', selector);
+
+/** Whether `el` matches `selector` (`matches`). */
+export const matches = (el: Element, selector: string) => nativeCall<boolean>(el, 'matches', selector);
+
+/** The element of a document or shadow root with an id (`getElementById`). */
+export const byId = (root: Document | DocumentFragment, id: string) =>
+  nativeCall<HTMLElement | null>(root, 'getElementById', id);
+
+/** A node's root (`getRootNode`). */
+export const rootOf = (node: Node) => nativeCall<Node>(node, 'getRootNode');
+
+/** An element's border box (`getBoundingClientRect`). */
+export const rectOf = (el: Element) => nativeCall<DOMRect>(el, 'getBoundingClientRect');
+
+/** A node's `textContent`. */
+export const textOf = (node: Node) => nativeGet<string | null>(node, 'textContent');
+
+/** An HTML element's `innerText`. */
+export const innerTextOf = (el: HTMLElement) => nativeGet<string>(el, 'innerText');
 
 /** Whether a role is one of Chrome's own, not an ARIA role (reported as `internalRole`). */
 export const isInternalRole = (role: string) => /^[A-Z]/.test(role);
@@ -60,7 +99,7 @@ export const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** The document or shadow root a node is in, where its ids resolve; null when detached. */
 export function scopeOf(node: Node): Document | ShadowRoot | null {
-  const root = node.getRootNode();
+  const root = rootOf(node);
   return isDocument(root) || isShadowRoot(root) ? root : null;
 }
 
@@ -93,9 +132,10 @@ const GLOBAL_ARIA =
 function hasAuthorName(el: Element): boolean {
   if (attr(el, 'aria-label')?.trim() || hasAttr(el, 'title')) return true;
   const root = scopeOf(el);
-  return (attr(el, 'aria-labelledby') ?? '')
-    .split(/[ \t\n\r\f]+/)
-    .some(id => !!id && !!root?.getElementById(id)?.textContent?.trim());
+  return (attr(el, 'aria-labelledby') ?? '').split(/[ \t\n\r\f]+/).some(id => {
+    const target = id && root ? byId(root, id) : null;
+    return !!target && !!textOf(target)?.trim();
+  });
 }
 
 /**
@@ -108,7 +148,7 @@ function explicitRole(el: Element): string | null {
     if ((token === 'region' || token === 'form') && !hasAuthorName(el)) continue;
     if (isOrphaned(el, token)) continue;
     if (token === 'none' || token === 'presentation')
-      return isFocusable(el) || [...el.attributes].some(a => GLOBAL_ARIA.test(a.name)) ? null : 'none';
+      return isFocusable(el) || attrNames(el).some(n => GLOBAL_ARIA.test(n)) ? null : 'none';
     return token === 'img' ? 'image' : token === 'directory' ? 'list' : token;
   }
   return null;
@@ -163,7 +203,7 @@ function isOrphaned(el: Element, role: string): boolean {
 
 /** Whether an element takes keyboard focus: in the tab order or focusable by script. */
 export function isFocusable(el: Element): boolean {
-  if (el.matches(':disabled')) return false;
+  if (matches(el, ':disabled')) return false;
   // Without a box (display: contents), Chrome does not focus it.
   if (styleOf(el).display === 'contents') return false;
   if (hasAttr(el, 'tabindex')) return true;
@@ -177,7 +217,7 @@ export function isFocusable(el: Element): boolean {
 const isSummary = (el: Element) =>
   el.localName === 'summary' &&
   el.parentElement?.localName === 'details' &&
-  el.parentElement.querySelector(':scope > summary') === el;
+  query(el.parentElement, ':scope > summary') === el;
 
 /** The words of a space-separated list. */
 export const words = (list: string) => list.split(' ');
@@ -287,7 +327,7 @@ function decideDataTable(table: Element): boolean {
   if (inDisplayNone(table)) return true;
   if (hasAttr(table, 'role') || table.isContentEditable) return true;
   if (attr(table, 'summary') || table.tHead || table.tFoot || table.caption || attr(table, 'rules')) return true;
-  if (table.querySelector(':scope > col, :scope > colgroup')) return true;
+  if (query(table, ':scope > col, :scope > colgroup')) return true;
   const rows = table.rows;
   if (rows.length >= 20) return true;
   if (!rows.length) return false;
@@ -308,7 +348,7 @@ function decideDataTable(table: Element): boolean {
       const style = styleOf(cell);
       if (inDisplayNone(cell) || !/^(table-cell|block|flow-root|inline-block|list-item|flex|grid)$/.test(style.display))
         continue;
-      const box = cell.getBoundingClientRect();
+      const box = rectOf(cell);
       if (box.width < 1 || box.height < 1) continue;
       valid++;
       if (style.emptyCells === 'hide') return true;
@@ -341,7 +381,7 @@ function implicitRole(el: Element): string {
     case 'th':
     case 'td':
       // The cells of a presentational table are plain containers.
-      const table = el.closest('table');
+      const table = closest(el, 'table');
       if (table && explicitRole(table) === 'none') return 'generic';
   }
   switch (el.localName) {
@@ -373,10 +413,10 @@ function implicitRole(el: Element): string {
       const scope = attr(el, 'scope');
       if (scope === 'row' || scope === 'rowgroup') return 'rowheader';
       if (scope === 'col' || scope === 'colgroup') return 'columnheader';
-      return el.parentElement?.querySelector(':scope > td') ? 'rowheader' : 'columnheader';
+      return el.parentElement && query(el.parentElement, ':scope > td') ? 'rowheader' : 'columnheader';
     }
     case 'td':
-      const grid = el.closest('table');
+      const grid = closest(el, 'table');
       return grid && /^(grid|treegrid)$/.test(explicitRole(grid) ?? '') ? 'gridcell' : 'cell';
     case 'input':
       if (isHtml(el, 'input')) return inputRole(el);
@@ -386,10 +426,12 @@ function implicitRole(el: Element): string {
     case 'section':
       return hasAuthorName(el) ? 'region' : 'generic';
     case 'aside':
-      return el.parentElement?.closest(SECTIONING) && !hasAuthorName(el) ? 'generic' : 'complementary';
+      return el.parentElement && closest(el.parentElement, SECTIONING) && !hasAuthorName(el)
+        ? 'generic'
+        : 'complementary';
     case 'header':
     case 'footer': {
-      const inSection = el.parentElement?.closest(SECTIONING);
+      const inSection = el.parentElement && closest(el.parentElement, SECTIONING);
       if (inSection) return el.localName === 'header' ? 'sectionheader' : 'sectionfooter';
       return el.localName === 'header' ? 'banner' : 'contentinfo';
     }
@@ -432,12 +474,12 @@ function hiddenReason(el: Element): IgnoredReason | null {
  * puts the areas under that image, though the map itself is not rendered.
  */
 export function imageOf(area: Element): Element | null {
-  const map = area.closest('map');
-  const name = map?.getAttribute('name') || map?.id;
+  const map = closest(area, 'map');
+  const name = (map && attr(map, 'name')) || map?.id;
   if (!map || !name) return null;
   const root = scopeOf(map);
   if (!root) return null;
-  for (const img of root.querySelectorAll('img[usemap]'))
+  for (const img of queryAll(root, 'img[usemap]'))
     if (attr(img, 'usemap') === `#${name}`) return hiddenReason(img) === 'notRendered' ? null : img;
   return null;
 }
@@ -447,8 +489,8 @@ function areasOf(img: Element): Element[] {
   const name = attr(img, 'usemap')?.replace(/^#/, '');
   const root = scopeOf(img);
   if (!name || !root) return [];
-  const map = [...root.querySelectorAll('map')].find(m => (attr(m, 'name') || m.id) === name);
-  return map ? [...map.querySelectorAll('area')].filter(area => imageOf(area) === img) : [];
+  const map = queryAll(root, 'map').find(m => (attr(m, 'name') || m.id) === name);
+  return map ? queryAll(map, 'area').filter(area => imageOf(area) === img) : [];
 }
 
 /** The children of a node as the tree sees them: shadow trees and slots flattened. */
@@ -530,9 +572,9 @@ export function ownersOf(scope: Document | ShadowRoot): Map<Element, Element> {
  */
 function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   const owner = new Map<Element, Element>();
-  for (const el of scope.querySelectorAll('[aria-owns]'))
+  for (const el of queryAll(scope, '[aria-owns]'))
     for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
-      const target = scope.getElementById(id);
+      const target = byId(scope, id);
       if (!target || owner.has(target)) continue;
       let n: Node | null = el;
       while (n && n !== target) n = (isElement(n) && owner.get(n)) || domParent(n);
@@ -582,7 +624,7 @@ export class TreeShape {
       return hidden ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden } : INCLUDED;
     }
     if (!isElement(node)) return excluded('uninteresting');
-    if (node.closest('[data-devtools-anywhere]')) return excluded('notRendered');
+    if (closest(node, '[data-devtools-anywhere]')) return excluded('notRendered');
     // An image map's area is shown through its image, whatever its own box.
     const hiddenBy = isHtml(node, 'area') && imageOf(node) ? null : hiddenReason(node);
     if (hiddenBy) return excluded(hiddenBy);
@@ -606,9 +648,9 @@ export class TreeShape {
     // thead and tfoot are kept.
     if (
       node.localName === 'tbody' &&
-      ![...node.attributes].some(a => a.name.startsWith('aria-') || a.name === 'role') &&
+      !attrNames(node).some(n => n.startsWith('aria-') || n === 'role') &&
       !attr(node, 'title') &&
-      !(node.id && !isShadowRoot(node.getRootNode())) &&
+      !(node.id && !isShadowRoot(rootOf(node))) &&
       !hasAttr(node, 'tabindex')
     )
       return ignored('uninteresting');
@@ -632,7 +674,7 @@ export class TreeShape {
       !explicit &&
       /^(ul|ol|menu)$/.test(node.parentElement?.localName ?? '') &&
       // Chrome compares the role attribute as written: only "list" and "directory" keep the item.
-      !/^(|list|directory)$/.test(node.parentElement?.getAttribute('role') ?? '')
+      !/^(|list|directory)$/.test((node.parentElement && attr(node.parentElement, 'role')) ?? '')
     )
       return lifted('presentationalRole');
     if (

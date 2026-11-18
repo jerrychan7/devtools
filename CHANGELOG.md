@@ -4,7 +4,7 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
-- The accessibility tree no longer uses dom-accessibility-api: roles, the text of labels and the descriptions are computed by the project's own code, compared with Chrome on cases imported from that library's tests and from web-platform-tests. More nodes now get Chrome's role (an invalid first `role` token falls back to the next, and elements such as `del`, `em`, `time`, `abbr` or `canvas` get Chrome's own roles), and names, descriptions, values and properties follow Chrome's rules: every one of the about 1,800 imported cases now matches Chrome, layout tables, image map areas and CSS counters in generated content included. `accessibility.js` grows from about 29 KB to about 40 KB.
+- The accessibility tree no longer uses dom-accessibility-api: roles, the text of labels and the descriptions are computed by the project's own code, compared with Chrome on cases imported from that library's tests and from web-platform-tests. More nodes now get Chrome's role (an invalid first `role` token falls back to the next, and elements such as `del`, `em`, `time`, `abbr` or `canvas` get Chrome's own roles), and names, descriptions, values and properties follow Chrome's rules: every one of the about 1,800 imported cases now matches Chrome, layout tables, image map areas and CSS counters in generated content included. `accessibility.js` grows from about 29 KB to about 44 KB.
 - `devtools-anywhere` has no runtime dependencies any more: snapDOM was already built into `dist/snapdom.js` and is now a development dependency, and dom-accessibility-api is gone.
 
 ## 0.4.0
@@ -44,7 +44,7 @@ Based on Chrome 158 (158.0.8127.37).
 Public API, as in `packages/*/etc/*.public.api.md`: unchanged since 0.3.0.
 
 - `devtools-anywhere` ships two more files in `dist/`, loaded on first use: `accessibility.js` (exported as `./accessibility.js`, with its source map `accessibility.js.map`) and `chromium-html.css`; self-hosted, serve them with the bundle. `chromium-html.css` is under the LGPL (2.0 or later), the package's only file that is not MIT or BSD; its license ships as `chromium-html.LICENSE.txt`, and leaving both out only drops the user agent stylesheet rules. It depends on `dom-accessibility-api` now.
-- The probe grows from 18948 to 27489 bytes minified (raw bytes, not gzip; 25409 before the functions the agent calls on the page were saved with it), mostly for the Animations panel's hooks, the `matchMedia()` hooks, the browser functions saved for them and for the vision deficiency mask, and the functions the agent calls (an internal interface of the probe, not public API).
+- The probe grows from 18948 to 27643 bytes minified (raw bytes, not gzip; 25409 before the functions the agent calls on the page were saved with it), mostly for the Animations panel's hooks, the `matchMedia()` hooks, the browser functions saved for them and for the vision deficiency mask, and the functions the agent and the accessibility tree call (an internal interface of the probe, not public API).
 - In shell mode the Service Worker keeps its `debugger` rewrite record in the Cache API, under `devtools-anywhere-service-worker-rewrites`; it is deleted when a new worker activates, when shell mode ends, and when a page outside shell mode unregisters a left-over shell worker.
 - The messages between the probe in a cross-origin iframe and its parent gained the internal event `DevtoolsAnywhere.scrollParent`: use the same version of the probe on both sides.
 

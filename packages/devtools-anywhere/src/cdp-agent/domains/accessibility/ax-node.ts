@@ -5,17 +5,26 @@ import { contentsText, documentNameOf, isNativeTextField, nameOf, targetsOf, tex
 import { inDisplayNone } from './ax-text';
 import {
   attr,
+  byId,
   groupTable,
   hasAttr,
   isFocusable,
   isFocused,
   isInternalRole,
   isMenuList,
+  matches,
+  query,
   roleOf,
   scopeOf,
+  textOf,
   TreeShape,
 } from './ax-tree';
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
+import type { Probe } from '../../probe/types';
+
+// This script has its own copy of core/natives.ts, which found the page's functions when it loaded, on
+// demand: the agent gives it those it uses instead (accessibility.ts).
+export { useNatives } from '../../core/natives';
 
 type AXNode = Protocol.Accessibility.AXNode;
 type AXProperty = Protocol.Accessibility.AXProperty;
@@ -40,6 +49,8 @@ export interface AXTree {
 /** What accessibility.js exports. */
 export interface AccessibilityModule {
   createAXTree(doc: Document, idOf: IdOf, frameId: string): AXTree;
+  /** Takes the agent's native functions (`nativesInUse`), past the page's wrappers. */
+  useNatives(natives: Pick<Probe, 'natives' | 'top'>): void;
 }
 
 const bool = (name: AXPropertyName, value: boolean, type: AXValue['type'] = 'booleanOrUndefined'): AXProperty => ({
@@ -62,7 +73,7 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
   const root = scopeOf(el);
   const relatedNodes: Protocol.Accessibility.AXRelatedNode[] = [];
   for (const idref of value.trim().split(/\s+/).filter(Boolean)) {
-    const target = root?.getElementById(idref);
+    const target = root && byId(root, idref);
     if (target) relatedNodes.push({ backendDOMNodeId: idOf(target), idref });
   }
   return { name, value: { type: 'idrefList', value, relatedNodes } };
@@ -194,7 +205,7 @@ function textValueOf(el: Element, role: string): string {
   }
   // A focusable ARIA combobox (Chrome's ComboBoxMenuButton) shows its content as its value.
   if (comboboxKind(el, role) === 'button') return isFocusable(el) ? contentsText(el) : '';
-  if (role === 'textbox' || role === 'searchbox' || isEditingHost(el)) return el.textContent ?? '';
+  if (role === 'textbox' || role === 'searchbox' || isEditingHost(el)) return textOf(el) ?? '';
   return '';
 }
 
@@ -252,7 +263,7 @@ function selectedOf(el: Element, role: string): boolean | null {
   while (container && !CONTAINER_WIDGET.test(roleOf(container))) container = container.parentElement;
   if (container) {
     const multiple = ariaBool(container, 'aria-multiselectable') ?? (isHtml(container, 'select') && container.multiple);
-    if (multiple || container.querySelector('[aria-checked]')) return null;
+    if (multiple || query(container, '[aria-checked]')) return null;
   }
   return false;
 }
@@ -322,7 +333,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   // Global states.
   // An object element that shows no content (no plugin, no frame) is disabled.
   const emptyObject = isHtml(el, 'object') && !el.contentWindow;
-  const disabled = el.matches(':disabled') || attr(el, 'aria-disabled') === 'true' || emptyObject;
+  const disabled = matches(el, ':disabled') || attr(el, 'aria-disabled') === 'true' || emptyObject;
   if (disabled) out.push(flag('disabled', true));
   const invalid = attr(el, 'aria-invalid');
   if (invalid && invalid !== 'false') out.push(token('invalid', invalid));
@@ -384,7 +395,7 @@ function propertiesOf(el: Element, role: string, idOf: IdOf, nameSources: AXValu
   const selected = selectedOf(el, role);
   if (selected !== null) out.push(bool('selected', selected));
   if (role === 'dialog' || role === 'alertdialog')
-    out.push(flag('modal', ariaBool(el, 'aria-modal') ?? (isHtml(el, 'dialog') && el.matches(':modal'))));
+    out.push(flag('modal', ariaBool(el, 'aria-modal') ?? (isHtml(el, 'dialog') && matches(el, ':modal'))));
   // Relationships, then sparse attributes.
   for (const name of ['describedby', 'owns'] as const) {
     const list = idrefList(el, name, idOf);
@@ -430,7 +441,8 @@ function activeDescendant(el: Element): Element | null {
     return selected[selected.length - 1] ?? null;
   }
   const idref = attr(el, 'aria-activedescendant')?.trim();
-  return (idref && scopeOf(el)?.getElementById(idref)) || null;
+  const scope = idref ? scopeOf(el) : null;
+  return (idref && scope && byId(scope, idref)) || null;
 }
 
 /** The url Chrome gives a link (its href) or an image (the source it shows). */

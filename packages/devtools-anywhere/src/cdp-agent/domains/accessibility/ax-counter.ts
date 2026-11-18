@@ -4,7 +4,7 @@
 // Counters come from counter-reset, counter-increment, counter-set and the list-item counter of
 // lists, along the document. Part of accessibility.js (ax-name.ts).
 import { isElement, styleOf } from '../../core/realm';
-import { domChildren } from './ax-tree';
+import { attr, domChildren, hasAttr } from './ax-tree';
 
 type Pseudo = '::before' | '::after';
 
@@ -37,12 +37,12 @@ function listItem(el: Element, style: CSSStyleDeclaration): (number | null)[] {
   let reset: number | null = null;
   if (ol || el.localName === 'ul' || el.localName === 'menu') {
     const items = [...el.children].filter(c => styleOf(c).display === 'list-item').length;
-    const start = ol?.hasAttribute('start') ? ol.start : ol?.reversed ? items : 1;
+    const start = ol && hasAttr(ol, 'start') ? ol.start : ol?.reversed ? items : 1;
     reset = ol?.reversed ? start + 1 : start - 1;
   }
   const item = style.display === 'list-item';
   const parent = el.parentElement;
-  const value = item && el.localName === 'li' ? el.getAttribute('value') : null;
+  const value = item && el.localName === 'li' ? attr(el, 'value') : null;
   return [
     reset,
     item ? (parent?.localName === 'ol' && (parent as HTMLOListElement).reversed ? -1 : 1) : null,

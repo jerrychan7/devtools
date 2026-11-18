@@ -1,4 +1,5 @@
 import type { Protocol } from 'devtools-protocol';
+import { nativesInUse } from '../../core/natives';
 import { CdpError } from '../../core/session';
 import type { Context } from '../../core/context';
 import { documentOf, isNode } from '../../core/realm';
@@ -27,10 +28,16 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
   const tree = async (doc: Document): Promise<AXTree> => {
     if (!load) throw new CdpError('Not supported in the page: the accessibility tree is not configured');
     // A failed load is not kept, so that the next command loads again.
-    const m = await (module ??= load().catch((e: unknown) => {
-      module = null;
-      throw e;
-    }));
+    const m = await (module ??= load().then(
+      loaded => {
+        loaded.useNatives(nativesInUse());
+        return loaded;
+      },
+      (e: unknown) => {
+        module = null;
+        throw e;
+      }
+    ));
     return m.createAXTree(doc, node => nodes.backendIdOf(node), frames.ofNode(doc).id);
   };
 

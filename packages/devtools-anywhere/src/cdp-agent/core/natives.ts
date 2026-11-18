@@ -19,14 +19,20 @@ let top: TopNatives | undefined = typeof MutationObserver === 'function' ? captu
 /** The native function found for each prototype and `part:name` (null: none). */
 let nativeCache = new WeakMap<object, Map<string, Native | null>>();
 
-/** Takes the functions the probe saved before the page's code (`probe.natives`, `probe.top`), where it has them. */
-export function useNatives(probe: Probe): void {
+/**
+ * Takes the functions the probe saved before the page's code (`probe.natives`, `probe.top`), where it has them.
+ * Also how a script loaded later with its own copy of this module (accessibility.js) takes the agent's (`nativesInUse`).
+ */
+export function useNatives(probe: Pick<Probe, 'natives' | 'top'>): void {
   if (probe.natives) {
     table = probe.natives;
     nativeCache = new WeakMap();
   }
   if (probe.top) top = probe.top;
 }
+
+/** The functions in use, for a script loaded later to take (`useNatives`) rather than those it would find then. */
+export const nativesInUse = (): Pick<Probe, 'natives' | 'top'> => ({ natives: table, top });
 
 /** The window's functions the agent calls: frames, timers, the clock, the observers and the listeners. */
 export function windowOf(): TopNatives {

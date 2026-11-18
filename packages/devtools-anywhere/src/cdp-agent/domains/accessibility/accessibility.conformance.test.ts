@@ -235,3 +235,49 @@ test('the vision deficiency mask is not in the accessibility tree', async () => 
     await t.ours.send('Emulation.setEmulatedVisionDeficiency', { type: 'none' });
   }
 });
+
+test('DOM methods the page replaced do not change the tree', async () => {
+  const full = async () => (await t.ours.send('Accessibility.getFullAXTree', {})).nodes.map(comparable);
+  const top = (side: Side) => side.send('Accessibility.getFullAXTree', { depth: 1 });
+  const before = await full();
+  // Replaces the methods and getters the tree reads with ones that lie or throw, keeping the originals.
+  await t.page.evaluate(() => {
+    const saved: [object, string, PropertyDescriptor][] = [];
+    const replace = (proto: object, name: string, desc: PropertyDescriptor) => {
+      const original = Object.getOwnPropertyDescriptor(proto, name);
+      if (original) saved.push([proto, name, original]);
+      Object.defineProperty(proto, name, { ...desc, configurable: true });
+    };
+    const fail = () => {
+      throw new Error('replaced by the page');
+    };
+    replace(Element.prototype, 'getAttribute', { value: () => 'button' });
+    replace(Element.prototype, 'hasAttribute', { value: () => true });
+    for (const name of [
+      'querySelector',
+      'querySelectorAll',
+      'closest',
+      'matches',
+      'getBoundingClientRect',
+      'getAttributeNames',
+    ])
+      replace(Element.prototype, name, { value: fail });
+    for (const name of ['querySelector', 'querySelectorAll', 'getElementById'])
+      replace(Document.prototype, name, { value: fail });
+    replace(DocumentFragment.prototype, 'getElementById', { value: fail });
+    replace(Node.prototype, 'getRootNode', { value: fail });
+    replace(Node.prototype, 'textContent', { get: () => 'lie' });
+    replace(HTMLElement.prototype, 'innerText', { get: fail });
+    replace(Element.prototype, 'attributes', { get: fail });
+    (window as unknown as { __restoreDom: () => void }).__restoreDom = () => {
+      for (const [proto, name, desc] of saved) Object.defineProperty(proto, name, desc);
+    };
+  });
+  try {
+    assert.deepEqual(await full(), before);
+    const [ours, chrome] = await Promise.all([top(t.ours), top(t.chrome)]);
+    assert.deepEqual(visible(ours.nodes), visible(chrome.nodes));
+  } finally {
+    await t.page.evaluate(() => (window as unknown as { __restoreDom: () => void }).__restoreDom());
+  }
+});
