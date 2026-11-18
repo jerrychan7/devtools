@@ -427,7 +427,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 
 ## 无障碍树
 
-Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。由 `accessibility.js`（约 21 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录。
+Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。由 `accessibility.js`（约 41 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录。
 
 - **Chrome**：在浏览器里计算，含 InlineTextBox、列表标记和 UA shadow 树里的节点。
 - **devtools-anywhere**：没有 InlineTextBox、列表标记和 UA shadow 树里的节点；input 的默认名称（如 "Submit"）是英文。
