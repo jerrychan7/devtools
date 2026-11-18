@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- 无障碍树不再使用 dom-accessibility-api：角色、label 文字和描述改由项目自己的代码计算，并用从该库的测试和 web-platform-tests 导入的用例与 Chrome 对照。更多节点的角色与 Chrome 一致（`role` 首个 token 无效时回退到下一个，`del`、`em`、`time`、`abbr`、`canvas` 等元素给出 Chrome 自己的角色），名称和描述也有更多与 Chrome 一致。`accessibility.js` 从约 29 KB 降到约 21 KB。
+- `devtools-anywhere` 不再有运行时依赖：snapDOM 本来就已打进 `dist/snapdom.js`，改为开发依赖；dom-accessibility-api 已去掉。
+
 ## 0.4.0
 
 基于 Chrome 158（158.0.8127.37）。

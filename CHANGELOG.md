@@ -4,6 +4,9 @@ All packages share one version and are released together (see DEV.md, "Releasing
 
 ## Unreleased
 
+- The accessibility tree no longer uses dom-accessibility-api: roles, the text of labels and the descriptions are computed by the project's own code, compared with Chrome on cases imported from that library's tests and from web-platform-tests. More nodes now get Chrome's role (an invalid first `role` token falls back to the next, and elements such as `del`, `em`, `time`, `abbr` or `canvas` get Chrome's own roles), and more names and descriptions match. `accessibility.js` shrinks from about 29 KB to about 21 KB.
+- `devtools-anywhere` has no runtime dependencies any more: snapDOM was already built into `dist/snapdom.js` and is now a development dependency, and dom-accessibility-api is gone.
+
 ## 0.4.0
 
 Based on Chrome 158 (158.0.8127.37).
