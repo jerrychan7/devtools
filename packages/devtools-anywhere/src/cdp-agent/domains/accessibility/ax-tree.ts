@@ -145,7 +145,8 @@ function isOrphaned(el: Element, role: string): boolean {
   if (!context) return false;
   const isContainer = (parent: Element, parentRole: string | null) =>
     context.tags.includes(parent.localName) || (!!parentRole && context.roles.includes(parentRole));
-  const owner = el.id ? el.ownerDocument.querySelector(`[aria-owns~="${CSS.escape(el.id)}"]`) : null;
+  const scope = el.id && scopeOf(el);
+  const owner = scope && ownersOf(scope).get(el);
   if (owner && isContainer(owner, roleOf(owner))) return false;
   for (let n = domParent(el); n; n = domParent(n)) {
     if (!isElement(n)) continue;
@@ -507,13 +508,27 @@ const ignored = (reason: IgnoredReason): Inclusion => ({ kind: 'ignored', reason
 const lifted = (reason: IgnoredReason): Inclusion => ({ kind: 'lifted', reason });
 const excluded = (reason: IgnoredReason): Inclusion => ({ kind: 'excluded', reason });
 
+/** Owner tables, kept for one synchronous pass over the tree like dataTables. */
+let owners: WeakMap<Document | ShadowRoot, Map<Element, Element>> | null = null;
+
+/** The ownerTable of a document or shadow root, built once in the current pass. */
+export function ownersOf(scope: Document | ShadowRoot): Map<Element, Element> {
+  if (!owners) {
+    owners = new WeakMap();
+    queueMicrotask(() => (owners = null));
+  }
+  let table = owners.get(scope);
+  if (!table) owners.set(scope, (table = ownerTable(scope)));
+  return table;
+}
+
 /**
  * The elements aria-owns moves in a document or shadow root, each to its owner, in the owners'
  * order. Like Chrome, first come first served: an element owned twice stays with its first owner,
  * and an aria-owns that would make a cycle (an element owning its ancestor in the tree, or one
  * that owns it already) is dropped.
  */
-export function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
+function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   const owner = new Map<Element, Element>();
   for (const el of scope.querySelectorAll('[aria-owns]'))
     for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
@@ -531,11 +546,13 @@ export class TreeShape {
   /** Elements moved by aria-owns, to their owner. */
   private owner: Map<Element, Element>;
   private owned = new Map<Element, Element[]>();
+  /** Inclusions computed already: a shape serves one request. */
+  private inclusions = new WeakMap<Node, Inclusion>();
   readonly doc: Document;
 
   constructor(doc: Document) {
     this.doc = doc;
-    this.owner = ownerTable(doc);
+    this.owner = ownersOf(doc);
     for (const [target, el] of this.owner) this.owned.set(el, [...(this.owned.get(el) ?? []), target]);
   }
 
@@ -544,8 +561,13 @@ export class TreeShape {
    * when presentational or aria-hidden, ignored, as in Chrome.
    */
   inclusion(node: Node): Inclusion {
-    const inclusion = this.ownInclusion(node);
-    return inclusion.kind === 'lifted' && this.owner.has(node as Element) ? ignored(inclusion.reason) : inclusion;
+    let inclusion = this.inclusions.get(node);
+    if (!inclusion) {
+      inclusion = this.ownInclusion(node);
+      if (inclusion.kind === 'lifted' && this.owner.has(node as Element)) inclusion = ignored(inclusion.reason);
+      this.inclusions.set(node, inclusion);
+    }
+    return inclusion;
   }
 
   /** How a node takes part in the tree, wherever aria-owns puts it. */

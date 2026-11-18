@@ -15,7 +15,7 @@ import {
   hasAttr,
   isFocusable,
   isMenuList,
-  ownerTable,
+  ownersOf,
   roleOf,
   scopeOf,
   SVG_NS,
@@ -408,10 +408,10 @@ function childrenOf(el: Element): Node[] {
   return children;
 }
 
-/** The element whose aria-owns moves an element, if any: its owner in the tree (ownerTable). */
+/** The element whose aria-owns moves an element, if any: its owner in the tree (ownersOf). */
 function ownerOf(el: Element): Element | null {
   const root = el.id && scopeOf(el);
-  const owner = root && ownerTable(root).get(el);
+  const owner = root && ownersOf(root).get(el);
   return owner && owns(owner) ? owner : null;
 }
 
