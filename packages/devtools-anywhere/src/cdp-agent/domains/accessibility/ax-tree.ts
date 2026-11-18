@@ -134,6 +134,8 @@ function isOrphaned(el: Element, role: string): boolean {
 /** Whether an element takes keyboard focus: in the tab order or focusable by script. */
 export function isFocusable(el: Element): boolean {
   if (el.matches(':disabled')) return false;
+  // Without a box (display: contents), Chrome does not focus it.
+  if (styleOf(el).display === 'contents') return false;
   if (el.hasAttribute('tabindex')) return true;
   if (isHtml(el, 'a') || isHtml(el, 'area')) return el.hasAttribute('href');
   if (isHtml(el, 'input')) return el.type !== 'hidden';
