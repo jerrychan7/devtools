@@ -686,71 +686,17 @@ const groups: CaseGroup[] = Object.entries(CONFIGS).map(([file, configs]) => {
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
 const TODO = {
-  'Chrome gives one of its internal roles (Abbr, Canvas, DateTime, LayoutTable…); ours gives an ARIA role': `
-    other-form-elements-el-22 other-form-elements-el-23 other-form-elements-el-24
-    other-form-elements-el-25 other-form-elements-el-26 other-form-elements-el-27
-    other-form-elements-el-28 other-form-elements-el-29 other-form-elements-el-30
-    other-form-elements-el-31 other-form-elements-el-32 other-form-elements-el-33
-    other-form-elements-el-34 other-form-elements-el-35 other-form-elements-el-36
-    other-form-elements-el-37 other-form-elements-el-38 other-form-elements-el-39
-    other-form-elements-el-40 other-form-elements-el-41 other-form-elements-el-42
-    other-form-elements-el-50 other-form-elements-el-51 other-form-elements-el-52
-    other-form-elements-el-53 other-form-elements-el-54 other-form-elements-el-55
-    other-form-elements-el-56 other-form-elements-el-64 other-form-elements-el-65
-    other-form-elements-el-66 other-form-elements-el-67 other-form-elements-el-68
-    other-form-elements-el-69 other-form-elements-el-70 other-form-elements-el-71
-    other-form-elements-el-72 other-form-elements-el-73 other-form-elements-el-74
-    other-form-elements-el-75 other-form-elements-el-76 other-form-elements-el-77
-    phrasing-elements-el-36 phrasing-elements-el-37 phrasing-elements-el-38 phrasing-elements-el-39
-    phrasing-elements-el-40 table-el-5 table-el-6 tr-td-th.tentative-el-1 tr-td-th.tentative-el-2
-    tr-td-th.tentative-el-3 tr-td-th.tentative-el-4 tr-td-th.tentative-el-5 tr-td-th.tentative-el-11
-    tr-td-th.tentative-el-12 tr-td-th.tentative-el-13 tr-td-th.tentative-el-14 tr-td-th.tentative-el-15
+  'layout table: Chrome takes the table for layout and gives LayoutTable, LayoutTableRow or LayoutTableCell; ours gives the table roles': `
+    table-el-5 table-el-6 tr-td-th.tentative-el-1 tr-td-th.tentative-el-2 tr-td-th.tentative-el-3
+    tr-td-th.tentative-el-4 tr-td-th.tentative-el-5 tr-td-th.tentative-el-11 tr-td-th.tentative-el-12
+    tr-td-th.tentative-el-13 tr-td-th.tentative-el-14 tr-td-th.tentative-el-15
     `,
-  'implicit role: Chrome gives the element its own role (deletion, emphasis, meter, time…); ours gives generic': `
-    section-and-grouping-elements-el-91 section-and-grouping-elements-el-92
-    section-and-grouping-elements-el-93 section-and-grouping-elements-el-94
-    section-and-grouping-elements-el-95
+  'image map area: Chrome exposes an area as a link; ours ignores it': `
+    area-el-1 area-el-2 area-el-3 area-el-4 area-el-5 area-el-6 area-el-7
     `,
-  'name sources: same name, different source list': `
-    input-button-submit-reset-el-1 input-button-submit-reset-el-2 input-button-submit-reset-el-3
-    input-button-submit-reset-el-4 input-button-submit-reset-el-5 input-button-submit-reset-el-6
-    input-button-submit-reset-el-7 input-button-submit-reset-el-10 input-button-submit-reset-el-11
-    input-button-submit-reset-el-12 input-button-submit-reset-el-13 input-button-submit-reset-el-14
-    input-button-submit-reset-el-15 input-button-submit-reset-el-16 input-button-submit-reset-el-17
-    input-button-submit-reset-el-18 input-button-submit-reset-el-19 input-button-submit-reset-el-20
-    input-button-submit-reset-el-21 input-button-submit-reset-el-22 input-button-submit-reset-el-23
-    other-form-elements-el-78 other-form-elements-el-79 other-form-elements-el-80
-    `,
-  'properties: Chrome and ours differ in invalid': `
-    inputs-with-placeholders-el-1 inputs-with-placeholders-el-2 inputs-with-placeholders-el-3
-    inputs-with-placeholders-el-4 inputs-with-placeholders-el-5 inputs-with-placeholders-el-6
-    inputs-with-placeholders-el-7 inputs-with-placeholders-el-8 inputs-with-placeholders-el-9
-    inputs-with-placeholders-el-10 inputs-with-placeholders-el-61 inputs-with-placeholders-el-62
-    inputs-with-placeholders-el-63 inputs-with-placeholders-el-64 inputs-with-placeholders-el-65
-    inputs-with-placeholders-el-66 inputs-with-placeholders-el-67 inputs-with-placeholders-el-68
-    inputs-with-placeholders-el-69 inputs-with-placeholders-el-70
-    `,
-  'ignored: Chrome exposes the node; ours ignores it': `
-    area-el-1 area-el-2 area-el-3 area-el-4 area-el-5 area-el-6 area-el-7 img-el-5
+  'tbody: Chrome exposes a table body as rowgroup; ours ignores it': `
     tr-td-th.tentative-el-21 tr-td-th.tentative-el-22 tr-td-th.tentative-el-23 tr-td-th.tentative-el-24
     tr-td-th.tentative-el-25
-    `,
-  'value: Chrome and ours give different values': `
-    inputs-with-placeholders-el-21 inputs-with-placeholders-el-22 inputs-with-placeholders-el-23
-    inputs-with-placeholders-el-24 inputs-with-placeholders-el-25 inputs-with-placeholders-el-26
-    inputs-with-placeholders-el-27 inputs-with-placeholders-el-28 inputs-with-placeholders-el-29
-    inputs-with-placeholders-el-30
-    `,
-  'ignored: Chrome ignores the node; ours exposes it': `
-    phrasing-elements-el-81 phrasing-elements-el-82 phrasing-elements-el-83 phrasing-elements-el-84
-    phrasing-elements-el-85 phrasing-elements-el-131 phrasing-elements-el-132 phrasing-elements-el-133
-    phrasing-elements-el-134 phrasing-elements-el-135
-    `,
-  'properties: Chrome and ours differ in atomic, invalid, live, relevant': `
-    output-el-1 output-el-2 output-el-3 output-el-4 output-el-5 output-el-6 output-el-7
-    `,
-  'name: Chrome and ours compute different names': `
-    other-form-elements-el-81
     `,
 };
 

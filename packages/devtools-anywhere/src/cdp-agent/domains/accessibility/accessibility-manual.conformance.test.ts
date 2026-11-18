@@ -8,36 +8,8 @@ import { describeCases, readCases } from '../../../../test-support/accessibility
 
 /** Cases that differ from Chrome on the current implementation, by what differs. */
 const TODO = {
-  'name: Chrome and ours compute different names': `
-    m-name-checkbox-label-embedded-menu m-name-file-label-inline-block-styles m-name-from-content
-    m-name-from-content-of-label m-name-from-content-of-labelledby-element m-name-link-mixed-content
-    m-name-password-label-embedded-menu m-name-radio-label-embedded-menu m-name-test-case-548
-    m-name-test-case-617 m-name-test-case-618 m-name-test-case-619 m-name-test-case-620
-    m-name-test-case-659 m-name-test-case-660 m-name-test-case-661 m-name-test-case-662
-    m-name-test-case-727 m-name-test-case-733 m-name-test-case-734 m-name-test-case-735
-    m-name-test-case-738 m-name-test-case-743 m-name-text-label-embedded-menu
-    `,
-  'properties: the same ones, in another order (Chrome lists describedby before url)': `
-    lib-DS1 lib-DS2 lib-DS5 m-description-test-case-664 m-description-test-case-665
-    m-description-test-case-666 m-description-test-case-772 m-description-test-case-773
-    m-description-test-case-774 m-description-test-case-838 m-description-test-case-one-valid-reference
-    `,
-  'name sources: same name, different source list': `
-    m-name-checkbox-label-multiple-label-alternative m-name-checkbox-label-multiple-label
-    m-name-test-case-544 m-name-test-case-559
-    `,
-  'value: Chrome and ours give different values': `
-    m-description-1-0-combobox-focusable m-name-1-0-combobox-focusable-alternative m-name-test-case-748
-    `,
-  'description: Chrome and ours compute different descriptions': `
-    m-description-from-content-of-describedby-element
-    m-name-from-content-of-labelledby-elements-one-of-which-is-hidden
-    `,
-  'properties: Chrome and ours differ in describedby': `
-    m-description-test-case-broken-reference
-    `,
-  'ignored: Chrome exposes the node; ours ignores it': `
-    m-name-test-case-566
+  "name: Chrome takes a layout table cell's text into the name; ours stops at the data table": `
+    m-name-from-content m-name-from-content-of-label
     `,
 };
 
