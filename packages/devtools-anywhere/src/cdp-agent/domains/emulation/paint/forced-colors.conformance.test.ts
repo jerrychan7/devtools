@@ -5,10 +5,10 @@
 // whole page alone.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
 import type { Frame } from 'puppeteer-core';
-import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
-import { agreement, decodePng, mismatches, type Box, type Pixels } from '../../../../test-support/png-pixels.ts';
+import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
+import { agreement, decodePng, mismatches, type Box, type Pixels } from '../../../../../test-support/png-pixels.ts';
 
 /** Per channel, how far a pixel may be from Chrome's and still count as the same (antialiasing, dithering). */
 const TOLERANCE = 2;

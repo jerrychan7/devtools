@@ -1,8 +1,8 @@
 import type { Protocol } from 'devtools-protocol';
-import { CdpError } from '../../core/session';
-import { Tok, tokenize } from '../css/sheets/parse/css-lexer';
-import { decodeEscapes, mapFunctions } from './css-tokens';
-import type { Rewrite } from './rewrite';
+import { CdpError } from '../../../core/session';
+import { Tok, tokenize } from '../../css/sheets/parse/css-lexer';
+import { decodeEscapes, mapFunctions } from '../rewrite/css-tokens';
+import type { Rewrite } from '../rewrite/rewrite';
 
 /**
  * The insets of Protocol.Emulation.SafeAreaInsets, each with the name `env()` takes for it and the

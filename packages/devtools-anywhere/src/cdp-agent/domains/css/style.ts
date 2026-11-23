@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { splitTopLevel } from '../../core/style/selectors';
-import { unwrapSafeArea } from '../emulation/safe-area';
-import { shownStyle } from '../emulation/shown-style';
+import { unwrapSafeArea } from '../emulation/safe-area/safe-area';
+import { shownStyle } from '../emulation/rewrite/shown-style';
 import { isOwnStyleRule, ownCall, ownGet, ownSet, ownSheet, ownStyle } from './sheets/watch/cssom-watch';
 import { textStyle } from './sheets/text/ranges';
 
@@ -201,7 +201,7 @@ export function buildStyle(styleSheetId: string, decl: CSSStyleDeclaration, line
   const current = source && unwrapSafeArea(source.applied) === cssText ? source.text : undefined;
   // Like Chrome, the text as written, each declaration with its range in it.
   if (current !== undefined) return textStyle(styleSheetId, decl, current, line, column);
-  // The declarations as the page wrote them, where the emulation rewrote them (domains/emulation/rewrite.ts).
+  // The declarations as the page wrote them, where the emulation rewrote them (domains/emulation/rewrite/rewrite.ts).
   const shown = shownStyle(decl);
   let text = '';
   const written: Written[] = [];

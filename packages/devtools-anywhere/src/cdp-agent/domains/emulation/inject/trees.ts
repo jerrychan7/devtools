@@ -1,6 +1,6 @@
-import { frames } from '../../core/frames/frames';
-import type { ShadowRootTracker } from '../../core/nodes/shadow-roots';
-import { realmOf } from '../../core/realm';
+import { frames } from '../../../core/frames/frames';
+import type { ShadowRootTracker } from '../../../core/nodes/shadow-roots';
+import { realmOf } from '../../../core/realm';
 
 /** A tree of the page: the document of a frame, or a shadow root in one. */
 export type Tree = Document | ShadowRoot;

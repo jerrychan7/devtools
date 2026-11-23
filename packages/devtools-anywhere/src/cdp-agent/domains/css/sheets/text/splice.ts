@@ -5,7 +5,7 @@
 import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { replacedLines } from './text-lines';
-import { unwrapSafeArea } from '../../../emulation/safe-area';
+import { unwrapSafeArea } from '../../../emulation/safe-area/safe-area';
 import { ownCall } from '../watch/cssom-watch';
 import { type SheetSource, TOP, type Wrap, childRules, pairList, tagOf } from './pair';
 

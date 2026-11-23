@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { Tok, tokenize } from '../css/sheets/parse/css-lexer';
-import { asciiLower, decodeEscapes, splitMediaQueries, trimWhitespace } from './css-tokens';
-import type { Rewrite } from './rewrite';
+import { asciiLower, decodeEscapes, splitMediaQueries, trimWhitespace } from './rewrite/css-tokens';
+import type { Rewrite } from './rewrite/rewrite';
 
 /**
  * The media features Emulation.setEmulatedMedia can set here, with their values. Chrome ignores a name it

@@ -1,9 +1,9 @@
-import { disconnect, nativeCall, newObserver, observe, takeRecords } from '../../core/natives';
-import { hideAdopted } from '../../core/nodes/adopted';
-import { closestOwn } from '../../core/nodes/nodes';
-import { documentOf, isElement, realmOf } from '../../core/realm';
-import { afterFrames, inTurn, MAX_WAIT, task, turnOf } from '../../core/turn';
-import { ownCall } from '../css/sheets/watch/cssom-watch';
+import { disconnect, nativeCall, newObserver, observe, takeRecords } from '../../../core/natives';
+import { hideAdopted } from '../../../core/nodes/adopted';
+import { closestOwn } from '../../../core/nodes/nodes';
+import { documentOf, isElement, realmOf } from '../../../core/realm';
+import { afterFrames, inTurn, MAX_WAIT, task, turnOf } from '../../../core/turn';
+import { ownCall } from '../../css/sheets/watch/cssom-watch';
 import { followTrees, pageTrees, type Tree } from './trees';
 
 /**

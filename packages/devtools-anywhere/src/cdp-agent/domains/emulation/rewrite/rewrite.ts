@@ -1,11 +1,11 @@
-import { nativeCall, nativeGet, windowOf } from '../../core/natives';
-import { afterFrames, inTurn, MAX_WAIT, queue, turnOf } from '../../core/turn';
-import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../core/nodes/adopted';
-import { closestOwn } from '../../core/nodes/nodes';
-import { quietMutations } from '../../core/nodes/own-mutations';
-import { setWrittenAttribute, type Written, writtenAttribute } from '../../core/nodes/written-attributes';
-import { isCssom, isElement, isHtml, isNode, isSvg, realmOf } from '../../core/realm';
-import { pageRulesRewritten } from '../css/matching/forced-pseudo';
+import { nativeCall, nativeGet, windowOf } from '../../../core/natives';
+import { afterFrames, inTurn, MAX_WAIT, queue, turnOf } from '../../../core/turn';
+import { adoptedOf, isHiddenSheet, quietly, watchAdopted, watchTrees } from '../../../core/nodes/adopted';
+import { closestOwn } from '../../../core/nodes/nodes';
+import { quietMutations } from '../../../core/nodes/own-mutations';
+import { setWrittenAttribute, type Written, writtenAttribute } from '../../../core/nodes/written-attributes';
+import { isCssom, isElement, isHtml, isNode, isSvg, realmOf } from '../../../core/realm';
+import { pageRulesRewritten } from '../../css/matching/forced-pseudo';
 import {
   type CssomChange,
   cssSupports,
@@ -18,7 +18,7 @@ import {
   ownStyle,
   watchCssom,
   watchRealms,
-} from '../css/sheets/watch/cssom-watch';
+} from '../../css/sheets/watch/cssom-watch';
 import {
   ALWAYS,
   blockRecord,
@@ -28,10 +28,10 @@ import {
   sheetTrusted,
   sourceTrusted,
   startRecord,
-} from '../css/sheets/watch/written-blocks';
-import { writtenBlock } from '../css/sheets/text/block-text';
+} from '../../css/sheets/watch/written-blocks';
+import { writtenBlock } from '../../css/sheets/text/block-text';
 import { sizesRewrite } from './attributes';
-import { schemeDeclarations, schemeValue, type Preference } from './color-scheme';
+import { schemeDeclarations, schemeValue, type Preference } from '../color-scheme';
 import { asciiLower, withoutTakenSemicolon } from './css-tokens';
 import {
   blockReading,
@@ -44,9 +44,9 @@ import {
   serializedBlock,
   writeDeclarations,
 } from './merge';
-import { unwrapSafeArea } from './safe-area';
+import { unwrapSafeArea } from '../safe-area/safe-area';
 import { mediaLists, type Rewritten, styles } from './shown-style';
-import { followTrees, pageTrees, realmsOf, type Tree } from './trees';
+import { followTrees, pageTrees, realmsOf, type Tree } from '../inject/trees';
 
 /** A rewrite of a text of the page's style sheets: a media query list, or a declaration block. */
 export type Rewrite = (text: string) => string;

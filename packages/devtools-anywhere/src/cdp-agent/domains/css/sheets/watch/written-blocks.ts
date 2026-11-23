@@ -3,7 +3,7 @@
  * back serialized, and what it cannot serialize is lost with it. A shorthand whose value has a var() or an env()
  * is kept as written for each of its sides, and once a longhand of it is set after it the block reads as
  * longhands with no value: nothing a script reads of the block gives the shorthand's text then. The emulation
- * rewrites such a block from what was written (domains/emulation/rewrite.ts), and only from what is known to be
+ * rewrites such a block from what was written (domains/emulation/rewrite/rewrite.ts), and only from what is known to be
  * the block: each thing kept here says whether it still holds, and what may have changed unseen holds no more.
  *
  * - The text of a sheet (replace(), replaceSync(), or one the agent set) and of an inserted rule (insertRule(),

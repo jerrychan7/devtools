@@ -1,6 +1,13 @@
-import { frames } from '../../core/frames/frames';
-import { ownCall, ownGet, ownPlayer, ownRemoveProperty, ownSet, ownSetProperty } from '../css/sheets/watch/cssom-watch';
-import { type BlockRecord, play } from '../css/sheets/watch/written-blocks';
+import { frames } from '../../../core/frames/frames';
+import {
+  ownCall,
+  ownGet,
+  ownPlayer,
+  ownRemoveProperty,
+  ownSet,
+  ownSetProperty,
+} from '../../css/sheets/watch/cssom-watch';
+import { type BlockRecord, play } from '../../css/sheets/watch/written-blocks';
 import {
   type Declaration,
   mapDeclarations,

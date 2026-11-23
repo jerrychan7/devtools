@@ -1,10 +1,10 @@
-import { computedStyle, nativeCall } from '../../core/natives';
-import { FORCED_COLORS_ATTRIBUTE, OWN_ATTRIBUTE } from '../../core/nodes/nodes';
-import { quietMutations } from '../../core/nodes/own-mutations';
-import { isShadowRoot } from '../../core/realm';
-import { splitMediaQueries } from './css-tokens';
-import { injectOwnStyle, scanElements, type Visit } from './inject';
-import { pageTrees } from './trees';
+import { computedStyle, nativeCall } from '../../../core/natives';
+import { FORCED_COLORS_ATTRIBUTE, OWN_ATTRIBUTE } from '../../../core/nodes/nodes';
+import { quietMutations } from '../../../core/nodes/own-mutations';
+import { isShadowRoot } from '../../../core/realm';
+import { splitMediaQueries } from '../rewrite/css-tokens';
+import { injectOwnStyle, scanElements, type Visit } from '../inject/inject';
+import { pageTrees } from '../inject/trees';
 
 /*
  * Forced colors (Emulation.setEmulatedMedia with forced-colors: active). Chrome paints the page with a

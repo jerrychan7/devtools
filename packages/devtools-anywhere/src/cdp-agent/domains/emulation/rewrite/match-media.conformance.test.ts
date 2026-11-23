@@ -6,8 +6,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
-import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
 
 /** The listeners a MediaQueryList gets: `add1` and `add2` are plain ones, `capture` is added with capture set. */
 type Listener = 'add1' | 'onchange' | 'capture' | 'add2';

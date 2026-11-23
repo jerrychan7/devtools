@@ -5,7 +5,7 @@
  * media query are compared decoded (`decodeEscapes`), as CSS compares them: `e\nv(` is a call of `env()`.
  * What a hook does not change comes back byte for byte.
  */
-import { Tok, tokenize, type TokKind, type Tokens } from '../css/sheets/parse/css-lexer';
+import { Tok, tokenize, type TokKind, type Tokens } from '../../css/sheets/parse/css-lexer';
 
 /**
  * Gets a declaration's property and its value (`red !important` as written), and returns the new

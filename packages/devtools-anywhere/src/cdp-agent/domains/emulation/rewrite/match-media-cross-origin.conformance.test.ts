@@ -4,10 +4,10 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { setUpAndTearDown } from '../../../../test-support/conformance.ts';
-import type { Env } from '../../../../test-support/conformance.ts';
-import { chromeSide, oursSide, type Side as OopifSide } from '../../../../test-support/oopif/oopif-sides.ts';
-import { launchOopif } from '../../../../test-support/oopif/oopif.ts';
+import { setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import type { Env } from '../../../../../test-support/conformance.ts';
+import { chromeSide, oursSide, type Side as OopifSide } from '../../../../../test-support/oopif/oopif-sides.ts';
+import { launchOopif } from '../../../../../test-support/oopif/oopif.ts';
 
 type Scheme = 'dark' | 'light';
 

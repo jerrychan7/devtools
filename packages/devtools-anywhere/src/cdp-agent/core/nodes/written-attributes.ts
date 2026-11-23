@@ -3,12 +3,12 @@ import { nativeCall } from '../natives';
 
 /**
  * An attribute the agent wrote into one of the page's elements (the emulation's rewrites, see
- * domains/emulation/rewrite.ts): the value the page gave it, and the value written, as it reads.
+ * domains/emulation/rewrite/rewrite.ts): the value the page gave it, and the value written, as it reads.
  */
 export interface Written {
   original: string;
   applied: string;
-  /** What the rewrite gave the original, as last written (domains/emulation/rewrite.ts). */
+  /** What the rewrite gave the original, as last written (domains/emulation/rewrite/rewrite.ts). */
   target: string;
   /** For a style attribute rewritten from the writes of its block (rewrite.ts, planWritten), not from its text. */
   played?: true;

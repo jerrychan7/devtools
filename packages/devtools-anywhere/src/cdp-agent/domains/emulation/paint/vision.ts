@@ -1,11 +1,11 @@
 // Vision deficiencies: Chrome filters the whole page with an SVG filter outside the DOM. We put a
 // transparent mask in the top layer whose backdrop-filter is that filter, so the page's own
 // `filter` on <html> stays and getComputedStyle sees nothing of ours.
-import { frames } from '../../core/frames/frames';
-import { OWN_ATTRIBUTE, closestOwn, isOwn, markOwn, ownPopovers } from '../../core/nodes/nodes';
-import type { ShadowRootTracker } from '../../core/nodes/shadow-roots';
-import { captureTop } from '../../probe/natives';
-import type { TopNatives } from '../../probe/types';
+import { frames } from '../../../core/frames/frames';
+import { OWN_ATTRIBUTE, closestOwn, isOwn, markOwn, ownPopovers } from '../../../core/nodes/nodes';
+import type { ShadowRootTracker } from '../../../core/nodes/shadow-roots';
+import { captureTop } from '../../../probe/natives';
+import type { TopNatives } from '../../../probe/types';
 
 /** The SVG filters Chrome puts on the page for each vision deficiency. */
 export const VISION: Record<string, string> = {

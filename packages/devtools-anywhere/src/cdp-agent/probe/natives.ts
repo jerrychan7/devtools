@@ -13,9 +13,9 @@ export type Part = 'value' | 'get' | 'set';
 
 /**
  * What the agent calls on the page's objects, as `part:name`, on the interfaces `INTERFACES` matches. The CSSOM's
- * are the CSS domain's and the emulation's (domains/css/sheets/watch/cssom-watch.ts, domains/emulation/rewrite.ts);
+ * are the CSS domain's and the emulation's (domains/css/sheets/watch/cssom-watch.ts, domains/emulation/rewrite/rewrite.ts);
  * the attributes are those of the elements the emulation rewrites and the DOM and CSS domains edit; the queries and
- * the adopted sheets are the ones the emulation reads (domains/emulation/rewrite.ts, core/nodes/adopted.ts); the
+ * the adopted sheets are the ones the emulation reads (domains/emulation/rewrite/rewrite.ts, core/nodes/adopted.ts); the
  * accessibility tree reads attributes, queries, text and boxes (domains/accessibility/ax-dom.ts).
  */
 export const NATIVE_KEYS: readonly string[] = [

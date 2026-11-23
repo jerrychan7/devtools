@@ -3,8 +3,8 @@
 // text. Chrome and we both act on the same page, as safe-area.conformance.test.ts does.
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, openPage, sameOnBoth, setUpAndTearDown } from '../../../../test-support/conformance.ts';
-import type { Env, TestPage } from '../../../../test-support/conformance.ts';
+import { launch, openPage, sameOnBoth, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 let t: TestPage;

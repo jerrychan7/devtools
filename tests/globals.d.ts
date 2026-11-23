@@ -76,7 +76,7 @@ declare global {
       childTargets: ChildTargets;
       mergedFrames: MergedFrames;
       shellClients: () => string[];
-      /** The emulation's stable APIs, and the own style sheets and scans (domains/emulation/inject.ts). */
+      /** The emulation's stable APIs, and the own style sheets and scans (domains/emulation/inject/inject.ts). */
       emulation: {
         currentMediaRewrite: () => ((text: string) => string) | null;
         onMediaRewriteChange: (listener: () => void) => () => void;

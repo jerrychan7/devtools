@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { launch, setUpAndTearDown, type Env } from '../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown, type Env } from '../../../../../test-support/conformance.ts';
 
 let env: Env | undefined;
 

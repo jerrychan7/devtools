@@ -1,4 +1,4 @@
-// The page the emulation conformance tests act on (domains/emulation/*.conformance.test.ts): one fixture
+// The page the emulation conformance tests act on (domains/emulation/**/*.conformance.test.ts): one fixture
 // page with the sheet and the elements they emulate, shared by their files.
 import { openPage, type Env, type EventName, type TestPage } from './conformance.ts';
 

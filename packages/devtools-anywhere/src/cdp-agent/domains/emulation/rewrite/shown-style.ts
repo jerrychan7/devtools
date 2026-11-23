@@ -2,9 +2,9 @@
 // written as, for showing. rewrite.ts keeps the records. The CSS text modules that read them are loaded outside
 // a page too, so this module reads no DOM when it loads, and the copy shownStyle makes is parsed by the native
 // CSSOM.
-import { ownCall, ownGet, ownPlayer, ownSheet, ownStyle } from '../css/sheets/watch/cssom-watch';
-import { type BlockRecord, play } from '../css/sheets/watch/written-blocks';
-import { unwrapSafeArea } from './safe-area';
+import { ownCall, ownGet, ownPlayer, ownSheet, ownStyle } from '../../css/sheets/watch/cssom-watch';
+import { type BlockRecord, play } from '../../css/sheets/watch/written-blocks';
+import { unwrapSafeArea } from '../safe-area/safe-area';
 
 /** A text the page had, and what it was rewritten to: `applied` as it reads after the write. */
 export interface Rewritten {
