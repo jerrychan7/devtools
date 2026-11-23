@@ -18,6 +18,7 @@ import {
   queryAll,
   scopeOf,
   isMenuList,
+  layoutOf,
   matches,
   roleOf,
   type Inclusion,
@@ -171,21 +172,20 @@ function nameReads(el: Element): boolean {
  * A details element's two slots, ignored: the first holds its first summary child, the other the
  * rest of its children, none while it is closed (its content is not rendered then). A summary is
  * not made when the details has none: Chrome's default one has the browser's localized "Details"
- * as its text, which the page cannot know. In an open flex details, the content slot is a generic.
- * The content slot is not made when nothing is assigned to it: no element or text but the summary
- * (a comment is not assigned), as Chrome leaves an empty slot out.
+ * as its text, which the page cannot know. The content slot is a generic when its content is laid
+ * out in lines, as a block's. It is not made when nothing is assigned to it: no element or text but
+ * the summary (a comment is not assigned), as Chrome leaves an empty slot out.
  */
 function detailsChildren(el: HTMLDetailsElement): VirtualNode[] {
   const children = domChildren(el);
   const summary = children.find(c => isHtml(c, 'summary'));
-  const flex = el.open && /\bflex\b/.test(styleOf(el).display);
   const content = children.filter(c => c !== summary && (isElement(c) || isText(c)));
   const summarySlot = new VirtualNode(el, 'summary-slot', 'generic', UNINTERESTING, summary ? [summary] : []);
   if (!content.length) return [summarySlot];
-  return [
-    summarySlot,
-    new VirtualNode(el, 'content-slot', 'generic', flex ? INCLUDED : UNINTERESTING, el.open ? content : []),
-  ];
+  const shown = el.open ? content : [];
+  // Like a block, the content slot is a generic when it holds only inline content.
+  const lines = layoutOf(shown) === 'inline';
+  return [summarySlot, new VirtualNode(el, 'content-slot', 'generic', lines ? INCLUDED : UNINTERESTING, shown)];
 }
 
 /** The inputs that edit text in an inner editor. */

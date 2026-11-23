@@ -559,6 +559,9 @@ function virtualNode(node: VirtualNode, queried: boolean | undefined): Omit<AXNo
       },
       properties: editable,
     };
+  // A details' slot lists no sources, as a slot cannot be named.
+  if (isHtml(node.host, 'details'))
+    return { ignored: false, role: roleValue(node.role), name: { type: 'computedString', value: '' }, properties: [] };
   const sources: Protocol.Accessibility.AXValueSource[] = [
     { type: 'relatedElement', attribute: 'aria-labelledby' },
     { type: 'attribute', attribute: 'aria-label' },

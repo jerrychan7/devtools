@@ -1,10 +1,10 @@
 // What Chrome keeps of a hidden subtree (display: none, visibility: hidden, aria-hidden, inert):
 // most of it is left out of the tree, but some elements stay in it, ignored, with their own
 // subtree: form fields, labels, the targets of aria-labelledby and aria-describedby, and under
-// aria-hidden buttons and links too; and what display: none or aria-hidden hides in a label or such
-// a target, and what visibility: hidden hides there too. The hidden elements around them give
-// their place to them. The parts of an HTML table (the table, its row groups, rows and cells) stay
-// too, ignored, but without the rest of their subtree, and so do elements with aria-owns.
+// aria-hidden buttons and links too, and labels under visibility: hidden; and what display: none,
+// visibility: hidden or aria-hidden hides in a label or such a target. The hidden elements around
+// them give their place to them. The parts of an HTML table (the table, its row groups, rows and
+// cells) stay too, ignored, but without the rest of their subtree, and so do elements with aria-owns.
 import { isElement, isHtml, isHtmlElement, styleOf } from '../../core/realm';
 import { nativeCall } from '../../core/natives';
 import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf, type IgnoredReason } from './ax-tree';
@@ -143,8 +143,8 @@ export class HiddenKeeper {
   private keeps(el: Element, mode: HiddenMode): boolean {
     if (mode !== 'inert' && this.isReferenced(el)) return true;
     if (isHtml(el, 'select') || isHtml(el, 'textarea') || isField(el) || isHtml(el, 'meter')) return true;
-    if (mode === 'visibility') return false;
     if (isHtml(el, 'label')) return true;
+    if (mode === 'visibility') return false;
     if (mode === 'none') return false;
     if (isHtml(el, 'input') && BUTTON_TYPES.has(el.type)) return true;
     if (mode === 'inert') return false;

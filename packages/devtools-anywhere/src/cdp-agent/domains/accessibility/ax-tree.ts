@@ -684,9 +684,14 @@ function isPlainGeneric(el: Element): boolean {
  * flow but still content; display: contents children give their own.
  */
 function layoutContent(el: Element): 'none' | 'inline' | 'block' {
+  return layoutOf(domChildren(el));
+}
+
+/** What a list of nodes laid out in one box holds in its flow, as layoutContent. */
+export function layoutOf(nodes: Node[]): 'none' | 'inline' | 'block' {
   let some = false;
-  const visit = (node: Node): boolean => {
-    for (const child of domChildren(node)) {
+  const visit = (children: Node[]): boolean => {
+    for (const child of children) {
       if (isText(child)) {
         if (child.data.trim()) some = true;
         continue;
@@ -695,7 +700,7 @@ function layoutContent(el: Element): 'none' | 'inline' | 'block' {
       const style = styleOf(child);
       if (style.display === 'none') continue;
       if (style.display === 'contents') {
-        if (!visit(child)) return false;
+        if (!visit(domChildren(child))) return false;
         continue;
       }
       some = true;
@@ -704,7 +709,7 @@ function layoutContent(el: Element): 'none' | 'inline' | 'block' {
     }
     return true;
   };
-  return !visit(el) ? 'block' : some ? 'inline' : 'none';
+  return !visit(nodes) ? 'block' : some ? 'inline' : 'none';
 }
 
 /** Whether an element scrolls: its overflow lets it, and its content overflows it. */
@@ -761,9 +766,20 @@ function genericInclusion(el: Element): Inclusion {
   // An inline element with a ::before or ::after in the tree keeps an ignored node over it.
   const generated =
     display !== 'contents' && (generatedContent(el, '::before', false) || generatedContent(el, '::after', false));
-  return !inline || generated || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))
-    ? ignored('uninteresting')
-    : lifted('uninteresting');
+  if (!inline || generated || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))) return ignored('uninteresting');
+  // A details' child is assigned to one of its user-agent slots, which keeps it.
+  if (isHtml(el.parentNode, 'details')) return ignored('uninteresting');
+  // An inline element but a span right in a label (but for display: contents elements between) is kept too.
+  if (display !== 'contents' && el.localName !== 'span' && isHtml(labelParent(el), 'label'))
+    return ignored('uninteresting');
+  return lifted('uninteresting');
+}
+
+/** An element's parent in the tree's DOM, past display: contents elements but a label. */
+function labelParent(el: Element): Node | null {
+  let p = domParent(el);
+  while (p && isElement(p) && !isHtml(p, 'label') && styleOf(p).display === 'contents') p = domParent(p);
+  return p;
 }
 
 /** The inclusions, built once (included) or by kind. */
@@ -978,7 +994,9 @@ export class TreeShape {
       !attr(node, 'title')
     )
       return lifted('emptyAlt');
-    if (explicit === 'none') return lifted('presentationalRole');
+    // A presentational label stays in the tree, ignored, with what it holds.
+    if (explicit === 'none')
+      return isHtml(node, 'label') ? ignored('presentationalRole') : lifted('presentationalRole');
     if (isRedundantLabel(node)) return ignored('labelFor');
     if (!explicit && isPlainGeneric(node)) {
       // In a drop-down's popup, which is not laid out, a container is kept whatever its box; in

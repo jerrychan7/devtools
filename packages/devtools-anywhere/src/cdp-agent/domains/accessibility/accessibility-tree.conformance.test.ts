@@ -62,11 +62,6 @@ const TODO: Record<string, string[]> = {
   'input inner nodes differ; other nodes differ': [
     'names: wpt accname/name/comp_embedded_control.html',
     'names: wpt accname/name/comp_host_language_label.html',
-    'names: wpt accname/name/comp_host_language_label.tentative.html',
-  ],
-  'other nodes differ: flex details items, elements in a label': [
-    'manual: devtools-anywhere details in a flex box',
-    'manual: devtools-anywhere elements in a label',
   ],
 };
 
