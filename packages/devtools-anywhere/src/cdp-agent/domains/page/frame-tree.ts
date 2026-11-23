@@ -48,7 +48,9 @@ export function describeFrame(frames: FrameRegistry, frame: Frame | OpaqueFrame)
     url,
     ...(hash < 0 || hash === href.length - 1 ? {} : { urlFragment: href.slice(hash) }),
     domainAndRegistry: '',
-    securityOrigin: url.startsWith('about:') ? '://' : win.origin,
+    // Since Chrome 159 the frame's own origin: an about:blank or srcdoc frame has its creator's,
+    // and an opaque origin is written as Chrome writes it.
+    securityOrigin: win.origin === 'null' ? '://' : win.origin,
     mimeType: frame.document.contentType,
     secureContextType: !win.isSecureContext
       ? 'InsecureScheme'
@@ -61,8 +63,8 @@ export function describeFrame(frames: FrameRegistry, frame: Frame | OpaqueFrame)
 }
 
 /**
- * A sandboxed iframe's opaque frame as Chrome describes it: the security origin of its URL (not
- * the opaque one), a secure context and NotIsolatedFeatureDisabled. Its document is out of reach:
+ * A sandboxed iframe's opaque frame as Chrome describes it: an opaque security origin (since
+ * Chrome 159; Chrome 158 gave the origin of its URL), a secure context and NotIsolatedFeatureDisabled. Its document is out of reach:
  * the URL is the iframe's, the name the iframe's `name` (else its id), the MIME type text/html.
  */
 function describeOpaqueFrame(frame: OpaqueFrame): Protocol.Page.Frame {
@@ -78,7 +80,7 @@ function describeOpaqueFrame(frame: OpaqueFrame): Protocol.Page.Frame {
     url,
     ...(hash < 0 || hash === href.length - 1 ? {} : { urlFragment: href.slice(hash) }),
     domainAndRegistry: '',
-    securityOrigin: url.startsWith('about:') ? '://' : new URL(url).origin,
+    securityOrigin: '://',
     mimeType: 'text/html',
     secureContextType: parent.isSecureContext ? 'Secure' : 'InsecureScheme',
     crossOriginIsolatedContextType: 'NotIsolatedFeatureDisabled',
