@@ -773,8 +773,12 @@ function genericInclusion(el: Element): Inclusion {
   const generated =
     display !== 'contents' && (generatedContent(el, '::before', false) || generatedContent(el, '::after', false));
   if (!inline || generated || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))) return ignored('uninteresting');
-  // A details' child is assigned to one of its user-agent slots, which keeps it.
-  if (isHtml(el.parentNode, 'details')) return ignored('uninteresting');
+  // An element whose parent in the tree is not its DOM parent is kept: one assigned to a slot (a
+  // details' children are, to its user-agent slots), and one at the top of a shadow tree, but for
+  // a slot with neither assigned nodes nor fallback content.
+  if (isHtml(el, 'slot') && !domChildren(el).length) return lifted('uninteresting');
+  if (isHtml(el.parentNode, 'details') || el.assignedSlot || isShadowRoot(el.parentNode))
+    return ignored('uninteresting');
   // An inline element but a span right in a label is kept too.
   if (display !== 'contents' && el.localName !== 'span' && isHtml(domParent(el), 'label'))
     return ignored('uninteresting');
@@ -904,6 +908,8 @@ export class TreeShape {
    */
   private inNameSource(node: Node): boolean {
     if (!isElement(node) || styleOf(node).display !== 'contents') return false;
+    // A slot with nothing to show is never kept.
+    if (isHtml(node, 'slot') && !domChildren(node).length) return false;
     for (let p = domParent(node); p && isElement(p); p = domParent(p)) {
       if (isHtml(p, 'label') || this.hidden.isReferenced(p)) return true;
       if (this.inclusion(p).kind === 'included') return NAME_FROM_CONTENTS.has(roleOf(p));
