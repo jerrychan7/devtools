@@ -155,8 +155,24 @@ export const isMenuList = (el: Element | null): boolean => isHtml(el, 'select') 
 /** Whether an element has focus, in a document that has it. */
 export const isFocused = (el: Element) => el === el.ownerDocument.activeElement && el.ownerDocument.hasFocus();
 
-/** Sectioning elements, inside which `header` and `footer` are no landmarks. */
-const SECTIONING = 'article, aside, main, nav, section';
+/**
+ * Whether an aside, header or footer is inside a section of the page, which makes an aside without
+ * a name no landmark, and a header or footer a section's (as in Chrome): an ancestor whose role is
+ * article, complementary or navigation (by tag or role attribute), or a section without a role
+ * attribute; for a header or footer (`main`), one whose role is main too. A region by role does
+ * not count, nor what a role attribute makes something else or presentational.
+ */
+function inSectionOf(el: Element, main: boolean): boolean {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const explicit = explicitRole(p);
+    if (explicit === 'none') continue;
+    const role = explicit ?? implicitRole(p);
+    if (role === 'article' || role === 'complementary' || role === 'navigation') return true;
+    if (main && role === 'main') return true;
+    if (p.localName === 'section' && !explicit) return true;
+  }
+  return false;
+}
 
 /** The ARIA roles Chrome knows (abstract roles are not among them). */
 const ARIA_ROLES = new Set(
@@ -482,12 +498,10 @@ function implicitRole(el: Element): string {
     case 'section':
       return hasAuthorName(el) ? 'region' : 'generic';
     case 'aside':
-      return el.parentElement && closest(el.parentElement, SECTIONING) && !hasAuthorName(el)
-        ? 'generic'
-        : 'complementary';
+      return inSectionOf(el, false) && !hasAuthorName(el) ? 'generic' : 'complementary';
     case 'header':
     case 'footer': {
-      const inSection = el.parentElement && closest(el.parentElement, SECTIONING);
+      const inSection = inSectionOf(el, true);
       if (inSection) return el.localName === 'header' ? 'sectionheader' : 'sectionfooter';
       return el.localName === 'header' ? 'banner' : 'contentinfo';
     }
