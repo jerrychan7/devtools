@@ -668,7 +668,7 @@ export function renderedText(text: Text): string {
 }
 
 /** The meter a node is in, at any depth, if any. */
-function meterOf(node: Node): Element | null {
+export function meterOf(node: Node): Element | null {
   for (let p = domParent(node); p && isElement(p); p = domParent(p)) if (isHtml(p, 'meter')) return p;
   return null;
 }
@@ -830,6 +830,7 @@ function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   const owner = new Map<Element, Element>();
   // As in Chrome, a hidden owner owns nothing but where inert alone hides it, and nothing owns an
   // element without a box (display: none) or aria-hidden itself; their DOM ancestors are read here.
+  // Nor does anything own a meter's content, which has no place in the tree (see parent()).
   const doc = isDocument(scope) ? scope : scope.ownerDocument;
   const hidden = new HiddenKeeper(doc);
   // An owner an earlier owner moved out of an aria-hidden subtree shows again, and owns.
@@ -842,6 +843,7 @@ function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
       if (
         !target ||
         owner.has(target) ||
+        meterOf(target) ||
         hidden.hiding(target)?.mode === 'none' ||
         attr(target, 'aria-hidden') === 'true'
       )

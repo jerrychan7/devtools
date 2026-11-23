@@ -30,6 +30,7 @@ import {
   isRedundantLabel,
   isSvgLink,
   matches,
+  meterOf,
   query,
   roleOf,
   scopeOf,
@@ -115,7 +116,7 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
 /**
  * Whether aria-owns takes none of its targets: Chrome leaves out ids that name no element, targets
  * that are not rendered or carry aria-hidden themselves (one inside an aria-hidden subtree is still
- * taken), and those visibility: hidden or inert, which it moves but ignores; and drops the relation
+ * taken) or sit in a meter, and those visibility: hidden or inert, which it moves but ignores; and drops the relation
  * when none is left.
  */
 function ownsNothing(el: Element): boolean {
@@ -125,6 +126,7 @@ function ownsNothing(el: Element): boolean {
       t =>
         inDisplayNone(t) ||
         attr(t, 'aria-hidden') === 'true' ||
+        !!meterOf(t) ||
         /^(hidden|collapse)$/.test(styleOf(t).visibility) ||
         inInert(t)
     )
