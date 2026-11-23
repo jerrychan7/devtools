@@ -710,7 +710,7 @@ export function createAXTree(
       const inclusion = shape.inclusion(node);
       if (inclusion.kind !== 'included') {
         const relatedNodes =
-          inclusion.kind === 'ignored' && inclusion.hiddenRoot && inclusion.reason === 'ariaHiddenSubtree'
+          inclusion.hiddenRoot && inclusion.reason === 'ariaHiddenSubtree'
             ? [
                 {
                   backendDOMNodeId: idOf(inclusion.hiddenRoot),

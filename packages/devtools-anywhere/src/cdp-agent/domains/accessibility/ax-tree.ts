@@ -8,6 +8,7 @@
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 import { nativeCall, nativeGet } from '../../core/natives';
 import { inDisplayNone } from './ax-text';
+import { HiddenKeeper, type Hiding } from './ax-hidden';
 import { isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
 
 // The DOM is read through the browser's own functions (core/natives.ts), not those on the page's
@@ -65,7 +66,8 @@ export type IgnoredReason =
   | 'notRendered'
   | 'notVisible'
   | 'presentationalRole'
-  | 'emptyAlt';
+  | 'emptyAlt'
+  | 'inertElement';
 
 /**
  * How a DOM node takes part in the tree: `included`, ignored but kept (`reason`), left out with its
@@ -80,8 +82,8 @@ export type Inclusion =
       hiddenRoot?: Element;
       noReason?: true;
     }
-  | { kind: 'lifted'; reason: IgnoredReason }
-  | { kind: 'excluded'; reason: IgnoredReason };
+  | { kind: 'lifted'; reason: IgnoredReason; hiddenRoot?: Element }
+  | { kind: 'excluded'; reason: IgnoredReason; hiddenRoot?: Element };
 
 /** Elements whose text and children the page does not show as content: replaced by their value or a popup. */
 const OPAQUE = new Set(
@@ -527,7 +529,7 @@ export function roleOf(el: Element): string {
  * Why an element is not shown, if it is not: `display: none` on it or an ancestor (no box), or
  * `visibility: hidden` (a box, not painted).
  */
-function hiddenReason(el: Element): IgnoredReason | null {
+export function hiddenReason(el: Element): IgnoredReason | null {
   if (!el.isConnected) return 'notRendered';
   for (let n: Node | null = el; n && isElement(n); n = domParent(n))
     if (styleOf(n).display === 'none') return 'notRendered';
@@ -706,6 +708,12 @@ const INCLUDED: Inclusion = { kind: 'included' };
 const ignored = (reason: IgnoredReason): Inclusion => ({ kind: 'ignored', reason });
 const lifted = (reason: IgnoredReason): Inclusion => ({ kind: 'lifted', reason });
 const excluded = (reason: IgnoredReason): Inclusion => ({ kind: 'excluded', reason });
+/** A hidden node's inclusion, with the aria-hidden root that hides it, if any. */
+const hidden = (kind: 'ignored' | 'lifted' | 'excluded', hiding: Hiding): Inclusion => ({
+  kind,
+  reason: hiding.reason,
+  ...(hiding.hiddenRoot && { hiddenRoot: hiding.hiddenRoot }),
+});
 
 /** Owner tables, kept for one synchronous pass over the tree like dataTables. */
 let owners: WeakMap<Document | ShadowRoot, Map<Element, Element>> | null = null;
@@ -752,6 +760,8 @@ export class TreeShape {
   private keyed = new Map<Element, Map<string, VirtualNode>>();
   private placed = new Map<Node, VirtualNode>();
   readonly doc: Document;
+  /** What is kept of hidden subtrees. */
+  private hidden: HiddenKeeper;
   /** The text a text field or input button shows, for its VirtualNodes. */
   private fieldText: (el: Element) => string;
 
@@ -759,6 +769,7 @@ export class TreeShape {
     this.doc = doc;
     this.fieldText = fieldText;
     this.owner = ownersOf(doc);
+    this.hidden = new HiddenKeeper(doc);
     for (const [target, el] of this.owner) this.owned.set(el, [...(this.owned.get(el) ?? []), target]);
   }
 
@@ -791,17 +802,19 @@ export class TreeShape {
     if (node === this.doc) return INCLUDED;
     if (isText(node)) {
       const parent = domParent(node);
-      if (!parent || (isElement(parent) && (OPAQUE.has(parent.localName) || hiddenReason(parent))))
-        return excluded('notRendered');
+      if (!parent || (isElement(parent) && OPAQUE.has(parent.localName))) return excluded('notRendered');
       // In an svg, only its text elements draw text.
       if (isElement(parent) && parent.namespaceURI === SVG_NS && !/^(text|tspan|textPath)$/.test(parent.localName))
         return excluded('notRendered');
+      const hiding = this.hidden.hiding(node);
+      if (hiding) {
+        // What aria-hidden hides in an svg is left out of the tree.
+        if (hiding.mode !== 'none' && (parent as Element).namespaceURI === SVG_NS) return excluded(hiding.reason);
+        if (!this.hidden.isKept(node)) return excluded(hiding.reason);
+      }
       if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n) || this.isPlainLifted(n)))
         return excluded('uninteresting');
-      const hidden = this.hiddenRoot(node);
-      // What aria-hidden hides in an svg is left out of the tree.
-      if (hidden && (parent as Element).namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
-      return hidden ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: hidden } : INCLUDED;
+      return hiding ? hidden('ignored', hiding) : INCLUDED;
     }
     if (!isElement(node)) return excluded('uninteresting');
     if (closest(node, '[data-devtools-anywhere]')) return excluded('notRendered');
@@ -813,23 +826,20 @@ export class TreeShape {
       if (!isMenuList(select)) return ignored('notRendered');
       hiddenBy = null;
     }
-    if (hiddenBy) return excluded(hiddenBy);
+    // A hidden element is left out with its subtree, but for those Chrome keeps (ax-hidden.ts),
+    // ignored, and the hidden elements around them.
+    const hiding = hiddenBy === null && (select || isHtml(node, 'area')) ? null : this.hidden.hiding(node);
+    if (hiding) {
+      if (hiding.mode !== 'none' && node.namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
+      if (this.hidden.isKept(node)) return hidden('ignored', hiding);
+      return hidden(this.hidden.holdsKept(node) ? 'lifted' : 'excluded', hiding);
+    }
     if (
       isHtmlElement(node) &&
       (NOT_RENDERED.has(node.localName) ||
         (node.localName === 'embed' && !hasAttr(node, 'src') && !hasAttr(node, 'type')))
     )
       return excluded('notRendered');
-    const hidden = this.hiddenRoot(node);
-    if (hidden && node.namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
-    // Chrome leaves the aria-hidden element out and keeps what it hides, ignored.
-    if (hidden === node) return lifted('ariaHiddenElement');
-    if (hidden)
-      return {
-        kind: 'ignored',
-        reason: 'ariaHiddenSubtree',
-        hiddenRoot: hidden,
-      };
     if (node === this.doc.documentElement || node === this.doc.body) return ignored('uninteresting');
     // A tbody without a role, ARIA attribute, title, id (a possible link target) or tabindex is ignored;
     // thead and tfoot are kept.
@@ -882,13 +892,6 @@ export class TreeShape {
     return INCLUDED;
   }
 
-  /** The element with aria-hidden="true" that hides a node, if any. */
-  private hiddenRoot(node: Node): Element | null {
-    for (let n: Node | null = node; n && n !== this.doc; n = domParent(n))
-      if (isElement(n) && attr(n, 'aria-hidden') === 'true') return n;
-    return null;
-  }
-
   /** Whether a node is a plain generic container left out for having nothing of interest. */
   private isPlainLifted(node: Node): boolean {
     const inclusion = this.inclusion(node);
@@ -923,6 +926,11 @@ export class TreeShape {
     };
     if (isVirtual(node)) {
       for (const child of node.raw) visit(child, true);
+      return out;
+    }
+    // A hidden select Chrome keeps holds its options, not a popup; a hidden field nothing.
+    if ((isHtml(node, 'select') || isHtml(node, 'input') || isHtml(node, 'textarea')) && this.hidden.hiding(node)) {
+      if (isHtml(node, 'select')) for (const child of domChildren(node)) visit(child);
       return out;
     }
     const virtuals = isElement(node) && this.virtualChildren(node);
