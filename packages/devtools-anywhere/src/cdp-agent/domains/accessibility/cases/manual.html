@@ -884,3 +884,12 @@ The licenses in full: LICENSES in this directory.
 <div id="ws-break-spaces" data-ax-tree="ws-break-spaces" style="white-space:break-spaces"><input> <input></div>
 <div id="lbl-comment" data-ax-tree="lbl-comment"><label><!-- a comment -->Foo <input type="checkbox" id="lbl-comment-input"></label></div>
 <div id="lbl-plain" data-ax-tree="lbl-plain"><label>Foo <input type="radio"></label></div>
+<!-- group: devtools-anywhere generated content alternative text -->
+<style>
+  .gca1::before { content: "a / b"; }
+  .gca2::before { content: "a" / "b"; }
+  .gca3::before { content: 'x\'/ y' / "alt"; }
+  .gca4::before { content: "a/b"; }
+  .gca5::before { content: "x" attr(data-a) / "y / z"; }
+</style>
+<div id="gca" data-ax-tree="gca"><p class="gca1">slash in a string</p><p class="gca2">alternative text</p><p class="gca3">escaped quote and slash in a string</p><p class="gca4">slash without spaces</p><p class="gca5" data-a=" / q">slash in an attribute and in the alternative text</p></div>

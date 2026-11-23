@@ -39,6 +39,26 @@ export const pseudoHidden = (el: Element, pseudo: GeneratedPseudo) =>
   /^(hidden|collapse)$/.test(styleOf(el, pseudo).visibility);
 
 /**
+ * A computed content value's shown part and its alternative text after a top-level `/`, if any:
+ * a slash in a string or in a function's arguments does not count.
+ */
+function splitAlt(content: string): [string, string | undefined] {
+  let quote = '';
+  let depth = 0;
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === '/' && !depth) return [content.slice(0, i).trim(), content.slice(i + 1).trim()];
+  }
+  return [content, undefined];
+}
+
+/**
  * The content of an element's ::before or ::after in the tree, or null when it has no node. The
  * text of a run has its spaces collapsed, the leading one of a ::before's first dropped; a run of
  * spaces only is named with two, as in Chrome.
@@ -47,7 +67,7 @@ export function generatedContent(el: Element, pseudo: GeneratedPseudo): Generate
   if (!shows(el, pseudo)) return null;
   const { content, display } = styleOf(el, pseudo);
   const box = display === 'inline' ? 'inline' : /flex|grid/.test(display) ? 'flex' : 'block';
-  const [shown = '', alt] = content.split(/\s\/\s/);
+  const [shown, alt] = splitAlt(content);
   if (alt !== undefined && box === 'inline') {
     const text = contentText(alt, el, pseudo, true);
     return text ? { alt: text } : null;
