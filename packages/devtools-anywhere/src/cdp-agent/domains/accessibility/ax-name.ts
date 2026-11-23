@@ -247,10 +247,16 @@ const BUTTON_LABELS: Record<string, string> = {
 /**
  * An image input's name from the host language, in Chrome's order: its alt, its value, its title,
  * then the default label of a submit button (Chrome's in the browser's language). Empty ones are
- * passed over.
+ * passed over. With where it came from: a title names it as the title.
  */
-const imageInputText = (el: HTMLInputElement) =>
-  attr(el, 'alt') || attr(el, 'value') || titleText(el) || BUTTON_LABELS['submit'] || '';
+function imageInputText(el: HTMLInputElement): [string, From] | null {
+  const alt = attr(el, 'alt') || attr(el, 'value');
+  if (alt) return [alt, 'attribute'];
+  const title = titleText(el);
+  if (title) return [title, 'title'];
+  const label = BUTTON_LABELS['submit'];
+  return label ? [label, 'attribute'] : null;
+}
 
 /** The text an input button shows: its value, or its default label. */
 export const inputButtonText = (el: HTMLInputElement) => attr(el, 'value') ?? (BUTTON_LABELS[el.type] || '');
@@ -358,8 +364,7 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     return value ? [value, 'value'] : null;
   }
   if (isHtml(el, 'input') && el.type === 'image') {
-    const text = imageInputText(el);
-    return text ? [text, text === titleText(el) ? 'title' : 'attribute'] : null;
+    return imageInputText(el);
   }
   if (isHtml(el, 'img') || isHtml(el, 'area')) {
     const alt = attr(el, 'alt');
@@ -782,24 +787,26 @@ export function contentsText(el: Element): string {
 /**
  * An element's description, in Chrome's order: aria-describedby's targets, aria-description, then
  * the first of what did not name it: an input button's value, a table's caption, a summary's
- * content, a ruby's annotations, an svg element's desc child, the title.
+ * content, a ruby's annotations, an svg element's desc child, the title. What named it is told by
+ * the source that did (`named`), not by its text: a title equal to a name from alt describes.
  */
-function descriptionOf(el: Element, name: string): string {
+function descriptionOf(el: Element, name: string, named: AXValueSource | undefined): string {
   const own = simplify(describedByText(el)) || simplify(attr(el, 'aria-description') ?? '');
   if (own) return own;
   // An input button that its empty value leaves without a name gets no description from its title.
   if (isInputButton(el) && !name) return '';
-  const caption = isHtml(el, 'table') ? captionOf(el) : null;
+  const from = (type: string, attribute?: string) =>
+    named?.type === type && (attribute === undefined || named.attribute === attribute);
+  const caption = isHtml(el, 'table') && named?.nativeSource !== 'tablecaption' ? captionOf(el) : null;
   const fallbacks = [
-    isInputButton(el) ? simplify(el.value) : '',
+    isInputButton(el) && !from('attribute', 'value') ? simplify(el.value) : '',
     caption ? contentsText(caption) : '',
-    el.localName === 'summary' ? contentsText(el) : '',
-    el.localName === 'ruby' ? queryAll(el, 'rt').map(contentsText).join(' ') : '',
+    el.localName === 'summary' && !from('contents') ? contentsText(el) : '',
+    el.localName === 'ruby' && !from('contents') ? queryAll(el, 'rt').map(contentsText).join(' ') : '',
     simplify(svgDescText(el)),
-    simplify(titleText(el) ?? ''),
+    named?.attribute === 'title' ? '' : simplify(titleText(el) ?? ''),
   ];
-  const simplifiedName = simplify(name);
-  return fallbacks.find(text => text && text !== simplifiedName) ?? '';
+  return fallbacks.find(Boolean) ?? '';
 }
 
 /** The text of an svg element's desc child. */
@@ -822,12 +829,12 @@ export function nameOf(
   const sources = found.map(f => f.source);
   // A line break's name is its text as is.
   const name = isHtml(el, 'br') ? text : simplifyName(text);
-  const description = descriptionOf(el, name);
+  const description = descriptionOf(el, name, found.find(f => f.found)?.source);
   return {
     // A slot lists no sources: it cannot be named; nor does an element a drop-down's popup holds
     // under display: none or visibility: hidden, as in Chrome.
     name: { ...computed(name), ...(!isHtml(el, 'slot') && !styleHiddenInPopup(el) && { sources }) },
-    ...(description && description !== name && { description: computed(description) }),
+    ...(description && { description: computed(description) }),
   };
 }
 
