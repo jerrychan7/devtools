@@ -5,6 +5,9 @@ import { startServer } from '../../playground/server.ts';
 
 const CHROME = process.env['CHROME_PATH'] || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
+/** How long closing Chrome may take: Browser.close itself is bounded by `protocolTimeout`. */
+const CLOSE_TIMEOUT = 45_000;
+
 export interface Env {
   baseUrl: string;
   browser: Browser;
@@ -38,7 +41,20 @@ export async function launch(args: string[] = [], options: { defaultViewport?: n
     browser,
     async close() {
       const child = browser.process();
-      await browser.close();
+      // Puppeteer's close() sends Browser.close, then waits for the process to exit with no time
+      // limit: a Chrome that never exits would hold the test file forever. Past the limit, Chrome
+      // is killed and the hook fails, saying so.
+      let timer: NodeJS.Timeout | undefined;
+      const closed = await Promise.race([
+        browser.close().then(() => true),
+        new Promise<false>(r => (timer = setTimeout(() => r(false), CLOSE_TIMEOUT))),
+      ]).finally(() => clearTimeout(timer));
+      if (!closed) {
+        child?.kill('SIGKILL');
+        for (const stream of child?.stdio ?? []) stream?.destroy();
+        server.close();
+        throw new Error(`Chrome (pid ${child?.pid}) had not exited ${CLOSE_TIMEOUT}ms after browser.close(): killed`);
+      }
       // Chrome's crashpad handler and the GoogleUpdater it wakes inherit its stdout and stderr and
       // outlive it by minutes; until they exit, the ends Puppeteer reads keep this process alive.
       for (const stream of child?.stdio ?? []) stream?.destroy();
