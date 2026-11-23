@@ -148,21 +148,36 @@ const NAMED_FROM_CONTENTS = new Set(
   ).split(' ')
 );
 
-/**
- * Whether a name computation reads an element: it or an ancestor is a label, takes its name from
- * its content, or is named or described by another element through aria-labelledby or
- * aria-describedby (each name is computed, with every source, aria-label or not).
- */
-function nameReads(el: Element): boolean {
-  const read = new Set<Element>();
-  const scope = scopeOf(el);
-  if (scope)
+/** The targets of aria-labelledby and aria-describedby by scope, kept for one synchronous pass like ownersOf. */
+let referenced: WeakMap<Document | ShadowRoot, Set<Element>> | null = null;
+
+/** The targets of aria-labelledby and aria-describedby in a document or shadow root, found once a pass. */
+function referencedIn(scope: Document | ShadowRoot): Set<Element> {
+  if (!referenced) {
+    referenced = new WeakMap();
+    queueMicrotask(() => (referenced = null));
+  }
+  let read = referenced.get(scope);
+  if (!read) {
+    referenced.set(scope, (read = new Set()));
     for (const from of queryAll(scope, '[aria-labelledby], [aria-describedby]'))
       for (const attribute of ['aria-labelledby', 'aria-describedby'])
         for (const idref of (attr(from, attribute) ?? '').split(/\s+/)) {
           const target = idref && byId(scope, idref);
           if (target) read.add(target);
         }
+  }
+  return read;
+}
+
+/**
+ * Whether a name computation reads an element: it or an ancestor is a label, takes its name from
+ * its content, or is named or described by another element through aria-labelledby or
+ * aria-describedby (each name is computed, with every source, aria-label or not).
+ */
+function nameReads(el: Element): boolean {
+  const scope = scopeOf(el);
+  const read = scope ? referencedIn(scope) : new Set<Element>();
   for (let n: Node | null = el; n && isElement(n); n = domParent(n))
     if (isHtml(n, 'label') || NAMED_FROM_CONTENTS.has(roleOf(n)) || read.has(n)) return true;
   return false;
