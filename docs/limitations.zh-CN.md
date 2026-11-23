@@ -427,7 +427,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 
 ## 无障碍树
 
-Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。由 `accessibility.js`（约 79 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录。
+Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。由 `accessibility.js`（约 80 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录。
 
 - **Chrome**：在浏览器里计算，含 InlineTextBox、列表标记和 UA shadow 树里的节点。
 - **devtools-anywhere**：没有 InlineTextBox。UA shadow 树里的节点（select 的弹出层和 slot、文本框的占位符和内部编辑区、input 按钮的文字、meter 的数值条（两层 generic 包装及其中的数值部分）、取色框的色块、details 的 slot）和列表标记及其文字，在没有 DOM 节点的情况下重建：它们没有 `backendDOMNodeId`，id 为负数，在会话内保持不变；列表标记例外，与 Chrome 一样用其 `::marker` 的 backend id。input 的默认名称（如 "Submit"，image input 的也是）是英文，Chrome 的则用浏览器语言。MathML 不逐节点重建：`math` 元素的内容显示为 generic 节点和其原文，Chrome 则给出 MathMLIdentifier 等 MathML 角色和渲染后的文字（斜体标识符 "x" 为 "𝑥"）。role 为 none 或 presentation 的 meter 没有节点，Chrome 则保留其数值条的 generic 包装。没有 summary 的 details 不生成 Chrome 的默认 summary：它的文字是浏览器语言的「详细信息」，页面拿不到。video 和 audio 没有 Chrome 在媒体无法播放时给的名称（浏览器语言的「无法播放媒体。」），也没有其媒体控件 shadow 树里那些被忽略的节点：它们随浏览器版本和媒体状态而变。body 与 Chrome 一样在有 click、mousedown 或 mouseup 处理函数时保留在树里，但只认经 `on*` 属性或特性设置的：用 `addEventListener` 添加的监听器页面里看不到，这样的 body 在 Chrome 保留时这里仍被忽略。
