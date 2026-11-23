@@ -104,12 +104,14 @@ test('the address bar follows the page shown, through history and reloads', asyn
   await page.waitForFunction(() => location.hash === '#here');
   await framed().evaluate(() => history.back());
   await page.waitForFunction(() => location.search === '?pushed' && location.hash === '');
-  // A reload shows the page shown, not the first one.
+  // A reload shows the page shown, not the first one, in the shell: its element may come after
+  // the page's frame, so both are waited for.
   await page.reload();
   await page.waitForFunction(() => {
     const frame = document.getElementById('devtools-anywhere-page');
     return frame instanceof HTMLIFrameElement && frame.contentWindow?.location.search === '?pushed';
   });
+  await page.waitForFunction(() => document.querySelector('devtools-anywhere[data-shell]'));
   assert.equal((await shellState()).inShell, true);
 });
 
