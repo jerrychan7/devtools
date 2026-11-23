@@ -33,6 +33,8 @@ const TODO: Record<string, string[]> = {
     'names: dom-accessibility-api names',
     'roles: wpt html-aam/optgroup-role.tentative.html',
     'roles: wpt wai-aria/role/role_none_conflict_resolution.tentative.html',
+    'roles: wpt wai-aria/role/role_none_conflict_resolution_spec_ambiguities.tentative.html',
+    'names: wpt html-aam/summary.html',
     'manual: wpt accname/manual/name_test_case_544-manual.html',
     'manual: wpt accname/manual/name_test_case_546-manual.html',
     'manual: wpt accname/manual/name_test_case_547-manual.html',
@@ -53,14 +55,8 @@ const TODO: Record<string, string[]> = {
     'manual: wpt accname/manual/name_test_case_566-manual.html',
     'manual: wpt accname/manual/name_test_case_604-manual.html',
   ],
-  'ListMarker nodes differ; other nodes differ': [
-    'roles: wpt wai-aria/role/role_none_conflict_resolution_spec_ambiguities.tentative.html',
-    'names: wpt html-aam/summary.html',
-  ],
-  'input inner nodes differ; other nodes differ': [
-    'names: wpt accname/name/comp_embedded_control.html',
-    'names: wpt accname/name/comp_host_language_label.html',
-  ],
+  'input inner nodes differ; other nodes differ': ['names: wpt accname/name/comp_embedded_control.html'],
+  'input inner nodes differ': ['names: wpt accname/name/comp_host_language_label.html'],
 };
 
 /** Groups whose listed nodes differ from Chrome's though their tree does not, by what differs. */
