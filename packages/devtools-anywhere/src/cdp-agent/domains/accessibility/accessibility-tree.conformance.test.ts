@@ -39,7 +39,6 @@ const TODO: Record<string, string[]> = {
     'names: wpt accname/name/comp_labelledby_hidden_nodes.html',
     'names: wpt accname/name/comp_name_from_content.html',
     'names: wpt accname/name/comp_name_from_content_display_contents.html',
-    'names: wpt accname/name/comp_name_from_pseudo_content_marker.tentative.html',
     'names: wpt html-aam/names.html',
     'manual: wpt accname/manual/description_from_content_of_describedby_element-manual.html',
     'manual: wpt accname/manual/name_from_content-manual.html',

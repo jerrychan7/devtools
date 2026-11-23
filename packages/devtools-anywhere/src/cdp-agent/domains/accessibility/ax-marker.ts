@@ -47,21 +47,26 @@ function contentParts(content: string, el: Element, alt = false): { text: string
  * it has one: its strings as the name, or no name with a counter or a quote in it (Chrome gives
  * those to the children only), one child per run of strings and per counter or quote. Else from
  * list-style-type: a string, or the list-item counter in the style with its suffix ("1. ", "• ").
+ * None with empty alternative text (`content: "x" / ""`), which Chrome leaves out.
  */
 export function markerText(el: Element): MarkerText | null {
   if (!generatesMarker(el)) return null;
   const content = styleOf(el, '::marker').content;
   if (content !== 'normal') {
     const [shown = '', alt] = content.split(/\s\/\s/);
-    if (alt !== undefined)
+    if (alt !== undefined) {
+      const name = contentParts(alt, el, true)
+        .map(p => p.text)
+        .join('');
+      // Empty alternative text: Chrome leaves the marker out of the tree.
+      if (!name) return null;
       return {
-        name: contentParts(alt, el, true)
-          .map(p => p.text)
-          .join(''),
+        name,
         parts: [],
         quotes: [],
         alt: true,
       };
+    }
     const items = contentParts(shown, el);
     const parts: string[] = [];
     const quotes: boolean[] = [];
