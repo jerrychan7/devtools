@@ -528,6 +528,22 @@ export function roleOf(el: Element): string {
 }
 
 /**
+ * The outermost closed details a node is in the content of (not in its summary): Chrome makes no
+ * node for it, as the content is not slotted while closed. Its first summary child is shown.
+ */
+export function closedDetailsOf(node: Node): HTMLDetailsElement | null {
+  let found: HTMLDetailsElement | null = null;
+  for (let child = node, p = domParent(node); p; child = p, p = domParent(p))
+    if (
+      isHtml(p, 'details') &&
+      !nativeGet<boolean>(p, 'open') &&
+      child !== domChildren(p).find(c => isHtml(c, 'summary'))
+    )
+      found = p;
+  return found;
+}
+
+/**
  * Why an element is not shown, if it is not: `display: none` on it or an ancestor (no box), or
  * `visibility: hidden` (a box, not painted).
  */
@@ -817,6 +833,7 @@ export class TreeShape {
   /** How a node takes part in the tree, wherever aria-owns puts it. */
   private ownInclusion(node: Node): Inclusion {
     if (node === this.doc) return INCLUDED;
+    if (closedDetailsOf(node)) return excluded('notRendered');
     if (isText(node)) {
       const parent = domParent(node);
       if (!parent || (isElement(parent) && OPAQUE.has(parent.localName))) return excluded('notRendered');
@@ -998,6 +1015,9 @@ export class TreeShape {
   parent(node: AXRef): AXRef | null {
     if (isVirtual(node)) return node.parent;
     if (node === this.doc) return null;
+    // A closed details' content is under its content slot, which does not list it.
+    const details = closedDetailsOf(node);
+    if (details) return this.virtual(details, 'content-slot');
     const host = domParent(node);
     const placed = isElement(host) && this.virtualChildren(host) && this.placed.get(node);
     if (placed) return placed;

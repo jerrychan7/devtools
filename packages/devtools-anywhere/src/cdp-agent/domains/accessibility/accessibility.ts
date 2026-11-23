@@ -190,7 +190,12 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
       if (params.fetchRelatives ?? true) {
         // Like Chrome: the node's children, then its ancestors up to the root.
         if (ax.inTree(node)) out.push(...childrenOf(ax, node).map(([, axNode]) => axNode));
+        const first = out.length;
         for (let p = ax.parent(node); p; p = ax.parent(p)) out.push(ax.node(p));
+        // A node out of the tree is listed among its parent's children here, as Chrome does.
+        const up = out[first];
+        const self = out[0] as Protocol.Accessibility.AXNode;
+        if (up && !up.childIds?.includes(self.nodeId)) up.childIds = [...(up.childIds ?? []), self.nodeId];
       }
       return { nodes: out };
     },
@@ -258,7 +263,9 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     ): Promise<Protocol.Accessibility.GetAXNodeAndAncestorsResponse> {
       const { node, ax } = await target(params);
       const given: [AXRef, Protocol.Accessibility.AXNode][] = [[node, ax.node(node)]];
-      for (let p = ax.parent(node); p; p = ax.parent(p)) given.push([p, ax.node(p)]);
+      // A node Chrome has no parent for (a closed details' content) comes alone.
+      if (given[0]?.[1].parentId !== undefined)
+        for (let p = ax.parent(node); p; p = ax.parent(p)) given.push([p, ax.node(p)]);
       remember(given);
       return { nodes: given.map(([, axNode]) => axNode) };
     },

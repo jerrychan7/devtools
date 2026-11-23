@@ -17,6 +17,7 @@ import { generatedContent, pseudoHidden, type GeneratedPseudo } from './ax-gener
 import {
   attr,
   byId,
+  closedDetailsOf,
   groupTable,
   hasAttr,
   innerTextOf,
@@ -833,6 +834,15 @@ export function createAXTree(
       if (isMarker(node)) return markerNode(node, queried);
       if (isGenerated(node)) return generatedNode(node);
       if (isVirtual(node)) return links(node, { nodeId: id(node), ...virtualNode(node, queried) });
+      // Chrome has no node for a closed details' content: it answers with an unlinked one, id 0.
+      if (node !== shape.doc && closedDetailsOf(node))
+        return {
+          nodeId: '0',
+          ignored: true,
+          ignoredReasons: [{ name: 'notRendered', value: { type: 'boolean', value: true } }],
+          role: { type: 'role', value: 'none' },
+          backendDOMNodeId: idOf(node),
+        };
       const inclusion = shape.inclusion(node);
       if (inclusion.kind !== 'included') {
         // Chrome points at the node behind the reason: the aria-hidden root, or the control a

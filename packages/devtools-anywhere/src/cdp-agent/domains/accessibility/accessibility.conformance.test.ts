@@ -191,6 +191,47 @@ describe('the whole tree', () => {
     }
   });
 
+  test('parentId and childIds agree, as in Chrome, in and out of a closed details', async () => {
+    // Each node as its role, whether ignored and its links, by place in the list: ids differ.
+    const links = (nodes: Protocol.Accessibility.AXNode[]) => {
+      const at = (id: string | undefined) => (id === undefined ? undefined : nodes.findIndex(n => n.nodeId === id));
+      return nodes.map(n => ({
+        role: n.role?.value,
+        ignored: n.ignored,
+        parent: at(n.parentId),
+        children: n.childIds?.map(at).filter(i => i !== -1),
+      }));
+    };
+    // Added for this test only: a closed details changes how Chrome breaks the fixture's
+    // aria-owns cycles.
+    await t.page.evaluate(() =>
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<details id=dc><summary id=dcs>S</summary><p id=dcp>T<b id=dcb>U</b></p></details>'
+      )
+    );
+    for (const id of ['dcp', 'dcb', 'dcs', 'su']) {
+      const [ours, chrome] = await Promise.all(
+        [t.ours, t.chrome].map(async side => {
+          const nodeId = await nodeIdOf(side, id);
+          const partial = await side.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: true });
+          const ancestors = await side.send('Accessibility.getAXNodeAndAncestors', { nodeId });
+          return { partial: partial.nodes, ancestors: ancestors.nodes };
+        })
+      );
+      assert.ok(ours && chrome);
+      for (const nodes of [ours.partial, ours.ancestors])
+        for (const node of nodes) {
+          const parent = nodes.find(n => n.nodeId === node.parentId);
+          if (parent)
+            assert.ok(parent.childIds?.includes(node.nodeId), `#${id}: ${node.nodeId} not among its parent's children`);
+        }
+      assert.deepEqual(links(ours.partial), links(chrome.partial), `#${id} getPartialAXTree`);
+      assert.deepEqual(links(ours.ancestors), links(chrome.ancestors), `#${id} getAXNodeAndAncestors`);
+    }
+    await t.page.evaluate(() => document.getElementById('dc')?.remove());
+  });
+
   test('getRootAXNode and getChildAXNodes walk down to a node', async () => {
     const walk = async (side: Side) => {
       const { node: root } = await side.send('Accessibility.getRootAXNode', {});
