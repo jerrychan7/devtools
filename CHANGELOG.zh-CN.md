@@ -7,6 +7,7 @@
 - 无障碍树不再使用 dom-accessibility-api：角色、label 文字和描述改由项目自己的代码计算，并用从该库的测试和 web-platform-tests 导入的用例与 Chrome 对照。更多节点的角色与 Chrome 一致（`role` 首个 token 无效时回退到下一个，`del`、`em`、`time`、`abbr`、`canvas` 等元素给出 Chrome 自己的角色），名称、描述、value 和 properties 也按 Chrome 的规则计算：导入的约 1800 条用例全部与 Chrome 一致，包括布局表格、图像热区和生成内容里的 CSS 计数器。`accessibility.js` 从约 29 KB 增至约 44 KB。
 - 页面变化时 Accessibility 窗格会自己刷新：与 Chrome 一样，在域启用期间，对客户端经 `getChildAXNodes` 或 `getAXNodeAndAncestors` 拿到过的节点发 `Accessibility.nodesUpdated`，同一帧里变化的合成一个事件。变化由 MutationObserver 得知；它看不到的样式变化（CSSOM、`:hover`、媒体查询）在下一次 DOM 变化时发出（见能力边界）。不发 `loadComplete`，因为 agent 在已加载的页面里启动。
 - 无障碍树补上了 Chrome 有、而页面看不到 DOM 节点的那些节点：select 的弹出层和选项、文本框的占位符和内部编辑区、input 按钮的文字、取色框的色块，以及列表标记和其文字（所有预定义计数样式都按 Chrome 写出）。svg 里的树也与 Chrome 一致。列表标记用其 `::marker` 的 backend id，其余这类节点的 id 为负数，`getChildAXNodes` 接受这些 id。`accessibility.js` 从约 44 KB 增至约 58 KB。
+- 无障碍树在更多页面上与 Chrome 一致：无趣的 generic 容器按 Chrome 的方式略去或忽略，隐藏子树里 Chrome 保留的部分照样保留，显示出来的空白文本保留，body 在有角色、ARIA 属性、title、id、contenteditable 或 click 处理函数时保留。details 的 slot 得以重建，只重复其 checkbox 名称的 label 被忽略，带角色的列表的项不再有 ListMarker，`getFullAXTree` 按 Chrome 的顺序列出节点，`::before` 和 `::after` 有了自己的节点，用其伪元素的 backend id。`::marker` content 里的引号像 Chrome 那样拆分，`@counter-style` 规则从页面样式表读取，不再按 decimal 写出。与 Chrome 的整棵树对照中，198 组里不一致的从 106 组降到 57 组。有意不做的：details 本地化的默认 summary、video 和 audio 本地化的名称与媒体控件、用 `addEventListener` 添加的 click 监听器（见限制文档）。`accessibility.js` 从约 58 KB 增至约 70 KB。
 - `devtools-anywhere` 不再有运行时依赖：snapDOM 本来就已打进 `dist/snapdom.js`，改为开发依赖；dom-accessibility-api 已去掉。
 
 ## 0.4.0
