@@ -7,7 +7,7 @@
 // Chrome's: ARIA roles where it gives them, its own (capitalized) roles elsewhere.
 import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
 import { nativeCall, nativeGet } from '../../core/natives';
-import { inDisplayNone } from './ax-text';
+import { inDisplayNone, spaceShows } from './ax-text';
 import { HiddenKeeper, type Hiding } from './ax-hidden';
 import { isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
 
@@ -586,21 +586,6 @@ export function domParent(node: Node): Node | null {
 /** The element a text node's rendering depends on. */
 const displayOf = (node: Node | null) => (node && isElement(node) ? styleOf(node).display : '');
 
-/**
- * Whether a whitespace-only text node shows: Chrome keeps it as StaticText " " between two inline
- * boxes, as it shows as a space there.
- */
-function isRenderedSpace(text: Text, inTree: (node: Node) => boolean): boolean {
-  let prev = text.previousSibling;
-  while (prev && isText(prev) && !prev.data.trim()) prev = prev.previousSibling;
-  let next = text.nextSibling;
-  while (next && isText(next) && !next.data.trim()) next = next.nextSibling;
-  // Not next to an inline-block (a button, a field), nor to an element left out of the tree:
-  // Chrome drops the space there.
-  const inline = (node: Node | null) => !!node && (isText(node) || (displayOf(node) === 'inline' && inTree(node)));
-  return inline(prev) && inline(next);
-}
-
 /** A text node's text as rendered: white space collapsed, and trimmed at the edges of its block. */
 export function renderedText(text: Text): string {
   let value = text.data.replace(/[ \t\n\r\f]+/g, ' ');
@@ -812,8 +797,7 @@ export class TreeShape {
         if (hiding.mode !== 'none' && (parent as Element).namespaceURI === SVG_NS) return excluded(hiding.reason);
         if (!this.hidden.isKept(node)) return excluded(hiding.reason);
       }
-      if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n) || this.isPlainLifted(n)))
-        return excluded('uninteresting');
+      if (!node.data.trim() && !spaceShows(node)) return excluded('uninteresting');
       return hiding ? hidden('ignored', hiding) : INCLUDED;
     }
     if (!isElement(node)) return excluded('uninteresting');
@@ -890,14 +874,6 @@ export class TreeShape {
     if (!explicit && isHtml(node, 'p') && !isInteresting(node) && layoutContent(node) === 'none')
       return ignored('uninteresting');
     return INCLUDED;
-  }
-
-  /** Whether a node is a plain generic container left out for having nothing of interest. */
-  private isPlainLifted(node: Node): boolean {
-    const inclusion = this.inclusion(node);
-    return (
-      inclusion.kind === 'lifted' && inclusion.reason === 'uninteresting' && isElement(node) && isPlainGeneric(node)
-    );
   }
 
   /** Whether a node is in the tree (included or ignored). */

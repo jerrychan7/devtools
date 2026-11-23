@@ -158,6 +158,47 @@ export function droppedSpace(text: Text): boolean {
   });
 }
 
+/** ARIA roles read as separate cells, which need no space between them (Blink's CanIgnoreSpaceNextTo). */
+const CELL_ROLES = new Set(['cell', 'gridcell', 'columnheader', 'rowheader']);
+
+/**
+ * Whether a white space only text node needs no node next to `node`, the node before it (`back`)
+ * or after it in its line: Chrome (CanIgnoreSpaceNextTo) keeps the space only between text,
+ * inline boxes and images (an img, a video); it drops it next to another box (an inline-block,
+ * a field, a canvas, an svg), an element with no box of its own (display: contents) or an ARIA cell.
+ */
+function spaceIgnorableNextTo(node: Node, back: boolean): boolean | undefined {
+  // Next to another white space only text node, laid out or not (one after a comment), the space is dropped.
+  if (isText(node)) return node.data ? isBlank(node.data) : undefined;
+  if (!isElement(node)) return undefined;
+  const style = styleOf(node);
+  if (style.display === 'none' || outOfFlow(node)) return undefined;
+  if (style.display === 'contents') return true;
+  if (
+    node.localName === 'img' ||
+    node.localName === 'video' ||
+    (isHtml(node, 'input') && attr(node, 'type')?.toLowerCase() === 'image')
+  )
+    return false;
+  if (!isInlineBox(node) || isHtml(node, 'br')) return true;
+  const role = attr(node, 'role')?.trim().toLowerCase().split(/\s+/)[0];
+  if (role && CELL_ROLES.has(role)) return true;
+  return firstInside(node, back, n => spaceIgnorableNextTo(n, back));
+}
+
+/**
+ * Whether a white space only text node shows in the tree as StaticText: it gets a text box (it is
+ * not collapsed away at the start or the end of a line, nor after another space) and, unless its
+ * white space is preserved, is not next to a node that needs no space beside it.
+ */
+export function spaceShows(text: Text): boolean {
+  if (!hasLayout(text) || !layoutText(text)) return false;
+  const parent = domParent(text);
+  if (isElement(parent) && /preserve|break-spaces/.test(styleOf(parent).getPropertyValue('white-space-collapse')))
+    return true;
+  return ![true, false].some(back => walkLine<boolean>(text, back, n => spaceIgnorableNextTo(n, back), true));
+}
+
 /** Whether an element's start (`back`) or end is at the edge of its line: not inside a line of text. */
 export function lineEdge(el: Element, back: boolean): boolean {
   return !isInlineBox(el) || neighbour(el, back) !== 'content';
