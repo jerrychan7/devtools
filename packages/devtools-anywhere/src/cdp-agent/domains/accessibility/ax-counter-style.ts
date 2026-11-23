@@ -274,14 +274,15 @@ const graphemes = (text: string) => [...text.replace(/\p{M}/gu, '')].length;
 
 /**
  * `n` in the style of the @counter-style rule `name` of a document, or null when no rule has the
- * name. `predefined` writes a number in a predefined style (ax-counter.ts), for fallbacks and the
- * styles a rule extends.
+ * name. `predefined` writes a number in a predefined style (ax-counter.ts), for fallbacks;
+ * `extended` writes it as a rule that extends a predefined style does, or null for its fallback.
  */
 export function customCounterText(
   doc: Document,
   name: string,
   n: number,
   predefined: (n: number, style: string) => string,
+  extended: (n: number, style: string, ownRange: boolean) => string | null,
   seen = new Set<string>()
 ): string | null {
   const style = resolve(doc, name);
@@ -289,15 +290,16 @@ export function customCounterText(
   const fallback = () => {
     if (seen.has(name)) return predefined(n, 'decimal');
     seen.add(name);
-    return customCounterText(doc, style.fallback, n, predefined, seen) ?? predefined(n, style.fallback);
+    return customCounterText(doc, style.fallback, n, predefined, extended, seen) ?? predefined(n, style.fallback);
   };
   let negative: boolean;
   let text: string | null;
   if (style.predefined !== undefined) {
-    // The predefined style writes the number (in its own range, with its own fallback); the
-    // rule's range, negative and pad still apply around it.
-    if (style.range && !inRange(n, style)) return fallback();
-    const raw = predefined(n, style.predefined);
+    // The predefined style's algorithm writes the number, in the rule's range or else the style's
+    // own; out of it, or where the algorithm cannot, the rule's fallback writes it, without the
+    // rule's negative and pad. The rule's negative and pad apply to what the style writes.
+    const raw = style.range && !inRange(n, style) ? null : extended(n, style.predefined, !style.range);
+    if (raw === null) return fallback();
     negative = n < 0 && raw.startsWith('-');
     text = negative ? raw.slice(1) : raw;
   } else {

@@ -322,25 +322,65 @@ const fallbackOf = (style: string) => (/^(cjk-(earthly|heavenly)|japanese)/.test
  * Counter Styles; others (none, unknown names) are decimal.
  */
 export function counterText(n: number, style = 'decimal', doc?: Document): string {
-  const custom = doc && customCounterText(doc, style, n, predefinedText);
+  const custom = doc && customCounterText(doc, style, n, predefinedText, extendedText);
   return custom ?? predefinedText(n, style);
 }
+
+/** A style's name as `represent` knows it: its upper and lower forms, and its other names, as one. */
+const baseName = (style: string) =>
+  style
+    .replace(/^(upper|lower)-(alpha|latin)$/, 'lower-alpha')
+    .replace(/^upper-roman$/, 'lower-roman')
+    .replace(/^(upper|lower)-armenian$/, 'armenian');
+
+/** A style's text in the letter case its name asks for. */
+const cased = (out: string, style: string) =>
+  style.startsWith('upper-') ? out.toUpperCase() : style.startsWith('lower-') ? out.toLowerCase() : out;
 
 function predefinedText(n: number, style = 'decimal'): string {
   const symbol = SYMBOLS[style];
   if (symbol) return symbol;
-  // The upper and lower forms of a style, and its other names.
-  const name = style
-    .replace(/^(upper|lower)-(alpha|latin)$/, 'lower-alpha')
-    .replace(/^upper-roman$/, 'lower-roman')
-    .replace(/^(upper|lower)-armenian$/, 'armenian');
+  const name = baseName(style);
   for (let current = name; current !== 'decimal'; current = fallbackOf(current)) {
     const out = represent(n, current);
     if (out === null) continue;
-    if (current !== name) return out;
-    return style.startsWith('upper-') ? out.toUpperCase() : style.startsWith('lower-') ? out.toLowerCase() : out;
+    return current === name ? cased(out, style) : out;
   }
   return (style === 'decimal-leading-zero' && n >= 0 && n < 10 ? '0' : '') + n;
+}
+
+/**
+ * `n` by a predefined style's algorithm alone, past its range where the algorithm still writes it:
+ * negative numbers with a minus, lower-roman (additive) above 3999 with more m, cjk-decimal
+ * (numeric) below 0. Null when the algorithm cannot write it; the other styles keep their range.
+ */
+function unbounded(n: number, name: string): string | null {
+  if (n < 0) {
+    if (ALPHABETIC[name]) return null;
+    if (CJK[name]) return cjk(n, name);
+    const inner = unbounded(-n, name);
+    return inner === null ? null : '-' + inner;
+  }
+  const digits = NUMERIC[name];
+  if (typeof digits === 'string') return [...String(n)].map(d => digits[+d]).join('');
+  if (name === 'lower-roman' && n > 3999) return 'm'.repeat(Math.floor(n / 1000)) + (represent(n % 1000, name) ?? '');
+  return represent(n, name);
+}
+
+/**
+ * `n` in a predefined style as a @counter-style rule that extends it writes it, or null where the
+ * rule's own fallback writes it instead (as Chrome: not the predefined style's fallback). In the
+ * style's own range (`ownRange`) the number is out of it when the style cannot write it; with the
+ * rule's range, the style's algorithm writes what it can (unbounded).
+ */
+function extendedText(n: number, style: string, ownRange: boolean): string | null {
+  const symbol = SYMBOLS[style];
+  if (symbol) return symbol;
+  const name = baseName(style);
+  // Decimal, decimal-leading-zero and names of no style write every number.
+  if (name === 'decimal-leading-zero' || represent(1, name) === null) return predefinedText(n, style);
+  const out = ownRange ? represent(n, name) : unbounded(n, name);
+  return out === null ? null : cased(out, style);
 }
 
 /** What a list marker writes around its number in a list style: a rule's prefix and suffix, or none and markerSuffix's. */
