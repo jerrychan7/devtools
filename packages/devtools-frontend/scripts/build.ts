@@ -35,12 +35,16 @@ const revisionFile = path.join(pkg, 'REVISION');
 
 const UPSTREAM = 'https://chromium.googlesource.com/devtools/devtools-frontend.git';
 // gclient's configuration, rewritten on every sync. The hooks turned off fetch what only upstream's
-// own tests and tooling use: emscripten (0.8 GB, for the C++ debugging extension and the e2e tests'
-// wasm), the permissions of the Chrome its tests run in, and VS Code settings. That Chrome itself
-// (0.5 GB) is still downloaded: gclient offers no way to skip a dependency stored in GCS.
+// own tests and tooling use: the permissions of the Chrome its tests run in, and VS Code settings.
+// Two dependencies stored in GCS are still downloaded though the build uses neither: the Chrome
+// upstream's tests run in (0.5 GB) and, since Chrome 159, the emscripten toolchain (0.3 GB
+// archive, 1.1 GB on disk, for the C++ debugging extension and the e2e tests' wasm). gclient skips
+// a GCS dependency only by its DEPS condition, which for both is `non_git_source`, shared with
+// node and node_modules; a custom_deps entry set to None leaves it downloaded. The hook that sets
+// emscripten up (`setup_emscripten`) is already off by its own condition.
 // A hook is turned off by its name in upstream's DEPS: one renamed there would quietly run again,
 // so the sync checks that DEPS still has each.
-const SKIPPED_HOOKS = ['emscripten', 'fix_cft_permissions', 'VS Code settings'];
+const SKIPPED_HOOKS = ['fix_cft_permissions', 'VS Code settings'];
 const GCLIENT = `solutions = [{
   "name": "${path.basename(src)}",
   "url": "${UPSTREAM}",
