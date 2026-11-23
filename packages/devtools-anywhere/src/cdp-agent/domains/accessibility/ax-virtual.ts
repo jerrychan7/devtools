@@ -208,6 +208,11 @@ function detailsChildren(el: HTMLDetailsElement): VirtualNode[] {
 /** The inputs that edit text in an inner editor. */
 const TEXT_FIELD = /^(text|search|email|url|tel|password|number)$/;
 
+/** Whether an element is a text field: a textarea, or an input Chrome shows as one. */
+export function isTextFieldHost(el: Element): boolean {
+  return isHtml(el, 'textarea') || (isHtml(el, 'input') && TEXT_FIELD.test(el.type));
+}
+
 function textNode(host: Element, key: string, role: string, text: string, editable: boolean): VirtualNode {
   const node = new VirtualNode(host, key, role, INCLUDED);
   node.text = text;

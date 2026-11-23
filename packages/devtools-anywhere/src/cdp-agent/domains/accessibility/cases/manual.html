@@ -1045,5 +1045,20 @@ The licenses in full: LICENSES in this directory.
 <div id="da-meter-owned" data-ax-tree="da-meter-owned"><meter value="0.5"><span id="da-meter-owned-x">t</span></meter><div id="da-meter-owned-b" data-ax-case="da-meter-owned-b" role="button" aria-owns="da-meter-owned-x">b</div></div>
 <div id="da-meter-owner" data-ax-tree="da-meter-owner"><meter value="0.5"><span aria-owns="da-meter-owner-x"></span></meter><div id="da-meter-owner-b" data-ax-case="da-meter-owner-b" role="button"><b id="da-meter-owner-x">t</b></div></div>
 <div id="da-meter-owns" data-ax-tree="da-meter-owns"><meter id="da-meter-owns-m" data-ax-case="da-meter-owns-m" value="0.5" aria-owns="da-meter-owns-x"></meter><div id="da-meter-owns-b" data-ax-case="da-meter-owns-b" role="button"><b id="da-meter-owns-x">u</b></div></div>
+<!-- group: devtools-anywhere host owns -->
+<div id="da-ho-sel-self" data-ax-tree="da-ho-sel-self"><select aria-owns="da-ho-sel-self-o"><option id="da-ho-sel-self-o">a</option><option>b</option></select></div>
+<div id="da-ho-list-self" data-ax-tree="da-ho-list-self"><select size="3" aria-owns="da-ho-list-self-o"><option id="da-ho-list-self-o">a</option><option>b</option></select></div>
+<div id="da-ho-og-self" data-ax-tree="da-ho-og-self"><select size="3"><optgroup label="g" aria-owns="da-ho-og-self-o"><option>z</option><option id="da-ho-og-self-o">a</option></optgroup></select></div>
+<div id="da-ho-det-self" data-ax-tree="da-ho-det-self"><details aria-owns="da-ho-det-self-o"><summary id="da-ho-det-self-o">S</summary>c</details></div>
+<div id="da-ho-det-open-self" data-ax-tree="da-ho-det-open-self"><details open aria-owns="da-ho-det-open-self-o"><summary id="da-ho-det-open-self-o">S</summary>c</details></div>
+<div id="da-ho-sel" data-ax-tree="da-ho-sel"><select aria-owns="da-ho-sel-x"><option>a</option></select><div role="button" id="da-ho-sel-b" data-ax-case="da-ho-sel-b">b<span id="da-ho-sel-x">t</span></div></div>
+<div id="da-ho-list" data-ax-tree="da-ho-list"><select size="3" aria-owns="da-ho-list-x"><option>a</option></select><div role="button" id="da-ho-list-b" data-ax-case="da-ho-list-b">b<span id="da-ho-list-x">t</span></div></div>
+<div id="da-ho-og" data-ax-tree="da-ho-og"><select size="3"><optgroup label="g" aria-owns="da-ho-og-x"><option>a</option></optgroup></select><div role="button" id="da-ho-og-b" data-ax-case="da-ho-og-b">b<span id="da-ho-og-x">t</span></div></div>
+<div id="da-ho-det" data-ax-tree="da-ho-det"><details aria-owns="da-ho-det-x"><summary>S</summary>c</details><div role="button" id="da-ho-det-b" data-ax-case="da-ho-det-b">b<span id="da-ho-det-x">t</span></div></div>
+<div id="da-ho-ta" data-ax-tree="da-ho-ta"><textarea aria-owns="da-ho-ta-x">v</textarea><div role="button" id="da-ho-ta-b" data-ax-case="da-ho-ta-b">b<span id="da-ho-ta-x">t</span></div></div>
+<div id="da-ho-in" data-ax-tree="da-ho-in"><input value="v" aria-owns="da-ho-in-x"><div role="button" id="da-ho-in-b" data-ax-case="da-ho-in-b">b<span id="da-ho-in-x">t</span></div></div>
+<div id="da-ho-btn" data-ax-tree="da-ho-btn"><input type="button" value="v" aria-owns="da-ho-btn-x"><div role="button" id="da-ho-btn-b" data-ax-case="da-ho-btn-b">b<span id="da-ho-btn-x">t</span></div></div>
+<div id="da-ho-btn-empty" data-ax-tree="da-ho-btn-empty"><input type="button" aria-owns="da-ho-btn-empty-x"><div role="button" id="da-ho-btn-empty-b">b<span id="da-ho-btn-empty-x">t</span></div></div>
+<div id="da-ho-color" data-ax-tree="da-ho-color"><input type="color" aria-owns="da-ho-color-x"><div role="button" id="da-ho-color-b" data-ax-case="da-ho-color-b">b<span id="da-ho-color-x">t</span></div></div>
 <!-- group: devtools-anywhere figure title equal to the caption -->
 <div id="da-figure-title" data-ax-tree="da-figure-title"><figure id="da-figure-title-same" data-ax-case="da-figure-title-same" title="Cap"><img alt="i" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="><figcaption>Cap</figcaption></figure><figure id="da-figure-title-diff" data-ax-case="da-figure-title-diff" title="T"><figcaption>Cap</figcaption></figure></div>

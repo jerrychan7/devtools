@@ -675,7 +675,15 @@ const nodeListSource = (
   nativeSource: NonNullable<AXValueSource['nativeSource']>,
   relatedNodes: AXRelatedNode[],
   text: string | null
-) => source({ type: 'relatedElement', nativeSource, nativeSourceValue: { type: 'nodeList', relatedNodes } }, text);
+) =>
+  source(
+    {
+      type: 'relatedElement',
+      nativeSource,
+      nativeSourceValue: { type: 'nodeList', relatedNodes },
+    },
+    text
+  );
 
 /** The sources the host language gives an element (NativeTextAlternative). */
 function nativeSources(
@@ -714,7 +722,10 @@ function nativeSources(
     push(source({ type: 'attribute', attribute: 'value' }, value), value !== null);
     // Its content: the value, or the default label without one (an empty value shows nothing).
     const text = inputButtonText(el);
-    push(source({ type: 'contents' }, text || null), !!text);
+    // What it owns follows the value there, and names it when it has no value.
+    const owned = simplify(textFromDescendants(el, el, { visited: new Set([el]), naming: null }));
+    const contents = [text, owned].filter(Boolean).join(' ');
+    push(source({ type: 'contents' }, contents || null), !!contents);
     return;
   }
   if (isHtml(el, 'input') && el.type === 'image') {
@@ -833,7 +844,10 @@ export function nameOf(
   return {
     // A slot lists no sources: it cannot be named; nor does an element a drop-down's popup holds
     // under display: none or visibility: hidden, as in Chrome.
-    name: { ...computed(name), ...(!isHtml(el, 'slot') && !styleHiddenInPopup(el) && { sources }) },
+    name: {
+      ...computed(name),
+      ...(!isHtml(el, 'slot') && !styleHiddenInPopup(el) && { sources }),
+    },
     ...(description && { description: computed(description) }),
   };
 }

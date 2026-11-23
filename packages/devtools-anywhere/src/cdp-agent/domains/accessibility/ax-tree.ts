@@ -10,7 +10,7 @@ import { nativeCall, nativeGet } from '../../core/natives';
 import { inDisplayNone, spaceShows } from './ax-text';
 import { HiddenKeeper, type Hiding } from './ax-hidden';
 import { generatedContent } from './ax-generated';
-import { isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
+import { isTextFieldHost, isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
 
 // The DOM is read through the browser's own functions (core/natives.ts), not those on the page's
 // prototypes: a page that replaced `getAttribute` or `querySelectorAll` would otherwise see the
@@ -796,9 +796,18 @@ function genericInclusion(el: Element): Inclusion {
 
 /** The inclusions, built once (included) or by kind. */
 const INCLUDED: Inclusion = { kind: 'included' };
-const ignored = (reason: IgnoredReason): Inclusion => ({ kind: 'ignored', reason });
-const lifted = (reason: IgnoredReason): Inclusion => ({ kind: 'lifted', reason });
-const excluded = (reason: IgnoredReason): Inclusion => ({ kind: 'excluded', reason });
+const ignored = (reason: IgnoredReason): Inclusion => ({
+  kind: 'ignored',
+  reason,
+});
+const lifted = (reason: IgnoredReason): Inclusion => ({
+  kind: 'lifted',
+  reason,
+});
+const excluded = (reason: IgnoredReason): Inclusion => ({
+  kind: 'excluded',
+  reason,
+});
 /** A hidden node's inclusion, with the aria-hidden root that hides it, if any. */
 const hidden = (kind: 'ignored' | 'lifted' | 'excluded', hiding: Hiding): Inclusion => ({
   kind,
@@ -831,19 +840,23 @@ function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   // As in Chrome, a hidden owner owns nothing but where inert alone hides it, and nothing owns an
   // element without a box (display: none) or aria-hidden itself; their DOM ancestors are read here.
   // Nor does anything own a meter's content, which has no place in the tree (see parent()), nor
-  // does that content own anything; a meter itself does, after its bar (see children()).
+  // does that content own anything; a meter itself does, after its bar (see children()). A text
+  // field owns nothing, and a select or optgroup does not take its own options out of its popup or
+  // slot; a details element does take its summary, which then follows its slots.
   const doc = isDocument(scope) ? scope : scope.ownerDocument;
   const hidden = new HiddenKeeper(doc);
   // An owner an earlier owner moved out of an aria-hidden subtree shows again, and owns.
   const owners = new HiddenKeeper(doc, el => owner.get(el));
   for (const el of queryAll(scope, '[aria-owns]')) {
     const mode = owners.hiding(el)?.mode;
-    if ((mode && mode !== 'inert') || meterOf(el)) continue;
+    if ((mode && mode !== 'inert') || meterOf(el) || isTextFieldHost(el)) continue;
+    const keepsOwn = isHtml(el, 'select') || isHtml(el, 'optgroup');
     for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
       const target = byId(scope, id);
       if (
         !target ||
         owner.has(target) ||
+        (keepsOwn && within(target, el)) ||
         meterOf(target) ||
         hidden.hiding(target)?.mode === 'none' ||
         attr(target, 'aria-hidden') === 'true'
@@ -855,6 +868,12 @@ function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
     }
   }
   return owner;
+}
+
+/** Whether a node is an element's DOM descendant. */
+function within(node: Node, el: Element): boolean {
+  for (let n = domParent(node); n; n = domParent(n)) if (n === el) return true;
+  return false;
 }
 
 /** The tree's structure over one document, with aria-owns resolved. */
@@ -1070,8 +1089,10 @@ export class TreeShape {
       }
       out.push(child);
     };
+    // What aria-owns took from a VirtualNode (a details' summary) is under its owner instead.
     if (isVirtual(node)) {
-      for (const child of node.raw) visit(child, true);
+      for (const child of node.raw)
+        if (isVirtual(child) || !(isElement(child) && this.owner.has(child))) visit(child, true);
       return out;
     }
     // A hidden select Chrome keeps holds its options, not a popup; a hidden field nothing.
@@ -1080,7 +1101,7 @@ export class TreeShape {
       return out;
     }
     const virtuals = isElement(node) && this.virtualChildren(node);
-    // A meter's aria-owns puts the elements it owns after its bar, as in Chrome.
+    // A host's aria-owns puts the elements it owns after its VirtualNodes, as in Chrome.
     if (virtuals) {
       out.push(...virtuals);
       if (isElement(node)) for (const el of this.owned.get(node) ?? []) visit(el, true);
@@ -1146,7 +1167,11 @@ export class TreeShape {
     const details = closedDetailsOf(node);
     if (details) return this.virtual(details, 'content-slot');
     const host = domParent(node);
-    const placed = isElement(host) && this.virtualChildren(host) && this.placed.get(node);
+    const placed =
+      isElement(host) &&
+      this.virtualChildren(host) &&
+      !(isElement(node) && this.owner.has(node)) &&
+      this.placed.get(node);
     if (placed) return placed;
     let n: Node | null = isElement(node)
       ? (this.owner.get(node) ?? (isHtml(node, 'area') ? imageOf(node) : null) ?? domParent(node))
