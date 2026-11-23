@@ -200,20 +200,24 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     ): Promise<Protocol.Accessibility.GetFullAXTreeResponse> {
       const doc = documentOfFrame(params.frameId);
       const ax = await tree(doc);
-      // Breadth first, as Chrome lists them. `depth` counts the nodes that are not ignored above a
-      // node, as in Chrome: the root's children are at 1, and so are those of an ignored body.
-      const max = params.depth ?? Infinity;
-      const out: Protocol.Accessibility.AXNode[] = [];
-      let level: { node: AXRef; depth: number }[] = [{ node: doc, depth: 0 }];
-      while (level.length) {
-        const next: typeof level = [];
-        for (const { node, depth } of level) {
-          const axNode = ax.node(node);
+      // In Chrome's order (WalkAXNodesToDepth in inspector_accessibility_agent.cc): breadth first
+      // over the nodes that are not ignored, from the root; each one's children are listed depth
+      // first, going down through the ignored ones, before the next node of the queue is taken.
+      // Chrome also goes down through a node without a DOM node; ours (a control's shadow parts)
+      // have one in Chrome, and its own (a marker's text in a roled list) have no children here.
+      // `depth` counts the nodes that are not ignored, the root at 1: those below the last level
+      // are not taken from the queue, but the ignored nodes under its nodes are still listed.
+      const max = params.depth ?? -1;
+      const out: Protocol.Accessibility.AXNode[] = [ax.node(doc)];
+      const queue: { node: AXRef; depth: number }[] = [{ node: doc, depth: 1 }];
+      for (const { node, depth } of queue) {
+        const stack = [...ax.children(node)].reverse();
+        for (let child = stack.pop(); child; child = stack.pop()) {
+          const axNode = ax.node(child);
           out.push(axNode);
-          const childDepth = axNode.ignored ? depth : depth + 1;
-          if (childDepth <= max) for (const child of ax.children(node)) next.push({ node: child, depth: childDepth });
+          if (axNode.ignored) stack.push(...[...ax.children(child)].reverse());
+          else if (max === -1 || depth < max) queue.push({ node: child, depth: depth + 1 });
         }
-        level = next;
       }
       return { nodes: out };
     },
