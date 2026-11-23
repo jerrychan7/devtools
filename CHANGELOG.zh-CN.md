@@ -13,6 +13,9 @@
 - 无障碍树在更多页面上与 Chrome 一致：无趣的 generic 容器按 Chrome 的方式略去或忽略，隐藏子树里 Chrome 保留的部分照样保留，显示出来的空白文本保留，body 在有角色、ARIA 属性、title、id、contenteditable 或 click 处理函数时保留。details 的 slot 得以重建，只重复其 checkbox 名称的 label 被忽略，带角色的列表的项不再有 ListMarker，`getFullAXTree` 按 Chrome 的顺序列出节点，`::before` 和 `::after` 有了自己的节点，用其伪元素的 backend id。`::marker` content 里的引号像 Chrome 那样拆分，`@counter-style` 规则从页面样式表读取，不再按 decimal 写出。与 Chrome 的整棵树对照中，198 组里不一致的从 106 组降到 57 组。有意不做的：details 本地化的默认 summary、video 和 audio 本地化的名称与媒体控件、用 `addEventListener` 添加的 click 监听器（见限制文档）。`accessibility.js` 从约 58 KB 增至约 70 KB。
 - 无障碍树在更多地方与 Chrome 一致。select 的弹出层只在 select 为 combobox 时是 MenuListPopup，也包含 select 里的文字和其他元素，名称计算读取该 select 时多一层被忽略的 slot；meter 不再显示其内容，而是显示 UA shadow 树里的两层包装和数值条，被 visibility: hidden 隐藏时以忽略状态保留。生成内容为所属的行内元素保留一个被忽略的节点，只在行首或行尾去掉首尾空格；只重复其 checkbox 名称的 label 的生成文字被忽略，替代文字为空的列表标记不再出现。隐藏的表格部件以忽略状态保留，但不含其内容；label 或 aria-labelledby、aria-describedby 目标里被 visibility: hidden 隐藏的部分也保留；内容 slot 没有分配到任何节点的 details 不再有内容 slot 节点。aria-owns 把元素移出 aria-hidden 子树，隐藏的 owner 不拥有任何元素。image input 按 Chrome 的顺序取 alt、value、title，再取默认标签作为名称；无名称的 aside 和 section 的 header、footer 按祖先的角色定角色；label 和 details 里的行内包装元素、名称来源里的 display: contents 元素、分配到 slot 的元素和 shadow 树顶层元素，与 Chrome 一样以忽略状态保留。与 Chrome 的整棵树对照中，223 组里不一致的从 59 组降到 29 组。`accessibility.js` 从约 70 KB 增至约 79 KB。
 - `devtools-anywhere` 不再有运行时依赖：snapDOM 本来就已打进 `dist/snapdom.js`，改为开发依赖；dom-accessibility-api 已去掉。
+- frame 的安全源（security origin）与 Chrome 159 一致，见于 frame 树和 frame 事件：`about:blank` 或 `srcdoc` 的 frame 继承创建它的文档的源，没有 `allow-same-origin` 的沙箱 frame 是不透明源。
+- 没有源文件的内容安全策略（CSP）问题（例如脚本插入的标记引发的）不再指向文档 URL 的第 -1 行，而是与 Chrome 一样不带源码位置。
+- 弃用问题仍指向页面 URL，而 Chrome 159 指向调用该弃用 API 的脚本：页面无从得知调用发生在哪里（见限制说明）。
 
 ## 0.4.0
 
