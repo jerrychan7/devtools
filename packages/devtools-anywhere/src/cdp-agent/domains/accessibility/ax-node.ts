@@ -509,6 +509,8 @@ function urlOf(el: Element, role: string): string | null {
   if (role === 'link' && (isHtml(el, 'a') || isHtml(el, 'area'))) return el.href;
   if (role === 'link' && isSvgLink(el)) return new URL(attr(el, 'href') ?? '', el.baseURI).href;
   if (role === 'image' && isHtml(el, 'img')) return el.currentSrc.trim() || null;
+  // An image input gives its image's address.
+  if (isHtml(el, 'input') && el.type === 'image') return el.src || null;
   return null;
 }
 

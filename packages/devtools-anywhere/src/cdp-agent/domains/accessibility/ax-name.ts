@@ -243,6 +243,14 @@ const BUTTON_LABELS: Record<string, string> = {
   reset: 'Reset',
 };
 
+/**
+ * An image input's name from the host language, in Chrome's order: its alt, its value, its title,
+ * then the default label of a submit button (Chrome's in the browser's language). Empty ones are
+ * passed over.
+ */
+const imageInputText = (el: HTMLInputElement) =>
+  attr(el, 'alt') || attr(el, 'value') || titleText(el) || BUTTON_LABELS['submit'] || '';
+
 /** The text an input button shows: its value, or its default label. */
 export const inputButtonText = (el: HTMLInputElement) => attr(el, 'value') ?? (BUTTON_LABELS[el.type] || '');
 
@@ -349,8 +357,8 @@ function nativeText(el: Element, c: Computation): [string, From] | null {
     return value ? [value, 'value'] : null;
   }
   if (isHtml(el, 'input') && el.type === 'image') {
-    const alt = attr(el, 'alt');
-    if (alt) return [alt, 'attribute'];
+    const text = imageInputText(el);
+    return text ? [text, text === titleText(el) ? 'title' : 'attribute'] : null;
   }
   if (isHtml(el, 'img') || isHtml(el, 'area')) {
     const alt = attr(el, 'alt');
@@ -698,6 +706,16 @@ function nativeSources(
     push(source({ type: 'contents' }, text || null), !!text);
     return;
   }
+  if (isHtml(el, 'input') && el.type === 'image') {
+    const alt = attr(el, 'alt') || null;
+    push(stringSource('alt', alt), !!alt);
+    const value = attr(el, 'value') || null;
+    push(source({ type: 'attribute', attribute: 'value' }, value), !!value);
+    push(...titleSource(el));
+    // The default label, which Chrome lists as the type attribute's text.
+    const type = { type: 'string' as const, value: attr(el, 'type') ?? '' };
+    push(source({ type: 'attribute', attribute: 'type', attributeValue: type }, BUTTON_LABELS['submit'] ?? ''), true);
+  }
   if (isNativeTextField(el)) {
     push(...titleSource(el));
     push(placeholderSource(el, 'placeholder'), !!attr(el, 'placeholder'));
@@ -763,6 +781,8 @@ export function contentsText(el: Element): string {
 function descriptionOf(el: Element, name: string): string {
   const own = simplify(describedByText(el)) || simplify(attr(el, 'aria-description') ?? '');
   if (own) return own;
+  // An input button that its empty value leaves without a name gets no description from its title.
+  if (isInputButton(el) && !name) return '';
   const caption = isHtml(el, 'table') ? captionOf(el) : null;
   const fallbacks = [
     isInputButton(el) ? simplify(el.value) : '',
