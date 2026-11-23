@@ -667,6 +667,12 @@ export function renderedText(text: Text): string {
   return value;
 }
 
+/** The meter a node is in, at any depth, if any. */
+function meterOf(node: Node): Element | null {
+  for (let p = domParent(node); p && isElement(p); p = domParent(p)) if (isHtml(p, 'meter')) return p;
+  return null;
+}
+
 /** Whether an element is a child of a drop-down select, in its popup, which is not laid out. */
 const inPopup = (el: Node | null): boolean => !!el && isMenuList(domParent(el) as Element | null);
 
@@ -921,6 +927,8 @@ export class TreeShape {
   private ownInclusion(node: Node): Inclusion {
     if (node === this.doc) return INCLUDED;
     if (closedDetailsOf(node)) return excluded('notRendered');
+    // A meter's content is not rendered: its bar (ax-virtual.ts) stands in for it.
+    if (meterOf(node)) return excluded('notRendered');
     if (isText(node)) {
       const parent = domParent(node);
       // A drop-down select shows the text it holds in its popup, but for white space.
@@ -1115,6 +1123,8 @@ export class TreeShape {
   parent(node: AXRef): AXRef | null {
     if (isVirtual(node)) return node.parent;
     if (node === this.doc) return null;
+    // A meter's content has no parent in the tree, as in Chrome.
+    if (meterOf(node)) return null;
     // A closed details' content is under its content slot, which does not list it.
     const details = closedDetailsOf(node);
     if (details) return this.virtual(details, 'content-slot');
