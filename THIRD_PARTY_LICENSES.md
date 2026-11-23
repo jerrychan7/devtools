@@ -10,17 +10,17 @@ devtools-anywhere itself is licensed under the MIT license (see [LICENSE](LICENS
 | --- | --- | --- | --- | --- |
 | [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | devtools-anywhere |
 | [snapDOM (@zumer/snapdom)](https://github.com/zumerlab/snapdom) | 3.3.5 | MIT | ZumerLab | devtools-anywhere |
-| [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css) | Chrome 158.0.8127.37 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
-| [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | 047c90eca37c7170d826d72245d5df9281989cf3 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
+| [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/159.0.8154.13/third_party/blink/renderer/core/html/resources/html.css) | Chrome 159.0.8154.13 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
+| [Chrome DevTools frontend](https://chromium.googlesource.com/devtools/devtools-frontend) | 3d48567555b6795967c376050698efe2bf4f0f98 | BSD-3-Clause | The Chromium Authors | devtools-frontend, devtools-frontend-locales |
 | [acorn (DevTools front_end/third_party/acorn)](https://github.com/acornjs/acorn) | 8.10.0 | MIT | acorn contributors (see its AUTHORS) | devtools-frontend |
-| [chromium (DevTools front_end/third_party/chromium)](https://chromium.googlesource.com/devtools/devtools-frontend/+/047c90eca37c7170d826d72245d5df9281989cf3/front_end/third_party/chromium/) | N/A | BSD-3-Clause | The Chromium Authors | devtools-frontend |
+| [chromium (DevTools front_end/third_party/chromium)](https://chromium.googlesource.com/devtools/devtools-frontend/+/3d48567555b6795967c376050698efe2bf4f0f98/front_end/third_party/chromium/) | N/A | BSD-3-Clause | The Chromium Authors | devtools-frontend |
 | [codemirror.next (DevTools front_end/third_party/codemirror.next)](https://github.com/codemirror/CodeMirror.next/) | 0.19.0 | MIT | Marijn Haverbeke and others | devtools-frontend |
 | [csp_evaluator (DevTools front_end/third_party/csp_evaluator)](https://www.npmjs.com/package/csp_evaluator) | 1.1.1 | Apache-2.0 | not stated in the license text | devtools-frontend |
 | [diff (DevTools front_end/third_party/diff)](https://github.com/google/diff-match-patch/tree/master/javascript) | 5.60.0 | Apache-2.0 | Google Inc. (diff-match-patch) | devtools-frontend |
 | [i18n (DevTools front_end/third_party/i18n)](https://github.com/GoogleChrome/lighthouse) | 15dad3944c2754a9e147fef9ef99934169e2ca08 | Apache-2.0 | Google LLC (Lighthouse) | devtools-frontend |
 | [intl-messageformat (DevTools front_end/third_party/intl-messageformat)](https://github.com/formatjs/formatjs) | 9.8.0 | BSD-3-Clause | Oath Inc. (includes tslib, 0BSD, Microsoft Corporation) | devtools-frontend |
 | [json5 (DevTools front_end/third_party/json5)](https://github.com/json5/json5) | 2.2.3 | MIT | Aseem Kishore and others | devtools-frontend |
-| [legacy-javascript (DevTools front_end/third_party/legacy-javascript)](https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript) | 0.0.3 | Apache-2.0 | Google LLC (Lighthouse) | devtools-frontend |
+| [legacy-javascript (DevTools front_end/third_party/legacy-javascript)](https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript) | 0.0.4 | Apache-2.0 | Google LLC (Lighthouse) | devtools-frontend |
 | [lit (DevTools front_end/third_party/lit)](https://github.com/lit/lit) | 2.4.1 | BSD-3-Clause | Google LLC | devtools-frontend |
 | [marked (DevTools front_end/third_party/marked)](https://github.com/markedjs/marked) | 18.0.4 | BSD-3-Clause, MIT | Christopher Jeffrey / MarkedJS | devtools-frontend |
 | [source-map-scopes-codec (DevTools front_end/third_party/source-map-scopes-codec)](https://github.com/ChromeDevTools/source-map-scopes-codec) | 2.0.0 | BSD-3-Clause | The Chromium Authors | devtools-frontend |
@@ -105,10 +105,10 @@ SOFTWARE.
 
 ### Chromium's default style sheet (html.css)
 
-- Version: Chrome 158.0.8127.37
+- Version: Chrome 159.0.8154.13
 - License: LGPL-2.0-or-later
 - Copyright: Lars Knoll; Apple Inc.
-- Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css
+- Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/159.0.8154.13/third_party/blink/renderer/core/html/resources/html.css
 - Included in: devtools-anywhere
 - Notes: Shipped unmodified as dist/chromium-html.css, with this license as dist/chromium-html.LICENSE.txt; loaded on demand for the Styles pane. It is the only file under this license: deleting both leaves out the user agent stylesheet rules and nothing else.
 
@@ -597,7 +597,7 @@ That's all there is to it!
 
 ### Chrome DevTools frontend
 
-- Version: 047c90eca37c7170d826d72245d5df9281989cf3
+- Version: 3d48567555b6795967c376050698efe2bf4f0f98
 - License: BSD-3-Clause
 - Copyright: The Chromium Authors
 - Source: https://chromium.googlesource.com/devtools/devtools-frontend
@@ -672,7 +672,7 @@ THE SOFTWARE.
 - Version: N/A
 - License: BSD-3-Clause
 - Copyright: The Chromium Authors
-- Source: https://chromium.googlesource.com/devtools/devtools-frontend/+/047c90eca37c7170d826d72245d5df9281989cf3/front_end/third_party/chromium/
+- Source: https://chromium.googlesource.com/devtools/devtools-frontend/+/3d48567555b6795967c376050698efe2bf4f0f98/front_end/third_party/chromium/
 - Included in: devtools-frontend
 - Notes: Bundled into dist/bundle/ (from third_party/chromium/).
 
@@ -1463,7 +1463,7 @@ SOFTWARE.
 
 ### legacy-javascript (DevTools front_end/third_party/legacy-javascript)
 
-- Version: 0.0.3
+- Version: 0.0.4
 - License: Apache-2.0
 - Copyright: Google LLC (Lighthouse)
 - Source: https://github.com/GoogleChrome/lighthouse/tree/main/core/lib/legacy-javascript
