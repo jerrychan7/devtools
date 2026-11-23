@@ -830,14 +830,15 @@ function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   const owner = new Map<Element, Element>();
   // As in Chrome, a hidden owner owns nothing but where inert alone hides it, and nothing owns an
   // element without a box (display: none) or aria-hidden itself; their DOM ancestors are read here.
-  // Nor does anything own a meter's content, which has no place in the tree (see parent()).
+  // Nor does anything own a meter's content, which has no place in the tree (see parent()), nor
+  // does that content own anything; a meter itself does, after its bar (see children()).
   const doc = isDocument(scope) ? scope : scope.ownerDocument;
   const hidden = new HiddenKeeper(doc);
   // An owner an earlier owner moved out of an aria-hidden subtree shows again, and owns.
   const owners = new HiddenKeeper(doc, el => owner.get(el));
   for (const el of queryAll(scope, '[aria-owns]')) {
     const mode = owners.hiding(el)?.mode;
-    if (mode && mode !== 'inert') continue;
+    if ((mode && mode !== 'inert') || meterOf(el)) continue;
     for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
       const target = byId(scope, id);
       if (
@@ -1079,7 +1080,12 @@ export class TreeShape {
       return out;
     }
     const virtuals = isElement(node) && this.virtualChildren(node);
-    if (virtuals) return virtuals;
+    // A meter's aria-owns puts the elements it owns after its bar, as in Chrome.
+    if (virtuals) {
+      out.push(...virtuals);
+      if (isElement(node)) for (const el of this.owned.get(node) ?? []) visit(el, true);
+      return out;
+    }
     for (const child of this.ownChildren(node)) visit(child);
     if (isHtml(node, 'img')) for (const area of areasOf(node)) visit(area, true);
     if (isElement(node)) for (const el of this.owned.get(node) ?? []) visit(el, true);
