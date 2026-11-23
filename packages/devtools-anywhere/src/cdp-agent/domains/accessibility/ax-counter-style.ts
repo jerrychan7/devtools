@@ -150,6 +150,8 @@ interface Resolved {
   symbols: string[];
   additive: [number, string][];
   negative: [string, string];
+  /** Whether a rule of the chain sets `negative`; else an extended predefined style's own sign is it. */
+  negativeSet: boolean;
   prefix: string;
   suffix: string;
   /** The rule's ranges; 'auto' for `range: auto`, null when no rule in the chain sets one. */
@@ -180,6 +182,7 @@ function resolve(doc: Document, name: string, seen = new Set<string>()): Resolve
       symbols: [],
       additive: [],
       negative: ['-', ''],
+      negativeSet: false,
       prefix: '',
       // The extended style's own suffix: " " for disc, "、" for the CJK styles, and so on.
       suffix: markerSuffix(arg),
@@ -195,6 +198,7 @@ function resolve(doc: Document, name: string, seen = new Set<string>()): Resolve
       symbols: symbolsOf(rule.symbols),
       additive: [],
       negative: ['-', ''],
+      negativeSet: false,
       prefix: '',
       suffix: '. ',
       range: null,
@@ -210,6 +214,7 @@ function resolve(doc: Document, name: string, seen = new Set<string>()): Resolve
   if (rule.negative) {
     const [neg = '', after = ''] = symbolsOf(rule.negative);
     out.negative = [neg, after];
+    out.negativeSet = true;
   }
   if (rule.prefix) out.prefix = symbolsOf(rule.prefix)[0] ?? '';
   if (rule.suffix) out.suffix = symbolsOf(rule.suffix)[0] ?? '';
@@ -292,7 +297,7 @@ export function customCounterText(
   name: string,
   n: number,
   predefined: (n: number, style: string) => string,
-  extended: (n: number, style: string, range: ExtendedRange) => string | null,
+  extended: (n: number, style: string, range: ExtendedRange) => [string, string] | null,
   seen = new Set<string>()
 ): string | null {
   const style = resolve(doc, name);
@@ -304,6 +309,7 @@ export function customCounterText(
   };
   let negative: boolean;
   let text: string | null;
+  let sign = style.negative;
   if (style.predefined !== undefined) {
     // The predefined style's algorithm writes the number, in the rule's range or else the style's
     // own; out of it, or where the algorithm cannot, the rule's fallback writes it, without the
@@ -313,8 +319,12 @@ export function customCounterText(
         ? null
         : extended(n, style.predefined, style.range === null ? 'own' : style.range === 'auto' ? 'auto' : 'rule');
     if (raw === null) return fallback();
-    negative = n < 0 && raw.startsWith('-');
-    text = negative ? raw.slice(1) : raw;
+    // The style writes its sign (the CJK styles their minus word) apart from the number: the
+    // rule's negative replaces it when a rule sets one, and pad counts it, as Chrome.
+    const [own, body] = raw;
+    negative = own !== '';
+    if (!style.negativeSet) sign = [own, ''];
+    text = body;
   } else {
     if (!inRange(n, style)) return fallback();
     negative = n < 0 && usesNegative(style.system);
@@ -324,11 +334,11 @@ export function customCounterText(
   let out = text;
   if (style.pad) {
     const [count, symbol] = style.pad;
-    const sign = negative ? graphemes(style.negative[0]) + graphemes(style.negative[1]) : 0;
-    const missing = count - graphemes(text) - sign;
+    const width = negative ? graphemes(sign[0]) + graphemes(sign[1]) : 0;
+    const missing = count - graphemes(text) - width;
     if (missing > 0) out = symbol.repeat(missing) + out;
   }
-  return negative ? style.negative[0] + out + style.negative[1] : out;
+  return negative ? sign[0] + out + sign[1] : out;
 }
 
 /** The prefix and suffix a list marker writes around its number in a rule's style, or null. */

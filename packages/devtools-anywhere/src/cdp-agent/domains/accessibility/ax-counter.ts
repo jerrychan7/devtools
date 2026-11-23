@@ -386,14 +386,8 @@ const ADDITIVE_PAST: Record<string, number> = {
 function unbounded(n: number, name: string): string | null {
   if (n < 0) {
     if (ALPHABETIC[name]) return null;
-    const minus = CJK[name]?.[3];
-    if (minus !== undefined && name.startsWith('japanese')) {
-      const inner = unbounded(-n, name);
-      return inner === null ? null : minus + inner;
-    }
-    if (CJK[name]) return cjk(n, name);
     const inner = unbounded(-n, name);
-    return inner === null ? null : '-' + inner;
+    return inner === null ? null : minusOf(name) + inner;
   }
   const digits = NUMERIC[name];
   if (typeof digits === 'string') return [...String(n)].map(d => digits[+d]).join('');
@@ -401,6 +395,9 @@ function unbounded(n: number, name: string): string | null {
   if (past !== undefined && n > past) return additive(n, name);
   return represent(n, name);
 }
+
+/** The negative sign a predefined style writes before a negative number: its CJK minus, else "-". */
+const minusOf = (name: string) => CJK[name]?.[3] ?? '-';
 
 /**
  * `n` in a predefined style as a @counter-style rule that extends it writes it, or null where the
@@ -410,16 +407,20 @@ function unbounded(n: number, name: string): string | null {
  * `range: auto`, the same but for negative numbers, which only numeric and Chinese and Korean
  * styles keep.
  */
-function extendedText(n: number, style: string, range: ExtendedRange): string | null {
+function extendedText(n: number, style: string, range: ExtendedRange): [string, string] | null {
   const symbol = SYMBOLS[style];
-  if (symbol) return symbol;
+  if (symbol) return ['', symbol];
   const name = baseName(style);
   // Decimal, decimal-leading-zero and names of no style write every number.
-  if (name === 'decimal-leading-zero' || represent(1, name) === null) return predefinedText(n, style);
+  if (name === 'decimal-leading-zero' || represent(1, name) === null)
+    return n < 0 ? ['-', String(-n)] : ['', predefinedText(n, style)];
   if (range === 'auto' && n < 0 && NUMERIC[name] === undefined && !(CJK[name] && !name.startsWith('japanese')))
     return null;
-  const out = range === 'own' ? represent(n, name) : unbounded(n, name);
-  return out === null ? null : cased(out, style);
+  // The style's sign and the number's text apart, for the rule's negative and pad.
+  if (range === 'own' && represent(n, name) === null) return null;
+  const out = range === 'own' ? represent(Math.abs(n), name) : unbounded(Math.abs(n), name);
+  if (out === null || (n < 0 && ALPHABETIC[name])) return null;
+  return [n < 0 ? minusOf(name) : '', cased(out, style)];
 }
 
 /** What a list marker writes around its number in a list style: a rule's prefix and suffix, or none and markerSuffix's. */
