@@ -6,6 +6,8 @@
 // domain gives it an id of its own (accessibility.ts), apart from the DOM nodes' backend ids.
 // A list marker and its text children are VirtualNodes too, keys `marker` and `marker:<n>`, built
 // in ax-node.ts (ax-marker.ts); the marker has its ::marker's backend id.
+// So are generated content, keys `before`, `after` and `before:<n>`… (ax-generated.ts), the
+// pseudo-element nodes with their ::before and ::after backend ids.
 import { domChildren, hasAttr, isMenuList, matches, type Inclusion } from './ax-tree';
 import { isElement, isHtml, styleOf } from '../../core/realm';
 

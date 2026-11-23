@@ -41,7 +41,6 @@ const TODO: Record<string, string[]> = {
     'roles: wpt html-aam/roles.html',
     'roles: wpt wai-aria/role/role_none_conflict_resolution.tentative.html',
     'names: dom-accessibility-api script and shadow roots',
-    'names: dom-accessibility-api S2',
     'names: wpt accname/aria-owns.html',
     'names: wpt accname/name/comp_hidden_not_referenced.html',
     'names: wpt accname/name/comp_labelledby.html',
@@ -54,7 +53,6 @@ const TODO: Record<string, string[]> = {
     'names: wpt accname/name/comp_tooltip.html',
     'names: wpt html-aam/names.html',
     'manual: wpt accname/manual/description_from_content_of_describedby_element-manual.html',
-    'manual: wpt accname/manual/name_file-label-inline-block-styles-manual.html',
     'manual: wpt accname/manual/name_from_content-manual.html',
     'manual: wpt accname/manual/name_from_content_of_label-manual.html',
     'manual: wpt accname/manual/name_from_content_of_labelledby_element-manual.html',
@@ -78,18 +76,13 @@ const TODO: Record<string, string[]> = {
     'manual: wpt accname/manual/name_test_case_565-manual.html',
     'manual: wpt accname/manual/name_test_case_566-manual.html',
     'manual: wpt accname/manual/name_test_case_604-manual.html',
-    'manual: wpt accname/manual/name_test_case_659-manual.html',
-    'manual: wpt accname/manual/name_test_case_660-manual.html',
     'manual: wpt accname/manual/name_test_case_661-manual.html',
     'manual: wpt accname/manual/name_test_case_662-manual.html',
-    'manual: wpt accname/manual/name_test_case_753-manual.html',
     'manual: wpt accname/manual/name_test_case_754-manual.html',
     'manual: wpt accname/manual/name_test_case_755-manual.html',
-    'manual: wpt accname/manual/name_test_case_758-manual.html',
     'manual: wpt accname/manual/name_test_case_759-manual.html',
     'manual: wpt accname/manual/name_test_case_760-manual.html',
     'manual: devtools-anywhere generated content counters',
-    'manual: devtools-anywhere counter styles',
   ],
   'ListMarker nodes differ; other nodes differ': [
     'roles: wpt html-aam/roles-generic.tentative.html',
@@ -111,7 +104,6 @@ const TODO: Record<string, string[]> = {
     'manual: wpt accname/manual/name_radio-label-embedded-select-manual.html',
     'manual: wpt accname/manual/name_text-label-embedded-select-manual.html',
   ],
-  'ListMarker nodes differ': ['manual: devtools-anywhere list markers'],
 };
 
 let env: Env | undefined;

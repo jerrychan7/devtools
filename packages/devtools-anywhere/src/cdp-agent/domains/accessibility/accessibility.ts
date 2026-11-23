@@ -76,7 +76,7 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
       node => nodes.backendIdOf(node),
       frames.ofNode(doc).id,
       virtualIdOf,
-      host => nodes.backendIdOf(nodes.pseudoOf(host, 'marker'))
+      (host, type) => nodes.backendIdOf(nodes.pseudoOf(host, type))
     );
   };
 
@@ -232,18 +232,19 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
     async getChildAXNodes(
       params: Protocol.Accessibility.GetChildAXNodesRequest
     ): Promise<Protocol.Accessibility.GetChildAXNodesResponse> {
-      // A node without a DOM node by its id below 0, a list marker by its ::marker's backend id.
+      // A node without a DOM node by its id below 0, a list marker or generated content by its
+      // pseudo-element's backend id.
       const id = Number(params.id);
       const virtual = virtualKeys.get(id);
       const found = nodes.getByBackendId(virtual ? virtual.hostId : id);
-      const marker = found instanceof PseudoElement && found.pseudoType === 'marker';
-      const host = marker ? found.host : found;
+      const pseudo = pseudoKey(found);
+      const host = pseudo && found instanceof PseudoElement ? found.host : found;
       if (!isNode(host)) throw new CdpError('Invalid ID');
       const ax = await tree(documentOf(host));
-      const node = virtual || marker ? ax.virtual(host, virtual ? virtual.key : 'marker') : host;
-      // A ::marker the tree has no marker for has no children, as Chrome's ignored node.
+      const node = virtual || pseudo ? ax.virtual(host, virtual ? virtual.key : (pseudo ?? '')) : host;
+      // A pseudo-element the tree has no node for has no children, as Chrome's ignored node.
       if (!node) {
-        if (marker) return { nodes: [] };
+        if (pseudo) return { nodes: [] };
         throw new CdpError('Invalid ID');
       }
       const given: [AXRef, Protocol.Accessibility.AXNode][] = [];
@@ -310,12 +311,20 @@ export function registerAccessibility(ctx: Context, load: AccessibilityLoader | 
   }): Promise<{ node: AXRef; ax: AXTree }> {
     const { nodeId, backendNodeId } = params;
     const ref = nodeId ? nodes.get(nodeId) : backendNodeId ? nodes.getByBackendId(backendNodeId) : null;
-    if (ref instanceof PseudoElement && ref.pseudoType === 'marker') {
+    const pseudo = pseudoKey(ref);
+    if (pseudo && ref instanceof PseudoElement) {
       const ax = await tree(documentOf(ref.host));
-      return { node: ax.virtual(ref.host, 'marker') ?? ref.host, ax };
+      return { node: ax.virtual(ref.host, pseudo) ?? ref.host, ax };
     }
     const node = resolveNode(ctx, params);
     return { node, ax: await tree(documentOf(node)) };
+  }
+
+  /** The key of a pseudo-element's node in the tree: a ::marker, ::before or ::after. */
+  function pseudoKey(ref: unknown): 'marker' | 'before' | 'after' | null {
+    if (!(ref instanceof PseudoElement)) return null;
+    const type = ref.pseudoType;
+    return type === 'marker' || type === 'before' || type === 'after' ? type : null;
   }
 
   /** The document of a frame, the top one by default. */

@@ -87,7 +87,7 @@ export type Inclusion =
   | { kind: 'excluded'; reason: IgnoredReason; hiddenRoot?: Element };
 
 /** Elements whose text and children the page does not show as content: replaced by their value or a popup. */
-const OPAQUE = new Set(
+export const OPAQUE = new Set(
   'script style template noscript title head textarea select option input img br wbr iframe object embed video audio canvas'.split(
     ' '
   )

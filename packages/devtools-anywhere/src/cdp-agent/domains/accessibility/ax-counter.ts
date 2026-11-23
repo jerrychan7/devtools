@@ -5,6 +5,7 @@
 // lists, along the document. Part of accessibility.js (ax-name.ts).
 import { isElement, styleOf } from '../../core/realm';
 import { attr, domChildren, hasAttr } from './ax-tree';
+import { customCounterText, customMarkerAffixes } from './ax-counter-style';
 
 type Pseudo = '::before' | '::after';
 
@@ -316,10 +317,16 @@ function represent(n: number, style: string): string | null {
 const fallbackOf = (style: string) => (/^(cjk-(earthly|heavenly)|japanese)/.test(style) ? 'cjk-decimal' : 'decimal');
 
 /**
- * A counter's number in a list style, as Chrome writes it for the predefined styles of CSS
- * Counter Styles; others (none, @counter-style rules) are decimal.
+ * A counter's number in a list style, as Chrome writes it: in the style of the document's
+ * @counter-style rule of that name (ax-counter-style.ts), else the predefined style of CSS
+ * Counter Styles; others (none, unknown names) are decimal.
  */
-export function counterText(n: number, style = 'decimal'): string {
+export function counterText(n: number, style = 'decimal', doc?: Document): string {
+  const custom = doc && customCounterText(doc, style, n, predefinedText);
+  return custom ?? predefinedText(n, style);
+}
+
+function predefinedText(n: number, style = 'decimal'): string {
   const symbol = SYMBOLS[style];
   if (symbol) return symbol;
   // The upper and lower forms of a style, and its other names.
@@ -336,8 +343,13 @@ export function counterText(n: number, style = 'decimal'): string {
   return (style === 'decimal-leading-zero' && n >= 0 && n < 10 ? '0' : '') + n;
 }
 
+/** What a list marker writes around its number in a list style: a rule's prefix and suffix, or none and markerSuffix's. */
+export function markerAffixes(style: string, doc: Document): [string, string] {
+  return customMarkerAffixes(doc, style) ?? ['', markerSuffix(style)];
+}
+
 /** What a list marker writes after its number in a list style, as Chrome does (". " for the styles not known). */
-export function markerSuffix(style: string): string {
+function markerSuffix(style: string): string {
   if (SYMBOLS[style]) return ' ';
   if (/^(cjk-|hiragana|katakana|japanese-|simp-chinese|trad-chinese)/.test(style)) return '、';
   if (style.startsWith('korean-')) return ', ';
@@ -346,7 +358,11 @@ export function markerSuffix(style: string): string {
 }
 
 const STRING = /"((?:[^"\\]|\\.)*)"/g;
-export const unescape = (text = '') => text.replace(/\\(.)/g, '$1');
+/** A CSS string's text: `\9 ` and other hex escapes as their code points, `\x` as x. */
+export const unescape = (text = '') =>
+  text.replace(/\\(?:([0-9a-fA-F]{1,6})[ \t\n\f\r]?|(.))/gs, (_, hex: string | undefined, char: string | undefined) =>
+    hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff) || 0xfffd) : (char ?? '')
+  );
 
 /** How deep in quotes the pseudo-element `pseudo` of `target` starts: the quotes generated before it, in order. */
 function quoteDepth(target: Element, pseudo: Pseudo): number {
@@ -390,7 +406,9 @@ export function contentText(content: string, el: Element, pseudo: Pseudo, alt: b
       else {
         const values = counterValues(el, pseudo, name);
         const all = values.length ? values : [0];
-        out += (fn === 'counters' ? all : all.slice(-1)).map(n => counterText(n, style)).join(unescape(sep));
+        out += (fn === 'counters' ? all : all.slice(-1))
+          .map(n => counterText(n, style, el.ownerDocument))
+          .join(unescape(sep));
       }
     } else out += unescape(text);
   }
