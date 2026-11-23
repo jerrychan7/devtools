@@ -862,11 +862,28 @@ The licenses in full: LICENSES in this directory.
   .cr3 .v0::before { counter-reset: s 0; }
   .cr3 .vm1::before { counter-reset: s -1; }
   .cr3 .vm3::before { counter-reset: s -3; }
+  @counter-style cr-ug { system: extends georgian; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-ur { system: extends lower-roman; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-uj { system: extends japanese-formal; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-uh { system: extends hebrew; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-ra { system: extends lower-roman; range: 1 10; fallback: upper-alpha; }
+  @counter-style cr-rauto { system: extends cr-ra; range: auto; }
+  @counter-style cr-rkeep { system: extends cr-ra; }
+  @counter-style cr-ga { system: extends georgian; range: auto; fallback: upper-alpha; }
+  @counter-style cr-ca { system: extends cjk-decimal; range: auto; fallback: upper-alpha; }
+  .cr4 button::before { content: "" / counter(s, cr-ug) "|" counter(s, cr-ur) "|" counter(s, cr-uj) "|" counter(s, cr-uh) "|" counter(s, cr-ra) "|" counter(s, cr-rauto) "|" counter(s, cr-rkeep) "|" counter(s, cr-ga) "|" counter(s, cr-ca) "|"; }
+  .cr4 .v11::before { counter-reset: s 11; }
+  .cr4 .v20000::before { counter-reset: s 20000; }
+  .cr4 .v117003::before { counter-reset: s 117003; }
+  .cr4 .v118003::before { counter-reset: s 118003; }
+  .cr4 .v1000000::before { counter-reset: s 1000000; }
+  .cr4 .vm20000::before { counter-reset: s -20000; }
 </style>
 <style media="print">@counter-style cr-sheet { system: cyclic; symbols: "P"; }</style>
 <link rel="stylesheet" disabled href="data:text/css,@counter-style cr-sheet { system: cyclic; symbols: 'D'; }">
 <div class="cr2"><button class="v1" id="cnt-rule-1" data-ax-case="cnt-rule-1">x</button><button class="v5" id="cnt-rule-5" data-ax-case="cnt-rule-5">x</button><button class="vm1" id="cnt-rule-m1" data-ax-case="cnt-rule-m1">x</button></div>
 <div class="cr3"><button class="v4000" id="cnt-xfb-4000" data-ax-case="cnt-xfb-4000">x</button><button class="v0" id="cnt-xfb-0" data-ax-case="cnt-xfb-0">x</button><button class="vm1" id="cnt-xfb-m1" data-ax-case="cnt-xfb-m1">x</button><button class="vm3" id="cnt-xfb-m3" data-ax-case="cnt-xfb-m3">x</button></div>
+<div class="cr4"><button class="v11" id="cnt-unb-11" data-ax-case="cnt-unb-11">x</button><button class="v20000" id="cnt-unb-20000" data-ax-case="cnt-unb-20000">x</button><button class="v117003" id="cnt-unb-117003" data-ax-case="cnt-unb-117003">x</button><button class="v118003" id="cnt-unb-118003" data-ax-case="cnt-unb-118003">x</button><button class="v1000000" id="cnt-unb-1000000" data-ax-case="cnt-unb-1000000">x</button><button class="vm20000" id="cnt-unb-m20000" data-ax-case="cnt-unb-m20000">x</button></div>
 <ol id="cnt-rule-markers" data-ax-tree="cnt-rule-markers"><li style="list-style-type:cr-disc">disc</li><li style="list-style-type:cr-cjk">cjk</li><li style="list-style-type:cr-pad">pad</li><li style="list-style-type:cr-range" value="5">range</li><li style="list-style-type:cr-neg" value="-1">negative</li></ol>
 <!-- group: devtools-anywhere list markers -->
 <style>

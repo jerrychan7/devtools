@@ -5,7 +5,7 @@
 // lists, along the document. Part of accessibility.js (ax-name.ts).
 import { isElement, styleOf } from '../../core/realm';
 import { attr, domChildren, hasAttr } from './ax-tree';
-import { customCounterText, customMarkerAffixes } from './ax-counter-style';
+import { type ExtendedRange, customCounterText, customMarkerAffixes } from './ax-counter-style';
 
 type Pseudo = '::before' | '::after';
 
@@ -349,37 +349,76 @@ function predefinedText(n: number, style = 'decimal'): string {
   return (style === 'decimal-leading-zero' && n >= 0 && n < 10 ? '0' : '') + n;
 }
 
+/** At most this many symbols in an additive style's number, as Chrome; past it the fallback writes it. */
+const ADDITIVE_LIMIT = 120;
+
+/**
+ * `n` in an additive predefined style past its range, as Chrome's additive algorithm writes it:
+ * the largest weight repeated, then the rest, in at most ADDITIVE_LIMIT symbols; null past it.
+ */
+function additive(n: number, name: string): string | null {
+  const weight = name === 'lower-roman' ? 1000 : name === 'georgian' ? 10000 : 9000;
+  const repeated = name === 'lower-roman' ? 'm' : name === 'georgian' ? 'ჵ' : (represent(9000, name) ?? '');
+  const reps = Math.floor(n / weight);
+  const rest = n % weight;
+  const restText = rest ? (represent(rest, name) ?? '') : '';
+  // A Japanese symbol is a digit with its place: one per digit other than zero.
+  const restSymbols = name.startsWith('japanese')
+    ? [...String(rest)].filter(d => d !== '0').length
+    : [...restText].length;
+  return reps + restSymbols > ADDITIVE_LIMIT ? null : repeated.repeat(reps) + restText;
+}
+
+/** The additive styles past their range: Chrome writes them by the additive algorithm. */
+const ADDITIVE_PAST: Record<string, number> = {
+  'lower-roman': 3999,
+  georgian: 19999,
+  'japanese-informal': 9999,
+  'japanese-formal': 9999,
+};
+
 /**
  * `n` by a predefined style's algorithm alone, past its range where the algorithm still writes it:
- * negative numbers with a minus, lower-roman (additive) above 3999 with more m, cjk-decimal
- * (numeric) below 0. Null when the algorithm cannot write it; the other styles keep their range.
+ * negative numbers with a minus, the additive styles (lower-roman, georgian, Japanese) by the
+ * additive algorithm, cjk-decimal (numeric) below 0. Null when the algorithm cannot write it; the
+ * other styles keep their range.
  */
 function unbounded(n: number, name: string): string | null {
   if (n < 0) {
     if (ALPHABETIC[name]) return null;
+    const minus = CJK[name]?.[3];
+    if (minus !== undefined && name.startsWith('japanese')) {
+      const inner = unbounded(-n, name);
+      return inner === null ? null : minus + inner;
+    }
     if (CJK[name]) return cjk(n, name);
     const inner = unbounded(-n, name);
     return inner === null ? null : '-' + inner;
   }
   const digits = NUMERIC[name];
   if (typeof digits === 'string') return [...String(n)].map(d => digits[+d]).join('');
-  if (name === 'lower-roman' && n > 3999) return 'm'.repeat(Math.floor(n / 1000)) + (represent(n % 1000, name) ?? '');
+  const past = ADDITIVE_PAST[name];
+  if (past !== undefined && n > past) return additive(n, name);
   return represent(n, name);
 }
 
 /**
  * `n` in a predefined style as a @counter-style rule that extends it writes it, or null where the
  * rule's own fallback writes it instead (as Chrome: not the predefined style's fallback). In the
- * style's own range (`ownRange`) the number is out of it when the style cannot write it; with the
- * rule's range, the style's algorithm writes what it can (unbounded).
+ * style's own range the number is out of it when the style cannot write it; with the rule's range
+ * (checked before), the style's algorithm writes what it can (unbounded); in the auto range of
+ * `range: auto`, the same but for negative numbers, which only numeric and Chinese and Korean
+ * styles keep.
  */
-function extendedText(n: number, style: string, ownRange: boolean): string | null {
+function extendedText(n: number, style: string, range: ExtendedRange): string | null {
   const symbol = SYMBOLS[style];
   if (symbol) return symbol;
   const name = baseName(style);
   // Decimal, decimal-leading-zero and names of no style write every number.
   if (name === 'decimal-leading-zero' || represent(1, name) === null) return predefinedText(n, style);
-  const out = ownRange ? represent(n, name) : unbounded(n, name);
+  if (range === 'auto' && n < 0 && NUMERIC[name] === undefined && !(CJK[name] && !name.startsWith('japanese')))
+    return null;
+  const out = range === 'own' ? represent(n, name) : unbounded(n, name);
   return out === null ? null : cased(out, style);
 }
 

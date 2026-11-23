@@ -152,12 +152,19 @@ interface Resolved {
   negative: [string, string];
   prefix: string;
   suffix: string;
-  range: [number, number][] | null;
+  /** The rule's ranges; 'auto' for `range: auto`, null when no rule in the chain sets one. */
+  range: [number, number][] | 'auto' | null;
   pad: [number, string] | null;
   fallback: string;
   /** For a rule that extends a predefined style: that style. */
   predefined?: string;
 }
+
+/**
+ * Which range a rule that extends a predefined style writes in: the style's own (the rule sets
+ * none), the rule's (checked before), or the auto range of the style's system (`range: auto`).
+ */
+export type ExtendedRange = 'own' | 'rule' | 'auto';
 
 function resolve(doc: Document, name: string, seen = new Set<string>()): Resolved | null {
   const rule = ruleOf(doc, name);
@@ -206,7 +213,10 @@ function resolve(doc: Document, name: string, seen = new Set<string>()): Resolve
   }
   if (rule.prefix) out.prefix = symbolsOf(rule.prefix)[0] ?? '';
   if (rule.suffix) out.suffix = symbolsOf(rule.suffix)[0] ?? '';
-  if (rule.range && rule.range !== 'auto')
+  // `range: auto` resets a range from the extended rule (as Chrome); an extended predefined
+  // style then writes by its algorithm alone in its system's auto range.
+  if (rule.range?.trim() === 'auto') out.range = 'auto';
+  else if (rule.range)
     out.range = rule.range.split(',').map(r => {
       const [low = '', high = ''] = r.trim().split(/\s+/);
       return [low === 'infinite' ? -Infinity : +low, high === 'infinite' ? Infinity : +high];
@@ -223,7 +233,7 @@ function resolve(doc: Document, name: string, seen = new Set<string>()): Resolve
 const usesNegative = (system: string) => /^(symbolic|alphabetic|numeric|additive)$/.test(system);
 
 function inRange(n: number, style: Resolved): boolean {
-  if (style.range) return style.range.some(([low, high]) => n >= low && n <= high);
+  if (Array.isArray(style.range)) return style.range.some(([low, high]) => n >= low && n <= high);
   if (/^(alphabetic|symbolic)$/.test(style.system)) return n >= 1;
   if (style.system === 'additive') return n >= 0;
   return true;
@@ -282,7 +292,7 @@ export function customCounterText(
   name: string,
   n: number,
   predefined: (n: number, style: string) => string,
-  extended: (n: number, style: string, ownRange: boolean) => string | null,
+  extended: (n: number, style: string, range: ExtendedRange) => string | null,
   seen = new Set<string>()
 ): string | null {
   const style = resolve(doc, name);
@@ -298,7 +308,10 @@ export function customCounterText(
     // The predefined style's algorithm writes the number, in the rule's range or else the style's
     // own; out of it, or where the algorithm cannot, the rule's fallback writes it, without the
     // rule's negative and pad. The rule's negative and pad apply to what the style writes.
-    const raw = style.range && !inRange(n, style) ? null : extended(n, style.predefined, !style.range);
+    const raw =
+      Array.isArray(style.range) && !inRange(n, style)
+        ? null
+        : extended(n, style.predefined, style.range === null ? 'own' : style.range === 'auto' ? 'auto' : 'rule');
     if (raw === null) return fallback();
     negative = n < 0 && raw.startsWith('-');
     text = negative ? raw.slice(1) : raw;
