@@ -19,6 +19,8 @@ import {
   treeDiffKind,
 } from '../../../../test-support/accessibility.ts';
 
+// Known differences that stay: a details without a summary has Chrome's default summary, whose
+// text is the browser's localized "Details", which the page cannot know (docs/limitations.md).
 /** Groups ("file: group") whose tree differs from Chrome's on the current implementation, by what differs. */
 const TODO: Record<string, string[]> = {
   'select MenuListPopup and options differ; other nodes differ': [

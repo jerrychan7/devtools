@@ -475,7 +475,8 @@ function implicitRole(el: Element): string {
       if (isHtml(el, 'input')) return inputRole(el);
       break;
     case 'summary':
-      return isSummary(el) ? 'DisclosureTriangle' : 'generic';
+      // Any summary child of a details, as in Chrome's tree; only the first opens it (isSummary).
+      return el.parentElement?.localName === 'details' ? 'DisclosureTriangle' : 'generic';
     case 'section':
       return hasAuthorName(el) ? 'region' : 'generic';
     case 'aside':

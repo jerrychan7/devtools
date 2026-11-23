@@ -1,12 +1,13 @@
 // The nodes Chrome's tree has under a control without a DOM node the page can see: those of the
 // user-agent shadow tree (a select's popup, the slot of a list box or an optgroup, a text field's
-// placeholder and inner editor with its text, an input button's text, a color well's swatch). Each is a
+// placeholder and inner editor with its text, an input button's text, a color well's swatch, a
+// details element's slots). Each is a
 // VirtualNode, found again by its host element and a key unique in that host: the Accessibility
 // domain gives it an id of its own (accessibility.ts), apart from the DOM nodes' backend ids.
 // A list marker and its text children are VirtualNodes too, keys `marker` and `marker:<n>`, built
 // in ax-node.ts (ax-marker.ts); the marker has its ::marker's backend id.
 import { domChildren, hasAttr, isMenuList, matches, type Inclusion } from './ax-tree';
-import { isElement, isHtml } from '../../core/realm';
+import { isElement, isHtml, styleOf } from '../../core/realm';
 
 /** A node of the tree or its DOM node. */
 export type AXRef = Node | VirtualNode;
@@ -56,7 +57,7 @@ export function selectOf(el: Element): HTMLSelectElement | null {
 /**
  * The VirtualNodes Chrome puts between a host and its children, null for an element without:
  * a drop-down select's MenuListPopup and a list box's slot over the options, an optgroup's slot,
- * a text field's nodes, an input button's text, a color well's swatch. `fieldText`: the text a field or button shows.
+ * a text field's nodes, an input button's text, a color well's swatch, a details element's slots. `fieldText`: the text a field or button shows.
  */
 export function virtualChildrenOf(el: Element, fieldText: (el: Element) => string): VirtualNode[] | null {
   if (!isElement(el)) return null;
@@ -66,6 +67,7 @@ export function virtualChildrenOf(el: Element, fieldText: (el: Element) => strin
         ? new VirtualNode(el, 'popup', 'MenuListPopup', INCLUDED, optionsOf(el))
         : new VirtualNode(el, 'slot', 'generic', UNINTERESTING, optionsOf(el)),
     ];
+  if (isHtml(el, 'details')) return detailsChildren(el);
   if (isHtml(el, 'optgroup') && selectOf(el))
     return [new VirtualNode(el, 'slot', 'generic', UNINTERESTING, optionsOf(el))];
   if (isHtml(el, 'textarea') || (isHtml(el, 'input') && TEXT_FIELD.test(el.type)))
@@ -82,6 +84,28 @@ export function virtualChildrenOf(el: Element, fieldText: (el: Element) => strin
       ]),
     ];
   return null;
+}
+
+/**
+ * A details element's two slots, ignored: the first holds its first summary child, the other the
+ * rest of its children, none while it is closed (its content is not rendered then). A summary is
+ * not made when the details has none: Chrome's default one has the browser's localized "Details"
+ * as its text, which the page cannot know. In an open flex details, the content slot is a generic.
+ */
+function detailsChildren(el: HTMLDetailsElement): VirtualNode[] {
+  const children = domChildren(el);
+  const summary = children.find(c => isHtml(c, 'summary'));
+  const flex = el.open && /\bflex\b/.test(styleOf(el).display);
+  return [
+    new VirtualNode(el, 'summary-slot', 'generic', UNINTERESTING, summary ? [summary] : []),
+    new VirtualNode(
+      el,
+      'content-slot',
+      'generic',
+      flex ? INCLUDED : UNINTERESTING,
+      el.open ? children.filter(c => c !== summary) : []
+    ),
+  ];
 }
 
 /** The inputs that edit text in an inner editor. */
