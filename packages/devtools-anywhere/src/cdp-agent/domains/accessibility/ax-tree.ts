@@ -67,7 +67,8 @@ export type IgnoredReason =
   | 'notVisible'
   | 'presentationalRole'
   | 'emptyAlt'
-  | 'inertElement';
+  | 'inertElement'
+  | 'labelFor';
 
 /**
  * How a DOM node takes part in the tree: `included`, ignored but kept (`reason`), left out with its
@@ -539,6 +540,21 @@ export function hiddenReason(el: Element): IgnoredReason | null {
 }
 
 /**
+ * Whether a label only repeats the name of the checkbox or radio it labels, which Chrome ignores
+ * (labelFor) with its text: the input is rendered and visible, named by its labels (no aria-label
+ * or aria-labelledby), and the label holds only text besides the input, with no role, name of its
+ * own or click handler attribute. A handler added by addEventListener cannot be seen.
+ */
+function isRedundantLabel(el: Element): boolean {
+  if (!isHtml(el, 'label') || explicitRole(el)) return false;
+  const control = nativeGet<HTMLElement | null>(el, 'control');
+  if (!isHtml(control, 'input') || !/^(checkbox|radio)$/.test(control.type) || hiddenReason(control)) return false;
+  if (hasAttr(control, 'aria-label') || hasAttr(control, 'aria-labelledby')) return false;
+  if (['aria-label', 'aria-labelledby', 'title', 'onclick'].some(n => hasAttr(el, n))) return false;
+  return domChildren(el).every(c => isText(c) || c === control);
+}
+
+/**
  * The image an area belongs to: the first rendered img whose usemap names the area's map. Chrome
  * puts the areas under that image, though the map itself is not rendered.
  */
@@ -808,7 +824,8 @@ export class TreeShape {
         if (!this.hidden.isKept(node)) return excluded(hiding.reason);
       }
       if (!node.data.trim() && !spaceShows(node)) return excluded('uninteresting');
-      return hiding ? hidden('ignored', hiding) : INCLUDED;
+      if (hiding) return hidden('ignored', hiding);
+      return isElement(parent) && isRedundantLabel(parent) ? ignored('presentationalRole') : INCLUDED;
     }
     if (!isElement(node)) return excluded('uninteresting');
     if (closest(node, '[data-devtools-anywhere]')) return excluded('notRendered');
@@ -883,6 +900,7 @@ export class TreeShape {
     )
       return lifted('emptyAlt');
     if (explicit === 'none') return lifted('presentationalRole');
+    if (isRedundantLabel(node)) return ignored('labelFor');
     if (!explicit && isPlainGeneric(node)) return genericInclusion(node);
     // An empty paragraph is ignored too.
     if (!explicit && isHtml(node, 'p') && !isInteresting(node) && layoutContent(node) === 'none')
