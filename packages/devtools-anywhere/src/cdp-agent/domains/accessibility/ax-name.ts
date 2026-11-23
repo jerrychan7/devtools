@@ -22,6 +22,7 @@ import {
   isMenuList,
   inPopup,
   innerTextOf,
+  OPAQUE,
   ownersOf,
   query,
   queryAll,
@@ -399,9 +400,11 @@ function labelsOf(el: Element & { labels: NodeListOf<HTMLLabelElement> }, c: Com
 /**
  * A ::before or ::after pseudo-element's generated text: as rendered, or its alternative text as
  * written (`content: "text" / "alternative"`). Chrome resolves attr() in the computed value;
- * counters and quotes are worked out in ax-counter.ts.
+ * counters and quotes are worked out in ax-counter.ts. A replaced element such as an input or an
+ * img, or a non-HTML element, renders none, whatever its computed style says (as in ax-generated.ts).
  */
 function generatedText(el: Element, pseudo: '::before' | '::after'): string {
+  if (OPAQUE.has(el.localName) || el.namespaceURI !== 'http://www.w3.org/1999/xhtml') return '';
   const style = styleOf(el, pseudo);
   const parts = style.content.split(/\s\/\s/);
   if (parts.length > 1) return contentText(parts[parts.length - 1] ?? '', el, pseudo, true);
