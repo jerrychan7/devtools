@@ -3,6 +3,7 @@
 // Part of accessibility.js (ax-name.ts).
 import { isElement, isHtml, isText, styleOf } from '../../core/realm';
 import { attr, domChildren, domParent } from './ax-tree';
+import { generatedContent, type GeneratedPseudo } from './ax-generated';
 
 /** Elements laid out as one box that text cannot flow into. */
 const REPLACED = new Set(
@@ -101,7 +102,12 @@ function firstInside<T>(el: Element, back: boolean, inside: (n: Node) => T | und
  * Walks the line from a node, before it (`back`) or after it, out of the inline boxes it is in:
  * the first answer `inside` gives for a node met, or `edge` where the line starts or ends.
  */
-function walkLine<T>(node: Node, back: boolean, inside: (n: Node) => T | undefined, edge: T): T {
+function walkLine<T>(
+  node: Node,
+  back: boolean,
+  inside: (n: Node, pseudo?: GeneratedPseudo) => T | undefined,
+  edge: T
+): T {
   for (let current = node; ;) {
     const parent = domParent(current);
     if (!parent) return edge;
@@ -112,13 +118,34 @@ function walkLine<T>(node: Node, back: boolean, inside: (n: Node) => T | undefin
       const found = inside(siblings[i] as Node);
       if (found !== undefined) return found;
     }
-    if (!isElement(parent) || !isInlineBox(parent)) return edge;
+    if (!isElement(parent)) return edge;
+    // Past the parent's ::before (back) or its ::after, in the same line; then out of an inline box.
+    const generated = inside(parent, back ? '::before' : '::after');
+    if (generated !== undefined) return generated;
+    if (!isInlineBox(parent)) return edge;
     current = parent;
   }
 }
 
-/** The neighbour a node gives, looking at it from after it (`back`) or before it; undefined if it gives none. */
-function neighbourIn(node: Node, back: boolean): Neighbour | undefined {
+/**
+ * The neighbour an element's ::before or ::after gives, looking at it from after it (`back`) or
+ * before it: its text as laid out inline, an edge for a block, content for an inline box.
+ */
+function generatedNeighbour(el: Element, pseudo: GeneratedPseudo, back: boolean): Neighbour | undefined {
+  const content = generatedContent(el, pseudo, false);
+  if (!content || 'alt' in content) return undefined;
+  if (content.box !== 'inline') return styleOf(el, pseudo).display.startsWith('inline') ? 'content' : 'edge';
+  const last = back ? content.parts.at(-1) : content.parts[0];
+  if (!last) return undefined;
+  return back && last.kind === 'text' && last.text.endsWith(' ') ? 'space' : 'content';
+}
+
+/**
+ * The neighbour a node gives, looking at it from after it (`back`) or before it; undefined if it
+ * gives none. With `pseudo`, that of the node's ::before or ::after.
+ */
+function neighbourIn(node: Node, back: boolean, pseudo?: GeneratedPseudo): Neighbour | undefined {
+  if (pseudo) return isElement(node) ? generatedNeighbour(node, pseudo, back) : undefined;
   if (isText(node)) {
     if (!node.data) return undefined;
     if (isBlank(node.data)) return back ? 'space' : undefined;
@@ -127,12 +154,18 @@ function neighbourIn(node: Node, back: boolean): Neighbour | undefined {
   if (!isElement(node)) return undefined;
   if (styleOf(node).display === 'none' || outOfFlow(node)) return undefined;
   if (isHtml(node, 'br')) return 'edge';
-  if (isInlineBox(node)) return firstInside(node, back, n => neighbourIn(n, back));
+  if (isInlineBox(node))
+    return (
+      generatedNeighbour(node, back ? '::after' : '::before', back) ??
+      firstInside(node, back, n => neighbourIn(n, back)) ??
+      generatedNeighbour(node, back ? '::before' : '::after', back)
+    );
   return isInlineLevel(node) ? 'content' : 'edge';
 }
 
 /** What comes before (`back`) or after a node in its line. */
-const neighbour = (node: Node, back: boolean): Neighbour => walkLine(node, back, n => neighbourIn(n, back), 'edge');
+const neighbour = (node: Node, back: boolean): Neighbour =>
+  walkLine(node, back, (n, pseudo) => neighbourIn(n, back, pseudo), 'edge');
 
 /** The node next to a node in its line, before it (`back`) or after it, white space left out; null at an edge. */
 function lineNode(node: Node, back: boolean): Node | null {
@@ -145,7 +178,7 @@ function lineNode(node: Node, back: boolean): Node | null {
     if (isInlineBox(n)) return firstInside(n, back, inside);
     return isInlineLevel(n) ? n : null;
   };
-  return walkLine<Node | null>(node, back, inside, null);
+  return walkLine<Node | null>(node, back, (n, pseudo) => (pseudo ? undefined : inside(n)), null);
 }
 
 /**
@@ -199,7 +232,9 @@ export function spaceShows(text: Text): boolean {
     const collapse = styleOf(parent).getPropertyValue('white-space-collapse');
     if (collapse === 'preserve' || collapse === 'break-spaces') return true;
   }
-  return ![true, false].some(back => walkLine<boolean>(text, back, n => spaceIgnorableNextTo(n, back), true));
+  return ![true, false].some(back =>
+    walkLine<boolean>(text, back, (n, pseudo) => (pseudo ? undefined : spaceIgnorableNextTo(n, back)), true)
+  );
 }
 
 /** Whether an element's start (`back`) or end is at the edge of its line: not inside a line of text. */

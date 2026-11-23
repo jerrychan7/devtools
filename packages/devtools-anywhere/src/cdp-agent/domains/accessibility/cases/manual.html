@@ -946,6 +946,16 @@ The licenses in full: LICENSES in this directory.
   .gcl label.gcl-alt::before { content: "pre " / "alt"; }
 </style>
 <div class="gcl" id="gcl" data-ax-tree="gcl"><label>no control</label> <label for="gcl-text">text field</label><input id="gcl-text"> <label for="gcl-check">checkbox</label><input type="checkbox" id="gcl-check"> <label for="gcl-title" title="t">with a title</label><input type="checkbox" id="gcl-title"> <label for="gcl-alt" class="gcl-alt">alternative text</label><input type="checkbox" id="gcl-alt"></div>
+<!-- group: devtools-anywhere generated content in lines -->
+<style>
+  .gcn-b::before { content: " pre "; }
+  .gcn-a::after { content: " post "; }
+  .gcn-alt::before { content: "" / "n "; }
+  .gcn-bb::before { content: " pre "; display: inline-block; }
+  .gcn-ab::after { content: " post "; display: block; }
+  .gcn-pre::after { content: " post "; white-space: pre; }
+</style>
+<div id="gcn" data-ax-tree="gcn"><div>x<span class="gcn-b">y</span></div><div>x <span class="gcn-b">y</span></div><div><span class="gcn-b">y</span></div><p class="gcn-b">text</p><div><span class="gcn-a">y</span> z</div><div><span class="gcn-a">y</span><b> w</b></div><div><span><span class="gcn-a">y</span></span> v</div><div><span class="gcn-a">y</span><br>w</div><div><span class="gcn-ab">y</span> z</div><div>x<span class="gcn-bb">y</span></div><div><span class="gcn-pre">y</span></div><button class="gcn-a">button</button><a href="#" class="gcn-a">link</a> <div><span class="gcn-alt">alpha</span> <span class="gcn-alt">beta</span></div><button><span class="gcn-b">in a button</span></button></div>
 <!-- group: devtools-anywhere body kept: none -->
 <p id="body-none" data-ax-case="body-none">plain body</p>
 <!-- group: devtools-anywhere body kept: aria attribute -->

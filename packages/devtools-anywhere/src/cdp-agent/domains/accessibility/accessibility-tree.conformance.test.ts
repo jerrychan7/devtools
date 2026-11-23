@@ -37,7 +37,6 @@ const TODO: Record<string, string[]> = {
     'names: dom-accessibility-api script and shadow roots',
     'names: wpt accname/aria-owns.html',
     'names: wpt accname/name/comp_labelledby_hidden_nodes.html',
-    'names: wpt accname/name/comp_name_from_content.html',
     'names: wpt accname/name/comp_name_from_content_display_contents.html',
     'names: wpt html-aam/names.html',
     'manual: wpt accname/manual/description_from_content_of_describedby_element-manual.html',

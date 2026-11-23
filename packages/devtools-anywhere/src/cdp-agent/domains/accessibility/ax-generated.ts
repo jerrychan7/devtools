@@ -9,6 +9,7 @@
 import { styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
 import { OPAQUE } from './ax-tree';
+import { lineEdge } from './ax-text';
 
 export type GeneratedPseudo = '::before' | '::after';
 
@@ -60,10 +61,12 @@ function splitAlt(content: string): [string, string | undefined] {
 
 /**
  * The content of an element's ::before or ::after in the tree, or null when it has no node. The
- * text of a run has its spaces collapsed, the leading one of a ::before's first dropped; a run of
- * spaces only is named with two, as in Chrome.
+ * text of a run has its spaces collapsed; a run of spaces only is named with two, as in Chrome.
+ * With `trim`, the space at the start or the end of a line is dropped, as layout does: the leading
+ * one of an inline ::before's first text where its host starts a line, the trailing one of an
+ * inline ::after's last text where its host ends one, both ends of a box's text.
  */
-export function generatedContent(el: Element, pseudo: GeneratedPseudo): GeneratedContent | null {
+export function generatedContent(el: Element, pseudo: GeneratedPseudo, trim = true): GeneratedContent | null {
   if (!shows(el, pseudo)) return null;
   const { content, display } = styleOf(el, pseudo);
   const box = display === 'inline' ? 'inline' : /flex|grid/.test(display) ? 'flex' : 'block';
@@ -101,11 +104,18 @@ export function generatedContent(el: Element, pseudo: GeneratedPseudo): Generate
       run = true;
     }
   }
+  const preserved = /^(preserve|break-spaces)$/.test(styleOf(el, pseudo).getPropertyValue('white-space-collapse'));
+  const inline = box === 'inline';
+  const trimStart = trim && !preserved && (!inline || (pseudo === '::before' && lineEdge(el, true)));
+  const trimEnd = trim && !preserved && (!inline || (pseudo === '::after' && lineEdge(el, false)));
   parts.forEach((part, i) => {
     if (part.kind !== 'text') return;
     let text = part.text.replace(/[ \t\n\f\r]+/g, ' ');
     if (text === ' ') text = '  ';
-    else if (i === 0 && pseudo === '::before' && text.startsWith(' ')) text = text.slice(1);
+    else {
+      if (i === 0 && trimStart && text.startsWith(' ')) text = text.slice(1);
+      if (i === parts.length - 1 && trimEnd && text.endsWith(' ')) text = text.slice(0, -1);
+    }
     part.text = text;
   });
   // An inline-block holds its place without text; a block does not.

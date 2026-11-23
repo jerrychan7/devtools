@@ -9,6 +9,7 @@ import { isDocument, isElement, isHtml, isHtmlElement, isShadowRoot, isText, sty
 import { nativeCall, nativeGet } from '../../core/natives';
 import { inDisplayNone, spaceShows } from './ax-text';
 import { HiddenKeeper, type Hiding } from './ax-hidden';
+import { generatedContent } from './ax-generated';
 import { isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
 
 // The DOM is read through the browser's own functions (core/natives.ts), not those on the page's
@@ -737,7 +738,10 @@ function genericInclusion(el: Element): Inclusion {
       return INCLUDED;
   }
   const inline = display === 'contents' || display.startsWith('inline');
-  return !inline || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))
+  // An inline element with a ::before or ::after in the tree keeps an ignored node over it.
+  const generated =
+    display !== 'contents' && (generatedContent(el, '::before', false) || generatedContent(el, '::after', false));
+  return !inline || generated || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))
     ? ignored('uninteresting')
     : lifted('uninteresting');
 }
