@@ -16,6 +16,7 @@ import {
   domChildren,
   domParent,
   hasAttr,
+  inInert,
   isFocusable,
   isMenuList,
   innerTextOf,
@@ -129,7 +130,7 @@ function hiddenForText(el: Element, root: Root): boolean {
   // The children of a hidden aria-labelledby or aria-describedby target all count.
   if (root && !isVisible(root)) return false;
   if (attr(el, 'aria-hidden') === 'true') return true;
-  return hiddenViaStyle(el);
+  return hiddenViaStyle(el) || inInert(el);
 }
 
 /** The elements an idref list attribute names, in order. */
@@ -404,8 +405,8 @@ type Piece = Node | { pseudo: string; text: string; alt?: boolean };
 /** Whether a pseudo-element is laid out inline. */
 const pseudoInline = (el: Element, pseudo: string) => styleOf(el, pseudo).display.startsWith('inline');
 
-/** Whether an element's aria-owns moves elements: Chrome ignores it on hidden elements. */
-const owns = (el: Element) => hasAttr(el, 'aria-owns') && !inDisplayNone(el) && !inAriaHidden(el);
+/** Whether an element's aria-owns moves elements: Chrome ignores it on hidden elements, but inert ones. */
+const owns = (el: Element) => hasAttr(el, 'aria-owns') && isVisible(el);
 
 /**
  * The children of an element as the tree has them: without those aria-owns moved elsewhere, with
@@ -492,8 +493,8 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
       // An svg element's title and desc name and describe it, not its contents.
       if (piece.namespaceURI === SVG_NS && (piece.localName === 'title' || piece.localName === 'desc')) continue;
       if (hiddenForText(piece, root)) {
-        // An element hidden by visibility only is left out of the tree, and its elements that
-        // are visible again take its place.
+        // An element hidden by visibility only or inert is left out of the tree, and its elements
+        // that are visible again, or that it owns, take its place.
         if (!inDisplayNone(piece) && attr(piece, 'aria-hidden') !== 'true')
           pieces.splice(i + 1, 0, ...childrenOf(piece).filter(isElement));
         continue;

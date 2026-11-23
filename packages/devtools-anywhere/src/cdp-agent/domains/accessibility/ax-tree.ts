@@ -614,6 +614,12 @@ export function domChildren(node: Node): Node[] {
   return [...node.childNodes];
 }
 
+/** Whether an element is inert: it or one of its ancestors in the tree has the inert attribute. */
+export function inInert(el: Element): boolean {
+  for (let n: Node | null = el; n && isElement(n); n = domParent(n)) if (hasAttr(n, 'inert')) return true;
+  return false;
+}
+
 /** The parent of a node as the tree sees it: the slot it is assigned to, the host of a shadow root. */
 export function domParent(node: Node): Node | null {
   if (isElement(node) || isText(node)) {
@@ -780,14 +786,26 @@ export function ownersOf(scope: Document | ShadowRoot): Map<Element, Element> {
  */
 function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   const owner = new Map<Element, Element>();
-  for (const el of queryAll(scope, '[aria-owns]'))
+  // As in Chrome, a hidden owner owns nothing but where inert alone hides it, and nothing owns an
+  // element without a box (display: none) or aria-hidden itself; their DOM ancestors are read here.
+  const hidden = new HiddenKeeper(isDocument(scope) ? scope : scope.ownerDocument);
+  for (const el of queryAll(scope, '[aria-owns]')) {
+    const mode = hidden.hiding(el)?.mode;
+    if (mode && mode !== 'inert') continue;
     for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
       const target = byId(scope, id);
-      if (!target || owner.has(target)) continue;
+      if (
+        !target ||
+        owner.has(target) ||
+        hidden.hiding(target)?.mode === 'none' ||
+        attr(target, 'aria-hidden') === 'true'
+      )
+        continue;
       let n: Node | null = el;
       while (n && n !== target) n = (isElement(n) && owner.get(n)) || domParent(n);
       if (!n) owner.set(target, el);
     }
+  }
   return owner;
 }
 
@@ -812,7 +830,10 @@ export class TreeShape {
     this.doc = doc;
     this.fieldText = fieldText;
     this.owner = ownersOf(doc);
-    this.hidden = new HiddenKeeper(doc);
+    this.hidden = new HiddenKeeper(doc, el => {
+      const scope = scopeOf(el);
+      return scope ? ownersOf(scope).get(el) : undefined;
+    });
     for (const [target, el] of this.owner) this.owned.set(el, [...(this.owned.get(el) ?? []), target]);
   }
 
@@ -829,8 +850,9 @@ export class TreeShape {
       if (inclusion.kind === 'lifted' || inclusion.kind === 'excluded') {
         const raised = inclusion.kind === 'lifted';
         const unseen = inclusion.reason === 'notVisible';
+        // What aria-owns moves stays too (its owner shows), hidden or not.
         if (
-          (raised && this.owner.has(node as Element)) ||
+          (this.owner.has(node as Element) && (raised || !!this.hidden.hiding(node as Element))) ||
           ((raised || unseen) && isElement(node) && generatesMarker(node))
         )
           inclusion = ignored(inclusion.reason);

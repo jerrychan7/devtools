@@ -20,6 +20,7 @@ import {
   closedDetailsOf,
   groupTable,
   hasAttr,
+  inInert,
   innerTextOf,
   isFocusable,
   isFocused,
@@ -113,10 +114,20 @@ function idrefList(el: Element, name: AXPropertyName, idOf: IdOf): AXProperty | 
 /**
  * Whether aria-owns takes none of its targets: Chrome leaves out ids that name no element, targets
  * that are not rendered or carry aria-hidden themselves (one inside an aria-hidden subtree is still
- * taken), and drops the relation when none is left.
+ * taken), and those visibility: hidden or inert, which it moves but ignores; and drops the relation
+ * when none is left.
  */
 function ownsNothing(el: Element): boolean {
-  return !!scopeOf(el) && targetsOf(el, 'aria-owns').every(t => inDisplayNone(t) || attr(t, 'aria-hidden') === 'true');
+  return (
+    !!scopeOf(el) &&
+    targetsOf(el, 'aria-owns').every(
+      t =>
+        inDisplayNone(t) ||
+        attr(t, 'aria-hidden') === 'true' ||
+        /^(hidden|collapse)$/.test(styleOf(t).visibility) ||
+        inInert(t)
+    )
+  );
 }
 
 /** The nesting level of a list item: how many lists hold it. */

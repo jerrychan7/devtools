@@ -4,7 +4,7 @@
 // aria-hidden buttons and links too; and what display: none or aria-hidden hides in a label or such
 // a target, and what visibility: hidden hides there too. The hidden elements around them give
 // their place to them. The parts of an HTML table (the table, its row groups, rows and cells) stay
-// too, ignored, but without the rest of their subtree.
+// too, ignored, but without the rest of their subtree, and so do elements with aria-owns.
 import { isElement, isHtml, isHtmlElement, styleOf } from '../../core/realm';
 import { nativeCall } from '../../core/natives';
 import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf, type IgnoredReason } from './ax-tree';
@@ -26,7 +26,7 @@ const isField = (el: Element) => isHtml(el, 'input') && FIELD_TYPES.has(el.type)
 const KEPT_ELEMENTS = 'select, textarea, input, label, meter, button, a[href]';
 
 /** The table parts a hidden one may be kept among. */
-const KEPT_ALONE = 'table, tbody, thead, tfoot, tr, td, th';
+const KEPT_ALONE = 'table, tbody, thead, tfoot, tr, td, th, [aria-owns]';
 
 /**
  * Whether a hidden element is a table part Chrome keeps, ignored, without the rest of its
@@ -87,8 +87,12 @@ export class HiddenKeeper {
   private containsCache = new WeakMap<Element, boolean>();
   private hidingCache = new WeakMap<Node, Hiding | null>();
 
-  constructor(doc: Document) {
+  /** The aria-owns owner of an element, if any: an owned element does not take aria-hidden from its DOM ancestors. */
+  private ownerOf: (el: Element) => Element | undefined;
+
+  constructor(doc: Document, ownerOf: (el: Element) => Element | undefined = () => undefined) {
     this.doc = doc;
+    this.ownerOf = ownerOf;
   }
 
   /** How a node is hidden, or null when it shows. A text node is hidden as its parent. */
@@ -111,8 +115,12 @@ export class HiddenKeeper {
       return own?.reason === 'ariaHiddenElement' ? { mode: 'aria', reason: 'ariaHiddenSubtree', hiddenRoot: el } : own;
     }
     const parent = domParent(el);
-    const up = parent && isElement(parent) ? this.hiding(parent) : null;
+    let up = parent && isElement(parent) ? this.hiding(parent) : null;
     if (up?.mode === 'none') return up;
+    // An element aria-owns moves out of an aria-hidden subtree shows again, as in Chrome (its owner
+    // is not hidden: a hidden one owns nothing, an inert one does not make what it owns inert);
+    // what visibility: hidden or inert hides stays hidden.
+    if (up?.mode === 'aria' && this.ownerOf(el)) up = null;
     // The ancestors have a box (the parent is not 'none'), so only the element's own style counts.
     const box = el.isConnected ? ownBox(el) : 'notRendered';
     const inert = hasAttr(el, 'inert') || up?.mode === 'inert';
@@ -156,14 +164,17 @@ export class HiddenKeeper {
     return this.keepsSubtree(node);
   }
 
-  /** Whether a hidden element is kept without its subtree: a table part Chrome keeps alone. */
+  /** Whether a hidden element is kept without its subtree: a table part or an aria-owns owner. */
   keepsAlone(el: Element): boolean {
     return this.isKeptAlone(el) && !this.keepsSubtree(el);
   }
 
-  /** Whether a hidden element is a table part kept without the rest of its subtree (isTablePart). */
+  /**
+   * Whether a hidden element is kept without the rest of its subtree: a table part (isTablePart),
+   * or an element with aria-owns, which owns nothing while hidden but under inert.
+   */
   private isKeptAlone(el: Element): boolean {
-    return !!this.hiding(el) && isTablePart(el, e => !!this.hiding(e));
+    return !!this.hiding(el) && (hasAttr(el, 'aria-owns') || isTablePart(el, e => !!this.hiding(e)));
   }
 
   /** Whether a hidden node is kept with its subtree: it, or a hidden ancestor of it, is one Chrome keeps. */
