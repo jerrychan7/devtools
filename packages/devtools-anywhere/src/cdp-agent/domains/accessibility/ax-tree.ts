@@ -542,16 +542,22 @@ export function hiddenReason(el: Element): IgnoredReason | null {
 /**
  * Whether a label only repeats the name of the checkbox or radio it labels, which Chrome ignores
  * (labelFor) with its text: the input is rendered and visible, named by its labels (no aria-label
- * or aria-labelledby), and the label holds only text besides the input, with no role, name of its
+ * or aria-labelledby), and the label holds only text besides the input (comments do not count), with no role, name of its
  * own or click handler attribute. A handler added by addEventListener cannot be seen.
  */
 function isRedundantLabel(el: Element): boolean {
   if (!isHtml(el, 'label') || explicitRole(el)) return false;
   const control = nativeGet<HTMLElement | null>(el, 'control');
-  if (!isHtml(control, 'input') || !/^(checkbox|radio)$/.test(control.type) || hiddenReason(control)) return false;
+  if (
+    !isHtml(control, 'input') ||
+    !/^(checkbox|radio)$/.test(nativeGet<string>(control, 'type')) ||
+    hiddenReason(control)
+  )
+    return false;
   if (hasAttr(control, 'aria-label') || hasAttr(control, 'aria-labelledby')) return false;
   if (['aria-label', 'aria-labelledby', 'title', 'onclick'].some(n => hasAttr(el, n))) return false;
-  return domChildren(el).every(c => isText(c) || c === control);
+  // Comments and other nodes that are neither text nor elements show nothing, so they do not count.
+  return domChildren(el).every(c => isText(c) || c === control || !isElement(c));
 }
 
 /**

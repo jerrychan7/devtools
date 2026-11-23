@@ -194,8 +194,10 @@ function spaceIgnorableNextTo(node: Node, back: boolean): boolean | undefined {
 export function spaceShows(text: Text): boolean {
   if (!hasLayout(text) || !layoutText(text)) return false;
   const parent = domParent(text);
-  if (isElement(parent) && /preserve|break-spaces/.test(styleOf(parent).getPropertyValue('white-space-collapse')))
-    return true;
+  if (isElement(parent)) {
+    const collapse = styleOf(parent).getPropertyValue('white-space-collapse');
+    if (collapse === 'preserve' || collapse === 'break-spaces') return true;
+  }
   return ![true, false].some(back => walkLine<boolean>(text, back, n => spaceIgnorableNextTo(n, back), true));
 }
 

@@ -40,6 +40,7 @@ import { isVirtual, VirtualNode, type AXRef } from './ax-virtual';
 // This script has its own copy of core/natives.ts, which found the page's functions when it loaded, on
 // demand: the agent gives it those it uses instead (accessibility.ts).
 export { useNatives } from '../../core/natives';
+import { nativeGet } from '../../core/natives';
 
 type AXNode = Protocol.Accessibility.AXNode;
 type AXProperty = Protocol.Accessibility.AXProperty;
@@ -834,17 +835,17 @@ export function createAXTree(
       if (isVirtual(node)) return links(node, { nodeId: id(node), ...virtualNode(node, queried) });
       const inclusion = shape.inclusion(node);
       if (inclusion.kind !== 'included') {
-        const relatedNodes =
+        // Chrome points at the node behind the reason: the aria-hidden root, or the control a
+        // label only repeats the name of.
+        const related =
           inclusion.hiddenRoot && inclusion.reason === 'ariaHiddenSubtree'
-            ? [
-                {
-                  backendDOMNodeId: idOf(inclusion.hiddenRoot),
-                  ...(inclusion.hiddenRoot.id && {
-                    idref: inclusion.hiddenRoot.id,
-                  }),
-                },
-              ]
-            : undefined;
+            ? inclusion.hiddenRoot
+            : inclusion.reason === 'labelFor' && isElement(node)
+              ? nativeGet<HTMLElement | null>(node, 'control')
+              : null;
+        const relatedNodes = related
+          ? [{ backendDOMNodeId: idOf(related), ...(related.id && { idref: related.id }) }]
+          : undefined;
         const reason: AXProperty = {
           name: inclusion.reason,
           value: relatedNodes ? { type: 'idref', relatedNodes } : { type: 'boolean', value: true },
