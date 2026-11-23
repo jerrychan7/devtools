@@ -24,10 +24,17 @@ export async function openAxPage(env: Env, html = ''): Promise<TestPage> {
   return t;
 }
 
-/** Replaces the body; declarative shadow roots in `html` are attached. */
+/**
+ * Replaces the body; declarative shadow roots in `html` are attached. What a group's setup put on
+ * the body itself (attributes, click handlers) is taken off first, as it decides whether Chrome
+ * keeps the body.
+ */
 export async function setBody(t: TestPage, html: string): Promise<void> {
   await t.page.evaluate(html => {
-    document.body.setHTMLUnsafe(html);
+    const body = document.body;
+    for (const name of body.getAttributeNames()) body.removeAttribute(name);
+    body.onclick = body.onmousedown = body.onmouseup = null;
+    body.setHTMLUnsafe(html);
     // The fixture's own focus would differ between the sides' runs.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, html);
@@ -216,8 +223,23 @@ export function describeCases(groups: CaseGroup[], options: CaseOptions = {}): v
     });
 }
 
-/** cases/manual.html's setups: nodes made in a frame's realm, moved into the page. */
+/**
+ * cases/manual.html's setups: nodes made in a frame's realm, moved into the page; the body's
+ * attributes and handlers that decide whether Chrome keeps it.
+ */
 export const MANUAL_SETUPS = {
+  'devtools-anywhere body kept: aria attribute': () => document.body.setAttribute('aria-label', 'page'),
+  'devtools-anywhere body kept: id': () => document.body.setAttribute('id', 'page'),
+  'devtools-anywhere body kept: title': () => document.body.setAttribute('title', 'page'),
+  'devtools-anywhere body kept: contenteditable': () => document.body.setAttribute('contenteditable', ''),
+  'devtools-anywhere body kept: click handler': () => document.body.setAttribute('onclick', 'void 0'),
+  'devtools-anywhere body kept: click handler property': () => {
+    document.body.onclick = () => {};
+  },
+  'devtools-anywhere body kept: other attribute': () => {
+    document.body.setAttribute('lang', 'fr');
+    document.body.setAttribute('data-x', 'y');
+  },
   'devtools-anywhere nodes of another realm': () => {
     const frame = document.body.appendChild(document.createElement('iframe'));
     const other = frame.contentDocument as Document;
@@ -267,6 +289,63 @@ export async function fullTree(side: Side): Promise<TreeLine[]> {
   const root = nodes.find(n => !n.parentId) ?? nodes[0];
   if (root) visit(root, 0, []);
   return lines;
+}
+
+/**
+ * The pseudo-element types of backend node ids on one side. Ours are read from the whole DOM
+ * (DOM.getDocument, shadow roots included); Chrome's one by one (DOM.describeNode), as asking it
+ * for the whole DOM changes how it then breaks aria-owns cycles.
+ */
+async function pseudoTypes(side: Side, ids: number[], ours: boolean): Promise<Map<number, string>> {
+  const types = new Map<number, string>();
+  if (!ours) {
+    for (const backendNodeId of new Set(ids)) {
+      const found = await side.send('DOM.describeNode', { backendNodeId }).catch(() => null);
+      if (found?.node.pseudoType) types.set(backendNodeId, found.node.pseudoType);
+    }
+    return types;
+  }
+  const { root } = await side.send('DOM.getDocument', { depth: -1, pierce: true });
+  const visit = (node: Protocol.DOM.Node) => {
+    if (node.pseudoType) types.set(node.backendNodeId, node.pseudoType);
+    for (const child of [
+      ...(node.pseudoElements ?? []),
+      ...(node.shadowRoots ?? []),
+      ...(node.children ?? []),
+      ...(node.contentDocument ? [node.contentDocument] : []),
+    ])
+      visit(child);
+  };
+  visit(root);
+  return types;
+}
+
+/**
+ * One side's whole tree as getFullAXTree lists its nodes, in that order: each node's depth (by
+ * parentId), role, name, whether it is ignored, and the pseudo-element its backendDOMNodeId is,
+ * if it is one (a list marker's ::marker, generated content's ::before or ::after). Inline text
+ * boxes are left out, as in fullTree. `ours`: whether the side is ours.
+ */
+export async function listedTree(side: Side, ours: boolean): Promise<string[]> {
+  const { nodes } = await side.send('Accessibility.getFullAXTree', {});
+  const types = await pseudoTypes(
+    side,
+    nodes.flatMap(n => (n.backendDOMNodeId === undefined ? [] : [n.backendDOMNodeId])),
+    ours
+  );
+  const byId = new Map(nodes.map(n => [n.nodeId, n]));
+  const depthOf = (node: Protocol.Accessibility.AXNode): number => {
+    let depth = 0;
+    for (let p = byId.get(node.parentId ?? ''); p && depth < nodes.length; p = byId.get(p.parentId ?? '')) depth++;
+    return depth;
+  };
+  return nodes
+    .filter(n => n.role?.value !== 'InlineTextBox')
+    .map(n => {
+      const name = n.name?.value ? `:${JSON.stringify(String(n.name.value))}` : '';
+      const pseudo = n.backendDOMNodeId === undefined ? undefined : types.get(n.backendDOMNodeId);
+      return `${depthOf(n)} ${String(n.role?.value)}${name}${n.ignored ? ' (ignored)' : ''}${pseudo ? ` ::${pseudo}` : ''}`;
+    });
 }
 
 /** The kinds a whole-tree difference falls into, by what the line's node is and where it is. */

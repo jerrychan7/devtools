@@ -877,7 +877,7 @@ The licenses in full: LICENSES in this directory.
 <ol id="lm-content" data-ax-tree="lm-content"><li class="lm-c1">string</li><li class="lm-c2" data-x="c">strings</li><li class="lm-c3">counter</li><li class="lm-c4">counter and strings</li><li class="lm-c5">empty</li><li class="lm-c6">none</li><li class="lm-c7">alternative text</li></ol>
 <div id="lm-div" data-ax-tree="lm-div"><div id="lm-div-1" data-ax-case="lm-div-1" style="display:list-item">a div</div><span style="display:list-item">a span</span><div style="display:list-item;list-style:none">no marker</div><p style="display:list-item">a paragraph</p><div style="display:inline list-item" draggable="true">inline, draggable</div></div>
 <ul id="lm-roles" data-ax-tree="lm-roles"><li role="none">none</li><li role="presentation" style="list-style:none">presentation, no marker</li><li role="button" id="lm-role-button" data-ax-case="lm-role-button">button</li><li role="generic">generic</li><li style="visibility:hidden">hidden</li></ul>
-<ul id="lm-todo" data-ax-tree="lm-todo"><li class="lm-q">quotes</li><li style="list-style-type:lm-thumbs">counter style rule</li></ul>
+<ul id="lm-quotes-rule" data-ax-tree="lm-quotes-rule"><li class="lm-q">quotes</li><li style="list-style-type:lm-thumbs">counter style rule</li></ul>
 <!-- group: devtools-anywhere white space and labels -->
 <div id="ws-pre-line" data-ax-tree="ws-pre-line" style="white-space:pre-line"><input> <input></div>
 <div id="ws-pre" data-ax-tree="ws-pre" style="white-space:pre"><input> <input></div>
@@ -893,3 +893,32 @@ The licenses in full: LICENSES in this directory.
   .gca5::before { content: "x" attr(data-a) / "y / z"; }
 </style>
 <div id="gca" data-ax-tree="gca"><p class="gca1">slash in a string</p><p class="gca2">alternative text</p><p class="gca3">escaped quote and slash in a string</p><p class="gca4">slash without spaces</p><p class="gca5" data-a=" / q">slash in an attribute and in the alternative text</p></div>
+<!-- group: devtools-anywhere body kept: none -->
+<p id="body-none" data-ax-case="body-none">plain body</p>
+<!-- group: devtools-anywhere body kept: aria attribute -->
+<p id="body-aria" data-ax-case="body-aria">body with aria-label</p>
+<!-- group: devtools-anywhere body kept: id -->
+<p id="body-id" data-ax-case="body-id">body with an id</p>
+<!-- group: devtools-anywhere body kept: title -->
+<p id="body-title" data-ax-case="body-title">body with a title</p>
+<!-- group: devtools-anywhere body kept: contenteditable -->
+<p id="body-editable" data-ax-case="body-editable">editable body</p>
+<!-- group: devtools-anywhere body kept: click handler -->
+<p id="body-click" data-ax-case="body-click">body with an onclick handler</p>
+<!-- group: devtools-anywhere body kept: click handler property -->
+<p id="body-click-property" data-ax-case="body-click-property">body with an onclick property</p>
+<!-- group: devtools-anywhere body kept: other attribute -->
+<p id="body-lang" data-ax-case="body-lang">body with lang and a data attribute</p>
+<!-- group: devtools-anywhere tree shapes -->
+<div id="ts-details-closed" data-ax-tree="ts-details-closed"><details><summary>S</summary><p>content</p>text</details></div>
+<div id="ts-details-open" data-ax-tree="ts-details-open"><details open><summary>S</summary><p>content</p>text</details></div>
+<div id="ts-details-summaries" data-ax-tree="ts-details-summaries"><details open><p>before</p><summary>S1</summary><summary>S2</summary>text</details></div>
+<div id="ts-labels" data-ax-tree="ts-labels"><label>A <input type="checkbox"></label><label>B <input type="checkbox" aria-label="named"></label><label title="t">C <input type="radio"></label><label>F <input type="text"></label></div>
+<div id="ts-lists" data-ax-tree="ts-lists"><ul role="list"><li>list</li></ul><ul role="menu"><li role="menuitem">menu</li></ul><ol role="navigation"><li>navigation</li></ol><ul role="none"><li>none</li></ul><ul role="listbox"><li role="option">option</li></ul></div>
+<div id="ts-spaces" data-ax-tree="ts-spaces"><span style="display:inline-block">a</span> <span style="display:inline-block">b</span><div>c</div> <div>d</div><span> e </span> <b>f</b><button>g</button> h <input> <img alt="i" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="> <br> </div>
+<div id="ts-wrappers" data-ax-tree="ts-wrappers"><div>inline only</div><div><p>block child</p></div><span>plain span</span><span lang="fr">span with lang</span><div style="position:relative"><p>positioned</p></div><span style="display:inline-block"><p>inline-block</p></span><div style="display:contents"><p>contents</p></div><div id="ts-wrapper-id"><p>with an id</p></div><div style="display:inline-flex"><p>inline-flex</p></div><span style="position:absolute"><p>positioned span</p></span></div>
+<div id="ts-hidden" data-ax-tree="ts-hidden"><div style="display:none"><div><input id="ts-hidden-input"></div><p>gone</p></div><div aria-hidden="true"><div><button>button</button></div><p>gone</p></div><div style="visibility:hidden"><p>gone</p><p style="visibility:visible">shown again</p></div><div style="display:none"><span id="ts-hidden-label">label text</span></div><button aria-labelledby="ts-hidden-label">x</button><div inert><span><input type="checkbox"></span><a href="#">link</a></div><div style="display:none"><label>hidden label <input type="checkbox"></label><meter value="0.5"></meter></div></div>
+<!-- group: devtools-anywhere details in a flex box -->
+<div id="ts-details-flex" data-ax-tree="ts-details-flex"><details open style="display:flex"><summary>S</summary><span>a</span><span>b</span></details></div>
+<!-- group: devtools-anywhere elements in a label -->
+<div id="ts-label-elements" data-ax-tree="ts-label-elements"><label>D <b>bold</b> <input type="checkbox"></label><label>E <input type="checkbox" style="visibility:hidden"></label></div>

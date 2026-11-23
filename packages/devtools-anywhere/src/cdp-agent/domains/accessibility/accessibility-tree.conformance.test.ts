@@ -12,6 +12,7 @@ import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 import {
   MANUAL_SETUPS,
   fullTree,
+  listedTree,
   openAxPage,
   readCases,
   setBody,
@@ -88,6 +89,11 @@ const TODO: Record<string, string[]> = {
     'names: wpt accname/name/comp_host_language_label.html',
   ],
   'input inner nodes differ; other nodes differ': ['names: wpt accname/name/comp_host_language_label.tentative.html'],
+  'other nodes differ: flex details items, elements in a label, a body click handler set as a property': [
+    'manual: devtools-anywhere details in a flex box',
+    'manual: devtools-anywhere elements in a label',
+    'manual: devtools-anywhere body kept: click handler property',
+  ],
   'select MenuListPopup and options differ': [
     'manual: wpt accname/manual/name_checkbox-label-embedded-select-manual.html',
     'manual: wpt accname/manual/name_password-label-embedded-select-manual.html',
@@ -95,6 +101,9 @@ const TODO: Record<string, string[]> = {
     'manual: wpt accname/manual/name_text-label-embedded-select-manual.html',
   ],
 };
+
+/** Groups whose listed nodes differ from Chrome's though their tree does not, by what differs. */
+const LISTED_TODO = new Map<string, string>(Object.entries({}));
 
 let env: Env | undefined;
 let t: TestPage;
@@ -118,7 +127,7 @@ for (const [file, setups] of files)
   describe(file, () => {
     for (const group of readCases(new URL(`cases/${file}.html`, import.meta.url))) {
       const key = `${file}: ${group.name}`;
-      test(group.name, { todo: todo.get(key) }, async () => {
+      test(group.name, { todo: todo.get(key) ?? LISTED_TODO.get(key) }, async () => {
         await setBody(t, group.html);
         const setup = setups[group.name];
         if (setup) await t.page.evaluate(setup);
@@ -146,6 +155,11 @@ for (const [file, setups] of files)
           ours.map(l => l.text),
           chrome.map(l => l.text)
         );
+        // Then the nodes as getFullAXTree lists them, in Chrome's order, with the pseudo-elements
+        // whose backend ids list markers and generated content carry. In the same test: setting a
+        // group's body again changes how Chrome breaks aria-owns cycles.
+        const [listedOurs, listedChrome] = await Promise.all([listedTree(t.ours, true), listedTree(t.chrome, false)]);
+        assert.deepEqual(listedOurs, listedChrome, 'listed order and pseudo-element ids');
       });
     }
   });
