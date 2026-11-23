@@ -610,6 +610,97 @@ export function renderedText(text: Text): string {
   return value;
 }
 
+/** Generic elements Chrome keeps whatever their box: the table parts, sections and the like. */
+const KEPT_GENERIC = new Set('section summary aside header footer th td thead tbody tfoot tr area'.split(' '));
+
+/** Whether an element is a plain generic container (div, span, b, a custom element…) without a role. */
+function isPlainGeneric(el: Element): boolean {
+  return isHtmlElement(el) && !KEPT_GENERIC.has(el.localName) && implicitRole(el) === 'generic';
+}
+
+/**
+ * What a block holds in its flow (Blink's ChildrenInline and FirstChild): nothing, only inline
+ * content (it is laid out in lines), or a block. Floated and positioned children are out of the
+ * flow but still content; display: contents children give their own.
+ */
+function layoutContent(el: Element): 'none' | 'inline' | 'block' {
+  let some = false;
+  const visit = (node: Node): boolean => {
+    for (const child of domChildren(node)) {
+      if (isText(child)) {
+        if (child.data.trim()) some = true;
+        continue;
+      }
+      if (!isElement(child)) continue;
+      const style = styleOf(child);
+      if (style.display === 'none') continue;
+      if (style.display === 'contents') {
+        if (!visit(child)) return false;
+        continue;
+      }
+      some = true;
+      if (style.float !== 'none' || style.position === 'absolute' || style.position === 'fixed') continue;
+      if (!style.display.startsWith('inline') && style.display !== 'ruby') return false;
+    }
+    return true;
+  };
+  return !visit(el) ? 'block' : some ? 'inline' : 'none';
+}
+
+/** Whether an element scrolls: its overflow lets it, and its content overflows it. */
+function isScrollable(el: Element): boolean {
+  const style = styleOf(el);
+  const scrolls = (v: string) => v === 'auto' || v === 'scroll';
+  return (
+    (scrolls(style.overflowY) && el.scrollHeight > el.clientHeight) ||
+    (scrolls(style.overflowX) && el.scrollWidth > el.clientWidth)
+  );
+}
+
+/** Whether an id makes an element a possible link target: not in a shadow tree. */
+const hasDocumentId = (el: Element) => !!el.id && !isShadowRoot(rootOf(el));
+
+/**
+ * Whether an element is of interest whatever its box: an ARIA attribute (any), a title, an id
+ * outside a shadow tree, focus, a click handler or contenteditable.
+ */
+function isInteresting(el: Element): boolean {
+  return (
+    attrNames(el).some(n => n.startsWith('aria-')) ||
+    hasAttr(el, 'title') ||
+    hasDocumentId(el) ||
+    isFocusable(el) ||
+    hasAttr(el, 'onclick') ||
+    hasAttr(el, 'onmousedown') ||
+    hasAttr(el, 'onmouseup') ||
+    hasAttr(el, 'contenteditable')
+  );
+}
+
+/**
+ * How a plain generic container takes part, as in Chrome (AXNodeObject::ComputeIsIgnored): kept
+ * when of interest (isInteresting), as an inline-block, and, but for a span, as an inline flex or
+ * grid, when positioned or scrolling, or as a block laid out in lines. Otherwise it is ignored:
+ * kept in the tree when it is a block (a box of its own), has lang or an id in a shadow tree, its
+ * children in its place when inline or display: contents.
+ */
+function genericInclusion(el: Element): Inclusion {
+  if (isInteresting(el)) return INCLUDED;
+  const style = styleOf(el);
+  const display = style.display;
+  if (display === 'inline-block' || display === 'inline flow-root') return INCLUDED;
+  if (el.localName !== 'span') {
+    if (display === 'inline-flex' || display === 'inline-grid') return INCLUDED;
+    if (style.position !== 'static' || isScrollable(el)) return INCLUDED;
+    if (/^(block|flow-root|list-item|table-cell|table-caption)$/.test(display) && layoutContent(el) === 'inline')
+      return INCLUDED;
+  }
+  const inline = display === 'contents' || display.startsWith('inline');
+  return !inline || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))
+    ? ignored('uninteresting')
+    : lifted('uninteresting');
+}
+
 /** The inclusions, built once (included) or by kind. */
 const INCLUDED: Inclusion = { kind: 'included' };
 const ignored = (reason: IgnoredReason): Inclusion => ({ kind: 'ignored', reason });
@@ -705,7 +796,8 @@ export class TreeShape {
       // In an svg, only its text elements draw text.
       if (isElement(parent) && parent.namespaceURI === SVG_NS && !/^(text|tspan|textPath)$/.test(parent.localName))
         return excluded('notRendered');
-      if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n))) return excluded('uninteresting');
+      if (!node.data.trim() && !isRenderedSpace(node, n => this.inTree(n) || this.isPlainLifted(n)))
+        return excluded('uninteresting');
       const hidden = this.hiddenRoot(node);
       // What aria-hidden hides in an svg is left out of the tree.
       if (hidden && (parent as Element).namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
@@ -783,6 +875,10 @@ export class TreeShape {
     )
       return lifted('emptyAlt');
     if (explicit === 'none') return lifted('presentationalRole');
+    if (!explicit && isPlainGeneric(node)) return genericInclusion(node);
+    // An empty paragraph is ignored too.
+    if (!explicit && isHtml(node, 'p') && !isInteresting(node) && layoutContent(node) === 'none')
+      return ignored('uninteresting');
     return INCLUDED;
   }
 
@@ -791,6 +887,14 @@ export class TreeShape {
     for (let n: Node | null = node; n && n !== this.doc; n = domParent(n))
       if (isElement(n) && attr(n, 'aria-hidden') === 'true') return n;
     return null;
+  }
+
+  /** Whether a node is a plain generic container left out for having nothing of interest. */
+  private isPlainLifted(node: Node): boolean {
+    const inclusion = this.inclusion(node);
+    return (
+      inclusion.kind === 'lifted' && inclusion.reason === 'uninteresting' && isElement(node) && isPlainGeneric(node)
+    );
   }
 
   /** Whether a node is in the tree (included or ignored). */
