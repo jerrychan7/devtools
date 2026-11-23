@@ -13,4 +13,6 @@ const TODO: Record<string, string> = {};
 describeCases(readCases(new URL('cases/manual.html', import.meta.url)), {
   todo: TODO,
   setups: MANUAL_SETUPS,
+  // An image input's default label is the browser's localized "Submit".
+  localized: ['devtools-anywhere image input names'],
 });

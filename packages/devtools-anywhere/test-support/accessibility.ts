@@ -208,6 +208,26 @@ export interface CaseOptions {
   setups?: Record<string, (() => void) | string>;
   /** Cases known to differ from Chrome: the reason, then the ids it applies to, separated by whitespace. */
   todo?: Record<string, string>;
+  /**
+   * Groups whose cases are compared without the text of an input's default label (the name source
+   * of its `type` attribute), which Chrome gives in the browser's language; the rest is compared.
+   */
+  localized?: string[];
+}
+
+/** A node list without the value of the name sources from a `type` attribute: an input's default label. */
+function withoutDefaultLabels(nodes: unknown): unknown {
+  return (nodes as Protocol.Accessibility.AXNode[]).map(n => ({
+    ...n,
+    ...(n.name && {
+      name: {
+        ...n.name,
+        sources: n.name.sources?.map(source =>
+          source.attribute === 'type' ? { ...source, value: undefined } : source
+        ),
+      },
+    }),
+  }));
 }
 
 /** One describe per group, one test per case, each case's node compared with Chrome's. */
@@ -238,7 +258,13 @@ export function describeCases(groups: CaseGroup[], options: CaseOptions = {}): v
         const setup = options.setups?.[group.name];
         if (setup) await t.page.evaluate(setup);
       });
-      for (const id of group.ids) test(`#${id}`, { todo: todo.get(id) }, () => assertSameNode(t, id));
+      const localized = options.localized?.includes(group.name);
+      for (const id of group.ids)
+        test(`#${id}`, { todo: todo.get(id) }, async () => {
+          if (!localized) return assertSameNode(t, id);
+          const { ours, chrome } = await partialNode(t, id);
+          assert.deepEqual(withoutDefaultLabels(ours), withoutDefaultLabels(chrome));
+        });
       for (const id of group.trees ?? [])
         test(`#${id} and its subtree`, { todo: todo.get(id) }, async () => {
           const { ours, chrome } = await subtree(t, id);
