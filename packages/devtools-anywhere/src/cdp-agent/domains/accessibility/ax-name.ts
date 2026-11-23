@@ -819,8 +819,18 @@ export function documentNameOf(doc: Document): Protocol.Accessibility.AXValue {
 /** A text node's name, its rendered text. */
 export function textNameOf(text: Text): Protocol.Accessibility.AXValue {
   const value = hasLayout(text) ? layoutText(text) : text.data;
+  // Text in a drop-down's popup, which is not laid out, lists the sources an element would.
+  const unlaid = text.parentElement && isMenuList(closest(text.parentElement, 'select'));
   return {
     ...computed(value),
-    sources: [{ type: 'contents', value: computed(value) }],
+    sources: [
+      ...(unlaid
+        ? [
+            { type: 'relatedElement' as const, attribute: 'aria-labelledby' },
+            { type: 'attribute' as const, attribute: 'aria-label' },
+          ]
+        : []),
+      { type: 'contents', value: computed(value) },
+    ],
   };
 }

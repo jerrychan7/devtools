@@ -26,15 +26,11 @@ import {
 // controls, which change with the browser version and the media's state (docs/limitations.md).
 /** Groups ("file: group") whose tree differs from Chrome's on the current implementation, by what differs. */
 const TODO: Record<string, string[]> = {
-  'select MenuListPopup and options differ; other nodes differ': [
+  'other nodes differ': [
     'roles: dom-accessibility-api roles',
     'names: wpt accname/name/comp_label.html',
     'manual: wpt accname/manual/name_test_case_548-manual.html',
-    'manual: wpt accname/manual/name_test_case_733-manual.html',
-    'manual: wpt accname/manual/name_test_case_734-manual.html',
-    'manual: wpt accname/manual/name_test_case_735-manual.html',
-  ],
-  'other nodes differ': [
+    'names: dom-accessibility-api names',
     'roles: wpt html-aam/optgroup-role.tentative.html',
     'roles: wpt html-aam/roles-contextual.html',
     'roles: wpt html-aam/roles.html',
@@ -81,23 +77,14 @@ const TODO: Record<string, string[]> = {
     'roles: wpt wai-aria/role/tree-roles.html',
     'names: wpt html-aam/summary.html',
   ],
-  'ListMarker nodes differ; select MenuListPopup and options differ; input inner nodes differ; other nodes differ': [
-    'names: dom-accessibility-api names',
-  ],
-  'select MenuListPopup and options differ; input inner nodes differ; other nodes differ': [
+  'input inner nodes differ; other nodes differ': [
     'names: wpt accname/name/comp_embedded_control.html',
     'names: wpt accname/name/comp_host_language_label.html',
+    'names: wpt accname/name/comp_host_language_label.tentative.html',
   ],
-  'input inner nodes differ; other nodes differ': ['names: wpt accname/name/comp_host_language_label.tentative.html'],
   'other nodes differ: flex details items, elements in a label': [
     'manual: devtools-anywhere details in a flex box',
     'manual: devtools-anywhere elements in a label',
-  ],
-  'select MenuListPopup and options differ': [
-    'manual: wpt accname/manual/name_checkbox-label-embedded-select-manual.html',
-    'manual: wpt accname/manual/name_password-label-embedded-select-manual.html',
-    'manual: wpt accname/manual/name_radio-label-embedded-select-manual.html',
-    'manual: wpt accname/manual/name_text-label-embedded-select-manual.html',
   ],
 };
 

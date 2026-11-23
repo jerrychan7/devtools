@@ -645,6 +645,9 @@ export function renderedText(text: Text): string {
   return value;
 }
 
+/** Whether an element is a child of a drop-down select, in its popup, which is not laid out. */
+const inPopup = (el: Node | null): boolean => !!el && isMenuList(domParent(el) as Element | null);
+
 /** Generic elements Chrome keeps whatever their box: the table parts, sections and the like. */
 const KEPT_GENERIC = new Set('section summary aside header footer th td thead tbody tfoot tr area'.split(' '));
 
@@ -838,11 +841,16 @@ export class TreeShape {
     if (closedDetailsOf(node)) return excluded('notRendered');
     if (isText(node)) {
       const parent = domParent(node);
-      if (!parent || (isElement(parent) && OPAQUE.has(parent.localName))) return excluded('notRendered');
+      // A drop-down select shows the text it holds in its popup, but for white space.
+      if (isMenuList(parent as Element | null) && !node.data.trim()) return excluded('uninteresting');
+      if (!parent || (isElement(parent) && OPAQUE.has(parent.localName) && !isMenuList(parent)))
+        return excluded('notRendered');
       // In an svg, only its text elements draw text.
       if (isElement(parent) && parent.namespaceURI === SVG_NS && !/^(text|tspan|textPath)$/.test(parent.localName))
         return excluded('notRendered');
-      const hiding = this.hidden.hiding(node);
+      let hiding = this.hidden.hiding(node);
+      // The popup is not laid out: display: none on an element in it hides nothing.
+      if (hiding?.mode === 'none' && inPopup(parent)) hiding = null;
       if (hiding) {
         // What aria-hidden hides in an svg is left out of the tree.
         if (hiding.mode !== 'none' && (parent as Element).namespaceURI === SVG_NS) return excluded(hiding.reason);
@@ -867,7 +875,7 @@ export class TreeShape {
     const hiding = hiddenBy === null && (select || isHtml(node, 'area')) ? null : this.hidden.hiding(node);
     if (hiding) {
       if (hiding.mode !== 'none' && node.namespaceURI === SVG_NS) return excluded('ariaHiddenSubtree');
-      if (this.hidden.isKept(node)) return hidden('ignored', hiding);
+      if (this.hidden.isKept(node) || isMenuList(domParent(node) as Element | null)) return hidden('ignored', hiding);
       return hidden(this.hidden.holdsKept(node) ? 'lifted' : 'excluded', hiding);
     }
     if (
@@ -926,7 +934,13 @@ export class TreeShape {
       return lifted('emptyAlt');
     if (explicit === 'none') return lifted('presentationalRole');
     if (isRedundantLabel(node)) return ignored('labelFor');
-    if (!explicit && isPlainGeneric(node)) return genericInclusion(node);
+    if (!explicit && isPlainGeneric(node)) {
+      // In a drop-down's popup, which is not laid out, a container is kept whatever its box; in
+      // a list box, one Chrome would lift is ignored in place.
+      if (inPopup(node)) return INCLUDED;
+      const inclusion = genericInclusion(node);
+      return inclusion.kind === 'lifted' && isHtml(domParent(node), 'select') ? ignored(inclusion.reason) : inclusion;
+    }
     // An empty paragraph is ignored too.
     if (!explicit && isHtml(node, 'p') && !isInteresting(node) && layoutContent(node) === 'none')
       return ignored('uninteresting');

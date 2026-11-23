@@ -8,7 +8,19 @@
 // in ax-node.ts (ax-marker.ts); the marker has its ::marker's backend id.
 // So are generated content, keys `before`, `after` and `before:<n>`… (ax-generated.ts), the
 // pseudo-element nodes with their ::before and ::after backend ids.
-import { domChildren, hasAttr, isMenuList, matches, type Inclusion } from './ax-tree';
+import {
+  attr,
+  byId,
+  domChildren,
+  domParent,
+  hasAttr,
+  queryAll,
+  scopeOf,
+  isMenuList,
+  matches,
+  roleOf,
+  type Inclusion,
+} from './ax-tree';
 import { isElement, isHtml, styleOf } from '../../core/realm';
 
 /** A node of the tree or its DOM node. */
@@ -43,11 +55,23 @@ export const isVirtual = (ref: AXRef): ref is VirtualNode => ref instanceof Virt
 const INCLUDED: Inclusion = { kind: 'included' };
 const UNINTERESTING: Inclusion = { kind: 'ignored', reason: 'uninteresting' };
 /** Ignored without a reason given, as Chrome does a text field's wrappers. */
-const NO_REASON: Inclusion = { kind: 'ignored', reason: 'uninteresting', noReason: true };
+const NO_REASON: Inclusion = {
+  kind: 'ignored',
+  reason: 'uninteresting',
+  noReason: true,
+};
 
 /** The options and groups of a select or an optgroup, as Chrome lists them. */
 const optionsOf = (el: Element): Node[] =>
   domChildren(el).filter(c => isHtml(c, 'option') || (isHtml(c, 'optgroup') && isHtml(el, 'select')));
+
+/**
+ * The slot over the options of an optgroup, or over the elements of a list box (its text is not
+ * shown), none while it has none.
+ */
+function slotOf(el: Element, options: Node[]): VirtualNode[] {
+  return options.length ? [new VirtualNode(el, 'slot', 'generic', UNINTERESTING, options)] : [];
+}
 
 /** The select an option or optgroup is in, if any. */
 export function selectOf(el: Element): HTMLSelectElement | null {
@@ -63,15 +87,9 @@ export function selectOf(el: Element): HTMLSelectElement | null {
  */
 export function virtualChildrenOf(el: Element, fieldText: (el: Element) => string): VirtualNode[] | null {
   if (!isElement(el)) return null;
-  if (isHtml(el, 'select'))
-    return [
-      isMenuList(el)
-        ? new VirtualNode(el, 'popup', 'MenuListPopup', INCLUDED, optionsOf(el))
-        : new VirtualNode(el, 'slot', 'generic', UNINTERESTING, optionsOf(el)),
-    ];
+  if (isHtml(el, 'select')) return isMenuList(el) ? [menuListPopup(el)] : slotOf(el, domChildren(el).filter(isElement));
   if (isHtml(el, 'details')) return detailsChildren(el);
-  if (isHtml(el, 'optgroup') && selectOf(el))
-    return [new VirtualNode(el, 'slot', 'generic', UNINTERESTING, optionsOf(el))];
+  if (isHtml(el, 'optgroup') && selectOf(el)) return slotOf(el, optionsOf(el));
   if (isHtml(el, 'textarea') || (isHtml(el, 'input') && TEXT_FIELD.test(el.type)))
     return textFieldChildren(el, fieldText(el));
   if (isHtml(el, 'input') && /^(submit|reset|button)$/.test(el.type)) {
@@ -86,6 +104,48 @@ export function virtualChildrenOf(el: Element, fieldText: (el: Element) => strin
       ]),
     ];
   return null;
+}
+
+/**
+ * A drop-down select's popup: a MenuListPopup while the select is a combobox, ignored under any
+ * other ARIA role (a menu, a listbox, a button). Its slot over the options shows, ignored, once a
+ * name computation reads the select: Chrome only makes the slot's node then.
+ */
+function menuListPopup(el: HTMLSelectElement): VirtualNode {
+  // Its text and other elements show in the popup too, beside the options.
+  const options = domChildren(el);
+  const raw = nameReads(el) ? [new VirtualNode(el, 'popup-slot', 'generic', UNINTERESTING, options)] : options;
+  return roleOf(el) === 'combobox'
+    ? new VirtualNode(el, 'popup', 'MenuListPopup', INCLUDED, raw)
+    : new VirtualNode(el, 'popup', 'generic', { kind: 'ignored', reason: 'notRendered' }, raw);
+}
+
+/** Roles whose name Chrome computes from their content (ax-name.ts NAME_FROM_CONTENTS). */
+const NAMED_FROM_CONTENTS = new Set(
+  (
+    'button cell checkbox columnheader gridcell heading link menuitem menuitemcheckbox menuitemradio option radio ' +
+    'rowheader switch tab tooltip treeitem LayoutTableCell term math'
+  ).split(' ')
+);
+
+/**
+ * Whether a name computation reads an element: it or an ancestor is a label, takes its name from
+ * its content, or is named or described by another element through aria-labelledby or
+ * aria-describedby (each name is computed, with every source, aria-label or not).
+ */
+function nameReads(el: Element): boolean {
+  const read = new Set<Element>();
+  const scope = scopeOf(el);
+  if (scope)
+    for (const from of queryAll(scope, '[aria-labelledby], [aria-describedby]'))
+      for (const attribute of ['aria-labelledby', 'aria-describedby'])
+        for (const idref of (attr(from, attribute) ?? '').split(/\s+/)) {
+          const target = idref && byId(scope, idref);
+          if (target) read.add(target);
+        }
+  for (let n: Node | null = el; n && isElement(n); n = domParent(n))
+    if (isHtml(n, 'label') || NAMED_FROM_CONTENTS.has(roleOf(n)) || read.has(n)) return true;
+  return false;
 }
 
 /**
