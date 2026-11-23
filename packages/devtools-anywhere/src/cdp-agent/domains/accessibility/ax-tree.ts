@@ -720,7 +720,9 @@ function isInteresting(el: Element): boolean {
  * children in its place when inline or display: contents.
  */
 function genericInclusion(el: Element): Inclusion {
-  if (isInteresting(el)) return INCLUDED;
+  // A body that gets here was kept by bodyKept, which also counts its click handler properties,
+  // which isInteresting (attributes only) does not see.
+  if (isInteresting(el) || el === el.ownerDocument.body) return INCLUDED;
   const style = styleOf(el);
   const display = style.display;
   if (display === 'inline-block' || display === 'inline flow-root') return INCLUDED;

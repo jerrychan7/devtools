@@ -89,10 +89,9 @@ const TODO: Record<string, string[]> = {
     'names: wpt accname/name/comp_host_language_label.html',
   ],
   'input inner nodes differ; other nodes differ': ['names: wpt accname/name/comp_host_language_label.tentative.html'],
-  'other nodes differ: flex details items, elements in a label, a body click handler set as a property': [
+  'other nodes differ: flex details items, elements in a label': [
     'manual: devtools-anywhere details in a flex box',
     'manual: devtools-anywhere elements in a label',
-    'manual: devtools-anywhere body kept: click handler property',
   ],
   'select MenuListPopup and options differ': [
     'manual: wpt accname/manual/name_checkbox-label-embedded-select-manual.html',
