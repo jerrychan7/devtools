@@ -4,7 +4,8 @@
 // Not part of the host's name. Part of accessibility.js (ax-node.ts).
 import { styleOf } from '../../core/realm';
 import { contentText, counterText, counterValues, markerAffixes, unescape } from './ax-counter';
-import { attr, generatesMarker } from './ax-tree';
+import { attr } from './ax-dom';
+import { generatesMarker } from './ax-role';
 
 /** A marker's text: its name, the texts of its children, and whether it is alternative text only. */
 export interface MarkerText {

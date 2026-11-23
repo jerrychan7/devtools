@@ -18,11 +18,11 @@ import {
   queryAll,
   scopeOf,
   isMenuList,
-  layoutOf,
   matches,
-  roleOf,
-  type Inclusion,
-} from './ax-tree';
+} from './ax-dom';
+import { type Inclusion } from './ax-ignored';
+import { roleOf } from './ax-role';
+import { layoutOf } from './ax-generic';
 import { isElement, isHtml, isText, styleOf } from '../../core/realm';
 
 /** A node of the tree or its DOM node. */

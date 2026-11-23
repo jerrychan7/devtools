@@ -8,7 +8,7 @@
 // node over the generic of its anonymous item. Part of accessibility.js (ax-node.ts).
 import { styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
-import { OPAQUE } from './ax-tree';
+import { OPAQUE } from './ax-ignored';
 import { lineEdge } from './ax-text';
 
 export type GeneratedPseudo = '::before' | '::after';

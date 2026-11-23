@@ -23,21 +23,17 @@ import {
   hasAttr,
   inInert,
   innerTextOf,
-  isFocusable,
   isFocused,
-  isInternalRole,
   isMenuList,
-  isRedundantLabel,
-  isSvgLink,
   matches,
-  meterOf,
   query,
-  roleOf,
   scopeOf,
   textOf,
-  TreeShape,
-  type Inclusion,
-} from './ax-tree';
+} from './ax-dom';
+import { type Inclusion } from './ax-ignored';
+import { isFocusable, isInternalRole, isRedundantLabel, isSvgLink, roleOf } from './ax-role';
+import { meterOf } from './ax-generic';
+import { TreeShape } from './ax-tree';
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import type { Probe } from '../../probe/types';
 import { isVirtual, VirtualNode, type AXRef } from './ax-virtual';

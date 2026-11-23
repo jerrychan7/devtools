@@ -25,7 +25,7 @@ const OBSERVED: MutationObserverInit = {
 
 /**
  * The Accessibility domain: the tree computed in the page from the DOM, ARIA attributes and the
- * implicit roles (ax-tree.ts, ax-name.ts), as Chrome's getPartialAXTree gives it to the
+ * implicit roles (ax-role.ts, ax-name.ts), as Chrome's getPartialAXTree gives it to the
  * Accessibility pane. Chrome's inline text boxes are not in it. The nodes of user-agent shadow
  * trees (a select's popup), which the page cannot see, are redone without a DOM node
  * (ax-virtual.ts): each gets a negative id, kept for the session, apart from the backend ids. So

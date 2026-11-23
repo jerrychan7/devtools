@@ -2,7 +2,7 @@
 // box, which block it flows in, and a text node's text as rendered (Blink's LayoutText::PlainText).
 // Part of accessibility.js (ax-name.ts).
 import { isElement, isHtml, isText, styleOf } from '../../core/realm';
-import { attr, domChildren, domParent } from './ax-tree';
+import { attr, domChildren, domParent } from './ax-dom';
 import { generatedContent, type GeneratedPseudo } from './ax-generated';
 
 /** Elements laid out as one box that text cannot flow into. */

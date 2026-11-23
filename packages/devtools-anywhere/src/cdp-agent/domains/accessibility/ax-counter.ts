@@ -4,7 +4,7 @@
 // Counters come from counter-reset, counter-increment, counter-set and the list-item counter of
 // lists, along the document. Part of accessibility.js (ax-name.ts).
 import { isElement, styleOf } from '../../core/realm';
-import { attr, domChildren, hasAttr } from './ax-tree';
+import { attr, domChildren, hasAttr } from './ax-dom';
 import { type ExtendedRange, customCounterText, customMarkerAffixes } from './ax-counter-style';
 
 type Pseudo = '::before' | '::after';

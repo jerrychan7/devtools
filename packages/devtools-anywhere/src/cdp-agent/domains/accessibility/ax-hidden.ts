@@ -7,7 +7,9 @@
 // cells) stay too, ignored, but without the rest of their subtree, and so do elements with aria-owns.
 import { isElement, isHtml, isHtmlElement, styleOf } from '../../core/realm';
 import { nativeCall } from '../../core/natives';
-import { attr, byId, hasAttr, domChildren, domParent, inPopup, queryAll, scopeOf, type IgnoredReason } from './ax-tree';
+import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf } from './ax-dom';
+import { type IgnoredReason } from './ax-ignored';
+import { inPopup } from './ax-generic';
 
 /** What hides a node, its first cause from the outermost: no box, not painted, inert or aria-hidden. */
 type HiddenMode = 'none' | 'visibility' | 'inert' | 'aria';

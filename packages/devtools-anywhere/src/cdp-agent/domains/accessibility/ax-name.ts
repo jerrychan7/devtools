@@ -18,20 +18,18 @@ import {
   domParent,
   hasAttr,
   inInert,
-  isFocusable,
   isMenuList,
-  inPopup,
   innerTextOf,
-  OPAQUE,
-  ownersOf,
   query,
   queryAll,
-  roleOf,
   scopeOf,
-  SVG_NS,
   textOf,
   wordSet,
-} from './ax-tree';
+} from './ax-dom';
+import { OPAQUE } from './ax-ignored';
+import { isFocusable, roleOf, SVG_NS } from './ax-role';
+import { inPopup } from './ax-generic';
+import { ownersOf } from './ax-owns';
 import {
   droppedSpace,
   hasLayout,
