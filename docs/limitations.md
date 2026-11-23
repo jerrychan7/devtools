@@ -450,6 +450,7 @@ The Elements panel's Accessibility pane and `Accessibility.getPartialAXTree`, `g
 ### Issues panel
 
 - **devtools-anywhere**: CSP violations, deprecations, quirks mode and form issues. CSP and deprecations of the top document only; no interventions.
+- **Where a deprecated API was called**: the page's URL, where Chrome points at the calling script, line and column. Why: the report a page's `ReportingObserver` gets leaves the source file, line and column empty (null in Chrome 159), and it arrives after the call, so the observer's stack does not show the caller either.
 - **Low contrast**: none; Chrome has no such check either.
 - **Cookies, CORS and mixed content**: none. Why: they are the browser's.
 

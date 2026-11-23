@@ -450,6 +450,7 @@ Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree
 ### 问题面板
 
 - **devtools-anywhere**：CSP 违规、弃用、怪异模式和表单问题。CSP 和弃用只有顶层文档的；没有干预。
+- **弃用 API 的调用位置**：给的是页面 URL，Chrome 指向调用它的脚本及行列。原因：页面的 `ReportingObserver` 收到的报告里源文件、行、列都是空的（Chrome 159 中为 null），且报告在调用之后才到，观察者回调的调用栈也看不到调用方。
 - **低对比度**：没有；Chrome 也已没有这项检查。
 - **Cookie、CORS、混合内容**：没有。原因：只有浏览器知道。
 
