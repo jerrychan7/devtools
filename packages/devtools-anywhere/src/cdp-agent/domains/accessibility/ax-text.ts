@@ -68,7 +68,8 @@ export function hasLayout(node: Node): boolean {
 function whitespaceHasBox(text: Text, parent: Element): boolean {
   const style = styleOf(parent);
   if (/flex|grid|table/.test(style.display) && !/table-cell|table-caption/.test(style.display)) return false;
-  if (/preserve/.test(style.getPropertyValue('white-space-collapse'))) return true;
+  const collapse = style.getPropertyValue('white-space-collapse');
+  if (collapse === 'preserve' || collapse === 'break-spaces') return true;
   const siblings = domChildren(parent);
   for (let i = siblings.indexOf(text) - 1; i >= 0; i--) {
     const prev = siblings[i];
