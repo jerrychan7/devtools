@@ -40,6 +40,8 @@ export class VirtualNode {
   parent: AXRef;
   /** The text of a StaticText or LineBreak. */
   text = '';
+  /** Its name, where it is not its text: a generated text whose white space is preserved. */
+  name?: string;
   /** Whether it is in a text field the user can edit (`editable` plaintext). */
   editable = false;
   constructor(host: Element, key: string, role: string, inclusion: Inclusion, raw: AXRef[] = []) {

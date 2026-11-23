@@ -8,6 +8,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { isElement, isHtml, isHtmlElement, isNode, isText, styleOf } from '../../core/realm';
 import { contentText } from './ax-counter';
+import { preservesSpace, trimmedEnds } from './ax-generated';
 import {
   attr,
   attrNames,
@@ -37,7 +38,6 @@ import {
   isAtomicInline,
   isInlineLevel,
   layoutText,
-  lineEdge,
   nearestBlock,
 } from './ax-text';
 
@@ -85,7 +85,7 @@ const isHtmlSpace = (c: string | undefined) => !!c && HTML_SPACE.test(c);
 const simplify = (text: string) => text.replace(/[ \t\n\f\r]+/g, ' ').replace(/^ | $/g, '');
 
 /** A name as Chrome gives it: simplified, but keeping one space at either end if there was some. */
-function simplifyName(text: string): string {
+export function simplifyName(text: string): string {
   if (!text) return '';
   return `${isHtmlSpace(text[0]) ? ' ' : ''}${simplify(text)}${isHtmlSpace(text[text.length - 1]) ? ' ' : ''}`;
 }
@@ -400,11 +400,12 @@ function generatedText(el: Element, pseudo: '::before' | '::after'): string {
   const style = styleOf(el, pseudo);
   const parts = style.content.split(/\s\/\s/);
   if (parts.length > 1) return contentText(parts[parts.length - 1] ?? '', el, pseudo, true);
-  let text = contentText(parts[0] ?? '', el, pseudo, false).replace(/[ \t\n\f\r]+/g, ' ');
-  // Its space at the start or the end of a line does not show.
-  const inline = style.display.startsWith('inline');
-  if (text.startsWith(' ') && (!inline || (pseudo === '::before' && lineEdge(el, true)))) text = text.slice(1);
-  if (text.endsWith(' ') && (!inline || (pseudo === '::after' && lineEdge(el, false)))) text = text.slice(0, -1);
+  let text = contentText(parts[0] ?? '', el, pseudo, false);
+  if (!preservesSpace(el, pseudo)) text = text.replace(/[ \t\n\f\r]+/g, ' ');
+  // Its space at the start or the end of a line does not show, as in the tree.
+  const [trimStart, trimEnd] = trimmedEnds(el, pseudo);
+  if (trimStart && text.startsWith(' ')) text = text.slice(1);
+  if (trimEnd && text.endsWith(' ')) text = text.slice(0, -1);
   return text.replace(/\0/g, '');
 }
 

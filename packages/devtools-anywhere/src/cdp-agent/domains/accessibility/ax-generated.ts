@@ -59,6 +59,25 @@ function splitAlt(content: string): [string, string | undefined] {
   return [content, undefined];
 }
 
+/** Whether a ::before or ::after keeps the white space of its text as written (white-space: pre and the like). */
+export const preservesSpace = (el: Element, pseudo: GeneratedPseudo) =>
+  /^(preserve|break-spaces)$/.test(styleOf(el, pseudo).getPropertyValue('white-space-collapse'));
+
+/**
+ * Whether the space at the start and at the end of a ::before or ::after's text is dropped, as
+ * layout does, in the tree and in names alike: none where white space is preserved; both ends of
+ * a box's text (an inline-block or inline-flex too); for one with display: inline, the leading
+ * space of a ::before where its host starts a line, the trailing one of an ::after where it ends one.
+ */
+export function trimmedEnds(el: Element, pseudo: GeneratedPseudo): [boolean, boolean] {
+  if (preservesSpace(el, pseudo)) return [false, false];
+  const inline = styleOf(el, pseudo).display === 'inline';
+  return [
+    !inline || (pseudo === '::before' && lineEdge(el, true)),
+    !inline || (pseudo === '::after' && lineEdge(el, false)),
+  ];
+}
+
 /**
  * The content of an element's ::before or ::after in the tree, or null when it has no node. The
  * text of a run has its spaces collapsed; a run of spaces only is named with two, as in Chrome.
@@ -104,14 +123,13 @@ export function generatedContent(el: Element, pseudo: GeneratedPseudo, trim = tr
       run = true;
     }
   }
-  const preserved = /^(preserve|break-spaces)$/.test(styleOf(el, pseudo).getPropertyValue('white-space-collapse'));
-  const inline = box === 'inline';
-  const trimStart = trim && !preserved && (!inline || (pseudo === '::before' && lineEdge(el, true)));
-  const trimEnd = trim && !preserved && (!inline || (pseudo === '::after' && lineEdge(el, false)));
+  const [trimStart, trimEnd] = trim ? trimmedEnds(el, pseudo) : [false, false];
+  // Where white space is preserved its runs are kept, as Chrome's text has them.
+  const preserved = preservesSpace(el, pseudo);
   parts.forEach((part, i) => {
     if (part.kind !== 'text') return;
-    let text = part.text.replace(/[ \t\n\f\r]+/g, ' ');
-    if (text === ' ') text = '  ';
+    let text = preserved ? part.text : part.text.replace(/[ \t\n\f\r]+/g, ' ');
+    if (text === ' ' && !preserved) text = '  ';
     else {
       if (i === 0 && trimStart && text.startsWith(' ')) text = text.slice(1);
       if (i === parts.length - 1 && trimEnd && text.endsWith(' ')) text = text.slice(0, -1);

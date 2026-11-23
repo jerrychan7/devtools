@@ -7,13 +7,14 @@ import {
   inputButtonText,
   isNativeTextField,
   nameOf,
+  simplifyName,
   targetsOf,
   textNameOf,
   type IdOf,
 } from './ax-name';
 import { inDisplayNone } from './ax-text';
 import { markerText, type MarkerText } from './ax-marker';
-import { generatedContent, pseudoHidden, type GeneratedPseudo } from './ax-generated';
+import { generatedContent, preservesSpace, pseudoHidden, type GeneratedPseudo } from './ax-generated';
 import {
   attr,
   byId,
@@ -714,6 +715,8 @@ export function createAXTree(
           textInclusion
         );
         text.text = part.text;
+        // Its name has the runs of preserved white space collapsed, as Chrome's names do.
+        if (preservesSpace(host, pseudo)) text.name = simplifyName(part.text);
         if (part.kind !== 'quote') return text;
         const quote = new VirtualNode(host, `${key}:${i}`, 'none', UNINTERESTING, [text]);
         text.parent = quote;
@@ -851,7 +854,7 @@ export function createAXTree(
       role: roleValue(node.role),
       name: {
         type: 'computedString',
-        value: node.text,
+        value: node.name ?? node.text,
         ...(text
           ? { sources: [{ type: alt ? 'implicit' : 'contents', value: { type: 'computedString', value: node.text } }] }
           : node.role === 'generic' && {
