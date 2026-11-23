@@ -2,7 +2,20 @@
 
 所有包使用同一个版本号，一起发布（见 DEV.zh-CN.md 的「发布到 npm」）。每个版本开头先写明它的 DevTools 前端来自哪个版本的 Chrome；版本规则也在 DEV.zh-CN.md 里。改动合入时记在 `Unreleased` 下，发布时挪到对应的版本号下。英文版见 [CHANGELOG.md](CHANGELOG.md)，两份内容保持一致。
 
-## Unreleased
+## 0.5.0
+
+基于 Chrome 159（159.0.8154.13）。
+
+- DevTools 前端改为来自 Chrome 159（原为 Chrome 158），面板和界面随之更新；Styles 里显示的浏览器默认样式也改为 Chrome 159 的。
+- 无障碍树改由项目自己的代码计算，不再使用 dom-accessibility-api，与 Chrome 的一致程度大幅提高。`accessibility.js` 从约 29 KB 增至约 80 KB。
+  - 角色、名称、描述、value 和 properties 按 Chrome 的规则计算：从 dom-accessibility-api 的测试和 web-platform-tests 导入的约 1800 条用例全部与 Chrome 一致，包括布局表格、图像热区和生成内容里的 CSS 计数器。
+  - 无障碍树补上了 Chrome 有、而页面看不到 DOM 节点的那些节点：select 的弹出层和选项、文本框的占位符和内部编辑区、input 按钮的文字、取色框的色块，以及列表标记和其文字（所有预定义计数样式，以及从页面读取的 `@counter-style` 规则）。列表标记用其 `::marker` 的 backend id，`::before` 和 `::after` 用其伪元素的 backend id；其余这类节点的 id 为负数，`getChildAXNodes` 接受这些 id。
+  - 树的形状与 Chrome 一致：generic 容器、隐藏子树、空白文本、body、shadow 树和 slot、aria-owns、svg 和生成内容，都按 Chrome 的方式保留、忽略或略去，`getFullAXTree` 按 Chrome 的顺序列出节点。与 Chrome 的整棵树对照中，223 组里有 29 组不一致；剩下的（如本地化名称和媒体控件）列在限制文档里。
+- 页面变化时 Accessibility 窗格会自己刷新：与 Chrome 一样，在域启用期间，对客户端经 `getChildAXNodes` 或 `getAXNodeAndAncestors` 拿到过的节点发 `Accessibility.nodesUpdated`，同一帧里变化的合成一个事件。变化由 MutationObserver 得知；它看不到的样式变化（CSSOM、`:hover`、媒体查询）在下一次 DOM 变化时发出（见能力边界）。不发 `loadComplete`，因为 agent 在已加载的页面里启动。
+- `devtools-anywhere` 不再有运行时依赖：snapDOM 本来就已打进 `dist/snapdom.js`，改为开发依赖；dom-accessibility-api 已去掉。
+- frame 的安全源（security origin）与 Chrome 159 一致，见于 frame 树和 frame 事件：`about:blank` 或 `srcdoc` 的 frame 继承创建它的文档的源，没有 `allow-same-origin` 的沙箱 frame 是不透明源。
+- 没有源文件的内容安全策略（CSP）问题（例如脚本插入的标记引发的）不再指向文档 URL 的第 -1 行，而是与 Chrome 一样不带源码位置。
+- 弃用问题仍指向页面 URL，而 Chrome 159 指向调用该弃用 API 的脚本：页面无从得知调用发生在哪里（见限制说明）。
 
 ## 0.4.0
 
@@ -41,7 +54,7 @@
 公开 API（以 `packages/*/etc/*.public.api.md` 为准）与 0.3.0 相比没有变化。
 
 - `devtools-anywhere` 的 `dist/` 新增两个首次使用时才加载的文件：`accessibility.js`（导出为 `./accessibility.js`，附带 source map `accessibility.js.map`）和 `chromium-html.css`；自托管时和 bundle 放在一起。`chromium-html.css` 采用 LGPL（2.0 或更高版本），是包里唯一不属于 MIT 或 BSD 的文件；许可全文随附为 `chromium-html.LICENSE.txt`，两个文件都删掉只会少掉 user agent stylesheet 规则。新增依赖 `dom-accessibility-api`。
-- 探针 minify 后从 18948 字节增到 27489 字节（原始字节，不是 gzip；保存 agent 调用的页面函数之前为 25409 字节），主要是 Animations 面板用的挂钩、`matchMedia()` 的挂钩，为其和色觉缺陷遮罩保存的浏览器原生函数，以及 agent 调用的函数（属于探针的内部接口，不是公开 API）。
+- 探针 minify 后从 18948 字节增到 27643 字节（原始字节，不是 gzip；保存 agent 调用的页面函数之前为 25409 字节），主要是 Animations 面板用的挂钩、`matchMedia()` 的挂钩，为其和色觉缺陷遮罩保存的浏览器原生函数，以及 agent 和无障碍树调用的函数（属于探针的内部接口，不是公开 API）。
 - 壳模式下 Service Worker 把 `debugger` 改写记录存在 Cache API 的 `devtools-anywhere-service-worker-rewrites` 里；新 worker 激活时、退出壳模式时，以及不在壳模式的页面注销遗留的壳 worker 时删除。
 - 跨域 iframe 里的探针和父页面之间的消息新增内部事件 `DevtoolsAnywhere.scrollParent`：两边请使用同一版本的探针。
 

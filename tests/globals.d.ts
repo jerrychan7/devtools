@@ -33,6 +33,8 @@ declare global {
     /** The harness's CDP session in the page, and the events it emitted. */
     __session: CdpSession;
     __ours: { method: string; params: unknown }[];
+    /** Fixture elements whose aria-owns setBody puts back one at a time (test-support/accessibility.ts). */
+    __axOwners?: (readonly [Element, string])[];
     /** The page's agent with stand-in cross-origin iframe agents (target.test.ts). */
     __harness?: Harness;
     /** More CDP sessions in the page (multi-session.test.ts). */
@@ -74,7 +76,7 @@ declare global {
       childTargets: ChildTargets;
       mergedFrames: MergedFrames;
       shellClients: () => string[];
-      /** The emulation's stable APIs, and the own style sheets and scans (domains/emulation/inject.ts). */
+      /** The emulation's stable APIs, and the own style sheets and scans (domains/emulation/inject/inject.ts). */
       emulation: {
         currentMediaRewrite: () => ((text: string) => string) | null;
         onMediaRewriteChange: (listener: () => void) => () => void;

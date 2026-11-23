@@ -1,16 +1,17 @@
 diff --git a/front_end/panels/animation/AnimationTimeline.ts b/front_end/panels/animation/AnimationTimeline.ts
+index 36e3f60e93..e2cc83e88e 100644
 --- a/front_end/panels/animation/AnimationTimeline.ts
 +++ b/front_end/panels/animation/AnimationTimeline.ts
-@@ -231,7 +231,6 @@
-   #previewContainer!: HTMLElement;
+@@ -239,7 +239,6 @@ export class AnimationTimeline extends UI.Widget.VBox implements
+   readonly #pausedStatus: HTMLElement;
    #timelineScrubber!: HTMLElement;
    #currentTime!: HTMLElement;
 -  #clearButton!: UI.Toolbar.ToolbarButton;
    #selectedGroup!: SDK.AnimationModel.AnimationGroup|null;
    #renderQueue!: AnimationUI[];
    #duration: number;
-@@ -826,7 +825,9 @@
-
+@@ -855,7 +854,9 @@ export class AnimationTimeline extends UI.Widget.VBox implements
+ 
      const groupLength = this.#groupBuffer.length;
      if (groupLength === 0) {
 -      (this.#clearButton.element as HTMLElement).focus();

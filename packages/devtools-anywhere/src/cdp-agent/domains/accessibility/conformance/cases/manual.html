@@ -1,0 +1,1067 @@
+<!--
+Accessibility conformance cases: the input HTML only, each element marked data-ax-case compared
+with real Chrome (test-support/accessibility.ts). Imported from:
+- dom-accessibility-api (https://github.com/eps1lon/dom-accessibility-api), commit
+  a1828981f407b6cd6dc9d7b1046a618af93d0270, groups "dom-accessibility-api …".
+  MIT License. Copyright (c) 2020 Sebastian Silbermann
+- web-platform-tests (https://github.com/web-platform-tests/wpt), commit
+  73abd6299d0100763f0dfab7d30947282f626021, groups "wpt <path>": the file's body without its
+  scripts. The 3-Clause BSD License. Copyright © web-platform-tests contributors
+Ids were added to the elements compared; whitespace is part of the input.
+Groups "devtools-anywhere …" are this project's own regression cases.
+The licenses in full: LICENSES in this directory.
+-->
+<!-- group: dom-accessibility-api manual -->
+<div><img id="lib-DS1" data-ax-case="lib-DS1" src=foo.jpg alt="test" aria-describedby="lib-DS1-t1"><span id="lib-DS1-t1" role="presentation">foo</span></div>
+<div><img id="lib-DS2" data-ax-case="lib-DS2" src=foo.jpg alt="test" aria-describedby="lib-DS2-t1"><span id="lib-DS2-t1" role="none">foo</span></div>
+<div><a id="lib-DS3" data-ax-case="lib-DS3" href="#" aria-label="California" title="San Francisco">United States</a></div>
+<div><button id="lib-DS4" data-ax-case="lib-DS4" aria-description="Paid feature">Deploy</button></div>
+<div><img id="lib-DS5" data-ax-case="lib-DS5" src=foo.jpg alt="test" aria-description="bar" aria-describedby="lib-DS5-t1"><span id="lib-DS5-t1" role="presentation">foo</span></div>
+<!-- group: dom-accessibility-api shadow roots -->
+<div><div><template shadowrootmode="open"><div id="d">This is a button</div><button id="lib-DS6" data-ax-case="lib-DS6" aria-describedby="d">Click me</button></template></div></div>
+<!-- group: wpt accname/manual/description_1.0_combobox-focusable-manual.html -->
+<div id="m-description-1-0-combobox-focusable" data-ax-case="m-description-1-0-combobox-focusable" role="combobox" tabindex="0" title="Choose your language.">
+    <span> English </span>
+  </div>
+<!-- group: wpt accname/manual/description_from_content_of_describedby_element-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <input id="m-description-from-content-of-describedby-element" data-ax-case="m-description-from-content-of-describedby-element" type="text" aria-label="Important stuff" aria-describedby="descId" />
+  <div>
+    <div id="descId">
+      <span aria-hidden="true"><i> Hello, </i></span>
+      <span>My</span> name is
+      <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+      <span role="presentation" aria-label="Eli">
+        <span aria-label="Garaventa">Zambino</span>
+      </span>
+      <span>the weird.</span>
+      (QED)
+      <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+      <table>
+        <tr>
+          <td>Where</td>
+          <td style="visibility:hidden;"><div>in</div></td>
+          <td><div style="display:none;">the world</div></td>
+          <td>are my marbles?</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+<!-- group: wpt accname/manual/description_link-with-label-manual.html -->
+<a id="m-description-link-with-label" data-ax-case="m-description-link-with-label" href="#" aria-label="California" title="San Francisco" >United States</a>
+<!-- group: wpt accname/manual/description_test_case_557-manual.html -->
+<img id="m-description-test-case-557" data-ax-case="m-description-test-case-557" src="foo.jpg" aria-label="1" alt="a" title="t"/>
+<!-- group: wpt accname/manual/description_test_case_664-manual.html -->
+<div>
+    <img id="m-description-test-case-664" data-ax-case="m-description-test-case-664" aria-describedby="ID1" src="test.png">
+  </div>
+  <div id="ID1">foo</div>
+<!-- group: wpt accname/manual/description_test_case_665-manual.html -->
+<div>
+    <img id="m-description-test-case-665" data-ax-case="m-description-test-case-665" aria-describedby="ID1" src="test.png">
+  </div>
+  <div id="ID1" style="display:none">foo</div>
+<!-- group: wpt accname/manual/description_test_case_666-manual.html -->
+<div>
+    <img id="m-description-test-case-666" data-ax-case="m-description-test-case-666" aria-describedby="ID1" src="test.png">
+  </div>
+  <div id="ID1" role="presentation">foo</div>
+<!-- group: wpt accname/manual/description_test_case_772-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-772" data-ax-case="m-description-test-case-772" alt="test" aria-describedby="t1">
+  <div id="t1">foo</div>
+<!-- group: wpt accname/manual/description_test_case_773-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-773" data-ax-case="m-description-test-case-773" alt="test" aria-describedby="t1">
+  <div id="t1" style="display:none">foo</div>
+<!-- group: wpt accname/manual/description_test_case_774-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-774" data-ax-case="m-description-test-case-774" alt="test" aria-describedby="t1">
+  <span id="t1" role="presentation">foo</span>
+<!-- group: wpt accname/manual/description_test_case_838-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-838" data-ax-case="m-description-test-case-838" alt="test" aria-describedby="t1">
+  <div id="t1" style="visibility:hidden">foo</div>
+<!-- group: wpt accname/manual/description_test_case_broken_reference-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-broken-reference" data-ax-case="m-description-test-case-broken-reference" alt="test" aria-describedby="t1">
+<!-- group: wpt accname/manual/description_test_case_one_valid_reference-manual.html -->
+<img src="foo.jpg" id="m-description-test-case-one-valid-reference" data-ax-case="m-description-test-case-one-valid-reference" alt="test" aria-describedby="t1 t2 t3">
+  <div id="t2">foo</div>
+<!-- group: wpt accname/manual/description_title-same-element-manual.html -->
+<div><input aria-label="Name" id="m-description-title-same-element" data-ax-case="m-description-title-same-element" title="Title" aria-describedby="ID1" type="text"></div>
+  <div id="ID1">Description</div>
+<!-- group: wpt accname/manual/name_1.0_combobox-focusable-alternative-manual.html -->
+<input id="m-name-1-0-combobox-focusable-alternative" data-ax-case="m-name-1-0-combobox-focusable-alternative" role="combobox" type="text" title="Choose your language" value="English">
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-combobox-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-combobox" data-ax-case="m-name-checkbox-label-embedded-combobox" />
+  <label for="m-name-checkbox-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-listbox-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-listbox" data-ax-case="m-name-checkbox-label-embedded-listbox" />
+  <label for="m-name-checkbox-label-embedded-listbox">Flash the screen
+    <ul role="listbox" style="list-style-type: none;">
+      <li role="option" aria-selected="true">1</li>
+      <li role="option">2</li>
+      <li role="option">3</li>
+    </ul>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-menu-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-menu" data-ax-case="m-name-checkbox-label-embedded-menu" />
+  <label for="m-name-checkbox-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+        <span role="menuitem" hidden>2</span>
+    <span role="menuitem" hidden>3</span>
+      </span>
+      times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-select-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-select" data-ax-case="m-name-checkbox-label-embedded-select" />
+  <label for="m-name-checkbox-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-slider-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-slider" data-ax-case="m-name-checkbox-label-embedded-slider" />
+  <label for="m-name-checkbox-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-spinbutton-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-spinbutton" data-ax-case="m-name-checkbox-label-embedded-spinbutton" />
+  <label for="m-name-checkbox-label-embedded-spinbutton">foo <input role="spinbutton" type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-embedded-textbox-manual.html -->
+<input type="checkbox" id="m-name-checkbox-label-embedded-textbox" data-ax-case="m-name-checkbox-label-embedded-textbox" />
+  <label for="m-name-checkbox-label-embedded-textbox">Flash the screen
+    <div role="textbox" contenteditable>1</div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_checkbox-label-multiple-label-alternative-manual.html -->
+<label for="m-name-checkbox-label-multiple-label-alternative">a test</label>
+  <label>This <input type="checkbox" id="m-name-checkbox-label-multiple-label-alternative" data-ax-case="m-name-checkbox-label-multiple-label-alternative" /> is</label>
+<!-- group: wpt accname/manual/name_checkbox-label-multiple-label-manual.html -->
+<label>This <input type="checkbox" id="m-name-checkbox-label-multiple-label" data-ax-case="m-name-checkbox-label-multiple-label" /> is</label>
+  <label for="m-name-checkbox-label-multiple-label">a test</label>
+<!-- group: wpt accname/manual/name_checkbox-title-manual.html -->
+<input type="checkbox" id="m-name-checkbox-title" data-ax-case="m-name-checkbox-title" title="foo" />
+<!-- group: wpt accname/manual/name_file-label-inline-block-styles-manual.html -->
+<style>
+    label:before { content: "This"; display: block; }
+    label:after { content: "."; }
+  </style>
+  <label for="m-name-file-label-inline-block-styles">is a test</label>
+  <input type="text" id="m-name-file-label-inline-block-styles" data-ax-case="m-name-file-label-inline-block-styles"/>
+<!-- group: wpt accname/manual/name_from_content-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <div id="m-name-from-content" data-ax-case="m-name-from-content" role="link" tabindex="0">
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli">
+      <span aria-label="Garaventa">Zambino</span>
+    </span>
+    <span>the weird.</span>
+    (QED)
+    <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+    <table>
+      <tr>
+        <td>Where</td>
+        <td style="visibility:hidden;"><div>in</div></td>
+        <td><div style="display:none;">the world</div></td>
+        <td>are my marbles?</td>
+      </tr>
+    </table>
+  </div>
+<!-- group: wpt accname/manual/name_from_content_of_label-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <input type="text" id="m-name-from-content-of-label" data-ax-case="m-name-from-content-of-label" />
+  <label for="m-name-from-content-of-label" id="label">
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli">
+      <span aria-label="Garaventa">Zambino</span>
+   </span>
+   <span>the weird.</span>
+   (QED)
+   <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+   <table>
+     <tr>
+       <td>Where</td>
+       <td style="visibility:hidden;"><div>in</div></td>
+       <td><div style="display:none;">the world</div></td>
+       <td>are my marbles?</td>
+    </tr>
+   </table>
+  </label>
+<!-- group: wpt accname/manual/name_from_content_of_labelledby_element-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <input id="m-name-from-content-of-labelledby-element" data-ax-case="m-name-from-content-of-labelledby-element" type="text" aria-labelledby="lblId" />
+  <div id="lblId" >
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli">
+      <span aria-label="Garaventa">Zambino</span>
+    </span>
+    <span>the weird.</span>
+    (QED)
+    <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+    <table>
+      <tr>
+        <td>Where</td>
+        <td style="visibility:hidden;"><div>in</div></td>
+        <td><div style="display:none;">the world</div></td>
+        <td>are my marbles?</td>
+      </tr>
+    </table>
+  </div>
+<!-- group: wpt accname/manual/name_from_content_of_labelledby_elements_one_of_which_is_hidden-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <div>
+    <input id="m-name-from-content-of-labelledby-elements-one-of-which-is-hidden" data-ax-case="m-name-from-content-of-labelledby-elements-one-of-which-is-hidden" type="text" aria-labelledby="lbl1 lbl2" aria-describedby="descId" />
+    <span>
+      <span aria-hidden="true" id="lbl1">Important</span>
+      <span class="hidden">
+        <span aria-hidden="true" id="lbl2">stuff</span>
+      </span>
+    </span>
+  </div>
+  <div class="hidden">
+    <div id="descId">
+      <span aria-hidden="true"><i> Hello, </i></span>
+      <span>My</span> name is
+      <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+      <span role="presentation" aria-label="Eli">
+        <span aria-label="Garaventa">Zambino</span>
+      </span>
+      <span>the weird.</span>
+      (QED)
+      <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+      <table>
+        <tr>
+          <td>Where</td>
+          <td style="visibility:hidden;"><div>in</div></td>
+          <td><div style="display:none;">the world</div></td>
+          <td>are my marbles?</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+<!-- group: wpt accname/manual/name_heading-combobox-focusable-alternative-manual.html -->
+<h2 id="m-name-heading-combobox-focusable-alternative" data-ax-case="m-name-heading-combobox-focusable-alternative">
+  Country of origin:
+  <input role="combobox" type="text" title="Choose your country." value="United States">
+  </h2>
+<!-- group: wpt accname/manual/name_link-mixed-content-manual.html -->
+<style>
+    .hidden { display: none; }
+  </style>
+  <div id="m-name-link-mixed-content" data-ax-case="m-name-link-mixed-content" role="link" tabindex="0">
+    <span aria-hidden="true"><i> Hello, </i></span>
+    <span>My</span> name is
+    <div><img src="file.jpg" title="Bryan" alt="" role="presentation" /></div>
+    <span role="presentation" aria-label="Eli"><span aria-label="Garaventa">Zambino</span></span>
+    <span>the weird.</span>
+    (QED)
+    <span class="hidden"><i><b>and don't you forget it.</b></i></span>
+  </div>
+<!-- group: wpt accname/manual/name_password-label-embedded-combobox-manual.html -->
+<input type="password" id="m-name-password-label-embedded-combobox" data-ax-case="m-name-password-label-embedded-combobox" />
+  <label for="m-name-password-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-menu-manual.html -->
+<input type="password" id="m-name-password-label-embedded-menu" data-ax-case="m-name-password-label-embedded-menu" />
+  <label for="m-name-password-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+      <span role="menuitem" hidden>2</span>
+      <span role="menuitem" hidden>3</span>
+    </span>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-select-manual.html -->
+<input type="password" id="m-name-password-label-embedded-select" data-ax-case="m-name-password-label-embedded-select" />
+  <label for="m-name-password-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-slider-manual.html -->
+<input type="password" id="m-name-password-label-embedded-slider" data-ax-case="m-name-password-label-embedded-slider" />
+  <label for="m-name-password-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_password-label-embedded-spinbutton-manual.html -->
+<input type="password" id="m-name-password-label-embedded-spinbutton" data-ax-case="m-name-password-label-embedded-spinbutton" />
+  <label for="m-name-password-label-embedded-spinbutton">foo <input role="spinbutton" type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_password-title-manual.html -->
+<input type="password" id="m-name-password-title" data-ax-case="m-name-password-title" title="foo" />
+<!-- group: wpt accname/manual/name_radio-label-embedded-combobox-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-combobox" data-ax-case="m-name-radio-label-embedded-combobox" />
+  <label for="m-name-radio-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-menu-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-menu" data-ax-case="m-name-radio-label-embedded-menu" />
+  <label for="m-name-radio-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+      <span role="menuitem" hidden>2</span>
+      <span role="menuitem" hidden>3</span>
+    </span>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-select-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-select" data-ax-case="m-name-radio-label-embedded-select" />
+  <label for="m-name-radio-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-slider-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-slider" data-ax-case="m-name-radio-label-embedded-slider" />
+  <label for="m-name-radio-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_radio-label-embedded-spinbutton-manual.html -->
+<input type="radio" id="m-name-radio-label-embedded-spinbutton" data-ax-case="m-name-radio-label-embedded-spinbutton" />
+  <label for="m-name-radio-label-embedded-spinbutton">foo <input role="spinbutton"  type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_radio-title-manual.html -->
+<input type="radio" id="m-name-radio-title" data-ax-case="m-name-radio-title" title="foo" />
+<!-- group: wpt accname/manual/name_test_case_539-manual.html -->
+<input type="button" aria-label="Rich" id="m-name-test-case-539" data-ax-case="m-name-test-case-539">
+<!-- group: wpt accname/manual/name_test_case_540-manual.html -->
+<div id="ID1">Rich's button</div>
+  <input type="button" aria-labelledby="ID1" id="m-name-test-case-540" data-ax-case="m-name-test-case-540">
+<!-- group: wpt accname/manual/name_test_case_541-manual.html -->
+<div id="ID1">Rich's button</div>
+  <input type="button" aria-label="bar" aria-labelledby="ID1" id="m-name-test-case-541" data-ax-case="m-name-test-case-541"/>
+<!-- group: wpt accname/manual/name_test_case_544-manual.html -->
+<input type="button" id="m-name-test-case-544" data-ax-case="m-name-test-case-544" value="foo"/>
+<!-- group: wpt accname/manual/name_test_case_546-manual.html -->
+<label for="m-name-test-case-546">States:</label>
+  <input type="text" id="m-name-test-case-546" data-ax-case="m-name-test-case-546"/>
+<!-- group: wpt accname/manual/name_test_case_547-manual.html -->
+<label for="m-name-test-case-547">
+  foo
+  <input type="text" value="David"/>
+  </label>
+  <input type="text" id="m-name-test-case-547" data-ax-case="m-name-test-case-547" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_548-manual.html -->
+<label for="m-name-test-case-548">
+  crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="text" id="m-name-test-case-548" data-ax-case="m-name-test-case-548" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_549-manual.html -->
+<label for="m-name-test-case-549">
+    crazy
+     <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+     </div>
+  </label>
+  <input type="text" id="m-name-test-case-549" data-ax-case="m-name-test-case-549" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_550-manual.html -->
+<label for="m-name-test-case-550">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="text" id="m-name-test-case-550" data-ax-case="m-name-test-case-550" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_551-manual.html -->
+<input type="text" id="m-name-test-case-551" data-ax-case="m-name-test-case-551" title="crazy" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_552-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-552">fruit</label>
+  <input type="text" id="m-name-test-case-552" data-ax-case="m-name-test-case-552"/>
+<!-- group: wpt accname/manual/name_test_case_553-manual.html -->
+<style type="text/css">
+    [data-after]:after { content: attr(data-after); }
+  </style>
+  <label for="m-name-test-case-553" data-after="test content"></label>
+  <input type="text" id="m-name-test-case-553" data-ax-case="m-name-test-case-553">
+<!-- group: wpt accname/manual/name_test_case_556-manual.html -->
+<img id="m-name-test-case-556" data-ax-case="m-name-test-case-556" src="foo.jpg" aria-label="1"/>
+<!-- group: wpt accname/manual/name_test_case_558-manual.html -->
+<input type="text" value="peanuts" id="m-name-test-case-558" data-ax-case="m-name-test-case-558">
+  <img aria-labelledby="m-name-test-case-558" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_559-manual.html -->
+<img id="m-name-test-case-559" data-ax-case="m-name-test-case-559" aria-labelledby="m-name-test-case-559" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_560-manual.html -->
+<input type="text" value="peanuts" id="m-name-test-case-560" data-ax-case="m-name-test-case-560">
+  <img aria-labelledby="m-name-test-case-560" aria-label="1" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_561-manual.html -->
+<img id="m-name-test-case-561" data-ax-case="m-name-test-case-561" aria-labelledby="m-name-test-case-561" aria-label="1" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_562-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <input type="text" value="apple jacks" id="ID3">
+  <img aria-labelledby="ID1 ID2 ID3" id="m-name-test-case-562" data-ax-case="m-name-test-case-562" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_563-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <img id="m-name-test-case-563" data-ax-case="m-name-test-case-563" aria-label="l" aria-labelledby="m-name-test-case-563 ID1" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_564-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <img id="m-name-test-case-564" data-ax-case="m-name-test-case-564" aria-label="l" aria-labelledby="m-name-test-case-564 ID1 ID2" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_565-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <input type="text" value="apple jacks" id="ID3">
+  <img id="m-name-test-case-565" data-ax-case="m-name-test-case-565" aria-label="l" aria-labelledby="m-name-test-case-565 ID1 ID2 ID3" alt= "a" title="t" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_566-manual.html -->
+<input type="text" value="peanuts" id="ID1">
+  <input type="text" value="popcorn" id="ID2">
+  <input type="text" value="apple jacks" id="ID3">
+  <img id="m-name-test-case-566" data-ax-case="m-name-test-case-566" aria-label="" aria-labelledby="m-name-test-case-566 ID1 ID2 ID3" alt="" title="t" src="foo.jpg"/>
+<!-- group: wpt accname/manual/name_test_case_596-manual.html -->
+<div id="m-name-test-case-596" data-ax-case="m-name-test-case-596" aria-labelledby="ID1">foo</div>
+  <span id="ID1">bar</span>
+<!-- group: wpt accname/manual/name_test_case_597-manual.html -->
+<div id="m-name-test-case-597" data-ax-case="m-name-test-case-597" aria-label="Tag">foo</div>
+<!-- group: wpt accname/manual/name_test_case_598-manual.html -->
+<div id="m-name-test-case-598" data-ax-case="m-name-test-case-598" aria-labelledby="ID1" aria-label="Tag">foo</div>
+  <span id="ID1">bar</span>
+<!-- group: wpt accname/manual/name_test_case_599-manual.html -->
+<div id="m-name-test-case-599" data-ax-case="m-name-test-case-599" aria-labelledby="ID0 ID1" aria-label="Tag">foo</div>
+  <span id="ID0">bar</span>
+  <span id="ID1">baz</span>
+<!-- group: wpt accname/manual/name_test_case_600-manual.html -->
+<div id="m-name-test-case-600" data-ax-case="m-name-test-case-600">Div with text</div>
+<!-- group: wpt accname/manual/name_test_case_601-manual.html -->
+<div id="m-name-test-case-601" data-ax-case="m-name-test-case-601" role="button">foo</div>
+<!-- group: wpt accname/manual/name_test_case_602-manual.html -->
+<div id="m-name-test-case-602" data-ax-case="m-name-test-case-602" role="button" title="Tag" style="outline:medium solid black; width:2em; height:1em;">
+  </div>
+<!-- group: wpt accname/manual/name_test_case_603-manual.html -->
+<div id="ID1">foo</div>
+  <a id="m-name-test-case-603" data-ax-case="m-name-test-case-603" href="test.html" aria-labelledby="ID1">bar</a>
+<!-- group: wpt accname/manual/name_test_case_604-manual.html -->
+<a id="m-name-test-case-604" data-ax-case="m-name-test-case-604" href="test.html" aria-label="Tag">ABC</a>
+<!-- group: wpt accname/manual/name_test_case_605-manual.html -->
+<a href="test.html" id="m-name-test-case-605" data-ax-case="m-name-test-case-605" aria-labelledby="ID1" aria-label="Tag">foo</a>
+  <p id="ID1">bar</p>
+<!-- group: wpt accname/manual/name_test_case_606-manual.html -->
+<a href="test.html" id="m-name-test-case-606" data-ax-case="m-name-test-case-606" aria-labelledby="m-name-test-case-606 ID1" aria-label="Tag"></a>
+  <p id="ID1">foo</p>
+<!-- group: wpt accname/manual/name_test_case_607-manual.html -->
+<a href="test.html" id="m-name-test-case-607" data-ax-case="m-name-test-case-607">ABC</a>
+<!-- group: wpt accname/manual/name_test_case_608-manual.html -->
+<a href="test.html" id="m-name-test-case-608" data-ax-case="m-name-test-case-608" title="Tag"></a>
+<!-- group: wpt accname/manual/name_test_case_609-manual.html -->
+<input id="m-name-test-case-609" data-ax-case="m-name-test-case-609" type="text" aria-labelledby="ID1 ID2 ID3">
+  <p id="ID1">foo</p>
+  <p id="ID2">bar</p>
+  <p id="ID3">baz</p>
+<!-- group: wpt accname/manual/name_test_case_610-manual.html -->
+<input id="m-name-test-case-610" data-ax-case="m-name-test-case-610" type="text" aria-label="bar" aria-labelledby="ID1 m-name-test-case-610">
+  <div id="ID1">foo</div>
+<!-- group: wpt accname/manual/name_test_case_611-manual.html -->
+<input id="m-name-test-case-611" data-ax-case="m-name-test-case-611" type="text"/>
+  <label for="m-name-test-case-611">foo</label>
+<!-- group: wpt accname/manual/name_test_case_612-manual.html -->
+<input type="password" id="m-name-test-case-612" data-ax-case="m-name-test-case-612">
+  <label for="m-name-test-case-612">foo</label>
+<!-- group: wpt accname/manual/name_test_case_613-manual.html -->
+<input type="checkbox" id="m-name-test-case-613" data-ax-case="m-name-test-case-613">
+  <label for="m-name-test-case-613">foo</label></body>
+<!-- group: wpt accname/manual/name_test_case_614-manual.html -->
+<input type="radio" id="m-name-test-case-614" data-ax-case="m-name-test-case-614">
+  <label for="m-name-test-case-614">foo</label>
+<!-- group: wpt accname/manual/name_test_case_617-manual.html -->
+<input type="checkbox" id="m-name-test-case-617" data-ax-case="m-name-test-case-617">
+  <label for="m-name-test-case-617">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_618-manual.html -->
+<input type="text" id="m-name-test-case-618" data-ax-case="m-name-test-case-618">
+  <label for="m-name-test-case-618">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_619-manual.html -->
+<input type="password" id="m-name-test-case-619" data-ax-case="m-name-test-case-619">
+  <label for="m-name-test-case-619">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_620-manual.html -->
+<input type="radio" id="m-name-test-case-620" data-ax-case="m-name-test-case-620">
+  <label for="m-name-test-case-620">foo<input type="text" value="bar">baz</label>
+<!-- group: wpt accname/manual/name_test_case_659-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-659" title="bar"><input id="m-name-test-case-659" data-ax-case="m-name-test-case-659" type="text" name="test" title="buz"></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_660-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-660" title="bar"><input id="m-name-test-case-660" data-ax-case="m-name-test-case-660" type="password" name="test" title="buz"></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_661-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-661"><input id="m-name-test-case-661" data-ax-case="m-name-test-case-661" type="checkbox" name="test" title=" bar "></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_662-manual.html -->
+<style type="text/css">
+    label:before { content: "foo"; }
+    label:after { content: "baz"; }
+  </style>
+  <form>
+    <label for="m-name-test-case-662"><input id="m-name-test-case-662" data-ax-case="m-name-test-case-662" type="radio" name="test" title=" bar "></label>
+  </form>
+<!-- group: wpt accname/manual/name_test_case_721-manual.html -->
+<label for="m-name-test-case-721">States:</label>
+  <input type="password" id="m-name-test-case-721" data-ax-case="m-name-test-case-721"/>
+<!-- group: wpt accname/manual/name_test_case_723-manual.html -->
+<label for="m-name-test-case-723">States:</label>
+  <input type="checkbox" id="m-name-test-case-723" data-ax-case="m-name-test-case-723"/>
+<!-- group: wpt accname/manual/name_test_case_724-manual.html -->
+<label for="m-name-test-case-724">States:</label>
+  <input type="radio" id="m-name-test-case-724" data-ax-case="m-name-test-case-724"/>
+<!-- group: wpt accname/manual/name_test_case_727-manual.html -->
+<label for="m-name-test-case-727">
+    foo
+    <input type="text" value="David"/>
+  </label>
+  <input type="password" id="m-name-test-case-727" data-ax-case="m-name-test-case-727" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_728-manual.html -->
+<label for="m-name-test-case-728">
+    foo
+    <input type="text" value="David"/>
+  </label>
+  <input type="checkbox" id="m-name-test-case-728" data-ax-case="m-name-test-case-728"/>
+<!-- group: wpt accname/manual/name_test_case_729-manual.html -->
+<label for="m-name-test-case-729">
+    foo
+    <input type="text" value="David"/>
+  </label>
+  <input type="radio" id="m-name-test-case-729" data-ax-case="m-name-test-case-729"/>
+<!-- group: wpt accname/manual/name_test_case_733-manual.html -->
+<label for="m-name-test-case-733">
+    crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="password" id="m-name-test-case-733" data-ax-case="m-name-test-case-733"/>
+<!-- group: wpt accname/manual/name_test_case_734-manual.html -->
+<label for="m-name-test-case-734">
+    crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="checkbox" id="m-name-test-case-734" data-ax-case="m-name-test-case-734"/>
+<!-- group: wpt accname/manual/name_test_case_735-manual.html -->
+<label for="m-name-test-case-735">
+    crazy
+    <select name="member" size="1" role="menu" tabindex="0">
+      <option role="menuitem" value="beard" selected="true">clown</option>
+      <option role="menuitem" value="scuba">rich</option>
+    </select>
+  </label>
+  <input type="radio" id="m-name-test-case-735" data-ax-case="m-name-test-case-735"/>
+<!-- group: wpt accname/manual/name_test_case_738-manual.html -->
+<label for="m-name-test-case-738">
+    crazy
+    <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="password" value="baz" id="m-name-test-case-738" data-ax-case="m-name-test-case-738"/>
+<!-- group: wpt accname/manual/name_test_case_739-manual.html -->
+<label for="m-name-test-case-739">
+    crazy
+    <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="checkbox" id="m-name-test-case-739" data-ax-case="m-name-test-case-739"/>
+<!-- group: wpt accname/manual/name_test_case_740-manual.html -->
+<label for="m-name-test-case-740">
+    crazy
+    <div role="spinbutton" aria-valuetext="Monday" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="radio" id="m-name-test-case-740" data-ax-case="m-name-test-case-740"/>
+<!-- group: wpt accname/manual/name_test_case_743-manual.html -->
+<label for="m-name-test-case-743">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="password" id="m-name-test-case-743" data-ax-case="m-name-test-case-743" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_744-manual.html -->
+<label for="m-name-test-case-744">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="checkbox" id="m-name-test-case-744" data-ax-case="m-name-test-case-744"/>
+<!-- group: wpt accname/manual/name_test_case_745-manual.html -->
+<label for="m-name-test-case-745">
+    crazy
+    <div role="spinbutton" aria-valuemin="1" aria-valuemax="7" aria-valuenow="4">
+    </div>
+  </label>
+  <input type="radio" id="m-name-test-case-745" data-ax-case="m-name-test-case-745"/>
+<!-- group: wpt accname/manual/name_test_case_748-manual.html -->
+<input type="password" id="m-name-test-case-748" data-ax-case="m-name-test-case-748" title="crazy" value="baz"/>
+<!-- group: wpt accname/manual/name_test_case_749-manual.html -->
+<input type="checkbox" id="m-name-test-case-749" data-ax-case="m-name-test-case-749" title="crazy"/>
+<!-- group: wpt accname/manual/name_test_case_750-manual.html -->
+<input type="radio" id="m-name-test-case-750" data-ax-case="m-name-test-case-750" title="crazy"/>
+<!-- group: wpt accname/manual/name_test_case_753-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-753">fruit</label>
+  <input type="password" id="m-name-test-case-753" data-ax-case="m-name-test-case-753"/>
+<!-- group: wpt accname/manual/name_test_case_754-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-754">fruit</label>
+  <input type="checkbox" id="m-name-test-case-754" data-ax-case="m-name-test-case-754"/>
+<!-- group: wpt accname/manual/name_test_case_755-manual.html -->
+<style>
+    label:before { content:"fancy "; }
+  </style>
+  <label for="m-name-test-case-755">fruit</label>
+  <input type="radio" id="m-name-test-case-755" data-ax-case="m-name-test-case-755"/>
+<!-- group: wpt accname/manual/name_test_case_758-manual.html -->
+<style>
+    label:after { content:" fruit"; }
+  </style>
+  <label for="m-name-test-case-758">fancy</label>
+  <input type="password" id="m-name-test-case-758" data-ax-case="m-name-test-case-758"/>
+<!-- group: wpt accname/manual/name_test_case_759-manual.html -->
+<style>
+    label:after { content:" fruit"; }
+  </style>
+  <label for="m-name-test-case-759">fancy</label>
+  <input type="checkbox" id="m-name-test-case-759" data-ax-case="m-name-test-case-759"/>
+<!-- group: wpt accname/manual/name_test_case_760-manual.html -->
+<style>
+    label:after { content:" fruit"; }
+  </style>
+  <label for="m-name-test-case-760">fancy</label>
+  <input type="radio" id="m-name-test-case-760" data-ax-case="m-name-test-case-760"/>
+<!-- group: wpt accname/manual/name_text-label-embedded-combobox-manual.html -->
+<input type="text" id="m-name-text-label-embedded-combobox" data-ax-case="m-name-text-label-embedded-combobox" />
+  <label for="m-name-text-label-embedded-combobox">Flash the screen
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option" aria-selected="true">1</li>
+    <li role="option">2</li>
+    <li role="option">3</li>
+      </ul>
+    </div>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-menu-manual.html -->
+<input type="text" id="m-name-text-label-embedded-menu" data-ax-case="m-name-text-label-embedded-menu" />
+  <label for="m-name-text-label-embedded-menu">Flash the screen
+    <span role="menu">
+      <span role="menuitem" aria-selected="true">1</span>
+      <span role="menuitem" hidden>2</span>
+      <span role="menuitem" hidden>3</span>
+    </span>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-select-manual.html -->
+<input type="text" id="m-name-text-label-embedded-select" data-ax-case="m-name-text-label-embedded-select" />
+  <label for="m-name-text-label-embedded-select">Flash the screen
+    <select size="1">
+      <option selected="selected">1</option>
+      <option>2</option>
+      <option>3</option>
+    </select>
+    times.
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-slider-manual.html -->
+<input type="text" id="m-name-text-label-embedded-slider" data-ax-case="m-name-text-label-embedded-slider" />
+  <label for="m-name-text-label-embedded-slider">foo <input role="slider" type="range" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_text-label-embedded-spinbutton-manual.html -->
+<input type="text" id="m-name-text-label-embedded-spinbutton" data-ax-case="m-name-text-label-embedded-spinbutton" />
+  <label for="m-name-text-label-embedded-spinbutton">foo <input role="spinbutton" type="number" value="5" min="1" max="10" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10"> baz
+  </label>
+<!-- group: wpt accname/manual/name_text-title-manual.html -->
+<input type="text" id="m-name-text-title" data-ax-case="m-name-text-title" title="foo" />
+<!-- group: devtools-anywhere aria-owns cycles -->
+<div id="da-cy1" data-ax-case="da-cy1" aria-owns="da-cy2">A</div><div id="da-cy2" data-ax-case="da-cy2" aria-owns="da-cy1">B</div>
+<button id="da-cy-b1" data-ax-case="da-cy-b1" aria-labelledby="da-cy1">x</button>
+<div id="da-cy3" data-ax-case="da-cy3" aria-owns="da-cy4">C</div><div id="da-cy4"><span id="da-cy5" data-ax-case="da-cy5" aria-owns="da-cy3">D</span></div>
+<!-- group: devtools-anywhere role attribute tokens -->
+<ul role="foo"><li id="da-role-li1" data-ax-case="da-role-li1">a</li></ul>
+<ul role="List"><li id="da-role-li2" data-ax-case="da-role-li2">b</li></ul>
+<ul role="list foo"><li id="da-role-li3" data-ax-case="da-role-li3">c</li></ul>
+<ul role="foo directory"><li id="da-role-li4" data-ax-case="da-role-li4">d</li></ul>
+<ul role="toolbar list"><li id="da-role-li5" data-ax-case="da-role-li5">e</li></ul>
+<table role="Grid"><tr><td id="da-role-td1" data-ax-case="da-role-td1">f</td></tr></table>
+<table role="grid foo"><tr><td id="da-role-td2" data-ax-case="da-role-td2">g</td></tr></table>
+<table role="foo treegrid"><tr><td id="da-role-td3" data-ax-case="da-role-td3">h</td></tr></table>
+<!-- group: devtools-anywhere nodes of another realm -->
+<div id="da-realm-1" data-ax-case="da-realm-1" role="button"></div>
+<button id="da-realm-2" data-ax-case="da-realm-2" aria-labelledby="da-realm-3"></button><span id="da-realm-3"></span>
+<!-- group: devtools-anywhere generated content counters -->
+<style>
+  .cn ol { counter-reset: item; list-style: none; }
+  .cn li { counter-increment: item; }
+  .cn li > button::before { content: counters(item, ".") " "; }
+  .cs button::before { counter-reset: s 3; content: counter(s, upper-roman) "|" counter(s, lower-alpha) "|" counter(s, lower-roman) "|" counter(s, upper-alpha) "|" counter(s, lower-latin) "|" counter(s, upper-latin) "|" counter(s, lower-greek) "|" counter(s, decimal-leading-zero) "|" counter(s, decimal) "|"; }
+  .cs2 button::before { counter-reset: s 2; content: counter(s, disc) "|" counter(s, circle) "|" counter(s, square) "|" counter(s, none) "|" counters(s, "-", upper-roman) " "; }
+  .cs3 button::before { counter-reset: s 3999; content: counter(s, upper-roman) "|" counter(s, lower-alpha) " "; }
+  .cs4 button::before { counter-reset: s 0; content: counter(s, upper-roman) "|" counter(s, lower-alpha) "|" counter(s, decimal-leading-zero) "|"; }
+  .cs5 button::before { counter-reset: s -5; content: counter(s, upper-roman) "|" counter(s, decimal-leading-zero) "|" counter(s, lower-alpha) "|"; }
+  .cq { quotes: "<" ">" "[" "]"; }
+  .cq button::before { content: open-quote open-quote; }
+  .cq button::after { content: close-quote close-quote; }
+  .ca button::before { content: attr(data-x) ": "; }
+  .cl li button::before { content: counter(list-item) ". "; }
+  .cr ol { counter-reset: reversed(r); }
+  .cr li { counter-increment: r -1; }
+  .cr li button::before { content: counter(r) " "; }
+  .cn li > button.alt::before { content: "" / counters(item, ".") " "; }
+  .cs .alt::before { content: "" / counter(s, upper-roman) "|" counter(s, lower-alpha) "|" counter(s, lower-roman) "|" counter(s, upper-alpha) "|" counter(s, lower-latin) "|" counter(s, upper-latin) "|" counter(s, lower-greek) "|" counter(s, decimal-leading-zero) "|" counter(s, decimal) "| "; }
+  .cs2 .alt::before { content: "" / counter(s, disc) "|" counter(s, circle) "|" counter(s, square) "|" counter(s, none) "|" counters(s, "-", upper-roman) " "; }
+  .cs3 .alt::before { content: "" / counter(s, upper-roman) "|" counter(s, lower-alpha) " "; }
+  .cs4 .alt::before { content: "" / counter(s, upper-roman) "|" counter(s, lower-alpha) "|" counter(s, decimal-leading-zero) "| "; }
+  .cs5 .alt::before { content: "" / counter(s, upper-roman) "|" counter(s, decimal-leading-zero) "|" counter(s, lower-alpha) "| "; }
+  .cq .alt::before { content: "" / open-quote "a"; }
+  .cq .alt::after { content: "" / "b" close-quote; }
+  .ca .alt::before { content: "" / attr(data-x) ": "; }
+  .cl li button.alt::before { content: "" / counter(list-item) ". "; }
+  .cr li button.alt::before { content: "" / counter(r) " "; }
+  .cg .b1::before { content: "x" / "alt"; }
+  .cg .b2::before { content: "x" / " alt"; }
+  .cg .b3::before { content: "x" / ""; }
+  .cg .a1::after { content: "x" / "alt"; }
+  .cg .a2::after { content: "x" / "alt "; }
+  .cg .ab::before { content: "x" / "A"; }
+  .cg .ab::after { content: "y" / "B"; }
+  .cg .c1::before { counter-reset: g 228; content: "" / counter(g); }
+</style>
+<div class="cn"><ol><li>a<ol><li>b</li><li><button class="alt" id="cnt-alt-nested" data-ax-case="cnt-alt-nested">x</button></li></ol></li></ol></div>
+<div class="cs"><button class="alt" id="cnt-alt-styles" data-ax-case="cnt-alt-styles">x</button></div>
+<div class="cs2"><button class="alt" id="cnt-alt-styles-2" data-ax-case="cnt-alt-styles-2">x</button></div>
+<div class="cs3"><button class="alt" id="cnt-alt-styles-big" data-ax-case="cnt-alt-styles-big">x</button></div>
+<div class="cs4"><button class="alt" id="cnt-alt-styles-zero" data-ax-case="cnt-alt-styles-zero">x</button></div>
+<div class="cs5"><button class="alt" id="cnt-alt-styles-neg" data-ax-case="cnt-alt-styles-neg">x</button></div>
+<div class="cq"><button class="alt" id="cnt-alt-quotes" data-ax-case="cnt-alt-quotes">x</button></div>
+<div class="ca"><button class="alt" id="cnt-alt-attr" data-x="hi" data-ax-case="cnt-alt-attr">x</button></div>
+<div class="cl"><ol><li>a</li><li><button class="alt" id="cnt-alt-list-item" data-ax-case="cnt-alt-list-item">x</button></li></ol><ol start="5"><li><button class="alt" id="cnt-alt-list-item-start" data-ax-case="cnt-alt-list-item-start">x</button></li></ol><ol reversed><li>a</li><li><button class="alt" id="cnt-alt-list-item-rev" data-ax-case="cnt-alt-list-item-rev">x</button></li><li>c</li></ol></div>
+<div class="cr"><ol><li>a</li><li>b</li><li><button class="alt" id="cnt-alt-reversed" data-ax-case="cnt-alt-reversed">x</button></li></ol></div>
+<div class="cg"><button class="b1" id="cnt-alt-space-before" data-ax-case="cnt-alt-space-before">label</button><button class="b2" id="cnt-alt-space-before-lead" data-ax-case="cnt-alt-space-before-lead">label</button><button class="b3" id="cnt-alt-space-empty" data-ax-case="cnt-alt-space-empty">label</button><button class="a1" id="cnt-alt-space-after" data-ax-case="cnt-alt-space-after">label</button><button class="a2" id="cnt-alt-space-after-trail" data-ax-case="cnt-alt-space-after-trail">label</button><button class="ab" id="cnt-alt-space-both" data-ax-case="cnt-alt-space-both">label</button><button class="b1" id="cnt-alt-space-alone" data-ax-case="cnt-alt-space-alone"></button><button class="c1" id="cnt-alt-space-counter" data-ax-case="cnt-alt-space-counter">label</button></div>
+<div class="cn"><ol><li>a<ol><li>b</li><li><button id="cnt-nested" data-ax-case="cnt-nested">x</button></li></ol></li></ol></div>
+<div class="cs"><button id="cnt-styles" data-ax-case="cnt-styles">x</button></div>
+<div class="cs2"><button id="cnt-styles-2" data-ax-case="cnt-styles-2">x</button></div>
+<div class="cs3"><button id="cnt-styles-big" data-ax-case="cnt-styles-big">x</button></div>
+<div class="cs4"><button id="cnt-styles-zero" data-ax-case="cnt-styles-zero">x</button></div>
+<div class="cs5"><button id="cnt-styles-neg" data-ax-case="cnt-styles-neg">x</button></div>
+<div class="cq"><button id="cnt-quotes" data-ax-case="cnt-quotes">x</button></div>
+<div class="ca"><button id="cnt-attr" data-x="hi" data-ax-case="cnt-attr">x</button></div>
+<div class="cl"><ol><li>a</li><li><button id="cnt-list-item" data-ax-case="cnt-list-item">x</button></li></ol><ol start="5"><li><button id="cnt-list-item-start" data-ax-case="cnt-list-item-start">x</button></li></ol></div>
+<div class="cr"><ol><li>a</li><li>b</li><li><button id="cnt-reversed" data-ax-case="cnt-reversed">x</button></li></ol></div>
+<!-- group: devtools-anywhere counter styles -->
+<style>
+  .cx button::before { content: "" / counter(s, decimal-leading-zero) "|" counter(s, arabic-indic) "|" counter(s, armenian) "|" counter(s, upper-armenian) "|" counter(s, lower-armenian) "|" counter(s, bengali) "|" counter(s, cambodian) "|" counter(s, khmer) "|" counter(s, cjk-decimal) "|" counter(s, devanagari) "|" counter(s, georgian) "|" counter(s, gujarati) "|" counter(s, gurmukhi) "|" counter(s, hebrew) "|" counter(s, kannada) "|" counter(s, lao) "|" counter(s, malayalam) "|" counter(s, mongolian) "|" counter(s, myanmar) "|" counter(s, oriya) "|" counter(s, persian) "|" counter(s, urdu) "|" counter(s, tamil) "|" counter(s, telugu) "|" counter(s, thai) "|" counter(s, tibetan) "|" counter(s, hiragana) "|" counter(s, hiragana-iroha) "|" counter(s, katakana) "|" counter(s, katakana-iroha) "|" counter(s, disclosure-open) "|" counter(s, disclosure-closed) "|" counter(s, cjk-earthly-branch) "|" counter(s, cjk-heavenly-stem) "|" counter(s, cjk-ideographic) "|" counter(s, japanese-informal) "|" counter(s, japanese-formal) "|" counter(s, korean-hangul-formal) "|" counter(s, korean-hanja-informal) "|" counter(s, korean-hanja-formal) "|" counter(s, simp-chinese-informal) "|" counter(s, simp-chinese-formal) "|" counter(s, trad-chinese-informal) "|" counter(s, trad-chinese-formal) "|" counter(s, ethiopic-numeric) "|" counter(s, ethiopic-halehame) "|" counter(s, ethiopic-halehame-am) "|" counter(s, ethiopic-halehame-ti-er) "|" counter(s, ethiopic-halehame-ti-et) "|" counter(s, lower-norwegian); }
+  .cx .vm12::before { counter-reset: s -12; }
+  .cx .v0::before { counter-reset: s 0; }
+  .cx .v1::before { counter-reset: s 1; }
+  .cx .v15::before { counter-reset: s 15; }
+  .cx .v99::before { counter-reset: s 99; }
+  .cx .v1001::before { counter-reset: s 1001; }
+  .cx .v10010::before { counter-reset: s 10010; }
+  .cx .v12345::before { counter-reset: s 12345; }
+  .cx .v1000100::before { counter-reset: s 1000100; }
+  .cx .v10001000::before { counter-reset: s 10001000; }
+  .cx .v123456789::before { counter-reset: s 123456789; }
+</style>
+<div class="cx"><button class="vm12" id="cnt-style-m12" data-ax-case="cnt-style-m12">x</button><button class="v0" id="cnt-style-0" data-ax-case="cnt-style-0">x</button><button class="v1" id="cnt-style-1" data-ax-case="cnt-style-1">x</button><button class="v15" id="cnt-style-15" data-ax-case="cnt-style-15">x</button><button class="v99" id="cnt-style-99" data-ax-case="cnt-style-99">x</button><button class="v1001" id="cnt-style-1001" data-ax-case="cnt-style-1001">x</button><button class="v10010" id="cnt-style-10010" data-ax-case="cnt-style-10010">x</button><button class="v12345" id="cnt-style-12345" data-ax-case="cnt-style-12345">x</button><button class="v1000100" id="cnt-style-1000100" data-ax-case="cnt-style-1000100">x</button><button class="v10001000" id="cnt-style-10001000" data-ax-case="cnt-style-10001000">x</button><button class="v123456789" id="cnt-style-123456789" data-ax-case="cnt-style-123456789">x</button></div>
+<style>
+  @import url("data:text/css,@counter-style cr-import { system: cyclic; symbols: 'I'; }");
+  @counter-style cr-layer { system: cyclic; symbols: "U"; }
+  @layer cr-x, cr-y;
+  @layer cr-y { @counter-style cr-layers { system: cyclic; symbols: "Y"; } }
+  @layer cr-x { @counter-style cr-layers { system: cyclic; symbols: "X"; } @counter-style cr-layer { system: cyclic; symbols: "L"; } }
+  @counter-style cr-pad { system: extends decimal; pad: 3 "0"; }
+  @counter-style cr-pad2 { system: extends cr-pad; }
+  @counter-style cr-range { system: extends lower-alpha; range: 1 3; }
+  @counter-style cr-neg { system: extends decimal; negative: "(" ")"; }
+  @counter-style cr-disc { system: extends disc; }
+  @counter-style cr-cjk { system: extends cjk-decimal; }
+  @counter-style cr-media { system: cyclic; symbols: "A"; }
+  @media (max-width: 1px) { @counter-style cr-media { system: cyclic; symbols: "M"; } }
+  @media (min-width: 1px) { @counter-style cr-media-on { system: cyclic; symbols: "N"; } }
+  @counter-style cr-supports { system: cyclic; symbols: "A"; }
+  @supports (not (display: block)) { @counter-style cr-supports { system: cyclic; symbols: "S"; } }
+  @counter-style cr-sheet { system: cyclic; symbols: "A"; }
+  .cr2 button::before { content: "" / counter(s, cr-pad) "|" counter(s, cr-pad2) "|" counter(s, cr-range) "|" counter(s, cr-neg) "|" counter(s, cr-import) "|" counter(s, cr-layer) "|" counter(s, cr-layers) "|" counter(s, cr-media) "|" counter(s, cr-media-on) "|" counter(s, cr-supports) "|" counter(s, cr-sheet) "|" counter(s, none) "|" counters(s, ".", none) "|"; }
+  .cr2 .v1::before { counter-reset: s 1; }
+  .cr2 .v5::before { counter-reset: s 5; }
+  .cr2 .vm1::before { counter-reset: s -1; }
+  @counter-style cr-xfb { system: extends lower-roman; fallback: upper-alpha; }
+  @counter-style cr-xfbn { system: extends lower-roman; fallback: upper-alpha; negative: "(" ")"; pad: 3 "0"; }
+  @counter-style cr-xfbr { system: extends lower-roman; range: 1 5000; fallback: upper-alpha; }
+  @counter-style cr-xfbc { system: extends cjk-decimal; range: infinite -2; fallback: upper-alpha; }
+  .cr3 button::before { content: "" / counter(s, cr-xfb) "|" counter(s, cr-xfbn) "|" counter(s, cr-xfbr) "|" counter(s, cr-xfbc) "|"; }
+  .cr3 .v4000::before { counter-reset: s 4000; }
+  .cr3 .v0::before { counter-reset: s 0; }
+  .cr3 .vm1::before { counter-reset: s -1; }
+  .cr3 .vm3::before { counter-reset: s -3; }
+  @counter-style cr-ug { system: extends georgian; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-ur { system: extends lower-roman; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-uj { system: extends japanese-formal; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-uh { system: extends hebrew; range: infinite infinite; fallback: upper-alpha; }
+  @counter-style cr-ra { system: extends lower-roman; range: 1 10; fallback: upper-alpha; }
+  @counter-style cr-rauto { system: extends cr-ra; range: auto; }
+  @counter-style cr-rkeep { system: extends cr-ra; }
+  @counter-style cr-ga { system: extends georgian; range: auto; fallback: upper-alpha; }
+  @counter-style cr-ca { system: extends cjk-decimal; range: auto; fallback: upper-alpha; }
+  .cr4 button::before { content: "" / counter(s, cr-ug) "|" counter(s, cr-ur) "|" counter(s, cr-uj) "|" counter(s, cr-uh) "|" counter(s, cr-ra) "|" counter(s, cr-rauto) "|" counter(s, cr-rkeep) "|" counter(s, cr-ga) "|" counter(s, cr-ca) "|"; }
+  .cr4 .v11::before { counter-reset: s 11; }
+  .cr4 .v20000::before { counter-reset: s 20000; }
+  .cr4 .v117003::before { counter-reset: s 117003; }
+  .cr4 .v118003::before { counter-reset: s 118003; }
+  .cr4 .v1000000::before { counter-reset: s 1000000; }
+  .cr4 .vm20000::before { counter-reset: s -20000; }
+  @counter-style cr-njp { system: extends japanese-informal; range: -99999 99999; pad: 6 "\3007"; }
+  @counter-style cr-njn { system: extends japanese-informal; range: -99999 99999; negative: "(" ")"; }
+  @counter-style cr-njo { system: extends japanese-formal; pad: 6 "Z"; }
+  @counter-style cr-nsp { system: extends simp-chinese-informal; range: -99999 99999; pad: 6 "Z"; }
+  @counter-style cr-ntn { system: extends trad-chinese-formal; negative: "(" ")"; }
+  @counter-style cr-nkp { system: extends korean-hanja-informal; pad: 6 "Z"; }
+  @counter-style cr-nkn { system: extends korean-hangul-formal; range: -99999 99999; pad: 6 "Z"; negative: "(" ")"; }
+  .cr5 button::before { content: "" / counter(s, cr-njp) "|" counter(s, cr-njn) "|" counter(s, cr-njo) "|" counter(s, cr-nsp) "|" counter(s, cr-ntn) "|" counter(s, cr-nkp) "|" counter(s, cr-nkn) "|"; }
+  .cr5 .vm1::before { counter-reset: s -1; }
+  .cr5 .vm12::before { counter-reset: s -12; }
+  .cr5 .vm123456::before { counter-reset: s -123456; }
+</style>
+<style media="print">@counter-style cr-sheet { system: cyclic; symbols: "P"; }</style>
+<link rel="stylesheet" disabled href="data:text/css,@counter-style cr-sheet { system: cyclic; symbols: 'D'; }">
+<div class="cr2"><button class="v1" id="cnt-rule-1" data-ax-case="cnt-rule-1">x</button><button class="v5" id="cnt-rule-5" data-ax-case="cnt-rule-5">x</button><button class="vm1" id="cnt-rule-m1" data-ax-case="cnt-rule-m1">x</button></div>
+<div class="cr3"><button class="v4000" id="cnt-xfb-4000" data-ax-case="cnt-xfb-4000">x</button><button class="v0" id="cnt-xfb-0" data-ax-case="cnt-xfb-0">x</button><button class="vm1" id="cnt-xfb-m1" data-ax-case="cnt-xfb-m1">x</button><button class="vm3" id="cnt-xfb-m3" data-ax-case="cnt-xfb-m3">x</button></div>
+<div class="cr4"><button class="v11" id="cnt-unb-11" data-ax-case="cnt-unb-11">x</button><button class="v20000" id="cnt-unb-20000" data-ax-case="cnt-unb-20000">x</button><button class="v117003" id="cnt-unb-117003" data-ax-case="cnt-unb-117003">x</button><button class="v118003" id="cnt-unb-118003" data-ax-case="cnt-unb-118003">x</button><button class="v1000000" id="cnt-unb-1000000" data-ax-case="cnt-unb-1000000">x</button><button class="vm20000" id="cnt-unb-m20000" data-ax-case="cnt-unb-m20000">x</button></div>
+<div class="cr5"><button class="vm1" id="cnt-neg-m1" data-ax-case="cnt-neg-m1">x</button><button class="vm12" id="cnt-neg-m12" data-ax-case="cnt-neg-m12">x</button><button class="vm123456" id="cnt-neg-m123456" data-ax-case="cnt-neg-m123456">x</button></div>
+<ol id="cnt-rule-markers" data-ax-tree="cnt-rule-markers"><li style="list-style-type:cr-disc">disc</li><li style="list-style-type:cr-cjk">cjk</li><li style="list-style-type:cr-pad">pad</li><li style="list-style-type:cr-range" value="5">range</li><li style="list-style-type:cr-neg" value="-1">negative</li></ol>
+<!-- group: devtools-anywhere list markers -->
+<style>
+  .lm-c1::marker { content: "abc"; }
+  .lm-c2::marker { content: "a" "b" attr(data-x); }
+  .lm-c3::marker { content: counter(list-item); }
+  .lm-c4::marker { content: "(" counter(list-item, upper-roman) ") "; }
+  .lm-c5::marker { content: ""; }
+  .lm-c6::marker { content: none; }
+  .lm-c7::marker { content: "x" / "alt"; }
+  .lm-q::marker { content: open-quote "q" close-quote; }
+  .lm-ea::marker { content: "x" / ""; }
+  @counter-style lm-thumbs { system: cyclic; symbols: "+"; suffix: " "; }
+</style>
+<ol id="lm-ol" data-ax-tree="lm-ol"><li id="lm-ol-1" data-ax-case="lm-ol-1">a</li><li>b<ol><li>nested</li></ol></li><li style="display:block">block</li><li><button id="lm-button" data-ax-case="lm-button">in a button's item</button></li></ol>
+<ol id="lm-start" data-ax-tree="lm-start" start="5" reversed><li>a</li><li value="10">b</li><li>c</li><li value="-2">d</li></ol>
+<ul id="lm-ul" data-ax-tree="lm-ul"><li>disc</li><li style="list-style-type:circle">circle</li><li style="list-style-type:square">square</li><li style="list-style-type:disclosure-open">open</li><li style="list-style-type:disclosure-closed">closed</li><li style="list-style-type:'-> '">string</li><li style="list-style-type:''">empty string</li><li style="list-style-position:inside">inside</li><li style="list-style:none">none</li><li style="list-style-image:url(data:image/gif;base64,R0lGODlhAQABAAAAACw=)">image</li><li style="list-style-image:url(data:image/gif;base64,R0lGODlhAQABAAAAACw=);list-style-type:none">image, no type</li><li style="list-style-type:no-such-style">unknown style</li></ul>
+<ol id="lm-styles" data-ax-tree="lm-styles"><li value="13" style="list-style-type:upper-roman">a</li><li style="list-style-type:lower-greek">b</li><li style="list-style-type:hebrew">c</li><li style="list-style-type:cjk-earthly-branch">d</li><li style="list-style-type:simp-chinese-informal">e</li><li style="list-style-type:korean-hangul-formal">f</li><li style="list-style-type:japanese-formal">g</li><li style="list-style-type:ethiopic-halehame">h</li><li style="list-style-type:ethiopic-numeric">i</li><li style="list-style-type:arabic-indic">j</li><li style="list-style-type:decimal-leading-zero" value="3">k</li></ol>
+<ol id="lm-content" data-ax-tree="lm-content"><li class="lm-c1">string</li><li class="lm-c2" data-x="c">strings</li><li class="lm-c3">counter</li><li class="lm-c4">counter and strings</li><li class="lm-c5">empty</li><li class="lm-c6">none</li><li class="lm-c7">alternative text</li></ol>
+<div id="lm-div" data-ax-tree="lm-div"><div id="lm-div-1" data-ax-case="lm-div-1" style="display:list-item">a div</div><span style="display:list-item">a span</span><div style="display:list-item;list-style:none">no marker</div><p style="display:list-item">a paragraph</p><div style="display:inline list-item" draggable="true">inline, draggable</div></div>
+<ul id="lm-roles" data-ax-tree="lm-roles"><li role="none">none</li><li role="presentation" style="list-style:none">presentation, no marker</li><li role="button" id="lm-role-button" data-ax-case="lm-role-button">button</li><li role="generic">generic</li><li style="visibility:hidden">hidden</li></ul>
+<ul id="lm-quotes-rule" data-ax-tree="lm-quotes-rule"><li class="lm-q">quotes</li><li style="list-style-type:lm-thumbs">counter style rule</li></ul>
+<ol id="lm-empty-alt" data-ax-tree="lm-empty-alt"><li class="lm-ea">empty alternative text</li><li>after</li></ol>
+<!-- group: devtools-anywhere white space and labels -->
+<div id="ws-pre-line" data-ax-tree="ws-pre-line" style="white-space:pre-line"><input> <input></div>
+<div id="ws-pre" data-ax-tree="ws-pre" style="white-space:pre"><input> <input></div>
+<div id="ws-break-spaces" data-ax-tree="ws-break-spaces" style="white-space:break-spaces"><input> <input></div>
+<div id="ws-pre-line-spaces" data-ax-tree="ws-pre-line-spaces"><p style="white-space:pre-line"><b>a</b> 
+ <b>b</b></p><p style="white-space:pre-line">  <b>c</b>  </p><p style="white-space:pre-line"><b>d</b>   <b>e</b></p></div>
+<div id="ws-break-spaces-edges" data-ax-tree="ws-break-spaces-edges"><p style="white-space:break-spaces">  <b>a</b>  </p><p style="white-space:break-spaces"><b>b</b> 
+ <b>c</b></p><div style="white-space:break-spaces"> <div>d</div> </div></div>
+<div id="ws-pre-edges" data-ax-tree="ws-pre-edges"><p style="white-space:pre">  <b>a</b>  </p><div style="white-space:pre"> <div>b</div> </div><div style="white-space:pre-line"> <div>c</div> </div></div>
+<div id="lbl-comment" data-ax-tree="lbl-comment"><label><!-- a comment -->Foo <input type="checkbox" id="lbl-comment-input"></label></div>
+<div id="lbl-plain" data-ax-tree="lbl-plain"><label>Foo <input type="radio"></label></div>
+<!-- group: devtools-anywhere generated content alternative text -->
+<style>
+  .gca1::before { content: "a / b"; }
+  .gca2::before { content: "a" / "b"; }
+  .gca3::before { content: 'x\'/ y' / "alt"; }
+  .gca4::before { content: "a/b"; }
+  .gca5::before { content: "x" attr(data-a) / "y / z"; }
+</style>
+<div id="gca" data-ax-tree="gca"><p class="gca1">slash in a string</p><p class="gca2">alternative text</p><p class="gca3">escaped quote and slash in a string</p><p class="gca4">slash without spaces</p><p class="gca5" data-a=" / q">slash in an attribute and in the alternative text</p></div>
+<!-- group: devtools-anywhere generated content in labels -->
+<style>
+  .gcl label::before { content: "pre "; }
+  .gcl label::after { content: " post"; }
+  .gcl label.gcl-alt::before { content: "pre " / "alt"; }
+</style>
+<div class="gcl" id="gcl" data-ax-tree="gcl"><label>no control</label> <label for="gcl-text">text field</label><input id="gcl-text"> <label for="gcl-check">checkbox</label><input type="checkbox" id="gcl-check"> <label for="gcl-title" title="t">with a title</label><input type="checkbox" id="gcl-title"> <label for="gcl-alt" class="gcl-alt">alternative text</label><input type="checkbox" id="gcl-alt"></div>
+<!-- group: devtools-anywhere generated content in lines -->
+<style>
+  .gcn-b::before { content: " pre "; }
+  .gcn-a::after { content: " post "; }
+  .gcn-alt::before { content: "" / "n "; }
+  .gcn-bb::before { content: " pre "; display: inline-block; }
+  .gcn-ab::after { content: " post "; display: block; }
+  .gcn-pre::after { content: " post "; white-space: pre; }
+</style>
+<div id="gcn" data-ax-tree="gcn"><div>x<span class="gcn-b">y</span></div><div>x <span class="gcn-b">y</span></div><div><span class="gcn-b">y</span></div><p class="gcn-b">text</p><div><span class="gcn-a">y</span> z</div><div><span class="gcn-a">y</span><b> w</b></div><div><span><span class="gcn-a">y</span></span> v</div><div><span class="gcn-a">y</span><br>w</div><div><span class="gcn-ab">y</span> z</div><div>x<span class="gcn-bb">y</span></div><div><span class="gcn-pre">y</span></div><button class="gcn-a">button</button><a href="#" class="gcn-a">link</a> <div><span class="gcn-alt">alpha</span> <span class="gcn-alt">beta</span></div><button><span class="gcn-b">in a button</span></button></div>
+<!-- group: devtools-anywhere body kept: none -->
+<p id="body-none" data-ax-case="body-none">plain body</p>
+<!-- group: devtools-anywhere body kept: aria attribute -->
+<p id="body-aria" data-ax-case="body-aria">body with aria-label</p>
+<!-- group: devtools-anywhere body kept: id -->
+<p id="body-id" data-ax-case="body-id">body with an id</p>
+<!-- group: devtools-anywhere body kept: title -->
+<p id="body-title" data-ax-case="body-title">body with a title</p>
+<!-- group: devtools-anywhere body kept: contenteditable -->
+<p id="body-editable" data-ax-case="body-editable">editable body</p>
+<!-- group: devtools-anywhere body kept: click handler -->
+<p id="body-click" data-ax-case="body-click">body with an onclick handler</p>
+<!-- group: devtools-anywhere body kept: click handler property -->
+<p id="body-click-property" data-ax-case="body-click-property">body with an onclick property</p>
+<!-- group: devtools-anywhere body kept: other attribute -->
+<p id="body-lang" data-ax-case="body-lang">body with lang and a data attribute</p>
+<!-- group: devtools-anywhere tree shapes -->
+<div id="ts-details-closed" data-ax-tree="ts-details-closed"><details><summary>S</summary><p>content</p>text</details></div>
+<div id="ts-details-open" data-ax-tree="ts-details-open"><details open><summary>S</summary><p>content</p>text</details></div>
+<div id="ts-details-summaries" data-ax-tree="ts-details-summaries"><details open><p>before</p><summary>S1</summary><summary>S2</summary>text</details></div>
+<div id="ts-labels" data-ax-tree="ts-labels"><label>A <input type="checkbox"></label><label>B <input type="checkbox" aria-label="named"></label><label title="t">C <input type="radio"></label><label>F <input type="text"></label></div>
+<div id="ts-lists" data-ax-tree="ts-lists"><ul role="list"><li>list</li></ul><ul role="menu"><li role="menuitem">menu</li></ul><ol role="navigation"><li>navigation</li></ol><ul role="none"><li>none</li></ul><ul role="listbox"><li role="option">option</li></ul></div>
+<div id="ts-spaces" data-ax-tree="ts-spaces"><span style="display:inline-block">a</span> <span style="display:inline-block">b</span><div>c</div> <div>d</div><span> e </span> <b>f</b><button>g</button> h <input> <img alt="i" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="> <br> </div>
+<div id="ts-wrappers" data-ax-tree="ts-wrappers"><div>inline only</div><div><p>block child</p></div><span>plain span</span><span lang="fr">span with lang</span><div style="position:relative"><p>positioned</p></div><span style="display:inline-block"><p>inline-block</p></span><div style="display:contents"><p>contents</p></div><div id="ts-wrapper-id"><p>with an id</p></div><div style="display:inline-flex"><p>inline-flex</p></div><span style="position:absolute"><p>positioned span</p></span></div>
+<div id="ts-inert-referenced" data-ax-tree="ts-inert-referenced"><div inert><span id="ts-inert-desc" style="display:none">x</span></div><button aria-describedby="ts-inert-desc">b</button></div>
+<div id="ts-hidden" data-ax-tree="ts-hidden"><div style="display:none"><div><input id="ts-hidden-input"></div><p>gone</p></div><div aria-hidden="true"><div><button>button</button></div><p>gone</p></div><div style="visibility:hidden"><p>gone</p><p style="visibility:visible">shown again</p></div><div style="display:none"><span id="ts-hidden-label">label text</span></div><button aria-labelledby="ts-hidden-label">x</button><div inert><span><input type="checkbox"></span><a href="#">link</a></div><div style="display:none"><label>hidden label <input type="checkbox"></label><meter value="0.5"></meter></div></div>
+<!-- group: devtools-anywhere details in a flex box -->
+<div id="ts-details-flex" data-ax-tree="ts-details-flex"><details open style="display:flex"><summary>S</summary><span>a</span><span>b</span></details></div>
+<!-- group: devtools-anywhere elements in a label -->
+<div id="ts-label-elements" data-ax-tree="ts-label-elements"><label>D <b>bold</b> <input type="checkbox"></label><label>E <input type="checkbox" style="visibility:hidden"></label></div>
+<!-- group: devtools-anywhere select popups -->
+<div id="ts-select-role" data-ax-tree="ts-select-role"><select role="menu"><option>a</option></select><select role="listbox"><option>b</option></select><select role="button"><option>c</option></select><label>d <select role="menu"><option>e</option></select></label></div>
+<div id="ts-select-read" data-ax-tree="ts-select-read"><label>f <select><option>g</option></select></label><button aria-label="h"><select><option>i</option></select></button><div role="heading">j <select><optgroup label="k"><option>l</option></optgroup></select></div><span id="ts-select-ref"><select><option>m</option></select></span><input aria-describedby="ts-select-ref"><p>n <select><option>o</option></select></p><label for="ts-select-for">p</label><select id="ts-select-for"><option>q</option></select></div>
+<div id="ts-select-content" data-ax-tree="ts-select-content"><select aria-label="s">x</select><select>z<option>o</option>w</select><select>  </select><select><span>s</span><div>d</div><b>b</b><hr><p>p</p><span aria-hidden="true">h</span><option>o<span>in</span></option></select><label>q<select>t<span>s</span><option>o</option></select></label></div>
+<div id="ts-select-list" data-ax-tree="ts-select-list"><select size="2"></select><select multiple><optgroup label="g"></optgroup></select><select><optgroup label="h"></optgroup></select><select size="3">y</select><select size="3"><span>s</span><hr><option>o</option></select><label>a <select size="2"></select></label></div>
+<!-- group: devtools-anywhere meters -->
+<div id="ts-meter" data-ax-tree="ts-meter"><meter value="0.5"></meter><meter min="0" max="10" low="2" high="8" optimum="5" value="9">text <span>not shown</span></meter><label>r <meter value="1"></meter></label><meter role="progressbar" value="0.5"></meter><meter style="appearance:none" value="0"></meter></div>
+<div id="ts-meter-hidden" data-ax-tree="ts-meter-hidden"><meter style="visibility:hidden" value="0.5"></meter><meter style="display:none" value="0.5"></meter><div aria-hidden="true"><meter value="0.5"></meter></div><meter style="display:contents" value="0.5"></meter></div>
+<!-- group: devtools-anywhere meter content -->
+<div id="mc-meter" data-ax-tree="mc-meter"><meter value="0.5">50% <span id="mc-span" data-ax-case="mc-span">x</span><b id="mc-hidden" data-ax-case="mc-hidden" style="display:none">y</b></meter></div>
+<!-- group: devtools-anywhere nested select popups -->
+<div id="nsp-popups" data-ax-tree="nsp-popups"><select><div><span>v</span></div></select><select><div><span style="display:none">t</span></div></select><select><div style="display:none"><span>t</span></div></select><select><div><b style="display:none">t</b>w</div></select><select><div style="display:none"></div></select><select><div style="visibility:hidden"><span>t</span></div></select><select><div aria-hidden="true"><span style="display:none">t</span></div></select></div>
+<!-- group: devtools-anywhere hidden table parts and name sources -->
+<style>
+  .htp-before td::before { content: "k"; }
+</style>
+<div id="htp-rows" data-ax-tree="htp-rows"><table><tr style="display:none"><td>a<div>d</div></td><th>h</th></tr><tr style="visibility:hidden"><td>v</td></tr><tr aria-hidden="true"><td>h</td></tr><tr inert><td>i</td></tr><tr><td><div style="display:none">x</div>q</td><td style="visibility:hidden"><span style="visibility:visible">again</span></td><td aria-hidden="true">z</td><td style="display:none"><table><tr><td>nested</td></tr></table></td></tr></table></div>
+<div id="htp-sections" data-ax-tree="htp-sections"><table><caption style="display:none">c</caption><thead style="display:none"><tr><th>h</th></tr></thead><tbody style="display:none"><tr><th>b</th></tr></tbody><tr><td>d</td></tr><tfoot><tr style="display:none"><td>f</td></tr></tfoot></table><table><thead><tr style="display:none"><th>h</th></tr></thead><tr><td>d</td></tr></table></div>
+<div id="htp-hidden-table" data-ax-tree="htp-hidden-table"><div style="display:none"><table><tr><td>a</td></tr></table></div><div aria-hidden="true"><table role="presentation"><tr><td>b</td></tr></table></div><table style="display:none"><colgroup><col></colgroup><tfoot><tr><td>f</td></tr></tfoot></table><table><tr style="display:none"><td><button>b</button><input></td></tr></table></div>
+<div id="htp-pseudo" data-ax-tree="htp-pseudo"><table class="htp-before"><tr style="display:none"><td>a</td></tr><tr inert><td>i</td></tr><tr style="visibility:hidden"><td>v</td></tr><tr><td aria-hidden="true">h</td><td>s</td></tr></table></div>
+<div id="htp-names" data-ax-tree="htp-names"><label>L<span style="visibility:hidden"><b>x</b></span></label><div id="htp-names-target">T<span style="visibility:hidden"><b>x</b></span></div><button aria-labelledby="htp-names-target">b</button><input id="htp-names-input"><label for="htp-names-input"><table><tr><td>a</td><td style="visibility:hidden"><div>in</div></td><td><div style="display:none">out</div></td></tr></table></label></div>
+<div id="htp-details" data-ax-tree="htp-details"><details><summary>a</summary></details><details><summary>b</summary><!--c--></details><details><summary>c</summary> </details><details open><summary>d</summary></details><details><summary>e</summary><span style="display:none">f</span></details></div>
+<!-- group: devtools-anywhere aria-owns and hidden elements -->
+<div id="aoh-targets" data-ax-tree="aoh-targets"><button aria-owns="aoh-play">B<div aria-hidden="true"><span id="aoh-play">Play</span><span>Pause</span></div></button><h3 aria-owns="aoh-t1">x</h3><span aria-hidden="true" id="aoh-t1">self hidden</span><h3 aria-owns="aoh-t2">x</h3><div style="visibility:hidden"><span id="aoh-t2">not visible</span></div><h3 aria-owns="aoh-t3">x</h3><div inert><span id="aoh-t3">inert</span></div><h3 aria-owns="aoh-t4">x</h3><div aria-hidden="true"><p><span id="aoh-t4">shown<b aria-hidden="true">q</b></span></p></div><h3 aria-owns="aoh-t5">x</h3><div><span id="aoh-t5" hidden>no box</span></div></div>
+<div id="aoh-owners" data-ax-tree="aoh-owners"><div role="group" aria-owns="aoh-o1"><span hidden aria-owns="aoh-o1">ninja</span><mark id="aoh-o1">treasure</mark></div><h3><span aria-hidden="true" aria-owns="aoh-o2">vamp</span><mark id="aoh-o2">reflection</mark></h3><h3><div aria-hidden="true"><span aria-owns="aoh-o3">vamp</span></div><mark id="aoh-o3">reflection</mark></h3><h3><span inert aria-owns="aoh-o4">vamp</span><mark id="aoh-o4">inert owner</mark></h3><h3><span style="visibility:hidden" aria-owns="aoh-o5">vamp</span><mark id="aoh-o5">not visible</mark></h3><h3><div style="display:none"><span aria-owns="aoh-o6">vamp</span></div><mark id="aoh-o6">no box</mark></h3></div>
+<div id="aoh-inert-names" data-ax-tree="aoh-inert-names"><h3>x<span inert>y</span></h3><button>a<span inert>b</span></button><div id="aoh-inert-target">p<span inert>q</span></div><button aria-labelledby="aoh-inert-target"></button></div>
+<!-- group: devtools-anywhere owners shown again -->
+<div id="aoh-again" data-ax-tree="aoh-again"><div aria-owns="aoh-again-b"></div><div aria-hidden="true"><div id="aoh-again-b" aria-owns="aoh-again-c"></div></div><div id="aoh-again-c">x</div><div aria-owns="aoh-again-d"></div><div aria-hidden="true"><div id="aoh-again-d"><span aria-owns="aoh-again-e">s</span></div></div><div id="aoh-again-e">y</div></div>
+<!-- group: devtools-anywhere owners' generated content -->
+<style>
+  .aog::before { content: "k"; }
+  .aog::after { content: "z"; }
+</style>
+<div id="aog-owners" data-ax-tree="aog-owners"><h3><span class="aog" aria-owns="aog-1">v</span><mark id="aog-1">r</mark></h3><h3><span class="aog" inert aria-owns="aog-2">v</span><mark id="aog-2">r</mark></h3><h3><span class="aog" style="visibility:hidden" aria-owns="aog-3">v</span><mark id="aog-3">r</mark></h3><h3><span class="aog" aria-hidden="true" aria-owns="aog-4">v</span><mark id="aog-4">r</mark></h3><h3><span class="aog" hidden aria-owns="aog-5">v</span><mark id="aog-5">r</mark></h3></div>
+<!-- group: devtools-anywhere image input names -->
+<!-- Each image input has a name source for its default label, the browser's localized "Submit", compared without its text; one named by that label alone is left out, its name being localized. -->
+<div><input id="da-image-alt" data-ax-case="da-image-alt" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="alt"><input id="da-image-value" data-ax-case="da-image-value" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" value="value" title="title"><input id="da-image-empty-alt" data-ax-case="da-image-empty-alt" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="" title="title"><input id="da-image-all" data-ax-case="da-image-all" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="alt" value="value" title="title"><label for="da-image-label">label</label><input id="da-image-label" data-ax-case="da-image-label" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="alt"><input id="da-image-alt-title" data-ax-case="da-image-alt-title" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Go" title="Go"><input id="da-image-value-title" data-ax-case="da-image-value-title" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" value="Go" title="Go"><input id="da-image-aria" data-ax-case="da-image-aria" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" aria-label="aria" alt="alt"><span id="da-image-ref">ref</span><input id="da-image-labelledby" data-ax-case="da-image-labelledby" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" aria-labelledby="da-image-ref" aria-label="aria" alt="alt"><input id="da-image-title" data-ax-case="da-image-title" type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" title="title"><input type="submit" value="" title="title" id="da-image-empty-submit" data-ax-case="da-image-empty-submit"></div>
+<!-- group: devtools-anywhere title equal to the name -->
+<div><img id="da-title-img" data-ax-case="da-title-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Go" title="Go"><button id="da-title-content" data-ax-case="da-title-content" title="Go">Go</button><button id="da-title-label" data-ax-case="da-title-label" aria-label="Go" title="Go">x</button><input id="da-title-submit" data-ax-case="da-title-submit" type="submit" value="Go" title="Go"><a id="da-title-link" data-ax-case="da-title-link" href="#" title="Go">Go</a><input id="da-title-input" data-ax-case="da-title-input" aria-label="Go" title="Go"><label for="da-title-for">Go</label><input id="da-title-for" data-ax-case="da-title-for" title="Go"><input id="da-title-only" data-ax-case="da-title-only" title="Go"></div>
+<!-- group: devtools-anywhere generated text in names -->
+<div id="da-gen-names" data-ax-tree="da-gen-names"><style>#da-gen-pre::before{content:"  x"}#da-gen-pre-wrap::before{content:"  x  "}#da-gen-ib::after{content:"x ";display:inline-block}#da-gen-if::before{content:" y";display:inline-block}#da-gen-il::after{content:"x ";display:inline}</style><button id="da-gen-pre" data-ax-case="da-gen-pre" style="white-space:pre">b</button><button id="da-gen-pre-wrap" data-ax-case="da-gen-pre-wrap" style="white-space:pre-wrap">b</button><button id="da-gen-ib-b" data-ax-case="da-gen-ib-b">a<span id="da-gen-ib"></span>b</button><button id="da-gen-if-b" data-ax-case="da-gen-if-b">a<span id="da-gen-if"></span>b</button><button id="da-gen-il-b" data-ax-case="da-gen-il-b">a<span id="da-gen-il"></span>b</button></div>
+<!-- group: devtools-anywhere inert name targets -->
+<div id="da-inert-targets" data-ax-tree="da-inert-targets"><span id="da-inert-l" inert>Foo</span><button id="da-inert-lb" data-ax-case="da-inert-lb" aria-labelledby="da-inert-l">x</button><div inert><span id="da-inert-d">Bar <b>baz</b></span></div><button id="da-inert-db" data-ax-case="da-inert-db" aria-describedby="da-inert-d">y</button></div>
+<!-- group: devtools-anywhere sections with a role -->
+<div id="da-section-roles" data-ax-tree="da-section-roles"><section role="region"><header>h</header><aside>a</aside></section><section role="foo"><aside>a</aside><footer>f</footer></section><section role="form"><header>h</header></section></div>
+<!-- group: devtools-anywhere contextual landmarks -->
+<div id="da-landmarks" data-ax-tree="da-landmarks"><main><aside>a</aside><header>h</header><div><aside>a</aside></div></main><div role="main"><aside>a</aside><footer>f</footer></div><div role="article"><aside>a</aside><header>h</header></div><div role="navigation"><aside>a</aside></div><div role="complementary"><aside>a</aside></div><div role="region" aria-label="r"><aside>a</aside><header>h</header></div><section><aside>a</aside></section><section role="main"><aside>a</aside></section><article role="none"><aside>a</aside><header>h</header></article><main role="none"><header>h</header></main><article><aside aria-label="n">a</aside></article></div>
+<!-- group: devtools-anywhere wrappers in a label -->
+<div id="da-label-wrappers" data-ax-tree="da-label-wrappers"><label>a <b>b</b> <span>s</span> <custom-el>c</custom-el> <a>a</a> <small>m</small><input></label><label>b <b><b>b</b></b> <span><b>s</b></span> <span style="display:contents"><b>c</b></span> <em><b>e</b></em><input type="checkbox"></label><label style="display:contents">c <b>b</b></label><label role="none">d <span>s</span><b>b</b><input></label><label>e <b style="visibility:hidden">h</b><input type="radio" style="visibility:hidden"><button style="visibility:hidden">b</button></label><div id="da-label-wrappers-ref">f <span style="visibility:hidden">h</span></div><button aria-labelledby="da-label-wrappers-ref">x</button><div style="visibility:hidden"><label>g <b>b</b><input type="checkbox"></label></div><label style="visibility:hidden">h</label></div>
+<!-- group: devtools-anywhere details content -->
+<div id="da-details-content" data-ax-tree="da-details-content"><details open><summary>S</summary><span>a</span><span>b</span></details><details open><summary>S</summary>t<b>b</b><em>e</em></details><details open><summary>S</summary><span>a</span><div>d</div></details><details open style="display:flex"><summary>S</summary>t</details><details open style="display:grid"><summary>S</summary><span>a</span><div>d</div></details><details><summary>S</summary><span>a</span></details></div>
+<!-- group: devtools-anywhere display: contents in a name source -->
+<div id="da-contents-names" data-ax-tree="da-contents-names"><button>a<span style="display:contents">c</span></button><h2>a<span style="display:contents">c</span></h2><a href="#">a<span style="display:contents">c</span></a><table><tr><td>a<span style="display:contents">c</span></td></tr></table><div role="tab">a<span style="display:contents">c</span></div><div role="tooltip">a<span style="display:contents">c</span></div><label>a<span style="display:contents">c</span><input></label><label>a <span style="display:contents"><b>b</b></span></label><label>a <button>b<span style="display:contents">c</span></button></label><div id="da-contents-names-l">a<span style="display:contents">c</span></div><button aria-labelledby="da-contents-names-l">x</button><div id="da-contents-names-d">a<span style="display:contents">c</span></div><button aria-describedby="da-contents-names-d">x</button><p>a<span style="display:contents">c</span></p><ul><li>a<span style="display:contents">c</span></li></ul><div role="group">a<span style="display:contents">c</span></div><div>a<span style="display:contents">c</span></div><button>a<div role="group">g<span style="display:contents">c</span></div></button><button>a <span><span style="display:contents">c</span></span></button><div style="display:flex"><div role="button" style="display:contents">x <span>y</span></div></div></div>
+<!-- group: devtools-anywhere slotted elements -->
+<div id="da-slotted" data-ax-tree="da-slotted"><div><template shadowrootmode="open"><slot></slot></template><span>a</span><span style="display:contents">b</span>t</div><p><template shadowrootmode="open"><slot></slot></template><span>a</span>t</p><div><template shadowrootmode="open"><div><slot></slot></div></template><span>a</span>t</div><div><template shadowrootmode="open">x<b><slot></slot></b></template>t</div><div><template shadowrootmode="open"><span>x</span></template></div><div><template shadowrootmode="open"><p><slot>fb<span>f</span></slot></p></template></div><div><template shadowrootmode="open"><slot>fb</slot></template></div><div><template shadowrootmode="open">x<slot></slot></template></div><div><template shadowrootmode="open"><slot name="n"></slot><slot></slot></template><span slot="n">a</span>t</div><div><template shadowrootmode="open"><button>b<slot></slot></button></template></div><div><template shadowrootmode="open"><h2><slot></slot></h2></template>t</div></div>
+<!-- group: devtools-anywhere meter content owned -->
+<div id="da-meter-owned" data-ax-tree="da-meter-owned"><meter value="0.5"><span id="da-meter-owned-x">t</span></meter><div id="da-meter-owned-b" data-ax-case="da-meter-owned-b" role="button" aria-owns="da-meter-owned-x">b</div></div>
+<div id="da-meter-owner" data-ax-tree="da-meter-owner"><meter value="0.5"><span aria-owns="da-meter-owner-x"></span></meter><div id="da-meter-owner-b" data-ax-case="da-meter-owner-b" role="button"><b id="da-meter-owner-x">t</b></div></div>
+<div id="da-meter-owns" data-ax-tree="da-meter-owns"><meter id="da-meter-owns-m" data-ax-case="da-meter-owns-m" value="0.5" aria-owns="da-meter-owns-x"></meter><div id="da-meter-owns-b" data-ax-case="da-meter-owns-b" role="button"><b id="da-meter-owns-x">u</b></div></div>
+<!-- group: devtools-anywhere host owns -->
+<div id="da-ho-sel-self" data-ax-tree="da-ho-sel-self"><select aria-owns="da-ho-sel-self-o"><option id="da-ho-sel-self-o">a</option><option>b</option></select></div>
+<div id="da-ho-list-self" data-ax-tree="da-ho-list-self"><select size="3" aria-owns="da-ho-list-self-o"><option id="da-ho-list-self-o">a</option><option>b</option></select></div>
+<div id="da-ho-og-self" data-ax-tree="da-ho-og-self"><select size="3"><optgroup label="g" aria-owns="da-ho-og-self-o"><option>z</option><option id="da-ho-og-self-o">a</option></optgroup></select></div>
+<div id="da-ho-det-self" data-ax-tree="da-ho-det-self"><details aria-owns="da-ho-det-self-o"><summary id="da-ho-det-self-o">S</summary>c</details></div>
+<div id="da-ho-det-open-self" data-ax-tree="da-ho-det-open-self"><details open aria-owns="da-ho-det-open-self-o"><summary id="da-ho-det-open-self-o">S</summary>c</details></div>
+<div id="da-ho-sel" data-ax-tree="da-ho-sel"><select aria-owns="da-ho-sel-x"><option>a</option></select><div role="button" id="da-ho-sel-b" data-ax-case="da-ho-sel-b">b<span id="da-ho-sel-x">t</span></div></div>
+<div id="da-ho-list" data-ax-tree="da-ho-list"><select size="3" aria-owns="da-ho-list-x"><option>a</option></select><div role="button" id="da-ho-list-b" data-ax-case="da-ho-list-b">b<span id="da-ho-list-x">t</span></div></div>
+<div id="da-ho-og" data-ax-tree="da-ho-og"><select size="3"><optgroup label="g" aria-owns="da-ho-og-x"><option>a</option></optgroup></select><div role="button" id="da-ho-og-b" data-ax-case="da-ho-og-b">b<span id="da-ho-og-x">t</span></div></div>
+<div id="da-ho-det" data-ax-tree="da-ho-det"><details aria-owns="da-ho-det-x"><summary>S</summary>c</details><div role="button" id="da-ho-det-b" data-ax-case="da-ho-det-b">b<span id="da-ho-det-x">t</span></div></div>
+<div id="da-ho-ta" data-ax-tree="da-ho-ta"><textarea aria-owns="da-ho-ta-x">v</textarea><div role="button" id="da-ho-ta-b" data-ax-case="da-ho-ta-b">b<span id="da-ho-ta-x">t</span></div></div>
+<div id="da-ho-in" data-ax-tree="da-ho-in"><input value="v" aria-owns="da-ho-in-x"><div role="button" id="da-ho-in-b" data-ax-case="da-ho-in-b">b<span id="da-ho-in-x">t</span></div></div>
+<div id="da-ho-btn" data-ax-tree="da-ho-btn"><input type="button" value="v" aria-owns="da-ho-btn-x"><div role="button" id="da-ho-btn-b" data-ax-case="da-ho-btn-b">b<span id="da-ho-btn-x">t</span></div></div>
+<div id="da-ho-btn-empty" data-ax-tree="da-ho-btn-empty"><input type="button" aria-owns="da-ho-btn-empty-x"><div role="button" id="da-ho-btn-empty-b">b<span id="da-ho-btn-empty-x">t</span></div></div>
+<div id="da-ho-color" data-ax-tree="da-ho-color"><input type="color" aria-owns="da-ho-color-x"><div role="button" id="da-ho-color-b" data-ax-case="da-ho-color-b">b<span id="da-ho-color-x">t</span></div></div>
+<style>.da-ho-pse::before { content: "x"; } .da-ho-pse::after { content: "y"; }</style>
+<div id="da-ho-pse-btn" data-ax-tree="da-ho-pse-btn"><input class="da-ho-pse" type="button" value="v" id="da-ho-pse-btn-i" data-ax-case="da-ho-pse-btn-i"><input class="da-ho-pse" type="submit" value="s" id="da-ho-pse-sub-i" data-ax-case="da-ho-pse-sub-i"><input class="da-ho-pse" type="reset" value="r" id="da-ho-pse-rst-i" data-ax-case="da-ho-pse-rst-i"></div>
+<div id="da-ho-pse-own" data-ax-tree="da-ho-pse-own"><input class="da-ho-pse" type="button" value="v" aria-owns="da-ho-pse-own-x" id="da-ho-pse-own-i" data-ax-case="da-ho-pse-own-i"><input class="da-ho-pse" type="button" aria-owns="da-ho-pse-own-y" id="da-ho-pse-own-e" data-ax-case="da-ho-pse-own-e"><div role="button" id="da-ho-pse-own-b">b<span id="da-ho-pse-own-x">t</span><span id="da-ho-pse-own-y">u</span></div></div>
+<!-- group: devtools-anywhere figure title equal to the caption -->
+<div id="da-figure-title" data-ax-tree="da-figure-title"><figure id="da-figure-title-same" data-ax-case="da-figure-title-same" title="Cap"><img alt="i" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="><figcaption>Cap</figcaption></figure><figure id="da-figure-title-diff" data-ax-case="da-figure-title-diff" title="T"><figcaption>Cap</figcaption></figure></div>

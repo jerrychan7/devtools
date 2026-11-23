@@ -1,0 +1,63 @@
+// The page's own declaration blocks and media query lists, where the emulation rewrote them: what each was
+// written as, for showing. rewrite.ts keeps the records. The CSS text modules that read them are loaded outside
+// a page too, so this module reads no DOM when it loads, and the copy shownStyle makes is parsed by the native
+// CSSOM.
+import { ownCall, ownGet, ownPlayer, ownSheet, ownStyle } from '../../css/sheets/watch/cssom-watch';
+import { type BlockRecord, play } from '../../css/sheets/watch/written-blocks';
+import { unwrapSafeArea } from '../safe-area/safe-area';
+
+/** A text the page had, and what it was rewritten to: `applied` as it reads after the write. */
+export interface Rewritten {
+  original: string;
+  applied: string;
+  /** What the rewrite gave the original, as last written: while the text still reads `applied`, it is not written again. */
+  target: string;
+  /**
+   * For a declaration block rewritten from the record of its writes (rewrite.ts, planWritten), where its
+   * serialization does not tell what it declares: that record, which holds what the page wrote.
+   */
+  written?: BlockRecord;
+}
+
+/** The records of the declaration blocks the emulation rewrote, held weakly (rewrite.ts keeps them). */
+export const styles = new WeakMap<CSSStyleDeclaration, Rewritten>();
+
+/** The records of the media query lists the emulation rewrote, held weakly (rewrite.ts keeps them). */
+export const mediaLists = new WeakMap<MediaList, Rewritten>();
+
+/**
+ * A declaration block as the page wrote it, for showing (and for an edit to undo to): the original of a
+ * rewritten one, and the env() of a safe area inset the rewrite made a var() of (safe-area.ts).
+ */
+export function shownCssText(style: CSSStyleDeclaration): string {
+  const rewritten = styles.get(style);
+  return unwrapSafeArea(rewritten && rewritten.applied === style.cssText ? rewritten.original : style.cssText);
+}
+
+/** A media query list as the page wrote it, for showing: the original of a rewritten one. */
+export function shownMedia(list: MediaList): string {
+  const rewritten = mediaLists.get(list);
+  return rewritten && rewritten.applied === list.mediaText ? rewritten.original : list.mediaText;
+}
+
+/**
+ * The declaration block to show for `style`: a copy holding the page's own declarations where the emulation
+ * rewrote them (shownCssText), or `style` itself. The copy is the block of a rule in a sheet of the agent's own,
+ * parsed natively, so no rewrite applies to it.
+ */
+export function shownStyle(style: CSSStyleDeclaration): CSSStyleDeclaration {
+  // Never rewritten: the text the page wrote is the one it has.
+  if (!styles.has(style)) return style;
+  const rewritten = styles.get(style);
+  // A block rewritten from the record of its writes is shown by them: its serialization has not all of it.
+  const written = rewritten?.written && rewritten.applied === style.cssText ? rewritten.written : undefined;
+  const original = written ? undefined : shownCssText(style);
+  if (original === style.cssText) return style;
+  const sheet = ownSheet();
+  ownCall(sheet, 'replaceSync', written ? 'a {}' : `a {${original}}`);
+  const rule = ownCall<CSSRule | null>(ownGet<CSSRuleList>(sheet, 'cssRules'), 'item', 0);
+  if (!rule) return style;
+  const copy = ownStyle(rule as CSSStyleRule);
+  if (written) play(written, ownPlayer(copy));
+  return copy;
+}

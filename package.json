@@ -5,8 +5,8 @@
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm run build && pnpm -r --parallel run dev",
-    "typecheck": "pnpm run build && pnpm -r run typecheck && tsc -p tsconfig.scripts.json && tsc -p tsconfig.tests.json",
-    "test": "pnpm run build && node --test --test-concurrency=4 \"tests/**/*.test.ts\" \"packages/*/src/**/*.test.ts\" \"playground/**/*.test.ts\"",
+    "typecheck": "pnpm run build && pnpm -r run typecheck && tsc -p scripts && tsc -p tests",
+    "test": "pnpm run build && node --test --test-concurrency=4 --test-timeout=300000 \"tests/**/*.test.ts\" \"packages/*/src/**/*.test.ts\" \"playground/**/*.test.ts\"",
     "playground": "node playground/server.ts",
     "remote": "node packages/remote-server/dist/cli.js --port 8790 --host 127.0.0.1 --no-token --public-url http://localhost:8790/",
     "licenses:update": "node scripts/third-party-licenses.ts",

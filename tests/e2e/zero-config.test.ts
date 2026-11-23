@@ -119,7 +119,9 @@ test('in shell mode the Service Worker injects the probe into pages without it',
     if (!pageWindow) throw new Error('no page frame');
     pageWindow.location.href = '/tests/e2e/pages/no-probe.html';
   });
-  await waitFor(async () => logged(await received(), 'no-probe early'));
+  // A navigation through the Service Worker, then the probe and the bundle it loads: slower than
+  // the other waits on a busy runner.
+  await waitFor(async () => logged(await received(), 'no-probe early'), 20000);
 });
 
 test('the Service Worker adds headers to requests known from Resource Timing', async () => {
@@ -130,7 +132,7 @@ test('the Service Worker adds headers to requests known from Resource Timing', a
       const probe = pageWindow.__devtoolsAnywhereProbe__;
       return probe?.requests.find(r => r.url.includes('cross.css?n=service-worker'));
     });
-  await waitFor(async () => (await find())?.responseHeaders?.['content-type']);
+  await waitFor(async () => (await find())?.responseHeaders?.['content-type'], 20000);
   const rec = await find();
   assert.ok(rec);
   assert.equal(rec.type, 'Stylesheet');

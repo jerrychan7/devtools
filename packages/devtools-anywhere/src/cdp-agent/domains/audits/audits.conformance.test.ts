@@ -84,11 +84,15 @@ describe('Audits', () => {
     assert.deepEqual(diffSubset(VOLATILE_DETAILS(ours), VOLATILE_DETAILS(chrome)), []);
   });
 
-  test('deprecations match Chrome', async () => {
+  test('deprecations match Chrome, but for where the API was called', async () => {
     await t.page.evaluate('window.webkitRequestAnimationFrame(() => {})');
     const [chrome] = await issuesOf(t.chrome, 'DeprecationIssue', 1);
     const [ours] = await issuesOf(t.ours, 'DeprecationIssue', 1);
-    assert.deepEqual(diffSubset(VOLATILE_DETAILS([ours]), VOLATILE_DETAILS([chrome])), []);
+    // Chrome points at the calling script; the ReportingObserver report has no location, so
+    // ours gives the page (docs/limitations.md). Everything else is compared.
+    const located = (issue: unknown) =>
+      JSON.parse(JSON.stringify(issue, (key, value: unknown) => (key === 'sourceCodeLocation' ? undefined : value)));
+    assert.deepEqual(diffSubset(VOLATILE_DETAILS([located(ours)]), VOLATILE_DETAILS([located(chrome)])), []);
   });
 
   test('quirks mode documents match Chrome', async () => {

@@ -32,7 +32,7 @@ pnpm test        # 构建所有包，然后在真实 Chrome 上跑全部测试
 
 ### 构建 DevTools 前端（只需一次）
 
-前端用 Chromium 的工具链从官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) 源码构建。大约需要 3 GB 磁盘（不带历史的源码检出 2 GB，构建输出 0.3 GB，depot_tools 0.8 GB），第一次需要较快的网络。
+前端用 Chromium 的工具链从官方 [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) 源码构建。大约需要 4 GB 磁盘（不带历史的源码检出 2 GB，上游 DEPS 拉取而构建用不到的 emscripten 工具链 1.1 GB，构建输出 0.3 GB，depot_tools 0.8 GB），第一次需要较快的网络。
 
 ```bash
 # depot_tools：Chromium 的 gclient/gn/autoninja（以 .ignore 结尾的目录不会进 git）；

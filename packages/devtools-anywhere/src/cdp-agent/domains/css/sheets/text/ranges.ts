@@ -5,7 +5,7 @@ import { type CssOutline, ROOT } from '../parse/css-outline';
 import { outline } from '../parse/css-outline-wasm';
 import { lineStarts, offsetAt, positionAt } from './text-lines';
 import type { Protocol } from 'devtools-protocol';
-import { shownStyle } from '../../../emulation/shown-style';
+import { shownStyle } from '../../../emulation/rewrite/shown-style';
 import { type CSSStyle, type Written, styleOf } from '../../style';
 import { type SheetSource, childRules } from './pair';
 import { reportedComment } from './commented';

@@ -1,0 +1,1765 @@
+<!--
+Accessibility conformance cases: the input HTML only, each element marked data-ax-case compared
+with real Chrome (test-support/accessibility.ts). Imported from:
+- dom-accessibility-api (https://github.com/eps1lon/dom-accessibility-api), commit
+  a1828981f407b6cd6dc9d7b1046a618af93d0270, groups "dom-accessibility-api …".
+  MIT License. Copyright (c) 2020 Sebastian Silbermann
+- web-platform-tests (https://github.com/web-platform-tests/wpt), commit
+  73abd6299d0100763f0dfab7d30947282f626021, groups "wpt <path>": the file's body without its
+  scripts. The 3-Clause BSD License. Copyright © web-platform-tests contributors
+Ids were added to the elements compared; whitespace is part of the input.
+The licenses in full: LICENSES in this directory.
+-->
+<!-- group: dom-accessibility-api roles -->
+<div><a id="lib-R1" data-ax-case="lib-R1" href="any"></a></div>
+<div><a id="lib-R2" data-ax-case="lib-R2"></a></div>
+<div><abbr id="lib-R3" data-ax-case="lib-R3"></abbr></div>
+<div><address id="lib-R4" data-ax-case="lib-R4"></address></div>
+<div><area id="lib-R5" data-ax-case="lib-R5" href="any"></div>
+<div><area id="lib-R6" data-ax-case="lib-R6"></div>
+<div><article id="lib-R7" data-ax-case="lib-R7"></article></div>
+<div><aside id="lib-R8" data-ax-case="lib-R8"></aside></div>
+<div><audio id="lib-R9" data-ax-case="lib-R9"></audio></div>
+<div><base id="lib-R10" data-ax-case="lib-R10"></div>
+<div><blockquote id="lib-R11" data-ax-case="lib-R11"></blockquote></div>
+<div><button id="lib-R13" data-ax-case="lib-R13"></button></div>
+<div><canvas id="lib-R14" data-ax-case="lib-R14"></canvas></div>
+<div><table><caption id="lib-R15" data-ax-case="lib-R15"></caption></table></div>
+<div><table><colgroup><col id="lib-R16" data-ax-case="lib-R16"></colgroup></table></div>
+<div><table><colgroup id="lib-R17" data-ax-case="lib-R17"></colgroup></table></div>
+<div><datalist id="lib-R18" data-ax-case="lib-R18"></datalist></div>
+<div><dl><dd id="lib-R19" data-ax-case="lib-R19"></dd></dl></div>
+<div><del id="lib-R20" data-ax-case="lib-R20"></del></div>
+<div><details id="lib-R21" data-ax-case="lib-R21"></details></div>
+<div><dialog id="lib-R22" data-ax-case="lib-R22"></dialog></div>
+<div><div id="lib-R23" data-ax-case="lib-R23"></div></div>
+<div><dl id="lib-R24" data-ax-case="lib-R24"></dl></div>
+<div><dl><dt id="lib-R25" data-ax-case="lib-R25"></dt></dl></div>
+<div><em id="lib-R26" data-ax-case="lib-R26"></em></div>
+<div><embed id="lib-R27" data-ax-case="lib-R27"></div>
+<div><figure><figcaption id="lib-R28" data-ax-case="lib-R28"></figcaption></figure></div>
+<div><fieldset id="lib-R29" data-ax-case="lib-R29"></fieldset></div>
+<div><figure id="lib-R30" data-ax-case="lib-R30"></figure></div>
+<div><footer id="lib-R31" data-ax-case="lib-R31"></footer></div>
+<div><form id="lib-R32" data-ax-case="lib-R32"></form></div>
+<div><h1 id="lib-R33" data-ax-case="lib-R33"></h1></div>
+<div><h2 id="lib-R34" data-ax-case="lib-R34"></h2></div>
+<div><h3 id="lib-R35" data-ax-case="lib-R35"></h3></div>
+<div><h4 id="lib-R36" data-ax-case="lib-R36"></h4></div>
+<div><h5 id="lib-R37" data-ax-case="lib-R37"></h5></div>
+<div><h6 id="lib-R38" data-ax-case="lib-R38"></h6></div>
+<div><header id="lib-R39" data-ax-case="lib-R39"></header></div>
+<div><hgroup id="lib-R40" data-ax-case="lib-R40"></hgroup></div>
+<div><iframe id="lib-R43" data-ax-case="lib-R43"></iframe></div>
+<div><img id="lib-R44" data-ax-case="lib-R44" alt="text"></div>
+<div><img id="lib-R46" data-ax-case="lib-R46" alt=""></div>
+<div><input id="lib-R47" data-ax-case="lib-R47" type="button"></div>
+<div><input id="lib-R54" data-ax-case="lib-R54" type="hidden"></div>
+<div><input id="lib-R65" data-ax-case="lib-R65" list="" type="text"></div>
+<div><input id="lib-R66" data-ax-case="lib-R66" list="" type="search"></div>
+<div><input id="lib-R67" data-ax-case="lib-R67" list="" type="tel"></div>
+<div><input id="lib-R68" data-ax-case="lib-R68" list="" type="url"></div>
+<div><input id="lib-R69" data-ax-case="lib-R69" list="" type="email"></div>
+<div><ins id="lib-R73" data-ax-case="lib-R73"></ins></div>
+<div><label id="lib-R74" data-ax-case="lib-R74"></label></div>
+<div><fieldset><legend id="lib-R75" data-ax-case="lib-R75"></legend></fieldset></div>
+<div><ul><li id="lib-R76" data-ax-case="lib-R76"></li></ul></div>
+<div><link id="lib-R77" data-ax-case="lib-R77" href="some"></div>
+<div><main id="lib-R78" data-ax-case="lib-R78"></main></div>
+<div><map id="lib-R79" data-ax-case="lib-R79"></map></div>
+<div><math id="lib-R80" data-ax-case="lib-R80"></math></div>
+<div><menu id="lib-R81" data-ax-case="lib-R81"></menu></div>
+<div><meta id="lib-R82" data-ax-case="lib-R82"></div>
+<div><meter id="lib-R83" data-ax-case="lib-R83"></meter></div>
+<div><nav id="lib-R84" data-ax-case="lib-R84"></nav></div>
+<div><noscript id="lib-R85" data-ax-case="lib-R85"></noscript></div>
+<div><object id="lib-R86" data-ax-case="lib-R86"></object></div>
+<div><ol id="lib-R87" data-ax-case="lib-R87"></ol></div>
+<div><select><optgroup id="lib-R88" data-ax-case="lib-R88"></optgroup></select></div>
+<div><select><option id="lib-R89" data-ax-case="lib-R89"></option></select></div>
+<div><output id="lib-R90" data-ax-case="lib-R90"></output></div>
+<div><p id="lib-R91" data-ax-case="lib-R91"></p></div>
+<div><object><param id="lib-R92" data-ax-case="lib-R92"></object></div>
+<div><picture id="lib-R93" data-ax-case="lib-R93"></picture></div>
+<div><pre id="lib-R94" data-ax-case="lib-R94"></pre></div>
+<div><progress id="lib-R95" data-ax-case="lib-R95"></progress></div>
+<div><script id="lib-R96" data-ax-case="lib-R96"></script></div>
+<div><section id="lib-R97" data-ax-case="lib-R97"></section></div>
+<div><select id="lib-R98" data-ax-case="lib-R98"></select></div>
+<div><select id="lib-R99" data-ax-case="lib-R99" size="1"></select></div>
+<div><select id="lib-R100" data-ax-case="lib-R100" size="2"></select></div>
+<div><select id="lib-R101" data-ax-case="lib-R101" multiple></select></div>
+<div><slot id="lib-R102" data-ax-case="lib-R102"></slot></div>
+<div><video><source id="lib-R103" data-ax-case="lib-R103"></video></div>
+<div><span id="lib-R104" data-ax-case="lib-R104"></span></div>
+<div><strong id="lib-R105" data-ax-case="lib-R105"></strong></div>
+<div><svg id="lib-R107" data-ax-case="lib-R107"></svg></div>
+<div><sub id="lib-R108" data-ax-case="lib-R108"></sub></div>
+<div><details><summary id="lib-R109" data-ax-case="lib-R109"></summary></details></div>
+<div><sup id="lib-R110" data-ax-case="lib-R110"></sup></div>
+<div><table id="lib-R111" data-ax-case="lib-R111"></table></div>
+<div><table><tbody id="lib-R112" data-ax-case="lib-R112"></tbody></table></div>
+<div><template id="lib-R113" data-ax-case="lib-R113"></template></div>
+<div><textarea id="lib-R114" data-ax-case="lib-R114"></textarea></div>
+<div><table><tfoot id="lib-R115" data-ax-case="lib-R115"></tfoot></table></div>
+<div><table><thead id="lib-R116" data-ax-case="lib-R116"></thead></table></div>
+<div><time id="lib-R117" data-ax-case="lib-R117"></time></div>
+<div><title id="lib-R118" data-ax-case="lib-R118"></title></div>
+<div><table><tr><td id="lib-R119" data-ax-case="lib-R119"></td></tr></table></div>
+<div><table><tr><th id="lib-R120" data-ax-case="lib-R120"></th></tr></table></div>
+<div><table><tr id="lib-R121" data-ax-case="lib-R121"></tr></table></div>
+<div><video><track id="lib-R122" data-ax-case="lib-R122"></video></div>
+<div><ul id="lib-R123" data-ax-case="lib-R123"></ul></div>
+<div><img id="lib-R125" data-ax-case="lib-R125" alt="" aria-label="foo"></div>
+<div><h1 id="lib-R126" data-ax-case="lib-R126" aria-describedby="comment-1" role="presentation"></h1></div>
+<div><h1 id="lib-R127" data-ax-case="lib-R127" aria-describedby="comment-1" role="none"></h1></div>
+<div><div id="lib-R128" data-ax-case="lib-R128" aria-label="hello" role="presentation"></div></div>
+<div><div id="lib-R129" data-ax-case="lib-R129" aria-label="hello" role="none"></div></div>
+<div><div id="lib-E1" data-ax-case="lib-E1" role="textbox"></div></div>
+<div><div id="lib-E2" data-ax-case="lib-E2" role="  textbox  "></div></div>
+<div><div id="lib-E3" data-ax-case="lib-E3" role="textbox input"></div></div>
+<div><div id="lib-E4" data-ax-case="lib-E4" role="  "></div></div>
+<div><h1 id="lib-E7" data-ax-case="lib-E7" role="presentation" aria-describedby="lib-E7-c1">t</h1><p id="lib-E7-c1">c</p></div>
+<div><h1 id="lib-E8" data-ax-case="lib-E8" role="none" aria-describedby="lib-E8-c1">t</h1><p id="lib-E8-c1">c</p></div>
+<div><div id="lib-E9" data-ax-case="lib-E9" role="presentation" aria-label="hello"></div></div>
+<div><div id="lib-E10" data-ax-case="lib-E10" role="none" aria-label="hello"></div></div>
+<div><img id="lib-E11" data-ax-case="lib-E11" alt="" aria-label="a logo" role="presentation"></div>
+<div><img id="lib-E12" data-ax-case="lib-E12" alt="" aria-label="a logo" role="none"></div>
+<div><div id="lib-O1" data-ax-case="lib-O1" aria-hidden="false"></div></div>
+<div><div style="visibility:hidden"><div id="lib-O2" data-ax-case="lib-O2" style="visibility:visible">v</div></div></div>
+<div><div id="lib-O3" data-ax-case="lib-O3" hidden>h</div></div>
+<div><div id="lib-O4" data-ax-case="lib-O4" style="visibility:hidden">v</div></div>
+<div><div id="lib-O5" data-ax-case="lib-O5" aria-hidden="true">a</div></div>
+<div><div id="lib-O6" data-ax-case="lib-O6" style="display:none">d</div></div>
+<div><div style="display:none"><button id="lib-O7" data-ax-case="lib-O7">b</button></div></div>
+<div><button id="lib-O8" data-ax-case="lib-O8" aria-disabled="true">b</button></div>
+<div><button id="lib-O9" data-ax-case="lib-O9" disabled="true">b</button></div>
+<div><button id="lib-O10" data-ax-case="lib-O10" aria-disabled="false">b</button></div>
+<div><div id="lib-O11" data-ax-case="lib-O11" disabled>d</div></div>
+<!-- group: dom-accessibility-api R106 -->
+<div><style id="lib-R106" data-ax-case="lib-R106"></style></div>
+<!-- group: wpt core-aam/role/roles-contextual.html -->
+<p>Tests contextual computed role mappings defined in <a href="https://w3c.github.io/core-aam/">HTML AAM</a>, where the returned computed role is expected to change based on the context. Most test names correspond to a unique ID defined in the spec.<p>
+
+<p>These should remain in alphabetical order.</p>
+
+<!-- role-map-region and role-map-region-nameless -->
+<div role="region" data-testname="role-map-region" aria-label="x" data-expectedrole="region" class="ex" id="role-roles-contextual-1" data-ax-case="role-roles-contextual-1">x</div>
+<div role="region" data-testname="role-map-region-nameless" class="ex-generic" id="role-roles-contextual-2" data-ax-case="role-roles-contextual-2">x</div>
+<div role="region" data-testname="role-map-region-aria-label-empty" class="ex-generic" aria-label="" id="role-roles-contextual-3" data-ax-case="role-roles-contextual-3">x</div>
+<div role="region" data-testname="role-map-region-aria-label-whitespace" class="ex-generic" aria-label=" " id="role-roles-contextual-4" data-ax-case="role-roles-contextual-4">x</div>
+<div role="region" data-testname="role-map-region-aria-labelledby" data-expectedrole="region" class="ex" aria-labelledby="labelledby" id="role-roles-contextual-5" data-ax-case="role-roles-contextual-5">x</div>
+<div role="region" data-testname="role-map-region-aria-labelledby-non-existing" class="ex-generic" aria-labelledby="non-existing" id="role-roles-contextual-6" data-ax-case="role-roles-contextual-6">x</div>
+<div role="region" data-testname="role-map-region-title" data-expectedrole="region" title="x" class="ex" id="role-roles-contextual-7" data-ax-case="role-roles-contextual-7">x</div>
+<div role="region" data-testname="role-map-region-title-empty" class="ex-generic" title="" id="role-roles-contextual-8" data-ax-case="role-roles-contextual-8">x</div>
+
+<!-- element to reference for aria-labelledby tests -->
+<div id="labelledby">labelledby</div>
+<div id="empty"></div>
+<div id="space"> </div>
+<!-- group: wpt html-aam/area-role.html -->
+<map name="areamap">
+  <area shape="rect" coords="0,0,15,15" href="#" alt="x" data-testname="el-area" data-expectedrole="link" class="ex" id="html-aam-area-role-1" data-ax-case="html-aam-area-role-1">
+  <area shape="rect" coords="15,15,31,31" alt="x" data-testname="el-area-no-href" class="ex-generic" id="html-aam-area-role-2" data-ax-case="html-aam-area-role-2">
+</map>
+<img usemap="#areamap" style="width: 32px; height: 32px;" alt="x" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
+<!-- group: wpt html-aam/dir-role.tentative.html -->
+<p>Tentative test for the expected role mappings of the obsolete <code>dir</code> element.
+  The computedrole mappings are defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>.<p>
+
+<p>Merge the outcome of this test into roles.html in the appropriate alphabetical order, when it is no longer considered tentative:</p>
+
+<dir data-testname="el-dir" data-expectedrole="list" class="ex" id="html-aam-dir-role-tentative-1" data-ax-case="html-aam-dir-role-tentative-1"><li>x</li><li>x</li></dir>
+<!-- group: wpt html-aam/heading/invalid-nesting.html -->
+<h1>HTML-AAM tests for invalidly nested heading elements</h1>
+  <p>Equivalent ARIA patterns tested in <code>/wai-aria/heading/invalid-nesting.tentative.html</code>.</p>
+
+  <h2>Accessible names and roles</h2>
+  <hr>
+
+  <!-- [SIC] Empty heading contents, which throws a parser warning. -->
+  <h1
+    class="ex-label ex-role"
+    data-testname="h1 with invalid h2 descendant should not inherit accname from the text contents of the contained h2, and should still convey heading role"
+    data-expectedlabel=""
+    data-expectedrole="heading"
+   id="heading-invalid-nesting-1" data-ax-case="heading-invalid-nesting-1">
+    <h2
+      class="ex-label ex-role"
+      data-testname="Invalidly nested h2 should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Invalid h2"
+      data-expectedrole="heading"
+     id="heading-invalid-nesting-2" data-ax-case="heading-invalid-nesting-2">Invalid h2</h2>
+  </h1>
+
+  <h4
+    class="ex-label ex-role"
+    data-testname="h4 with invalid h3 descendant should not inherit accname from the text contents of the contained h3, and should still convey heading role"
+    data-expectedlabel=""
+    data-expectedrole="heading"
+   id="heading-invalid-nesting-3" data-ax-case="heading-invalid-nesting-3">
+    <h3
+      class="ex-label ex-role"
+      data-testname="Invalidly nested h3 should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Invalid h3"
+      data-expectedrole="heading"
+     id="heading-invalid-nesting-4" data-ax-case="heading-invalid-nesting-4">Invalid h3</h3>
+  </h4>
+
+  <h5
+    class="ex-label ex-role"
+    data-testname="h5 with invalid h6 descendant should not inherit accname from the text contents of the contained h6, and should still convey heading role"
+    data-expectedlabel=""
+    data-expectedrole="heading"
+   id="heading-invalid-nesting-5" data-ax-case="heading-invalid-nesting-5">
+    <h6
+      class="ex-label ex-role"
+      data-testname="Invalidly nested h6 should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Invalid h6"
+      data-expectedrole="heading"
+     id="heading-invalid-nesting-6" data-ax-case="heading-invalid-nesting-6">Invalid h6</h6>
+  </h5>
+
+  <h1
+    class="ex-label ex-role"
+    data-testname="h1 with text contents and invalid h2 descendant should not accumulate accname from the text contents of the contained h2, and should still convey heading role"
+    data-expectedlabel="Chocolate"
+    data-expectedrole="heading"
+   id="heading-invalid-nesting-7" data-ax-case="heading-invalid-nesting-7">Chocolate
+    <h2>Peanut butter</h2>
+  </h1>
+
+  <h2>No heading ancestors</h2>
+  <hr>
+
+  <h1>One
+    <h2
+      class="ex-no-heading-ancestor"
+      data-testname="h2 invalidly nested inside h1 should not, after parsing, have any DOM ancestor with a heading role"
+    >Two
+      <h3
+        class="ex-no-heading-ancestor"
+        data-testname="h3 invalidly nested inside h1 > h2 should not, after parsing, have any DOM ancestor with a heading role"
+      >Three</h3>
+    </h2>
+  </h1>
+<!-- group: wpt html-aam/img-src-srcset-roles.tentative.html -->
+<p>Tentative test for the expected role mappings of the <code>img</code> element to ensure
+   it is exposed with the correct role when the <code>src</code>, <code>srcset</code>, both or neither
+   attributes are specified.</p>
+  <p>The computedrole mappings are defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>.<p>
+
+<p>Merge the outcome of this test into roles.html in the appropriate alphabetical order, when it is no longer considered tentative:</p>
+
+<div hidden id=labelledby>x</div>
+<div hidden id="empty"></div>
+<div hidden id="space"> </div>
+
+<h2>Image role:</h2>
+<img data-testname="el-img-no-src-or-srcset-but-name-from-alt" data-expectedrole="image" class="ex"
+  alt=x id="html-aam-img-src-srcset-roles-tentative-1" data-ax-case="html-aam-img-src-srcset-roles-tentative-1">
+<img data-testname="el-img-no-src-or-srcset-but-name-from-title" data-expectedrole="image" class="ex"
+  title=x id="html-aam-img-src-srcset-roles-tentative-2" data-ax-case="html-aam-img-src-srcset-roles-tentative-2">
+<img data-testname="el-img-no-src-or-srcset-but-name-from-aria-label" data-expectedrole="image" class="ex"
+  aria-label=foo id="html-aam-img-src-srcset-roles-tentative-3" data-ax-case="html-aam-img-src-srcset-roles-tentative-3">
+<img data-testname="el-img-no-src-or-srcset-but-name-from-aria-labelledby" data-expectedrole="image" class="ex"
+  aria-labelledby=labelledby id="html-aam-img-src-srcset-roles-tentative-4" data-ax-case="html-aam-img-src-srcset-roles-tentative-4">
+
+<img data-testname="el-img-srcset-no-src-no-name" data-expectedrole="image" class="ex"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" id="html-aam-img-src-srcset-roles-tentative-5" data-ax-case="html-aam-img-src-srcset-roles-tentative-5">
+<img data-testname="el-img-srcset-and-empty-src-no-name" data-expectedrole="image" class="ex"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" src id="html-aam-img-src-srcset-roles-tentative-6" data-ax-case="html-aam-img-src-srcset-roles-tentative-6">
+<img data-testname="el-img-srcset-broken-value-and-empty-src-no-name" data-expectedrole="image" class="ex"
+  src srcset="..." id="html-aam-img-src-srcset-roles-tentative-7" data-ax-case="html-aam-img-src-srcset-roles-tentative-7">
+<img data-testname="el-img-src-broken-value-and-empty-srcset-no-name" data-expectedrole="image" class="ex"
+  srcset src="..." id="html-aam-img-src-srcset-roles-tentative-8" data-ax-case="html-aam-img-src-srcset-roles-tentative-8">
+
+<img data-testname="el-img-empty-src-with-name-from-title" data-expectedrole="image" class="ex"
+  src title=x id="html-aam-img-src-srcset-roles-tentative-9" data-ax-case="html-aam-img-src-srcset-roles-tentative-9">
+<img data-testname="el-img-empty-srcset-with-name-from-title" data-expectedrole="image" class="ex"
+  srcset title=x id="html-aam-img-src-srcset-roles-tentative-10" data-ax-case="html-aam-img-src-srcset-roles-tentative-10">
+<img data-testname="el-img-empty-src-with-name-from-alt" data-expectedrole="image" class="ex"
+  src alt=x id="html-aam-img-src-srcset-roles-tentative-11" data-ax-case="html-aam-img-src-srcset-roles-tentative-11">
+<img data-testname="el-img-empty-srcset-with-name-from-alt" data-expectedrole="image" class="ex"
+  srcset alt=x id="html-aam-img-src-srcset-roles-tentative-12" data-ax-case="html-aam-img-src-srcset-roles-tentative-12">
+<img data-testname="el-img-empty-src-with-name-from-aria-label" data-expectedrole="image" class="ex"
+  src aria-label=x id="html-aam-img-src-srcset-roles-tentative-13" data-ax-case="html-aam-img-src-srcset-roles-tentative-13">
+<img data-testname="el-img-empty-srcset-with-name-from-aria-label" data-expectedrole="image" class="ex"
+  srcset aria-label=x id="html-aam-img-src-srcset-roles-tentative-14" data-ax-case="html-aam-img-src-srcset-roles-tentative-14">
+<img data-testname="el-img-empty-src-with-name-from-aria-labelledby" data-expectedrole="image" class="ex"
+  src aria-labelledby=labelledby id="html-aam-img-src-srcset-roles-tentative-15" data-ax-case="html-aam-img-src-srcset-roles-tentative-15">
+<img data-testname="el-img-empty-srcset-with-name-from-aria-labelledby" data-expectedrole="image" class="ex"
+  srcset aria-labelledby=labelledby id="html-aam-img-src-srcset-roles-tentative-16" data-ax-case="html-aam-img-src-srcset-roles-tentative-16">
+
+<img data-testname="el-img-srcset-empty-alt-and-name-from-aria-label" data-expectedrole="image" class="ex"
+  srcset=data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw== alt aria-label=foo id="html-aam-img-src-srcset-roles-tentative-17" data-ax-case="html-aam-img-src-srcset-roles-tentative-17">
+<img data-testname="el-img-srcset-empty-alt-and-name-from-aria-labelledby" data-expectedrole="image" class="ex"
+  srcset=data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw== alt aria-labelledby=labelledby id="html-aam-img-src-srcset-roles-tentative-18" data-ax-case="html-aam-img-src-srcset-roles-tentative-18">
+
+<!-- the following are revised tests from roles-contextual.html to use srcset insetead of the src attribute -->
+<!-- img empty alt -> ./roles.html -->
+<img data-testname="el-img-empty-alt-aria-label" data-expectedrole="image" class="ex"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-label="x" id="html-aam-img-src-srcset-roles-tentative-19" data-ax-case="html-aam-img-src-srcset-roles-tentative-19">
+<img data-testname="el-img-empty-alt-aria-labelledby" data-expectedrole="image" class="ex"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-labelledby="labelledby" id="html-aam-img-src-srcset-roles-tentative-20" data-ax-case="html-aam-img-src-srcset-roles-tentative-20">
+
+<h2>Presentation / None / Generic role</h2>
+<img data-testname="el-img-empty-alt-aria-label-empty" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-label="" id="html-aam-img-src-srcset-roles-tentative-21" data-ax-case="html-aam-img-src-srcset-roles-tentative-21">
+<img data-testname="el-img-empty-alt-aria-label-whitespace" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-label=" " id="html-aam-img-src-srcset-roles-tentative-22" data-ax-case="html-aam-img-src-srcset-roles-tentative-22">
+<img data-testname="el-img-empty-alt-aria-labelledby-non-existing" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-labelledby="non-existing" id="html-aam-img-src-srcset-roles-tentative-23" data-ax-case="html-aam-img-src-srcset-roles-tentative-23">
+<img data-testname="el-img-empty-alt-aria-labelledby-empty" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-labelledby="empty" id="html-aam-img-src-srcset-roles-tentative-24" data-ax-case="html-aam-img-src-srcset-roles-tentative-24">
+<img data-testname="el-img-empty-alt-aria-labelledby-whitespace" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-labelledby="space" id="html-aam-img-src-srcset-roles-tentative-25" data-ax-case="html-aam-img-src-srcset-roles-tentative-25">
+<img data-testname="el-img-empty-alt-title" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt title="x" id="html-aam-img-src-srcset-roles-tentative-26" data-ax-case="html-aam-img-src-srcset-roles-tentative-26">
+<img data-testname="el-img-empty-alt-title-empty" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt title="" id="html-aam-img-src-srcset-roles-tentative-27" data-ax-case="html-aam-img-src-srcset-roles-tentative-27">
+<img data-testname="el-img-empty-alt-title-whitespace" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt title=" " id="html-aam-img-src-srcset-roles-tentative-28" data-ax-case="html-aam-img-src-srcset-roles-tentative-28">
+
+<!-- the following are new tests using both src and srcset -->
+<!-- per the HTML spec:
+   "If the image has a src attribute whose value is the empty string, then the element represents nothing."
+   "If the src attribute is not set and either the alt attribute is set to the empty string or the alt attribute is not set at all
+    The element represents nothing."
+-->
+<img data-testname="el-img-no-src-srcset-and-no-name" class="ex-generic" id="html-aam-img-src-srcset-roles-tentative-29" data-ax-case="html-aam-img-src-srcset-roles-tentative-29">
+<img data-testname="el-img-empty-src-and-no-name" class="ex-generic"
+  src id="html-aam-img-src-srcset-roles-tentative-30" data-ax-case="html-aam-img-src-srcset-roles-tentative-30">
+<img data-testname="el-img-empty-srcset-and-no-name" class="ex-generic"
+  srcset id="html-aam-img-src-srcset-roles-tentative-31" data-ax-case="html-aam-img-src-srcset-roles-tentative-31">
+<img data-testname="el-img-empty-src-and-srcset-and-no-name" class="ex-generic"
+  src srcset id="html-aam-img-src-srcset-roles-tentative-32" data-ax-case="html-aam-img-src-srcset-roles-tentative-32">
+<img data-testname="el-img-empty-alt-no-src-or-srcset" class="ex-generic"
+  alt id="html-aam-img-src-srcset-roles-tentative-33" data-ax-case="html-aam-img-src-srcset-roles-tentative-33">
+<img data-testname="el-img-empty-title-no-src-or-srcset" class="ex-generic"
+  title id="html-aam-img-src-srcset-roles-tentative-34" data-ax-case="html-aam-img-src-srcset-roles-tentative-34">
+<img data-testname="el-img-empty-alt-no-src-srcset-title-empty" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+  alt title="">
+<img data-testname="el-img-empty-alt-no-src-srcset-title-whitespace" class="ex-generic"
+  srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+  alt title=" ">
+<img data-testname="el-img-empty-alt-srcset-invalid-value" class="ex-generic"
+  srcset="..." alt id="html-aam-img-src-srcset-roles-tentative-37" data-ax-case="html-aam-img-src-srcset-roles-tentative-37">
+
+<!-- replicating all former generic test cases that used empty alt text, now also using whitespace-only alt text, per https://github.com/w3c/aria/pull/2706 -->
+<img data-testname="el-img-whitespace-alt-aria-label-empty" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " aria-label="" id="html-aam-img-src-srcset-roles-tentative-38" data-ax-case="html-aam-img-src-srcset-roles-tentative-38">
+<img data-testname="el-img-whitespace-alt-aria-label-whitespace" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " aria-label=" " id="html-aam-img-src-srcset-roles-tentative-39" data-ax-case="html-aam-img-src-srcset-roles-tentative-39">
+<img data-testname="el-img-whitespace-alt-aria-labelledby-non-existing" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " aria-labelledby="non-existing" id="html-aam-img-src-srcset-roles-tentative-40" data-ax-case="html-aam-img-src-srcset-roles-tentative-40">
+<img data-testname="el-img-whitespace-alt-aria-labelledby-empty" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " aria-labelledby="empty" id="html-aam-img-src-srcset-roles-tentative-41" data-ax-case="html-aam-img-src-srcset-roles-tentative-41">
+<img data-testname="el-img-whitespace-alt-aria-labelledby-whitespace" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " aria-labelledby="space" id="html-aam-img-src-srcset-roles-tentative-42" data-ax-case="html-aam-img-src-srcset-roles-tentative-42">
+<img data-testname="el-img-whitespace-alt-title" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " title="x" id="html-aam-img-src-srcset-roles-tentative-43" data-ax-case="html-aam-img-src-srcset-roles-tentative-43">
+<img data-testname="el-img-whitespace-alt-title-empty" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " title="" id="html-aam-img-src-srcset-roles-tentative-44" data-ax-case="html-aam-img-src-srcset-roles-tentative-44">
+<img data-testname="el-img-whitespace-alt-title-whitespace" class="ex-generic" srcset="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=" " title=" " id="html-aam-img-src-srcset-roles-tentative-45" data-ax-case="html-aam-img-src-srcset-roles-tentative-45">
+<img data-testname="el-img-whitespace-alt-no-src-or-srcset" class="ex-generic" alt=" " id="html-aam-img-src-srcset-roles-tentative-46" data-ax-case="html-aam-img-src-srcset-roles-tentative-46">
+<img data-testname="el-img-whitespace-alt-no-src-srcset-title-empty" class="ex-generic" alt=" " title="" id="html-aam-img-src-srcset-roles-tentative-47" data-ax-case="html-aam-img-src-srcset-roles-tentative-47">
+<img data-testname="el-img-whitespace-alt-no-src-srcset-title-whitespace" class="ex-generic" alt=" " title=" " id="html-aam-img-src-srcset-roles-tentative-48" data-ax-case="html-aam-img-src-srcset-roles-tentative-48">
+<img data-testname="el-img-whitespace-alt-srcset-invalid-value" class="ex-generic" srcset="..." alt=" " id="html-aam-img-src-srcset-roles-tentative-49" data-ax-case="html-aam-img-src-srcset-roles-tentative-49">
+<!-- group: wpt html-aam/optgroup-role.tentative.html -->
+<select size="4">
+  <optgroup label="x" data-testname="el-optgroup" data-expectedrole="group" class="ex" id="html-aam-optgroup-role-tentative-1" data-ax-case="html-aam-optgroup-role-tentative-1">
+    <option>x1</option>
+    <option>x2</option>
+  </optgroup>
+  <optgroup data-testname="el-optgroup-no-label" data-expectedrole="not defined in spec?" class="ex-todo" id="html-aam-optgroup-role-tentative-2" data-ax-case="html-aam-optgroup-role-tentative-2">
+    <option>y1</option>
+    <option>y2</option>
+  </optgroup>
+</select>
+<!-- group: wpt html-aam/roles-contextual.html -->
+<p>Tests contextual computed role mappings defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>, where the returned computed role is expected to change based on the context. Most test names correspond to a unique ID defined in the spec.<p>
+
+<p>These should remain in alphabetical order.</p>
+
+
+<!-- el-a -->
+<a href="#" data-testname="el-a" data-expectedrole="link" class="ex" id="html-aam-roles-contextual-1" data-ax-case="html-aam-roles-contextual-1">x</a>
+<a data-testname="el-a-no-href" class="ex-generic" id="html-aam-roles-contextual-2" data-ax-case="html-aam-roles-contextual-2">x</a>
+
+<!-- el-aside -->
+<aside data-testname="el-aside" data-expectedrole="complementary" class="ex">x</aside>
+<main>
+  <aside data-testname="el-aside-in-main" data-expectedrole="complementary" class="ex">x</aside>
+  <article>
+    <aside data-testname="el-aside-in-article-in-main" class="ex-generic">x</aside>
+    <aside data-testname="el-aside-in-article-in-main-with-name" data-expectedrole="complementary" aria-label="x" class="ex" id="html-aam-roles-contextual-6" data-ax-case="html-aam-roles-contextual-6">x</aside>
+  </article>
+</main>
+<article>
+  <aside data-testname="el-aside-in-article" class="ex-generic">x</aside>
+  <aside data-testname="el-aside-in-article-with-name" data-expectedrole="complementary" aria-label="x" class="ex">x</aside>
+</article>
+<aside>
+  <aside data-testname="el-aside-in-aside" class="ex-generic">x</aside>
+  <aside data-testname="el-aside-in-aside-with-name" data-expectedrole="complementary" aria-label="x" class="ex">x</aside>
+</aside>
+<nav>
+  <aside data-testname="el-aside-in-nav" class="ex-generic">x</aside>
+  <aside data-testname="el-aside-in-nav-with-name" data-expectedrole="complementary" aria-label="x" class="ex">x</aside>
+  <aside data-testname="el-aside-in-nav-with-role" data-expectedrole="complementary" class="ex" role="complementary" id="html-aam-roles-contextual-13" data-ax-case="html-aam-roles-contextual-13">x</aside>
+</nav>
+<!-- Spec says that the conditional aside mapping happens when nested in a sectioning content element.
+  However, this doesn't make sense if the parent <section> isn't a landmark in the first place.
+  Let's force the section to always be a landmark for now, but we should probably expand on this test
+  case pending discussions in https://github.com/w3c/html-aam/pull/484 -->
+<section aria-label="x">
+  <aside data-testname="el-aside-in-section" class="ex-generic">x</aside>
+  <aside data-testname="el-aside-in-section-with-name" data-expectedrole="complementary" aria-label="x" class="ex">x</aside>
+  <aside data-testname="el-aside-in-section-aria-label-empty" class="ex-generic" aria-label="" id="html-aam-roles-contextual-16" data-ax-case="html-aam-roles-contextual-16">x</aside>
+  <aside data-testname="el-aside-in-section-aria-label-whitespace" class="ex-generic" aria-label=" " id="html-aam-roles-contextual-17" data-ax-case="html-aam-roles-contextual-17">x</aside>
+  <aside data-testname="el-aside-in-section-aria-labelledby" data-expectedrole="complementary" class="ex" aria-labelledby="labelledby" id="html-aam-roles-contextual-18" data-ax-case="html-aam-roles-contextual-18">x</aside>
+  <aside data-testname="el-aside-in-section-aria-labelledby-non-existing" class="ex-generic" aria-labelledby="non-existing" id="html-aam-roles-contextual-19" data-ax-case="html-aam-roles-contextual-19">x</aside>
+  <aside data-testname="el-aside-in-section-title" data-expectedrole="complementary" title="x" class="ex" id="html-aam-roles-contextual-20" data-ax-case="html-aam-roles-contextual-20">x</aside>
+  <aside data-testname="el-aside-in-section-title-empty" class="ex-generic" title="" id="html-aam-roles-contextual-21" data-ax-case="html-aam-roles-contextual-21">x</aside>
+</section>
+
+<!-- el-footer -->
+<!-- nav>footer -> ./roles-contextual.tentative.html -->
+<footer data-testname="el-footer-ancestorbody" data-expectedrole="contentinfo" class="ex">x</footer>
+<!-- main>footer -> ./roles-contextual.tentative.html -->
+
+<!-- el-header -->
+<!-- nav>header -> ./roles-contextual.tentative.html -->
+<header data-testname="el-header-ancestorbody" data-expectedrole="banner" class="ex" id="html-aam-roles-contextual-23" data-ax-case="html-aam-roles-contextual-23">x</header>
+<!-- main>header -> ./roles-contextual.tentative.html -->
+
+<!-- el-img-empty-alt -->
+<img data-testname="el-img-no-name" data-expectedrole="image" class="ex" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
+<!-- img empty alt -> ./roles.html -->
+<img data-testname="el-img-empty-alt-aria-label" data-expectedrole="image" class="ex" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-label="x" id="html-aam-roles-contextual-25" data-ax-case="html-aam-roles-contextual-25">
+<img data-testname="el-img-empty-alt-aria-label-empty" class="ex-generic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-label="" id="html-aam-roles-contextual-26" data-ax-case="html-aam-roles-contextual-26">
+<img data-testname="el-img-empty-alt-aria-label-whitespace" class="ex-generic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-label=" " id="html-aam-roles-contextual-27" data-ax-case="html-aam-roles-contextual-27">
+<img data-testname="el-img-empty-alt-aria-labelledby" data-expectedrole="image" class="ex" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt aria-labelledby="labelledby" id="html-aam-roles-contextual-28" data-ax-case="html-aam-roles-contextual-28">
+<img data-testname="el-img-empty-alt-title" class="ex-generic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt title="x" id="html-aam-roles-contextual-29" data-ax-case="html-aam-roles-contextual-29">
+<img data-testname="el-img-empty-alt-title-empty" class="ex-generic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt title="" id="html-aam-roles-contextual-30" data-ax-case="html-aam-roles-contextual-30">
+
+<!-- el-section -->
+<section data-testname="el-section" aria-label="x" data-expectedrole="region" class="ex" id="html-aam-roles-contextual-31" data-ax-case="html-aam-roles-contextual-31">x</section>
+<section data-testname="el-section-no-name" class="ex-generic">x</section>
+<section data-testname="el-section-aria-label-empty" class="ex-generic" aria-label="" id="html-aam-roles-contextual-33" data-ax-case="html-aam-roles-contextual-33">x</section>
+<section data-testname="el-section-aria-label-whitespace" class="ex-generic" aria-label=" " id="html-aam-roles-contextual-34" data-ax-case="html-aam-roles-contextual-34">x</section>
+<section data-testname="el-section-aria-labelledby" data-expectedrole="region" class="ex" aria-labelledby="labelledby" id="html-aam-roles-contextual-35" data-ax-case="html-aam-roles-contextual-35">x</section>
+<section data-testname="el-section-aria-labelledby-non-existing" class="ex-generic" aria-labelledby="non-existing" id="html-aam-roles-contextual-36" data-ax-case="html-aam-roles-contextual-36">x</section>
+<section data-testname="el-section-title" data-expectedrole="region" title="x" class="ex" id="html-aam-roles-contextual-37" data-ax-case="html-aam-roles-contextual-37">x</section>
+<section data-testname="el-section-title-empty" class="ex-generic" title="" id="html-aam-roles-contextual-38" data-ax-case="html-aam-roles-contextual-38">x</section>
+
+<!-- element to reference for aria-labelledby tests -->
+<div id="labelledby">labelledby</div>
+<div id="empty"></div>
+<div id="space"> </div>
+
+<!-- el-summary -> ./summary.html -->
+<!-- group: wpt html-aam/roles-contextual.tentative.html -->
+<!--
+  New sectionheader and sectionfooter roles.
+  See https://github.com/w3c/aria/pull/1931
+-->
+<nav>
+  <footer data-testname="el-footer" aria-label="x" data-expectedrole="sectionfooter" class="ex" id="html-aam-roles-contextual-tentative-1" data-ax-case="html-aam-roles-contextual-tentative-1">x</footer>
+</nav>
+<main>
+  <footer data-testname="el-footer-ancestormain" data-expectedrole="sectionfooter" class="ex">x</footer>
+</main>
+<nav>
+  <header data-testname="el-header" aria-label="x" data-expectedrole="sectionheader" class="ex" id="html-aam-roles-contextual-tentative-3" data-ax-case="html-aam-roles-contextual-tentative-3">x</header>
+</nav>
+<main>
+  <header data-testname="el-header-ancestormain" data-expectedrole="sectionheader" class="ex">x</header>
+</main>
+<!-- group: wpt html-aam/roles-generic.html -->
+<p>Tests ONLY the <code>generic</code> mappings defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>. Most test names correspond to a unique ID defined in the spec.<p>
+
+<p>These should remain in alphabetical order by tagname.</p>
+
+<!-- a -> ./roles-contextual.html -->
+<!-- aside -> ./roles-contextual.html -->
+<b data-testname="el-b" class="ex-generic" id="html-aam-roles-generic-1" data-ax-case="html-aam-roles-generic-1">x</b>
+<bdi data-testname="el-bdi" class="ex-generic" id="html-aam-roles-generic-2" data-ax-case="html-aam-roles-generic-2">x</bdi>
+<bdo data-testname="el-bdo" class="ex-generic" id="html-aam-roles-generic-3" data-ax-case="html-aam-roles-generic-3">x</bdo>
+<data value="1" data-testname="el-data" class="ex-generic" id="html-aam-roles-generic-4" data-ax-case="html-aam-roles-generic-4">x</data>
+<div open data-testname="el-div" class="ex-generic" id="html-aam-roles-generic-5" data-ax-case="html-aam-roles-generic-5">x</div>
+<!-- footer -> ./roles-contextual.html -->
+<!-- header -> ./roles-contextual.html -->
+<i data-testname="el-i" class="ex-generic" id="html-aam-roles-generic-6" data-ax-case="html-aam-roles-generic-6">x</i>
+<pre data-testname="el-pre" class="ex-generic" id="html-aam-roles-generic-7" data-ax-case="html-aam-roles-generic-7">x</pre>
+<q data-testname="el-q" class="ex-generic" id="html-aam-roles-generic-8" data-ax-case="html-aam-roles-generic-8">x</q>
+<samp data-testname="el-samp" class="ex-generic" id="html-aam-roles-generic-9" data-ax-case="html-aam-roles-generic-9">x</samp>
+<!-- section -> ./roles-contextual.html -->
+<small data-testname="el-small" class="ex-generic" id="html-aam-roles-generic-10" data-ax-case="html-aam-roles-generic-10">x</small>
+<span data-testname="el-span" class="ex-generic" id="html-aam-roles-generic-11" data-ax-case="html-aam-roles-generic-11">x</span>
+<u data-testname="el-u" class="ex-generic" id="html-aam-roles-generic-12" data-ax-case="html-aam-roles-generic-12">x</u>
+<!-- group: wpt html-aam/roles-generic.tentative.html -->
+<p>Tests contextual computedrole mappings for the <code>LI</code> element defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>,
+where the returned computed role is expected to change based on whether the <code>LI</code> element is an accessibility child of a list element, or not.<p>
+
+
+<li data-testname="el-li-orphaned" class="ex-generic" id="html-aam-roles-generic-tentative-1" data-ax-case="html-aam-roles-generic-tentative-1">x</li><!-- todo: should orphaned roles be tested in a new ./roles-orphaned.html file? -->
+
+<ul role="none">
+  <li data-testname="el-li-orphaned-within-list-role-none" class="ex-generic">x</li>
+</ul>
+
+<ul>
+  <div>
+    <li data-testname="el-li-within-generic-within-list-parent" class="ex" data-expectedrole="listitem">x</li>
+  </div>
+</ul>
+
+
+<ul aria-owns="html-aam-roles-generic-tentative-2"></ul>
+<li data-testname="el-li-orphaned-in-dom-but-owned-by-list-element" id="html-aam-roles-generic-tentative-2" class="ex" data-expectedrole="listitem" data-ax-case="html-aam-roles-generic-tentative-2">x</li>
+
+
+<div role="list">
+  <li data-testname="el-li-within-explicit-role-list-parent" class="ex" data-expectedrole="listitem">x</li>
+</div>
+<!-- group: wpt html-aam/roles-minimum.tentative.html -->
+<p>Tests minimum computedrole mappings defined in <a href="https://w3c.github.io/html-aam/#minimum-role">HTML-AAM</a> ([HTML-AAM Issue #454](https://github.com/w3c/html-aam/pull/454)), where the returned computed role for generic elements is expected to change based on the generic elements having attributes that would require the element no longer be generic, and potentially ignored by browsers. Most test names correspond to a unique ID defined in the spec.<p>
+
+  <!-- el-div -->
+  <div data-testname="el-div" data-expectedrole="generic" class="ex" id="html-aam-roles-minimum-tentative-1" data-ax-case="html-aam-roles-minimum-tentative-1">Baseline div, role=generic</div>
+
+  <div data-testname="el-div-autofocus-attr" data-expectedrole="group" autofocus class="ex" id="html-aam-roles-minimum-tentative-2" data-ax-case="html-aam-roles-minimum-tentative-2">div with autofocus attribute.</div>
+  <div data-testname="el-div-autofocus-attr-role-generic" data-expectedrole="group" autofocus role="generic" class="ex" id="html-aam-roles-minimum-tentative-3" data-ax-case="html-aam-roles-minimum-tentative-3">div with explicit role=generic and autofocus attribute.</div>
+  <div data-testname="el-div-autofocus-attr-role-none" data-expectedrole="group" autofocus role="none" class="ex" id="html-aam-roles-minimum-tentative-4" data-ax-case="html-aam-roles-minimum-tentative-4">div with explicit role=none and autofocus attribute.</div>
+
+  <div data-testname="el-div-draggable-attr" data-expectedrole="group" draggable class="ex" id="html-aam-roles-minimum-tentative-5" data-ax-case="html-aam-roles-minimum-tentative-5">div with draggable attribute.</div>
+  <div data-testname="el-div-draggable-attr-role-generic" data-expectedrole="group" draggable role="generic" class="ex" id="html-aam-roles-minimum-tentative-6" data-ax-case="html-aam-roles-minimum-tentative-6">div with explicit role=generic and draggable attribute.</div>
+  <div data-testname="el-div-draggable-attr-role-none" data-expectedrole="group" draggable role="none" class="ex" id="html-aam-roles-minimum-tentative-7" data-ax-case="html-aam-roles-minimum-tentative-7">div with explicit role=none and draggable attribute.</div>
+
+  <button popovertarget=pd>Show popover div</button>
+  <div data-testname="el-div-popover-attr" id=pd data-expectedrole="group" popover class="ex" data-ax-case="pd">div with popover attribute, role=group</div>
+
+  <div data-testname="el-div-draggable-attr-invalid-role" data-expectedrole="group" draggable role="foo" class="ex" id="html-aam-roles-minimum-tentative-9" data-ax-case="html-aam-roles-minimum-tentative-9">div with draggable attribute and errant role attribute value.</div>
+
+  <!-- el-section - an unnamed section element is a generic, not a region. so when unnamed it would have a minimum role applied -->
+  <section data-testname="el-section-draggable-attr" data-expectedrole="group" draggable class="ex" id="html-aam-roles-minimum-tentative-10" data-ax-case="html-aam-roles-minimum-tentative-10">unnamed section with draggable attribute.</section>
+
+
+  <!--
+    The following tests do not meet the conditions for a minimum role change
+  -->
+  <!-- explicit valid role is used, so minimum role does not apply -->
+  <div data-testname="el-div-draggable-attr-role-article" data-expectedrole="article" role="article" draggable class="ex" id="html-aam-roles-minimum-tentative-11" data-ax-case="html-aam-roles-minimum-tentative-11">div with explicit role=article and draggable attribute.</div>
+
+  <!-- implicit non-generic or none/presentational role, so minimum role does not apply -->
+  <article data-testname="el-article-draggable-attr" data-expectedrole="article" draggable class="ex" id="html-aam-roles-minimum-tentative-12" data-ax-case="html-aam-roles-minimum-tentative-12">article element with draggable attribute.</article>
+  <section data-testname="el-section-named-draggable-attr" data-expectedrole="region" aria-label="test" draggable class="ex" id="html-aam-roles-minimum-tentative-13" data-ax-case="html-aam-roles-minimum-tentative-13">named section with draggable attribute.</section>
+
+  <!-- element has implicit platform computedrole, so minimum role does not apply -->
+  <cite data-testname="el-cite-draggable-attr" data-expectedrole="html-cite" draggable class="ex" id="html-aam-roles-minimum-tentative-14" data-ax-case="html-aam-roles-minimum-tentative-14">cite element with draggable attribute.</cite>
+<!-- group: wpt html-aam/roles.html -->
+<p>Tests the computedrole mappings defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>. Most test names correspond to a unique ID defined in the spec.<p>
+
+<p>These should remain in alphabetical order, and include all HTML tagnames. If a tag is not tested here, include a pointer to the file where it is tested, such as: <code>&lt;!-- caption -&gt; ./table-roles.html --&gt;</code></p>
+
+
+<!-- a (w/ and w/o href) -> ./roles-contextual.html -->
+<!-- todo: abbr -->
+<address data-testname="el-address" data-expectedrole="group" class="ex">x</address>
+<!-- area -> ./fragile/area-role.html -->
+<article data-testname="el-article" data-expectedrole="article" class="ex" id="html-aam-roles-2" data-ax-case="html-aam-roles-2">x</article>
+<!-- aside -> ./roles-contextual.html -->
+<!-- todo: audio -->
+<!-- todo: autonomous custom element -->
+<!-- b -> ./roles-generic.html -->
+<!-- base (not mapped) -->
+<!-- bdi -> ./roles-generic.html -->
+<!-- bdo -> ./roles-generic.html -->
+<blockquote data-testname="el-blockquote" data-expectedrole="blockquote" class="ex">x</blockquote>
+<!-- todo: body -->
+<!-- br (not mapped) -->
+<button data-testname="el-button" data-expectedrole="button" class="ex" id="html-aam-roles-4" data-ax-case="html-aam-roles-4">x</button>
+<!-- todo: canvas -->
+<!-- caption -> ./table-roles.html -->
+<!-- todo: cite -->
+<code data-testname="el-code" data-expectedrole="code" class="ex" id="html-aam-roles-5" data-ax-case="html-aam-roles-5">x</code>
+<!-- todo: col -->
+<!-- todo: colgroup -->
+<!-- data -> ./roles-generic.html -->
+<!-- todo: datalist -->
+
+<!-- el-dd -->
+<dl>
+  <dt>x</dt>
+  <!-- dt/dd pending listitemkey and listitemvalue roles: https://github.com/w3c/aria/issues/1662 -->
+  <dd data-testname="el-dd" data-expectedrole="definition" class="ex" id="html-aam-roles-6" data-ax-case="html-aam-roles-6">x</dd>
+</dl>
+
+<del data-testname="el-del" data-expectedrole="deletion" class="ex" id="html-aam-roles-7" data-ax-case="html-aam-roles-7">x</del>
+<details data-testname="el-details" data-expectedrole="group" class="ex" id="html-aam-roles-8" data-ax-case="html-aam-roles-8"><summary>x</summary>x</details>
+<dfn data-testname="el-dfn" data-expectedrole="term" class="ex" id="html-aam-roles-9" data-ax-case="html-aam-roles-9">x</dfn>
+<!-- todo: dialog(modal) -> needs to be tested in a separate file so background inertness won't break the other tests  -->
+<dialog open data-testname="el-dialog-non-modal" data-expectedrole="dialog" class="ex" id="html-aam-roles-10" data-ax-case="html-aam-roles-10">x</dialog>
+<!-- dir -> ./dir-role.tentative.html -->
+<!-- div -> ./roles-generic.html -->
+<!-- todo: dl -->
+
+<!-- el-dt -->
+<dl>
+  <!-- dt/dd pending listitemkey and listitemvalue roles: https://github.com/w3c/aria/issues/1662 -->
+  <dt data-testname="el-dt" data-expectedrole="term" class="ex" id="html-aam-roles-11" data-ax-case="html-aam-roles-11">x</dt>
+  <dd>x</dd>
+</dl>
+
+<em data-testname="el-em" data-expectedrole="emphasis" class="ex" id="html-aam-roles-12" data-ax-case="html-aam-roles-12">x</em>
+<!-- todo: embed -->
+<fieldset data-testname="el-fieldset" data-expectedrole="group" class="ex" id="html-aam-roles-13" data-ax-case="html-aam-roles-13"><legend>x</legend><input></fieldset>
+<!-- todo: figcaption -->
+<figure data-testname="el-figure" data-expectedrole="figure" class="ex" id="html-aam-roles-14" data-ax-case="html-aam-roles-14"><img alt="x" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="><figcaption>x</figcaption></figure>
+<!-- footer -> ./roles-contextual.html -->
+<form aria-label="form" data-testname="el-form" data-expectedrole="form" class="ex" id="html-aam-roles-15" data-ax-case="html-aam-roles-15"><input></form>
+<!-- todo: form-associated custom element -->
+
+<!-- el-h1-h6 -->
+<h1 data-testname="el-h1" data-expectedrole="heading" class="ex" id="html-aam-roles-16" data-ax-case="html-aam-roles-16">x</h1>
+<h2 data-testname="el-h2" data-expectedrole="heading" class="ex" id="html-aam-roles-17" data-ax-case="html-aam-roles-17">x</h2>
+<h3 data-testname="el-h3" data-expectedrole="heading" class="ex" id="html-aam-roles-18" data-ax-case="html-aam-roles-18">x</h3>
+<h4 data-testname="el-h4" data-expectedrole="heading" class="ex" id="html-aam-roles-19" data-ax-case="html-aam-roles-19">x</h4>
+<h5 data-testname="el-h5" data-expectedrole="heading" class="ex" id="html-aam-roles-20" data-ax-case="html-aam-roles-20">x</h5>
+<h6 data-testname="el-h6" data-expectedrole="heading" class="ex" id="html-aam-roles-21" data-ax-case="html-aam-roles-21">x</h6>
+
+<!-- head (not mapped) -->
+
+<!-- header -> ./roles-contextual.html -->
+<hgroup data-testname="el-hgroup" data-expectedrole="group" class="ex" id="html-aam-roles-22" data-ax-case="html-aam-roles-22"><h1>x</h1></hgroup>
+<hr data-testname="el-hr" data-expectedrole="separator" class="ex">
+<!-- todo: html -->
+<!-- i -> ./roles-generic.html -->
+<!-- todo: iframe -->
+<img alt="x" data-testname="el-img" data-expectedrole="image" class="ex" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" id="html-aam-roles-24" data-ax-case="html-aam-roles-24">
+
+<!-- Implementations might also be valid if ignored rather than returning 'none' for the following images. -->
+<img alt data-testname="el-img-alt-no-value" class="ex-generic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" id="html-aam-roles-25" data-ax-case="html-aam-roles-25">
+<img alt="" data-testname="el-img-empty-alt" class="ex-generic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" id="html-aam-roles-26" data-ax-case="html-aam-roles-26">
+
+<!-- img with empty alt but other naming mechanism -> ./roles-contextual.html -->
+
+<input type="button" value="x" data-testname="el-input-button" data-expectedrole="button" class="ex" id="html-aam-roles-27" data-ax-case="html-aam-roles-27">
+<input type="checkbox" data-testname="el-input-checkbox" data-expectedrole="checkbox" class="ex">
+<input type="checkbox" role="switch checkbox" data-testname="el-input-checkbox-with-role" data-expectedrole="switch" class="ex" id="html-aam-roles-29" data-ax-case="html-aam-roles-29">
+<input type="checkbox" switch data-testname="el-input-checkbox-switch" data-expectedrole="switch" class="ex" id="html-aam-roles-30" data-ax-case="html-aam-roles-30">
+<input type="checkbox" switch role="checkbox" data-testname="el-input-checkbox-switch-with-role" data-expectedrole="checkbox" class="ex" id="html-aam-roles-31" data-ax-case="html-aam-roles-31">
+<!-- todo: input type="color" -->
+<!-- todo: input type="date" -->
+<!-- todo: input type="datetime" -->
+<!-- todo: input type="datetime-local" -->
+<input type="email" data-testname="el-input-email" data-expectedrole="textbox" class="ex">
+<!-- todo: input type="file" -->
+<!-- input type="hidden" (not mapped) -->
+<!-- todo: input type="month" -->
+
+<!-- Blocked: HTML-AAM Issue #467 -->
+<!-- <input type="number" data-testname="el-input-number" data-expectedrole="spinbutton" class="ex"> -->
+
+<!-- todo: input type="password" -->
+<input type="radio" data-testname="el-input-radio" data-expectedrole="radio" class="ex">
+<input type="range" data-testname="el-input-range" data-expectedrole="slider" class="ex">
+<input type="reset" value="x" data-testname="el-input-reset" data-expectedrole="button" class="ex" id="html-aam-roles-35" data-ax-case="html-aam-roles-35">
+<input type="search" data-testname="el-input-search" data-expectedrole="searchbox" class="ex">
+<!-- An ARIA role should override type="search". -->
+<input type="search" role="combobox" data-testname="el-input-search-with-role" data-expectedrole="combobox" class="ex" id="html-aam-roles-37" data-ax-case="html-aam-roles-37">
+<input type="submit" value="x" data-testname="el-input-submit" data-expectedrole="button" class="ex" id="html-aam-roles-38" data-ax-case="html-aam-roles-38">
+<input type="tel" data-testname="el-input-tel" data-expectedrole="textbox" class="ex">
+<input type="text" data-testname="el-input-text" data-expectedrole="textbox" class="ex">
+<!-- todo: input (type attribute in the Text, Search, Telephone, URL, or E-mail states with a suggestions source element) -->
+<!-- todo: input type="time" -->
+<input type="url" data-testname="el-input-url" data-expectedrole="textbox" class="ex">
+<!-- todo: input type="week" -->
+<ins data-testname="el-ins" data-expectedrole="insertion" class="ex" id="html-aam-roles-42" data-ax-case="html-aam-roles-42">x</ins>
+<!-- todo: kbd -->
+<!-- todo: label -->
+<!-- todo: legend -->
+
+<!-- el-li -->
+<!-- li (orphaned) -> ./roles-generic.html -->
+<ul><li data-testname="el-li-in-ul" data-expectedrole="listitem" class="ex">x</li><li>x</li></ul>
+<ol><li data-testname="el-li-in-ol" data-expectedrole="listitem" class="ex">x</li><li>x</li></ol>
+
+<!-- link (not mapped) -->
+<main data-testname="el-main" data-expectedrole="main" class="ex">x</main>
+<!-- map (not mapped) -->
+<mark data-testname="el-mark" data-expectedrole="mark" class="ex" id="html-aam-roles-46" data-ax-case="html-aam-roles-46">x</mark>
+<!-- todo: math -->
+<menu data-testname="el-menu" data-expectedrole="list" class="ex"><li>x</li></menu>
+<!-- meta (not mapped) -->
+<meter data-testname="el-meter" data-expectedrole="meter" class="ex" min="0" max="100" low="20" high="80" optimum="60" value="50" id="html-aam-roles-48" data-ax-case="html-aam-roles-48">x</meter>
+<nav data-testname="el-nav" data-expectedrole="navigation" class="ex">x</nav>
+<!-- noscript (not mapped) -->
+<!-- object (not mapped) -->
+<ol data-testname="el-ol" data-expectedrole="list" class="ex" id="html-aam-roles-50" data-ax-case="html-aam-roles-50"><li>x</li><li>x</li></ol>
+
+<!-- optgroup -> ./fragile/optgroup-role.html -->
+
+<!-- option -->
+<select size="2">
+  <option data-testname="el-option" data-expectedrole="option" class="ex" id="html-aam-roles-51" data-ax-case="html-aam-roles-51">x</option>
+  <option>x</option>
+</select>
+
+<output data-testname="el-output" data-expectedrole="status" class="ex" id="html-aam-roles-52" data-ax-case="html-aam-roles-52">x</output>
+<p data-testname="el-p" data-expectedrole="paragraph" class="ex" id="html-aam-roles-53" data-ax-case="html-aam-roles-53">x</p>
+<!-- param (not mapped) -->
+<!-- todo: picture -->
+<!-- pre -> ./roles-generic.html -->
+<progress data-testname="el-progress" data-expectedrole="progressbar" class="ex" id="html-aam-roles-54" data-ax-case="html-aam-roles-54">x</progress>
+<!-- q -> ./roles-generic.html -->
+<!-- todo: rp -> /ruby-aam? -->
+<!-- todo: rt -> /ruby-aam? -->
+<!-- todo: ruby -> /ruby-aam? -->
+<s data-testname="el-s" data-expectedrole="deletion" class="ex" id="html-aam-roles-55" data-ax-case="html-aam-roles-55">x</s>
+<!-- samp -> ./roles-generic.html -->
+<!-- script (not mapped) -->
+<search data-testname="el-search" data-expectedrole="search" class="ex">x</search>
+<!-- section -> ./roles-contextual.html -->
+
+<!-- Blocked: HTML-AAM Issue #467 -->
+<!-- <select data-testname="el-select-combobox" data-expectedrole="combobox" class="ex"><option>a1</option><option>a2</option></select>-->
+
+<select data-testname="el-select-listbox" size="2" data-expectedrole="listbox" class="ex" id="html-aam-roles-57" data-ax-case="html-aam-roles-57"><option>b1</option><option>b2</option></select>
+
+<!-- slot (not mapped) -->
+<!-- small -> ./roles-generic.html -->
+<!-- source (not mapped) -->
+<!-- span -> ./roles-generic.html -->
+<strong data-testname="el-strong" data-expectedrole="strong" class="ex" id="html-aam-roles-58" data-ax-case="html-aam-roles-58">x</strong>
+<!-- style (not mapped) -->
+<sub data-testname="el-sub" data-expectedrole="subscript" class="ex" id="html-aam-roles-59" data-ax-case="html-aam-roles-59">x</sub>
+<!-- summary -> ./summary.html -->
+<sup data-testname="el-sup" data-expectedrole="superscript" class="ex" id="html-aam-roles-60" data-ax-case="html-aam-roles-60">x</sup>
+<!-- todo: svg (see /graphics-aam and /svg-aam tests) -->
+<!-- table -> ./table-roles.html -->
+<!-- tbody -> ./table-roles.html -->
+<!-- td -> ./table-roles.html -->
+<!-- template (not mapped) -->
+<!-- tfoot -> ./table-roles.html -->
+<!-- th -> ./table-roles.html -->
+<!-- thead -> ./table-roles.html -->
+<time data-testname="el-time" data-expectedrole="time" class="ex" id="html-aam-roles-61" data-ax-case="html-aam-roles-61">x</time>
+<!-- title (not mapped) -->
+<!-- tr -> ./table-roles.html -->
+<textarea data-testname="el-textarea" data-expectedrole="textbox" class="ex" id="html-aam-roles-62" data-ax-case="html-aam-roles-62">x</textarea>
+<!-- track (not mapped) -->
+<!-- u -> ./roles-generic.html -->
+<ul data-testname="el-ul" data-expectedrole="list" class="ex" id="html-aam-roles-63" data-ax-case="html-aam-roles-63"><li>x</li><li>x</li></ul>
+<!-- var (not mapped) -->
+<!-- todo: video -->
+<!-- wbr (not mapped) -->
+<!-- group: wpt html-aam/roles.tentative.html -->
+<p>Tests the computedrole mappings defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>. Most test names correspond to a unique ID defined in the spec.<p>
+
+<p>These should remain in alphabetical order, and include all HTML tagnames. If a tag is not tested here, include a pointer to the file where it is tested, such as: <code>&lt;!-- caption -&gt; ./table-roles.html --&gt;</code></p>
+
+<!--
+  These thead, tbody, and tfoot role tests are pending spec discussion.
+  See https://github.com/w3c/html-aam/issues/474
+-->
+<table>
+  <thead data-testname="el-thead" data-expectedrole="rowgroup" class="ex" id="html-aam-roles-tentative-1" data-ax-case="html-aam-roles-tentative-1">
+    <tr>
+      <th>a</th>
+      <th>b</th>
+      <th>c</th>
+    </tr>
+  </thead>
+  <tbody data-testname="el-tbody" data-expectedrole="rowgroup" class="ex" id="html-aam-roles-tentative-2" data-ax-case="html-aam-roles-tentative-2">
+    <tr>
+      <th>1</th>
+      <td>2</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>5</td>
+      <td>6</td>
+    </tr>
+  </tbody>
+  <tfoot data-testname="el-tfoot" data-expectedrole="rowgroup" class="ex" id="html-aam-roles-tentative-3" data-ax-case="html-aam-roles-tentative-3">
+    <tr>
+      <th>x</th>
+      <th>y</th>
+      <th>z</th>
+    </tr>
+  </tfoot>
+</table>
+<!-- group: wpt html-aam/table-roles.html -->
+<p>Tests the computedrole mappings for the table-related roles defined in <a href="https://w3c.github.io/html-aam/">HTML-AAM</a>. Most test names correspond to unique ID defined in the spec.<p>
+
+<!-- ARIA table roles tested in wpt/wai-aria/role/table-roles.html -->
+
+<table data-testname="el-table" data-expectedrole="table" class="ex" id="html-aam-table-roles-1" data-ax-case="html-aam-table-roles-1">
+  <caption data-testname="el-caption" data-expectedrole="caption" class="ex" id="html-aam-table-roles-2" data-ax-case="html-aam-table-roles-2">caption</caption>
+  <thead>
+    <tr data-testname="el-tr-thead" data-expectedrole="row" class="ex" id="html-aam-table-roles-3" data-ax-case="html-aam-table-roles-3">
+      <th data-testname="el-th" data-expectedrole="columnheader" class="ex" id="html-aam-table-roles-4" data-ax-case="html-aam-table-roles-4">a</th>
+      <th>b</th>
+      <th>c</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr data-testname="el-tr-tbody" data-expectedrole="row" class="ex" id="html-aam-table-roles-5" data-ax-case="html-aam-table-roles-5">
+      <th data-testname="el-th-in-row" data-expectedrole="rowheader" class="ex" id="html-aam-table-roles-6" data-ax-case="html-aam-table-roles-6">1</th>
+      <td data-testname="el-td" data-expectedrole="cell" class="ex" id="html-aam-table-roles-7" data-ax-case="html-aam-table-roles-7">2</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>5</td>
+      <td>6</td>
+    </tr>
+  </tbody>
+  <tfoot>
+    <tr>
+      <th>x</th>
+      <th>y</th>
+      <th>z</th>
+    </tr>
+  </tfoot>
+</table>
+<!-- group: wpt wai-aria/heading/invalid-nesting.html -->
+<h1>WAI-ARIA tests for invalidly nested heading elements</h1>
+  <p>Equivalent native patterns tested in <code>/html-aam/heading/invalid-nesting.html</code>.</p>
+
+  <h2>Accessible names and roles</h2>
+  <hr>
+
+  <div
+    role="heading"
+    aria-level="1"
+    class="ex-role"
+    data-testname="div[role=heading][aria-level=1] with invalid div[role=heading][aria-level=2] descendant still convey heading role"
+    data-expectedrole="heading"
+   id="role-heading-invalid-nesting-1" data-ax-case="role-heading-invalid-nesting-1">
+    <div
+      role="heading"
+      aria-level="2"
+      class="ex-role-and-label"
+      data-testname="Invalidly nested div[role=heading][aria-level=2] should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Invalid div[role=heading][aria-level=2]"
+      data-expectedrole="heading"
+     id="role-heading-invalid-nesting-2" data-ax-case="role-heading-invalid-nesting-2">Invalid div[role=heading][aria-level=2]</div>
+  </div>
+
+  <div
+    role="heading"
+    aria-level="4"
+    class="ex-role"
+    data-testname="div[role=heading][aria-level=4] with invalid div[role=heading][aria-level=3] descendant should still convey heading role"
+    data-expectedrole="heading"
+   id="role-heading-invalid-nesting-3" data-ax-case="role-heading-invalid-nesting-3">
+    <div
+      role="heading"
+      aria-level="3"
+      class="ex-role-and-label"
+      data-testname="Invalidly nested div[role=heading][aria-level=3] should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Invalid div[role=heading][aria-level=3]"
+      data-expectedrole="heading"
+     id="role-heading-invalid-nesting-4" data-ax-case="role-heading-invalid-nesting-4">Invalid div[role=heading][aria-level=3]</div>
+  </div>
+
+  <div
+    role="heading"
+    aria-level="5"
+    class="ex-role"
+    data-testname="div[role=heading][aria-level=5] with invalid div[role=heading][aria-level=6] descendant should still convey heading role"
+    data-expectedrole="heading"
+   id="role-heading-invalid-nesting-5" data-ax-case="role-heading-invalid-nesting-5">
+    <div
+      role="heading"
+      aria-level="6"
+      class="ex-role-and-label"
+      data-testname="Invalidly nested div[role=heading][aria-level=6] should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Invalid div[role=heading][aria-level=6]"
+      data-expectedrole="heading"
+     id="role-heading-invalid-nesting-6" data-ax-case="role-heading-invalid-nesting-6">Invalid div[role=heading][aria-level=6]</div>
+  </div>
+
+  <div
+    role="heading"
+    aria-level="1"
+    class="ex-role"
+    data-testname="div[role=heading][aria-level=1] with text contents and invalid div[role=heading][aria-level=2] descendant should still convey heading role"
+    data-expectedrole="heading"
+   id="role-heading-invalid-nesting-7" data-ax-case="role-heading-invalid-nesting-7">Chocolate
+    <div
+      role="heading"
+      aria-level="2"
+    >Peanut butter</div>
+  </div>
+
+  <h2>ARIA heading impostors</h2>
+  <hr>
+
+  <button
+    role="heading"
+    aria-level="1"
+    class="ex-role"
+    data-testname="button[role=heading][aria-level=1] with text contents and invalid span[role=heading][aria-level=2] descendant should still convey heading role"
+    data-expectedrole="heading"
+   id="heading-invalid-nesting-8" data-ax-case="heading-invalid-nesting-8">Macaroni
+    <span
+      role="heading"
+      aria-level="2"
+      class="ex-role-and-label"
+      data-testname="Invalidly nested span[role=heading][aria-level=2] should have accname matching its text contents, and should still convey heading role"
+      data-expectedlabel="Cheese"
+      data-expectedrole="heading"
+     id="heading-invalid-nesting-9" data-ax-case="heading-invalid-nesting-9">Cheese</span>
+  </button>
+
+  <p
+    role="heading"
+    aria-level="1"
+    class="ex-role"
+    data-testname="p[role=heading][aria-level=1] with text contents and invalid span[role=heading][aria-level=2] descendant should still convey heading role"
+    data-expectedrole="heading"
+   id="heading-invalid-nesting-10" data-ax-case="heading-invalid-nesting-10">Biscuits
+    <span
+      role="heading"
+      aria-level="2"
+    >Gravy</span>
+  </p>
+<!-- group: wpt wai-aria/role/abstract-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#abstract_roles">Abstract Roles</a> and related <a href="https://w3c.github.io/aria/#document-handling_author-errors_roles">9.1 Roles - handling author errors</a></p>
+
+  <nav role="command" data-testname="command role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-1" data-ax-case="role-abstract-roles-1">x</nav>
+  <nav role="composite" data-testname="composite role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-2" data-ax-case="role-abstract-roles-2">x</nav>
+  <nav role="input" data-testname="input role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-3" data-ax-case="role-abstract-roles-3">x</nav>
+  <nav role="landmark" data-testname="landmark role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-4" data-ax-case="role-abstract-roles-4">x</nav>
+  <nav role="range" data-testname="range role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-5" data-ax-case="role-abstract-roles-5">x</nav>
+  <nav role="roletype" data-testname="roletype role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-6" data-ax-case="role-abstract-roles-6">x</nav>
+  <nav role="section" data-testname="section role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-7" data-ax-case="role-abstract-roles-7">x</nav>
+  <nav role="sectionhead" data-testname="sectionhead role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-8" data-ax-case="role-abstract-roles-8">x</nav>
+  <nav role="select" data-testname="select role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-9" data-ax-case="role-abstract-roles-9">x</nav>
+  <nav role="structure" data-testname="structure role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-10" data-ax-case="role-abstract-roles-10">x</nav>
+  <nav role="widget" data-testname="widget role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-11" data-ax-case="role-abstract-roles-11">x</nav>
+  <nav role="window" data-testname="window role" data-expectedrole="navigation" class="ex" id="role-abstract-roles-12" data-ax-case="role-abstract-roles-12">x</nav>
+<!-- group: wpt wai-aria/role/button-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#button">button</a> and related roles.</p>
+
+<div role="button" aria-haspopup="false" data-testname="button aria-haspopup false" data-expectedrole="button" class="ex" id="role-button-roles-1" data-ax-case="role-button-roles-1"></div>
+<div role="button" aria-haspopup="true" data-testname="button aria-haspopup true" data-expectedrole="button" class="ex" id="role-button-roles-2" data-ax-case="role-button-roles-2"></div>
+<div role="button" aria-haspopup="menu" data-testname="button aria-haspopup menu" data-expectedrole="button" class="ex" id="role-button-roles-3" data-ax-case="role-button-roles-3"></div>
+<div role="button" aria-haspopup="dialog" data-testname="button aria-haspopup dialog" data-expectedrole="button" class="ex" id="role-button-roles-4" data-ax-case="role-button-roles-4"></div>
+<div role="button" aria-haspopup="listbox" data-testname="button aria-haspopup listbox" data-expectedrole="button" class="ex" id="role-button-roles-5" data-ax-case="role-button-roles-5"></div>
+<div role="button" aria-haspopup="tree" data-testname="button aria-haspopup tree" data-expectedrole="button" class="ex" id="role-button-roles-6" data-ax-case="role-button-roles-6"></div>
+<div role="button" aria-haspopup="grid" data-testname="button aria-haspopup grid" data-expectedrole="button" class="ex" id="role-button-roles-7" data-ax-case="role-button-roles-7"></div>
+<div role="button" aria-pressed="true" data-testname="button aria-pressed true" data-expectedrole="button" class="ex" id="role-button-roles-8" data-ax-case="role-button-roles-8"></div>
+<div role="button" aria-pressed="false" data-testname="button aria-pressed false" data-expectedrole="button" class="ex" id="role-button-roles-9" data-ax-case="role-button-roles-9"></div>
+<div role="button" aria-pressed="" data-testname="button aria-pressed undefined" data-expectedrole="button" class="ex" id="role-button-roles-10" data-ax-case="role-button-roles-10"></div>
+<!-- group: wpt wai-aria/role/contextual-roles.html -->
+<p>Verifies Required Accessibility Parent Roles from <a href="https://w3c.github.io/aria/#scope">5.2.7 Required Accessibility Parent Role</a></p>
+    <p>Also verifies Allowed Accessibility Child Roles from <a href="https://w3c.github.io/aria/#mustContain">5.2.6 Allowed Accessibility Child Roles</a></p>
+
+<!-- Notes for "required context" testing:
+
+    - See Computed Role for more details on role computation when an element lacks required context:
+    https://w3c.github.io/core-aam/#roleMappingComputedRole
+
+    - See ARIA spec for full listing of "Required Accessibility Parent Role" for each element:
+    https://w3c.github.io/aria/#scope
+
+    Identified roles with "Required Context" excluding abstract roles (e.g., child -> parent):
+
+    - caption -> {figure, grid, table, treegrid}
+    - cell -> row
+    - columnheader -> row
+    - gridcell -> row
+    - listitem -> {list, directory} *Note: directory role is deprecated as of ARIA 1.2
+    - menuitem -> {group, menu, menubar}
+    - menuitemcheckbox -> {group, menu, menubar}
+    - menuitemradio -> {group, menu, menubar}
+    - option -> {group, listbox}
+    - row -> {grid, rowgroup, table, treegrid}
+    - rowgroup -> {grid, table, treegrid}
+    - rowheader -> row
+    - tab -> tablist
+    - treeitem -> {group, tree}
+
+    -->
+
+<!-- Required Context Roles Testing  -->
+
+    <!-- caption -> ./table-roles.html -->
+
+    <!-- cell -> ./table-roles.html -->
+
+    <!-- columnheader -> ./grid-roles.html, ./table-roles.html -->
+
+    <!-- gridcell -> ./grid-roles.html -->
+
+    <!-- listitem -> ./list-roles.html -->
+
+    <!-- menuitem, menuitemcheckbox, menuitemradio -> ./menu-roles.html -->
+
+    <!-- option -> ./listbox-roles.html -->
+
+    <!-- row -> ./grid-roles.html, ./table-roles.html  -->
+
+    <!-- rowgroup -> ./grid-roles.html, ./table-roles.html -->
+
+    <!-- rowheader -> ./grid-roles.html, ./table-roles.html -->
+
+    <!-- tab -> ./tab-roles.html -->
+
+    <!-- treeitem -> ./tree-roles.html -->
+
+<!-- Misc Contextual Role Testing  -->
+
+    <!-- Testing contentinfo role computation when scoped to <main> or not:
+    1. If <footer> is a descendant of <main>, it should become 'generic'
+    2. If <footer> is scoped to , it should be 'contentinfo' as expected
+
+    see: https://w3c.github.io/html-aam/#el-footer-ancestorbody -->
+    <!-- main>footer -> ./roles-contextual.tentative.html -->
+
+    <footer data-testname="footer scoped to body element is contentinfo" data-expectedrole="contentinfo" class="ex">x</footer>
+    <div role="contentinfo" data-testname="contentinfo region scoped to body element is contentinfo" data-expectedrole="contentinfo" class="ex" id="role-contextual-roles-2" data-ax-case="role-contextual-roles-2">x</div>
+<!-- group: wpt wai-aria/role/contextual-roles.tentative.html -->
+<!--
+  New sectionheader and sectionfooter roles.
+  See https://github.com/w3c/aria/pull/1931
+-->
+<main>
+    <div role="sectionfooter" data-testname="role is sectionfooter (in main)" data-expectedrole="sectionfooter" class="ex" id="role-contextual-roles-tentative-1" data-ax-case="role-contextual-roles-tentative-1">x</div>
+</main>
+<main>
+    <div role="sectionheader" data-testname="role is sectionheader (in main)" data-expectedrole="sectionheader" class="ex" id="role-contextual-roles-tentative-2" data-ax-case="role-contextual-roles-tentative-2">x</div>
+</main>
+<!-- group: wpt wai-aria/role/empty-container-roles.tentative.html -->
+<!--
+  Lists and menus without items.
+  https://github.com/w3c/aria/issues/2930
+-->
+<div role="list" data-testname="role is list (empty)" data-expectedrole="list" class="ex" id="role-empty-container-roles-tentative-1" data-ax-case="role-empty-container-roles-tentative-1"></div>
+<div role="list" data-testname="role is list (no listitem)" data-expectedrole="list" class="ex" id="role-empty-container-roles-tentative-2" data-ax-case="role-empty-container-roles-tentative-2">
+  <div>x</div>
+</div>
+
+<div role="menu" data-testname="role is menu (empty)" data-expectedrole="menu" class="ex" id="role-empty-container-roles-tentative-3" data-ax-case="role-empty-container-roles-tentative-3"></div>
+<div role="menu" data-testname="role is menu (no menuitem)" data-expectedrole="menu" class="ex" id="role-empty-container-roles-tentative-4" data-ax-case="role-empty-container-roles-tentative-4">
+  <div>x</div>
+</div>
+<!-- group: wpt wai-aria/role/fallback-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#host_general_role">8.1 Role Attribute</a> role token list selection and <a href="https://w3c.github.io/aria/#document-handling_author-errors_roles">9.1 Roles - handling author errors</a>.</p>
+
+  <!-- known el and two known ARIA 1.0 roles -->
+  <nav role="region group" data-testname="fallback role w/ region with no label" data-expectedrole="group" class="ex" id="role-fallback-roles-1" data-ax-case="role-fallback-roles-1">x</nav>
+  <nav role="region group" data-testname="fallback role w/ region with label" aria-label="x" data-expectedrole="region" class="ex" id="role-fallback-roles-2" data-ax-case="role-fallback-roles-2">x</nav>
+
+  <!-- known el and known ARIA 1.1 with 1.0 role backup -->
+  <div role="switch checkbox" aria-checked="true" data-testname="aria 1.1 switch role w/ fallback to aria 1.0 checkbox role" aria-label="x" data-expectedrole="switch" class="ex" id="role-fallback-roles-3" data-ax-case="role-fallback-roles-3">x</div>
+
+  <!-- known el and invalid role token with valid backup -->
+  <div role="foo button" data-testname="div[role=button] ignoring invalid foo role token" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-4" data-ax-case="role-fallback-roles-4">x</div>
+
+  <!-- unknown el and invalid role token with valid backup -->
+  <unknown role="foo button" data-testname="unknown[role=button] ignoring invalid foo role token" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-5" data-ax-case="role-fallback-roles-5">x</unknown>
+
+  <!-- known el and invalid role(s) -->
+  <button role="foo" data-testname="button ignoring single invalid role token" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-6" data-ax-case="role-fallback-roles-6">x</button>
+  <button role="foo bar" data-testname="button ignoring multiple invalid role tokens" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-7" data-ax-case="role-fallback-roles-7">x</button>
+
+  <!-- known el with invalid punctuation -->
+  <div role="invalid, punctuation, tests, link, button" data-testname="div[role=button] ignoring invalid foo role token including punctuation-contaminated known link role" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-8" data-ax-case="role-fallback-roles-8">x</div>
+
+
+
+  <!-- extra line breaks here to account for rendering of unicode diacritic etc char glitch tests -->
+
+
+
+  <div role="l̷̨̢̡̖̻̗̤̺̟̱͚͔͇͍͇̫̫̜͔̗̟̘̫̟̰̼̘͗̌̃͐̔̈́̚͝į̵̡̲̯̠̮͈͖̥̮̲͓̦̗̗̱̞͍̗̪͙͇͚͂̍͐̔̍͌̐̇̏̎͘͝ǹ̶̨̧̢̜̲̫͇̮͉̬͎͎͕̝̱͔̙̱̦̰̦̠̰̣̝͂̓̋̊͜ķ̷̧̧̨̨̨̘̳͕̰͎̮̠̘̪͇͕̥̭̼̼̜̤̫̥̼̤̰̦͖̪̀͒̆͑̒̅͑̓̒͂̽̈́̽̉̀̕͘͜͝ ̷̡̮̦̘͓̫̜͕͖̰̙̘͓̼͎̳̹͇̮͐͂́͛̃́̊̈͌̄̓̌̂̈̇̀̌̈́́̀̈́̍̈́̇̄̊̔͒̾̾̇́͒̽͂̾̕̚͜͜͝͠ͅͅg̸̨̧̧̧̧̛̺̦̣͇͈͙͇͎͕̠̞̳̹̣͋͑̑̓͛̓̉̔̉͑̇́̈́̉̃́̑̍̂̒͐͛͗̑̏̓̾͌̈̅́̇̕̕̚̚͝͝ͅr̶̛̤̲̘̮̟̭̲̋̾̀́́̒̀̀͑̎̀̌̈̀̍̂̏̊̎͐͒͗͗̀͘͘͘͠͠ȍ̴̧̡̢̡̢̞̝̠̙̬̗͍͍͉̺͔͙̫̝̰̮̜̩̙̳͉̻̻̼͍̊͋͐̐͆̈̿̒̊̄͑̈́̔͋̔̃͐̓̓͛́͊̉͑̊̔͆͘͘͜͠ͅu̴̱̯̞̞̞̺̼̳̳͚̞̇̈͒͠p̶̛͉̮̙̯̮̱͉̖͚͉̩̱̺̩̦̺͈̫͍͔̲̣̗̟̜̂̐̌̏͌̈́͗̾͌̿̓͒̋̆͆̾͛̐̈́̓͋̀͘̚͝͝͝ ̶͔͚̩̬͈̍̈́͗͐̀̊̏͛̃̈́͋̅͝  button" data-testname="div[role=button] ignoring invalid unicode diacritics etc on link and group role tokens" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-9" data-ax-case="role-fallback-roles-9">x</div>
+
+
+  <!-- known el and known role with whitespace edge cases -->
+  <div role=" button" data-testname="div[role=button] ignoring tab char" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-10" data-ax-case="role-fallback-roles-10">x</div>
+  <div role="
+button" data-testname="div[role=button] ignoring line break" aria-label="x" data-expectedrole="button" class="ex">x</div>
+  <div role="⠀ button" data-testname="div[role=button] ignoring braille whitespace char" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-12" data-ax-case="role-fallback-roles-12">x</div>
+
+  <!-- various role capitalization styles and their fallbacks -->
+  <div role="foo Link" data-testname="div[role='foo Link'][tabindex=0], illegal role and capitalized fallback role, has link role" aria-label="x" tabindex="0" data-expectedrole="link" class="ex" id="role-fallback-roles-13" data-ax-case="role-fallback-roles-13">x</div>
+  <button role="foo Link" data-testname="button[role='foo Link'] with illegal role and capitalized fallback role, has link role" data-expectedrole="link" class="ex" id="role-fallback-roles-14" data-ax-case="role-fallback-roles-14"></button>
+  <nav role="foo GROUP" data-testname="nav[role='foo GROUP'] with illegal role and all upper case fallback role, has group role" aria-label="x" data-expectedrole="group" class="ex" id="role-fallback-roles-15" data-ax-case="role-fallback-roles-15">x</nav>
+  <div role="foo ReGiOn" data-testname="div[role='foo ReGiOn'][aria-label] with illegal role and alternating case fallback role, has region role" aria-label="x" data-expectedrole="region" class="ex" id="role-fallback-roles-16" data-ax-case="role-fallback-roles-16">x</div>
+  <div role="ReGiOn foo" data-testname="div[role='ReGiOn foo'] with alternating case role and illegal fallback role without accname, has generic role" class="ex-generic" id="role-fallback-roles-17" data-ax-case="role-fallback-roles-17">x</div>
+  <div role="ReGiOn foo" data-testname="div[role='ReGiOn foo'][aria-label] with alternating case role and illegal fallback role, has region role" aria-label="x" data-expectedrole="region" class="ex" id="role-fallback-roles-18" data-ax-case="role-fallback-roles-18">x</div>
+
+  <div role="BUTTON LINK" data-testname="div[role='BUTTON LINK'] with tabindex=0, has button role" aria-label="x" tabindex="0" data-expectedrole="button" class="ex" id="role-fallback-roles-19" data-ax-case="role-fallback-roles-19">x</div>
+  <div role="ReGiOn group" data-testname="div[role='ReGiOn group'] without accname, has group role" data-expectedrole="group" class="ex" id="role-fallback-roles-20" data-ax-case="role-fallback-roles-20">x</div>
+  <div role="ReGiOn group" data-testname="div[role='ReGiOn group'][aria-label], has region role" aria-label="x" data-expectedrole="region" class="ex" id="role-fallback-roles-21" data-ax-case="role-fallback-roles-21">x</div>
+
+    <div role="
+buTtOn" data-testname="div[role=buTtOn] ignoring line break, has button role" tabindex="0" aria-label="x" data-expectedrole="button" class="ex" id="role-fallback-roles-22" data-ax-case="role-fallback-roles-22">x</div>
+<!-- group: wpt wai-aria/role/form-roles.html -->
+<p>Verifies <a href="https://w3c.github.io/aria/#document-handling_author-errors_roles">9.1 Roles - handling author errors</a> and the <a href="https://w3c.github.io/aria/#form">form</a> role.</p>
+
+
+<!-- no label -->
+<nav role="form" data-testname="form without label" data-expectedrole="navigation" class="ex" id="role-form-roles-1" data-ax-case="role-form-roles-1">x</nav>
+
+<!-- w/ label -->
+<nav role="form" data-testname="form with label" data-expectedrole="form" aria-label="x" class="ex" id="role-form-roles-2" data-ax-case="role-form-roles-2">x</nav>
+<!-- group: wpt wai-aria/role/generic-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#generic">generic</a>.</p>
+
+<p role="generic" data-testname="generic role on p element is generic" class="ex-generic" id="role-generic-roles-1" data-ax-case="role-generic-roles-1">x</p>
+<!-- group: wpt wai-aria/role/grid-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#grid">grid</a> and related roles.</p>
+
+  <!-- ARIA table roles tested in ./table-roles.html -->
+
+  <div role="grid" data-testname="role is grid" data-expectedrole="grid" class="ex" id="role-grid-roles-1" data-ax-case="role-grid-roles-1">
+    <div role="row" data-testname="role is row (in grid)" data-expectedrole="row" class="ex" id="role-grid-roles-2" data-ax-case="role-grid-roles-2">
+      <span role="columnheader" data-testname="role is columnheader (in row, in grid)" data-expectedrole="columnheader" class="ex" id="role-grid-roles-3" data-ax-case="role-grid-roles-3">x</span>
+      <span role="columnheader">x</span>
+    </div>
+    <div role="row">
+      <span role="rowheader" data-testname="role is rowheader (in row, in grid)" data-expectedrole="rowheader" class="ex" id="role-grid-roles-4" data-ax-case="role-grid-roles-4">x</span>
+      <span role="gridcell" data-testname="role is gridcell (in row, in grid)" data-expectedrole="gridcell" class="ex" id="role-grid-roles-5" data-ax-case="role-grid-roles-5">x</span>
+    </div>
+  </div>
+
+  <div role="grid">
+    <div role="rowgroup" data-testname="role is rowgroup (in grid)" data-expectedrole="rowgroup" class="ex" id="role-grid-roles-6" data-ax-case="role-grid-roles-6">
+      <div role="row" data-testname="role is row (in rowgroup, in grid)" data-expectedrole="row" class="ex" id="role-grid-roles-7" data-ax-case="role-grid-roles-7">
+        <span role="columnheader" data-testname="role is columnheader (in row, in rowgroup, in grid)" data-expectedrole="columnheader" class="ex">x</span>
+        <span role="columnheader">x</span>
+        <span role="columnheader">x</span>
+      </div>
+    </div>
+    <div role="rowgroup">
+      <div role="row">
+        <span role="rowheader" data-testname="role is rowheader (in row, in rowgroup, in grid)" data-expectedrole="rowheader" class="ex">x</span>
+        <span role="gridcell" data-testname="role is gridcell (in row, in rowgroup, in grid)" data-expectedrole="gridcell" class="ex">x</span>
+        <span role="gridcell">x</span>
+      </div>
+    </div>
+  </div>
+<!-- group: wpt wai-aria/role/invalid-roles.html -->
+<p>Tests invalid ARIA roles from <a href="https://w3c.github.io/aria/#document-handling_author-errors_roles">9.1 Roles - handling author errors</a>.</p>
+
+<!-- Tests fallback for <nav> when 1/2/3 invalid roles are supplied -->
+<nav role="foo" data-testname="nav with invalid role name foo" data-expectedrole="navigation" class="ex" id="role-invalid-roles-1" data-ax-case="role-invalid-roles-1">x</nav>
+<nav role="foo bar" data-testname="nav with two invalid role names" data-expectedrole="navigation" class="ex" id="role-invalid-roles-2" data-ax-case="role-invalid-roles-2">x</nav>
+<nav role="foo bar baz" data-testname="nav with three invalid role names" data-expectedrole="navigation" class="ex" id="role-invalid-roles-3" data-ax-case="role-invalid-roles-3">x</nav>
+
+<!-- Tests fallback for <button> when 1/2/3 invalid roles are supplied -->
+<button role="foo" data-testname="button with invalid role name foo" data-expectedrole="button" class="ex" id="role-invalid-roles-4" data-ax-case="role-invalid-roles-4">x</button>
+<button role="foo bar" data-testname="button with two invalid role names" data-expectedrole="button" class="ex" id="role-invalid-roles-5" data-ax-case="role-invalid-roles-5">x</button>
+<button role="foo bar baz" data-testname="button with three invalid role names" data-expectedrole="button" class="ex" id="role-invalid-roles-6" data-ax-case="role-invalid-roles-6">x</button>
+
+<!-- Tests fallback for semantically neutral elements when 1/2/3 invalid roles are supplied -->
+<span role="foo" data-testname="span with invalid role name foo" class="ex-generic" id="role-invalid-roles-7" data-ax-case="role-invalid-roles-7">x</span>
+<span role="foo bar" data-testname="span with two invalid role names" class="ex-generic" id="role-invalid-roles-8" data-ax-case="role-invalid-roles-8">x</span>
+<span role="foo bar baz" data-testname="span with three invalid role names" class="ex-generic" id="role-invalid-roles-9" data-ax-case="role-invalid-roles-9">x</span>
+<div role="foo" data-testname="div with invalid role name foo" class="ex-generic" id="role-invalid-roles-10" data-ax-case="role-invalid-roles-10">x</div>
+<div role="foo bar" data-testname="div with two invalid role names" class="ex-generic" id="role-invalid-roles-11" data-ax-case="role-invalid-roles-11">x</div>
+<div role="foo bar baz" data-testname="div with three invalid role names"class="ex-generic" id="role-invalid-roles-12" data-ax-case="role-invalid-roles-12">x</div>
+
+<!-- Whitespace tests with <nav> (including line breaks, tabs, zero-width space, braille space, non-breaking space, standard space) -->
+<nav role=" " data-testname="nav with empty character as role" data-expectedrole="navigation" class="ex" id="role-invalid-roles-13" data-ax-case="role-invalid-roles-13">x</nav>
+<nav role="&#13" data-testname="nav with line break (&#13) character as role" data-expectedrole="navigation" class="ex" id="role-invalid-roles-14" data-ax-case="role-invalid-roles-14">x</nav>
+<nav role="&#9" data-testname="nav with tab (&#9) as role (should be treated as whitespace)" data-expectedrole="navigation" class="ex" id="role-invalid-roles-15" data-ax-case="role-invalid-roles-15">x</nav>
+<nav role="&#8203" data-testname="nav with zero-width space as role (should be treated as whitespace)" data-expectedrole="navigation" class="ex" id="role-invalid-roles-16" data-ax-case="role-invalid-roles-16">x</nav>
+<nav role="&#10240" data-testname="nav with braille space (10240) as role" data-expectedrole="navigation" class="ex" id="role-invalid-roles-17" data-ax-case="role-invalid-roles-17">x</nav>
+<nav role="&#x2800" data-testname="nav with braille space (x2800) as role" data-expectedrole="navigation" class="ex" id="role-invalid-roles-18" data-ax-case="role-invalid-roles-18">x</nav>
+<nav role="&nbsp;" data-testname="nav with non-breaking space (nbsp) as role" data-expectedrole="navigation" class="ex" id="role-invalid-roles-19" data-ax-case="role-invalid-roles-19">x</nav>
+<nav role="&#20" data-testname="nav with standard space (nbsp) as role" data-expectedrole="navigation" class="ex" id="role-invalid-roles-20" data-ax-case="role-invalid-roles-20">x</nav>
+
+<!-- Escaped whitespace tests with <span> (including line breaks, tabs, zero-width space, braille space, non-breaking space, standard space) -->
+<span role=" " data-testname="span with escaped empty character as role" class="ex-generic" id="role-invalid-roles-21" data-ax-case="role-invalid-roles-21">x</span>
+<span role="&#13" data-testname="span with escaped line break (&#13) character as role" class="ex-generic" id="role-invalid-roles-22" data-ax-case="role-invalid-roles-22">x</span>
+<span role="&#9" data-testname="span with escaped tab (&#9) as role (should be treated as whitespace)" class="ex-generic" id="role-invalid-roles-23" data-ax-case="role-invalid-roles-23">x</span>
+<span role="&#8203" data-testname="span with escaped zero-width space as role (should be treated as whitespace)" class="ex-generic" id="role-invalid-roles-24" data-ax-case="role-invalid-roles-24">x</span>
+<span role="&#10240" data-testname="span with escaped braille space (10240) as role" class="ex-generic" id="role-invalid-roles-25" data-ax-case="role-invalid-roles-25">x</span>
+<span role="&#x2800" data-testname="span with escaped braille space (x2800) as role" class="ex-generic" id="role-invalid-roles-26" data-ax-case="role-invalid-roles-26">x</span>
+<span role="&nbsp;" data-testname="span with escaped non-breaking space (nbsp) as role" class="ex-generic" id="role-invalid-roles-27" data-ax-case="role-invalid-roles-27">x</span>
+<span role="&#20" data-testname="span with escaped standard space (nbsp) as role" class="ex-generic" id="role-invalid-roles-28" data-ax-case="role-invalid-roles-28">x</span>
+
+<!-- Unescaped whitespace tests with <span> (including line breaks, tabs, zero-width space, braille space, non-breaking space, standard space) -->
+  <span role=" " data-testname="span with empty character as role" class="ex-generic">x</span>
+  <span role="
+  " data-testname="span with line break (&#13) character as role" class="ex-generic">x</span>
+  <span role="  " data-testname="span with tab (&#9) as role (should be treated as whitespace)" class="ex-generic">x</span>
+  <span role="‍" data-testname="span with zero-width space as role (should be treated as whitespace)" class="ex-generic" id="role-invalid-roles-32" data-ax-case="role-invalid-roles-32">x</span>
+  <span role="⠀" data-testname="span with braille space (10240) as role" class="ex-generic" id="role-invalid-roles-33" data-ax-case="role-invalid-roles-33">x</span>
+  <span role=" " data-testname="span with non-breaking space (nbsp) as role" class="ex-generic">x</span>
+  <span role=" " data-testname="span with standard space as role" class="ex-generic">x</span>
+
+<!-- Diacritics with <a> -->
+<a href="#" role="&#771" data-testname="link with role set to tilde diacritic" data-expectedrole="link" class="ex" id="role-invalid-roles-36" data-ax-case="role-invalid-roles-36">x</a>
+<a href="#" role="foo&#771" data-testname="link with role foo that has tilde diacritic" data-expectedrole="link" class="ex" id="role-invalid-roles-37" data-ax-case="role-invalid-roles-37">x</a>
+<a href="#" role="&#773" data-testname="link with role set to overline diacritic" data-expectedrole="link" class="ex" id="role-invalid-roles-38" data-ax-case="role-invalid-roles-38">x</a>
+<a href="#" role="foo&#773" data-testname="link with role foo that has overline diacritic" data-expectedrole="link" class="ex" id="role-invalid-roles-39" data-ax-case="role-invalid-roles-39">x</a>
+<a href="#" role="&#813" data-testname="link with role set to circumflex diacritic below" data-expectedrole="link" class="ex" id="role-invalid-roles-40" data-ax-case="role-invalid-roles-40">x</a>
+<a href="#" role="foo&#813" data-testname="link with role foo that has circumflex diacritic below" data-expectedrole="link" class="ex" id="role-invalid-roles-41" data-ax-case="role-invalid-roles-41">x</a>
+<a href="#" role="button&#771" data-testname="link with role set to button with tilde diacritic" data-expectedrole="link" class="ex" id="role-invalid-roles-42" data-ax-case="role-invalid-roles-42">x</a>
+
+<!-- Diacritics with <div> -->
+<div role="&#771" data-testname="div with role set to tilde diacritic" class="ex-generic" id="role-invalid-roles-43" data-ax-case="role-invalid-roles-43">x</div>
+<div role="foo&#771" data-testname="div with role foo that has tilde diacritic" class="ex-generic" id="role-invalid-roles-44" data-ax-case="role-invalid-roles-44">x</div>
+<div role="button&#771" data-testname="div with role set to button with tilde diacritic" class="ex-generic" id="role-invalid-roles-45" data-ax-case="role-invalid-roles-45">x</div>
+<div role="button´" data-testname="div with role set to button with unescaped tilde diacritic" class="ex-generic" id="role-invalid-roles-46" data-ax-case="role-invalid-roles-46">x</div>
+
+<!-- Zero-width joiners (e.g., ZWJ like emoji variants use) with <button> -->
+<!-- [sic] role="‍" should include an invisible ZWJ], and role="link‍" ends with an invisible ZWJ. Use caution when editing. -->
+<button role="‍" data-testname="button with role set to zero-width joiner" data-expectedrole="button" class="ex" id="role-invalid-roles-47" data-ax-case="role-invalid-roles-47">x</button>
+<button role="link‍" data-testname="button with role set to foo with zero-width joiner" data-expectedrole="button" class="ex" id="role-invalid-roles-48" data-ax-case="role-invalid-roles-48">x</button>
+
+<!-- Non-western chars with <nav> -->
+<nav role="Θ" data-testname="nav with role set to theta (Θ)" data-expectedrole="navigation" class="ex" id="role-invalid-roles-49" data-ax-case="role-invalid-roles-49">x</nav>
+<nav role="ژ" data-testname="nav with role set to Persian character (ژ)" data-expectedrole="navigation" class="ex" id="role-invalid-roles-50" data-ax-case="role-invalid-roles-50">x</nav>
+<nav role="ژ ♮" data-testname="nav with multiple non-latin character roles, Persian character (ژ) and ♮" data-expectedrole="navigation" class="ex" id="role-invalid-roles-51" data-ax-case="role-invalid-roles-51">x</nav>
+<nav role="漢字" data-testname="nav with role set to Japanese kanji" data-expectedrole="navigation" class="ex" id="role-invalid-roles-52" data-ax-case="role-invalid-roles-52">x</nav>
+
+<!-- Non-western chars with <span> -->
+<span role="Θ" data-testname="span with role set to theta (Θ)" class="ex-generic" id="role-invalid-roles-53" data-ax-case="role-invalid-roles-53">x</span>
+<span role="ژ" data-testname="span with role set to Persian character (ژ)" class="ex-generic" id="role-invalid-roles-54" data-ax-case="role-invalid-roles-54">x</span>
+<span role="ژ ♮" data-testname="span with multiple non-latin character roles, Persian character (ژ) and ♮" class="ex-generic" id="role-invalid-roles-55" data-ax-case="role-invalid-roles-55">x</span>
+<span role="漢字" data-testname="span with role set to Japanese kanji" class="ex-generic" id="role-invalid-roles-56" data-ax-case="role-invalid-roles-56">x</span>
+
+<!-- RTL strings (Hebrew & Arabic) with <nav> -->
+<nav role="سلام" data-testname="nav with role set to Arabic text" data-expectedrole="navigation" class="ex" id="role-invalid-roles-57" data-ax-case="role-invalid-roles-57">x</nav>
+<nav role="سلام حبيب" data-testname="nav with multiple role assignments set to Arabic text" data-expectedrole="navigation" class="ex" id="role-invalid-roles-58" data-ax-case="role-invalid-roles-58">x</nav>
+<nav role="שלום" data-testname="nav with role set to Hebrew text" data-expectedrole="navigation" class="ex" id="role-invalid-roles-59" data-ax-case="role-invalid-roles-59">x</nav>
+<nav role="שלום חבר" data-testname="nav with multiple role assignments set to Hebrew text" data-expectedrole="navigation" class="ex" id="role-invalid-roles-60" data-ax-case="role-invalid-roles-60">x</nav>
+
+<!-- RTL strings (Hebrew & Arabic) with <div> -->
+<div role="سلام" data-testname="div with role set to Arabic text" class="ex-generic" id="role-invalid-roles-61" data-ax-case="role-invalid-roles-61">x</div>
+<div role="سلام حبيب" data-testname="div with multiple role assignments set to Arabic text" class="ex-generic" id="role-invalid-roles-62" data-ax-case="role-invalid-roles-62">x</div>
+<div role="שלום" data-testname="div with role set to Hebrew text" class="ex-generic" id="role-invalid-roles-63" data-ax-case="role-invalid-roles-63">x</div>
+<div role="שלום חבר" data-testname="div with multiple role assignments set to Hebrew text" class="ex-generic" id="role-invalid-roles-64" data-ax-case="role-invalid-roles-64">x</div>
+
+<!-- Escaped chars, URL-encoded chars with <a> -->
+<a href="https://www.apple.com/" role="&amp" data-testname="link with role set to ampersand character" data-expectedrole="link" class="ex" id="role-invalid-roles-65" data-ax-case="role-invalid-roles-65">x</a>
+<a href="https://www.apple.com/" role="&lt" data-testname="link with role set to less than angle bracket character" data-expectedrole="link" class="ex" id="role-invalid-roles-66" data-ax-case="role-invalid-roles-66">x</a>
+
+<!-- Escaped chars, URL-encoded chars with <span> -->
+<span role="&amp" data-testname="span with role set to ampersand character" class="ex-generic" id="role-invalid-roles-67" data-ax-case="role-invalid-roles-67">x</span>
+<span role="&lt" data-testname="span with role set to less than angle bracket character" class="ex-generic" id="role-invalid-roles-68" data-ax-case="role-invalid-roles-68">x</span>
+<span role="&" data-testname="span with role set to unescaped ampersand character" class="ex-generic" id="role-invalid-roles-69" data-ax-case="role-invalid-roles-69">x</span>
+<span role="<" data-testname="span with role set to unescaped less than angle bracket character" class="ex-generic" id="role-invalid-roles-70" data-ax-case="role-invalid-roles-70">x</span>
+
+<!-- Backslash closing quote and other malformed roles with characters with <nav> -->
+<nav role="region\" data-testname="nav with role set to region followed by backslash" data-expectedrole="navigation" class="ex" id="role-invalid-roles-71" data-ax-case="role-invalid-roles-71">x</nav>
+<nav role="\region" data-testname="nav with role set to backslash followed by region" data-expectedrole="navigation" class="ex" id="role-invalid-roles-72" data-ax-case="role-invalid-roles-72">x</nav>
+<nav role="re/gion" data-testname="nav with role set to region with backslash after e character" data-expectedrole="navigation" class="ex" id="role-invalid-roles-73" data-ax-case="role-invalid-roles-73">x</nav>
+
+<!-- Backslash closing quote and other malformed roles with characters with <span> -->
+<span role="region\" data-testname="span with role set to region followed by backslash" class="ex-generic" id="role-invalid-roles-74" data-ax-case="role-invalid-roles-74">x</span>
+<span role="\region" data-testname="span with role set to backslash followed by region" class="ex-generic" id="role-invalid-roles-75" data-ax-case="role-invalid-roles-75">x</span>
+<span role="re/gion" data-testname="span with role set to region with forward slash after e character" class="ex-generic" id="role-invalid-roles-76" data-ax-case="role-invalid-roles-76">x</span>
+<!-- group: wpt wai-aria/role/list-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#list">list</a> and related roles.</p>
+
+<div role="list" data-testname="first simple list" data-expectedrole="list" class="ex" id="role-list-roles-1" data-ax-case="role-list-roles-1">
+  <div role="listitem" data-testname="first simple listitem" data-expectedrole="listitem" class="ex" id="role-list-roles-2" data-ax-case="role-list-roles-2">x</div>
+  <div role="listitem" data-testname="last simple listitem" data-expectedrole="listitem" class="ex">x</div>
+</div>
+<!-- group: wpt wai-aria/role/listbox-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#listbox">listbox</a> and related roles.</p>
+
+<div role="listbox" data-testname="div role is listbox" data-expectedrole="listbox" class="ex" id="role-listbox-roles-1" data-ax-case="role-listbox-roles-1">
+    <div role="option" data-testname="role is option (in div listbox)" data-expectedrole="option" class="ex" id="role-listbox-roles-2" data-ax-case="role-listbox-roles-2">x</div>
+    <div role="group" data-testname="role is group (in div listbox)" data-expectedrole="group" class="ex" id="role-listbox-roles-3" data-ax-case="role-listbox-roles-3">
+        <span role="option" data-testname="role is option (in group, in div listbox)" data-expectedrole="option" class="ex" id="role-listbox-roles-4" data-ax-case="role-listbox-roles-4">x</span>
+        <span role="option">x</span>
+    </div>
+    <div role="option">x</div>
+</div>
+
+<ul role="listbox" data-testname="ul role is listbox" data-expectedrole="listbox" class="ex" id="role-listbox-roles-5" data-ax-case="role-listbox-roles-5">
+    <li role="option" data-testname="li role is option (in ul listbox)" data-expectedrole="option" class="ex" id="role-listbox-roles-6" data-ax-case="role-listbox-roles-6">
+        x
+    </li>
+    <li role="option">
+        x
+    </li>
+</ul>
+<!-- group: wpt wai-aria/role/menu-roles.html -->
+<style>
+    /* Typically horizontal */
+    [role="menubar"] {
+        display: flex;
+    }
+</style>
+
+
+<p>Tests <a href="https://w3c.github.io/aria/#menu">menu</a> and related roles.</p>
+
+<div role="menu" data-testname="role is menu" data-expectedrole="menu" class="ex" id="role-menu-roles-1" data-ax-case="role-menu-roles-1">
+    <div role="menuitem" data-testname="role is menuitem (in menu)" data-expectedrole="menuitem" class="ex" id="role-menu-roles-2" data-ax-case="role-menu-roles-2">x</div>
+    <div role="menuitem">x</div>
+    <div role="menuitem">x</div>
+    <div role="group" data-testname="role is group (in menu)" data-expectedrole="group" class="ex" id="role-menu-roles-3" data-ax-case="role-menu-roles-3">
+        <div role="menuitem" data-testname="role is menuitem (in group, in menu)" data-expectedrole="menuitem" class="ex">x</div>
+        <div role="menuitem">x</div>
+    </div>
+    <div role="group">
+        <div role="menuitemradio" aria-checked="true" data-testname="role is menuitemradio (in group, in menu)" data-expectedrole="menuitemradio" class="ex" id="role-menu-roles-5" data-ax-case="role-menu-roles-5">x</div>
+        <div role="menuitemradio">x</div>
+    </div>
+    <div role="group">
+        <div role="menuitemcheckbox" aria-checked="true" data-testname="role is menuitemcheckbox (in group, in menu)" data-expectedrole="menuitemcheckbox" class="ex" id="role-menu-roles-6" data-ax-case="role-menu-roles-6">x</div>
+        <div role="menuitemcheckbox">x</div>
+    </div>
+</div>
+
+<div role="menubar" data-testname="role is menubar" data-expectedrole="menubar" class="ex" id="role-menu-roles-7" data-ax-case="role-menu-roles-7">
+    <div role="menuitem" data-testname="role is menuitem (in menubar)" data-expectedrole="menuitem" class="ex">x</div>
+    <div role="menuitem">x</div>
+    <div role="menuitem">x</div>
+    <div role="group" data-testname="role is group (in menubar)" data-expectedrole="group" class="ex">
+        <div role="menuitem" data-testname="role is menuitem (in group, in menubar)" data-expectedrole="menuitem" class="ex">x</div>
+        <div role="menuitem">x</div>
+    </div>
+    <div role="group">
+        <div role="menuitemradio" aria-checked="true" data-testname="role is menuitemradio (in group, in menubar)" data-expectedrole="menuitemradio" class="ex">x</div>
+        <div role="menuitemradio">x</div>
+    </div>
+    <div role="group">
+        <div role="menuitemcheckbox" aria-checked="true" data-testname="role is menuitemcheckbox (in group, in menubar)" data-expectedrole="menuitemcheckbox" class="ex">x</div>
+        <div role="menuitemcheckbox">x</div>
+    </div>
+</div>
+<!-- group: wpt wai-aria/role/region-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#region">region</a> and related roles, as well as the "name from author" rule in <a href="https://w3c.github.io/aria/#document-handling_author-errors_roles">9.1 Roles - handling author errors</a>.</p>
+
+<!-- no label -->
+<nav role="region" data-testname="region without label" data-expectedrole="navigation" class="ex" id="role-region-roles-1" data-ax-case="role-region-roles-1">x</nav>
+
+<!-- w/ label -->
+<nav role="region" data-testname="region with label" data-expectedrole="region" aria-label="x" class="ex" id="role-region-roles-2" data-ax-case="role-region-roles-2">x</nav>
+<!-- group: wpt wai-aria/role/role_none_conflict_resolution.html -->
+<p>Verifies <a href="https://w3c.github.io/aria/#conflict_resolution_presentation_none">conflict resolution</a> requirements for the ARIA <a href="https://w3c.github.io/aria/#none">none</a> and <a href="https://w3c.github.io/aria/#presentation">presentation</a> roles.</p>
+
+<!-- none with label(global) on header -->
+<h1 role="none" data-testname="heading role none with global attr aria-label" data-expectedrole="heading" aria-label="x" class="ex" id="role-role-none-conflict-resolution-1" data-ax-case="role-role-none-conflict-resolution-1">x</h1>
+
+<!-- none with label(global) on paragraph -->
+<p role="none" data-testname="p role none with global attr aria-label (prohibited role)" data-expectedrole="paragraph" aria-label="x" class="ex" id="role-role-none-conflict-resolution-2" data-ax-case="role-role-none-conflict-resolution-2">x</p>
+<p role="none" data-testname="p role none without global attr aria-label (prohibited role)" class="ex-generic" id="role-role-none-conflict-resolution-3" data-ax-case="role-role-none-conflict-resolution-3">x</p>
+
+<!-- none with focusable header -->
+<h1 role="none" data-testname="focusable heading role none with tabindex=0" data-expectedrole="heading" tabindex="0" class="ex" id="role-role-none-conflict-resolution-4" data-ax-case="role-role-none-conflict-resolution-4">x</h1>
+<h1 role="none" data-testname="focusable heading role none with tabindex=-1" data-expectedrole="heading" tabindex="-1" class="ex" id="role-role-none-conflict-resolution-5" data-ax-case="role-role-none-conflict-resolution-5">x</h1>
+<h1 role="none" data-testname="non-focusable heading role none" class="ex-generic" id="role-role-none-conflict-resolution-6" data-ax-case="role-role-none-conflict-resolution-6">x</h1>
+
+<!-- none with non-global-->
+<h1 role="none" data-testname="none with non-global" class="ex-generic" aria-level="2" id="role-role-none-conflict-resolution-7" data-ax-case="role-role-none-conflict-resolution-7"> Sample Content </h1>
+<!-- group: wpt wai-aria/role/role_none_conflict_resolution.tentative.html -->
+<!-- ARIA specs: https://w3c.github.io/aria/#tree_exclusion -->
+    <!-- no conflict, since not focusable; inner button should be exposed as generic - children presentational - //https://github.com/web-platform-tests/interop-accessibility/issues/161 -->
+    <h2>Non-focusable ARIA role="button" nesting non-focusable ARIA role="button" (no presentational roles conflict resolution, since inner button is not focusable)</h2>
+    <div role="button">
+      <span>outer button</span>
+      <span role="button" class="ex-role" data-expectedrole="SPEC_AMBIGUOUS_LOG_VALUE" data-testname="non-focusable ARIA[role=button] nesting non-focusable ARIA[role=button]" id="role-role-none-conflict-resolution-tentative-1" data-ax-case="role-role-none-conflict-resolution-tentative-1">Inner button</span>
+    </div>
+
+    <!-- no conflict, since nested button is not focusable; inner button should be exposed as generic - children presentational - //https://github.com/web-platform-tests/interop-accessibility/issues/161 -->
+    <h2>Focusable ARIA role="button" nesting non-focusable ARIA role="button" (no presentational roles conflict resolution, since inner button is not focusable)</h2>
+    <div role="button" tabindex="0">
+      <span>outer button</span>
+      <span role="button" class="ex-role" data-expectedrole="SPEC_AMBIGUOUS_LOG_VALUE" data-testname="focusable ARIA[role=button] nesting non-focusable ARIA[role=button]">Inner button</span>
+    </div>
+
+    <!-- conflict arise, since inner button is focusable - //https://github.com/web-platform-tests/interop-accessibility/issues/161-->
+    <h2>Non-focusable ARIA role="button" nesting focusable ARIA role="button" (presentational roles conflict resolution arise, since inner button is focusable)</h2>
+    <div role="button">
+      <span>outer button</span>
+      <span role="button" class="ex-role" data-expectedrole="SPEC_AMBIGUOUS_LOG_VALUE" data-testname="non-focusable ARIA[role=button] nesting focusable ARIA[role=button]" tabindex="0" id="role-role-none-conflict-resolution-tentative-3" data-ax-case="role-role-none-conflict-resolution-tentative-3">Inner button</span>
+    </div>
+
+    <!-- conflict arise, since inner button is focusable - //https://github.com/web-platform-tests/interop-accessibility/issues/161-->
+    <h2>Focusable ARIA role="button" nesting focusable ARIA role="button" (presentational roles conflict resolution arise, since inner button is focusable)</h2>
+    <div role="button" tabindex="0">
+      <span>outer button</span>
+      <span role="button" class="ex-role" data-expectedrole="SPEC_AMBIGUOUS_LOG_VALUE" data-testname="focusable ARIA[role=button] nesting focusable ARIA[role=button]" tabindex="0">Inner button</span>
+    </div>
+
+    <!-- conflict arise, since inner button is focusable - //https://github.com/web-platform-tests/interop-accessibility/issues/161-->
+    <h2>HTML button nesting HTML button</h2>
+    <div id="button-container">
+      <button id="outer-button">
+        <span>outer button</span>
+        <span id="inner-button-container"></span>
+      </button>
+    </div>
+
+    <!-- This test case is specifically designed to check the role, but a separate test case has been created in accname/name/comp_host_language_label.tentative.html to check the acc name -->
+    <h2>HTML input with role="none" (presentational roles conflict resolution)</h2>
+    <label for="role-role-none-conflict-resolution-tentative-2">input label</label>
+    <input id="role-role-none-conflict-resolution-tentative-2" type="text" data-expectedrole="textbox" data-testname="HTML input[role=none] but focusable" class="ex-role" role="none" data-ax-case="role-role-none-conflict-resolution-tentative-2">
+
+    <!-- This test case is specifically designed to check the role, but a separate test case has been created in accname/name/comp_host_language_label.tentative.html to check the acc name -->
+    <h2>HTML input with role="none" and disabled (presentational roles conflict resolution does not apply due to disabled attr)</h2>
+    <label for="irpd">input label</label>
+    <input id="irpd" type="text" data-testname="HTML input[role=none][disabled]" class="ex-generic" role="none" disabled data-ax-case="irpd">
+
+    <h2>HTML input with role="none" and readonly (presentational roles conflict resolution)</h2>
+    <label for="irnro">input label</label>
+    <input id="irnro" type="text" data-expectedrole="textbox" data-testname="HTML input[role=none][readonly] but focusable" class="ex-role" role="none" readonly data-ax-case="irnro">
+
+    <h2>HTML input with role="none", disabled and readonly (presentational roles conflict resolution does not apply due to disabled attr)</h2>
+    <label for="irpdro">input label</label>
+    <input id="irpdro" type="text" data-testname="HTML input[role=none][disabled][readonly]" class="ex-generic" role="none" disabled readonly data-ax-case="irpdro">
+<!-- group: wpt wai-aria/role/role_none_conflict_resolution_spec_ambiguities.tentative.html -->
+<!-- current spec: https://w3c.github.io/aria/#conflict_resolution_presentation_none -->
+    <!-- PR with proposed clarification, pending user agent tests: https://github.com/w3c/aria/pull/2237 -->
+    <h1>Presentational role inherited with global</h1>
+
+    <!-- li is inheriting presentational role from ul; it has a global aria attr but it doesn't impact the presentational conflict resolution -->
+    <ul role="none">
+      <li aria-describedby="test" data-testname="presentational roles conflict - ul[role=none] > li[aria-describedby]" class="ex-generic" id="role-role-none-conflict-resolution-spec-ambiguities-tentative-1" data-ax-case="role-role-none-conflict-resolution-spec-ambiguities-tentative-1">a</li>
+      <li aria-describedby="test">b</li>
+      <li aria-describedby="test">c</li>
+    </ul>
+
+    <!-- td is inheriting presentational role from table; it has a global aria attr but it doesn't impact the presentational conflict resolution -->
+    <table role="none">
+      <tbody>
+          <tr>
+            <td aria-describedby="test" data-testname="presentational roles conflict - table[role=none] td[aria-describedby]" class="ex-generic" id="role-role-none-conflict-resolution-spec-ambiguities-tentative-2" data-ax-case="role-role-none-conflict-resolution-spec-ambiguities-tentative-2">a</td>
+          </tr>
+      </tbody>
+    </table>
+
+    <!-- td is inheriting presentational role from table; it has a global aria attr but it doesn't impact the presentational conflict resolution -->
+    <style>
+      table.with-style, table.with-style th, table.with-style td {
+        border: 1px solid black;
+        border-collapse: collapse;
+      }
+    </style>
+    <table role="none" class="with-style">
+      <tbody>
+          <tr>
+            <th>col 1</th>
+            <th>col 2</th>
+          </tr>
+          <tr>
+            <td aria-describedby="test" data-testname="presentational roles conflict - table.with-style[role=none] td[aria-describedby]" class="ex-generic" id="role-role-none-conflict-resolution-spec-ambiguities-tentative-3" data-ax-case="role-role-none-conflict-resolution-spec-ambiguities-tentative-3">cell 1</td>
+            <td>cell 2</td>
+          </tr>
+          <tr>
+            <td>cell 3</td>
+            <td>cell 4</td>
+          </tr>
+      </tbody>
+    </table>
+<!-- group: wpt wai-aria/role/synonym-roles.html -->
+<p>Tests synonym roles image/img and none/presentation via <a href="https://w3c.github.io/core-aam/#roleMappingComputedRole">Core-AAM Computed Role</a>.</p>
+
+<!-- spec resolution https://github.com/w3c/core-aam/issues/166 -->
+
+<div role="none" id="none" data-testname="none role == computedrole none" class="ex-generic" data-ax-case="none">x</div><!-- preferred -->
+<div role="presentation" id="presentation" data-testname="synonym presentation role == computedrole none" class="ex-generic" data-ax-case="presentation">x</div><!-- synonym -->
+
+<div role="image" id="image" data-expectedrole="image" data-testname="image role == computedrole image" class="ex" data-ax-case="image">x</div><!-- preferred -->
+<div role="img" id="img" data-expectedrole="image" data-testname="synonym img role == computedrole image" class="ex" data-ax-case="img">x</div><!-- synonym -->
+
+<!-- `directory` synonym deprecated in ARIA 1.2; these examples should all return computedrole `list` -->
+<ul role="list" id="list2" data-expectedrole="list" data-testname="list role == computedrole list" class="ex" data-ax-case="list2"><li>x</li></ul>
+<ul role="directory" id="directory" data-expectedrole="list" data-testname="directory role == computedrole list" class="ex" data-ax-case="directory"><li>x</li></ul>
+<div role="directory" id="div" data-expectedrole="list" data-testname="div w/directory role == computedrole list" class="ex" data-ax-case="div"><div role="listitem">x</div></div>
+<!-- group: wpt wai-aria/role/tab-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#tab">tab</a> and related roles.</p>
+
+<!--<div> tab with tablist/tab/tabpanel semantics-->
+<div role="tablist" data-testname="div role is tablist" data-expectedrole="tablist" class="ex" id="role-tab-roles-1" data-ax-case="role-tab-roles-1">
+    <div role="tab" data-testname="role is tab (in div tablist)" data-expectedrole="tab" class="ex" id="role-tab-roles-2" data-ax-case="role-tab-roles-2">x</div>
+</div>
+<div role="tabpanel" data-testname="role is tabpanel (with sibling div tablist)" data-expectedrole="tabpanel" class="ex" id="role-tab-roles-3" data-ax-case="role-tab-roles-3"></div>
+
+<!--<div> tabs with tablist/tab/tabpanel semantics, selection, no focus management-->
+<div role="tablist" data-testname="div role is tablist (with selection)" data-expectedrole="tablist" class="ex" id="role-tab-roles-4" data-ax-case="role-tab-roles-4">
+    <div role="tab" aria-selected="true" data-testname="role is tab and tab is selected" data-expectedrole="tab" class="ex" id="role-tab-roles-5" data-ax-case="role-tab-roles-5">x</div>
+    <div role="tab" aria-selected="false" data-testname="role is tab and tab is not selected" data-expectedrole="tab" class="ex" id="role-tab-roles-6" data-ax-case="role-tab-roles-6">y</div>
+</div>
+<div role="tabpanel" data-testname="role is tabpanel (faux selected)" data-expectedrole="tabpanel" class="ex"></div>
+<div role="tabpanel" data-testname="role is tabpanel (faux unselected)" data-expectedrole="tabpanel" class="ex"></div>
+
+<!--<div> tabs with tablist/tab/tabpanel semantics, selection, roving tabindex-->
+<div role="tablist" data-testname="div role is tablist (with selection, roving tabindex)" data-expectedrole="tablist" class="ex" id="role-tab-roles-9" data-ax-case="role-tab-roles-9">
+    <div role="tab" aria-selected="true" tabindex = "0" data-testname="role is tab, tab is selected and in tab order" data-expectedrole="tab" class="ex" id="role-tab-roles-10" data-ax-case="role-tab-roles-10">x</div>
+    <div role="tab" aria-selected="false" tabindex = "-1" data-testname="role is tab and tab is not selected, not tabbable" data-expectedrole="tab" class="ex" id="role-tab-roles-11" data-ax-case="role-tab-roles-11">y</div>
+    <div role="tab" aria-selected="false" tabindex = "-1" data-testname="role is tab and tab is not selected, not tabbable (duplicate)" data-expectedrole="tab" class="ex" id="role-tab-roles-12" data-ax-case="role-tab-roles-12">z</div>
+</div>
+<div role="tabpanel" data-testname="role is tabpanel with selection, roving tabindex" data-expectedrole="tabpanel" class="ex"></div>
+<div role="tabpanel" data-testname="role is tabpanel with selection, roving tabindex (duplicate)" data-expectedrole="tabpanel" class="ex"></div>
+<div role="tabpanel" data-testname="role is tabpanel with selection, roving tabindex (duplicate 2)" data-expectedrole="tabpanel" class="ex"></div>
+
+<!--<div> tabs with tablist/tab/tabpanel semantics and non-empty tabpanel-->
+<div role="tablist" data-testname="div role is tablist (with non-empty tabpanel)" data-expectedrole="tablist" class="ex">
+    <div role="tab" aria-selected="true" data-testname="role is tab and tab is selected (with non-empty tabpanel content)" data-expectedrole="tab" class="ex">x</div>
+    <div role="tab" aria-selected="false" data-testname="role is tab and tab is not selected (with non-empty tabpanel content)" data-expectedrole="tab" class="ex">y</div>
+</div>
+<div role="tabpanel" data-testname="role is tabpanel with selection, non-empty content" data-expectedrole="tabpanel" class="ex" id="role-tab-roles-19" data-ax-case="role-tab-roles-19">Tab one's stuff</div>
+<div role="tabpanel" data-testname="role is tabpanel with selection, non-empty content (duplicate)" data-expectedrole="tabpanel" class="ex" id="role-tab-roles-20" data-ax-case="role-tab-roles-20">Tab two's stuff</div>
+
+<!--<div> tabs with tablist/tab/tabpanel semantics, non-empty tabpanel and aria-controls-->
+<div role="tablist" data-testname="div role is tablist (with non-empty tabpanel and aria-controls)" data-expectedrole="tablist" class="ex" id="role-tab-roles-21" data-ax-case="role-tab-roles-21">
+    <div role="tab" aria-controls = "tabpanel1" aria-selected="true" data-testname="role is tab, tab is selected (with aria-controls)" data-expectedrole="tab" class="ex" id="role-tab-roles-22" data-ax-case="role-tab-roles-22">x</div>
+    <div role="tab" aria-controls = "tabpanel2" aria-selected="false" data-testname="role is tab, tab is not selected (with aria-controls)" data-expectedrole="tab" class="ex" id="role-tab-roles-23" data-ax-case="role-tab-roles-23">y</div>
+</div>
+<div role="tabpanel" id="tabpanel1" data-testname="role is tabpanel with aria-controls and non-empty content" data-expectedrole="tabpanel" class="ex" data-ax-case="tabpanel1">Tab one's stuff</div>
+<div role="tabpanel" id="tabpanel2" data-testname="role is tabpanel with aria-controls and non-empty content (duplicate)" data-expectedrole="tabpanel" class="ex" data-ax-case="tabpanel2">Tab one's stuff</div>
+
+<!--<div> tablist with child <button> that has explicit role="tab"-->
+<div role="tablist" data-testname="div role for button parent container is tablist" data-expectedrole="tablist" class="ex" id="role-tab-roles-26" data-ax-case="role-tab-roles-26">
+    <button role="tab" data-testname="button role is tab (in div tablist)" data-expectedrole="tab" class="ex" id="role-tab-roles-27" data-ax-case="role-tab-roles-27">x</button>
+</div>
+
+<!--<ul> tablist with child <divs> that have explicit role="tab"-->
+<ul role="tablist" data-testname="ul role is tablist" data-expectedrole="tablist" class="ex" id="role-tab-roles-28" data-ax-case="role-tab-roles-28">
+    <li>
+        <div role="tab" aria-selected="true" tabindex = "0" data-testname="role is tab (within li), tab is selected and in tab order" data-expectedrole="tab" class="ex">x</div>
+    </li>
+    <li>
+        <div role="tab" aria-selected="false" tabindex = "-1" data-testname="role is tab (within li), tab is not selected and in tab order" data-expectedrole="tab" class="ex">y</div>
+    </li>
+</ul>
+<div role="tabpanel" data-testname="role is tabpanel as sibling to ul" data-expectedrole="tabpanel" class="ex">Tab one's stuff</div>
+<div role="tabpanel" data-testname="role is tabpanel as sibling to ul (duplicate)" data-expectedrole="tabpanel" class="ex">Tab two's stuff</div>
+
+<!--<ul> tablist with child <divs> that have explicit role="tab", role="none" on li elements-->
+    <ul role="tablist" data-testname="ul role is tablist (child li have role none)" data-expectedrole="tablist" class="ex" id="role-tab-roles-33" data-ax-case="role-tab-roles-33">
+        <li role="none">
+            <div role="tab" aria-selected="true" tabindex = "0" data-testname="role is tab (within li with role none), tab is selected and in tab order" data-expectedrole="tab" class="ex">x</div>
+        </li>
+        <li role="none">
+            <div role="tab" aria-selected="false" tabindex = "-1" data-testname="role is tab (within li with role none), tab is not selected and in tab order" data-expectedrole="tab" class="ex">y</div>
+        </li>
+    </ul>
+    <div role="tabpanel" data-testname="role is tabpanel as sibling to ul with child role none li elements" data-expectedrole="tabpanel" class="ex">Tab one's stuff</div>
+    <div role="tabpanel" data-testname="role is tabpanel as sibling to ul with child role none li elements (duplicate)" data-expectedrole="tabpanel" class="ex">Tab two's stuff</div>
+<!-- group: wpt wai-aria/role/table-roles.html -->
+<p>Tests <a href="https://w3c.github.io/aria/#table">table</a> and related roles.</p>
+
+<!-- HTML <table> Elements Testing  -->
+
+    <!-- <caption> -> wpt/html-aam/table-roles.html -->
+
+    <!-- <table> -> wpt/html-aam/table-roles.html -->
+    <!-- <tbody> -> wpt/html-aam/table-roles.html -->
+
+    <!-- <td> -> wpt/html-aam/table-roles.html -->
+
+    <!-- <tfoot> -> wpt/html-aam/table-roles.html -->
+
+    <!-- <th> -> wpt/html-aam/table-roles.html -->
+    <!-- <thead> -> wpt/html-aam/table-roles.html -->
+
+    <!-- <tr> -> wpt/html-aam/table-roles.html -->
+
+
+<!-- ARIA Grid Elements Testing  -->
+
+        <!-- Grid roles tested in ./grid-roles.html -->
+
+
+<!-- ARIA Table Roles Testing  -->
+
+    <!-- caption -->
+    <div role="table">
+        <div role="caption" data-testname="div role is caption (in div with table role)" data-expectedrole="caption" class="ex" id="role-table-roles-1" data-ax-case="role-table-roles-1">x</div>
+    </div>
+
+    <p role="caption" data-testname="orphan p role is caption" data-expectedrole="caption" class="ex" id="role-table-roles-2" data-ax-case="role-table-roles-2">x</p>
+
+    <!-- cell -->
+    <div role="table">
+        <div role="rowgroup">
+            <div role="row">
+              <span role="columnheader">x</span>
+              <span role="columnheader">x</span>
+            </div>
+        </div>
+        <div role="rowgroup">
+            <div role="row">
+                <span role="cell" data-testname="span role is cell (in div with row role, in div with rowgroup role, in div with table role)" data-expectedrole="cell" class="ex" id="role-table-roles-3" data-ax-case="role-table-roles-3">x</span>
+                <span role="cell">x</span>
+            </div>
+        </div>
+    </div>
+
+    <span role="cell" data-testname="orphan span role is cell" data-expectedrole="cell" class="ex">x</span>
+
+    <!-- columnheader -->
+    <div role="table">
+        <div role="rowgroup">
+            <div role="row">
+                <span role="columnheader" data-testname="span role is columnheader (in div with row role, in div with rowgroup role, in div with table role)" data-expectedrole="columnheader" class="ex">x</span>
+                <span role="columnheader">x</span>
+                <span role="columnheader">x</span>
+            </div>
+        </div>
+        <div role="rowgroup">
+            <div role="row">
+                <span role="rowheader">x</span>
+                <span role="cell">x</span>
+                <span role="cell">x</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- row -->
+    <div role="table">
+        <div role="rowgroup">
+            <div role="row" data-testname="div role is row (in div with rowgroup role, in div with table role)" data-expectedrole="row" class="ex" id="role-table-roles-6" data-ax-case="role-table-roles-6">
+                <span role="columnheader">x</span>
+            </div>
+        </div>
+        <div role="rowgroup">
+            <div role="row">
+                <span role="cell">x</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- rowgroup -->
+    <div role="table">
+        <div role="rowgroup" data-testname="div role is rowgroup (in div with table role)" data-expectedrole="rowgroup" class="ex" id="role-table-roles-7" data-ax-case="role-table-roles-7">
+            <div role="row">
+                <span role="columnheader">x</span>
+                <span role="columnheader">x</span>
+            </div>
+        </div>
+        <div role="rowgroup">
+            <div role="row">
+                <span role="cell">x</span>
+                <span role="cell">x</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- rowheader -->
+    <div role="table">
+        <div role="rowgroup">
+            <div role="row">
+                <span role="columnheader">x</span>
+                <span role="columnheader">x</span>
+                <span role="columnheader">x</span>
+            </div>
+        </div>
+        <div role="rowgroup">
+            <div role="row">
+                <span role="rowheader" data-testname="role is rowheader (in div with row role, in div with rowgroup role, in div with table role)" data-expectedrole="rowheader" class="ex">x</span>
+                <span role="cell">x</span>
+                <span role="cell">x</span>
+                <span role="cell">x</span>
+            </div>
+        </div>
+      </div>
+
+    <!-- table -->
+    <div role="table" data-testname="div role is table" data-expectedrole="table" class="ex" id="role-table-roles-9" data-ax-case="role-table-roles-9">
+        <div role="row">
+            <span role="columnheader">x</span>
+            <span role="columnheader">x</span>
+        </div>
+        <div role="row">
+            <span role="cell">x</span>
+            <span role="cell">x</span>
+        </div>
+    </div>
+<!-- group: wpt wai-aria/role/tree-roles.html -->
+<style>
+  /* Hide collapsed rows */
+  [role="treegrid"] tr.hidden {
+    display: none;
+  }
+
+  /* Indents */
+  [role="treegrid"] tr[aria-level="2"] > td:first-child {
+    padding-left: 2ch;
+  }
+
+  [role="treegrid"] tr[aria-level="3"] > td:first-child {
+    padding-left: 4ch;
+  }
+
+  /* Collapse/expand icons */
+  [role="treegrid"] tr > td:first-child::before {
+    content: "";
+    display: inline-block;
+    width: 2ch;
+    height: 11px;
+    transition: transform 0.3s;
+    transform-origin: 5px 5px;
+  }
+
+  [role="treegrid"] tr[aria-expanded] > td:first-child::before,
+  [role="treegrid"] td[aria-expanded]:first-child::before {
+    cursor: pointer;
+
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpolygon fill='black' points='2,0 2,10 10,5'%3E%3C/polygon%3E%3C/svg%3E%0A");
+    background-repeat: no-repeat;
+  }
+
+  [role="treegrid"] tr[aria-expanded="true"] > td:first-child::before,
+  [role="treegrid"] td[aria-expanded="true"]:first-child::before {
+    transform: rotate(90deg);
+  }
+</style>
+
+
+<p>Tests <a href="https://w3c.github.io/aria/#tree">tree</a> and related roles.</p>
+
+<ul role="tree" data-testname="role is tree" data-expectedrole="tree" class="ex" id="role-tree-roles-1" data-ax-case="role-tree-roles-1">
+  <li role="treeitem" data-testname="role is treeitem (in tree)" data-expectedrole="treeitem" class="ex" id="role-tree-roles-2" data-ax-case="role-tree-roles-2">
+    x
+    <ul role="group" data-testname="role is group (in treeitem)" data-expectedrole="group" class="ex" id="role-tree-roles-3" data-ax-case="role-tree-roles-3">
+      <li role="treeitem" data-testname="role is treeitem (in group, in treeitem)" data-expectedrole="treeitem" class="ex" id="role-tree-roles-4" data-ax-case="role-tree-roles-4">x</li>
+      <li role="treeitem">x</li>
+    </ul>
+  </li>
+  <li role="treeitem">x</li>
+</ul>
+
+<table role="treegrid" data-testname="role is treegrid" data-expectedrole="treegrid" class="ex" id="role-tree-roles-5" data-ax-case="role-tree-roles-5">
+  <tbody>
+    <tr role="row" aria-expanded="true" aria-level="1" aria-posinset="1" aria-setsize="2" data-testname="role is row (in treegrid)" data-expectedrole="row" class="ex expander" id="role-tree-roles-6" data-ax-case="role-tree-roles-6">
+      <td role="gridcell" data-testname="role is gridcell (in row, in treegrid)" data-expectedrole="gridcell" class="ex" id="role-tree-roles-7" data-ax-case="role-tree-roles-7">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+    <tr role="row" aria-level="2" aria-posinset="1" aria-setsize="2">
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+    <tr aria-expanded="false" aria-level="2" aria-posinset="2" aria-setsize="2" role="row" class="expander">
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+    <tr role="row" aria-level="3" aria-posinset="1" aria-setsize="1" class="hidden">
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+    <tr role="row" aria-expanded="false" aria-level="1" aria-posinset="2" aria-setsize="2" class="expander">
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+    <tr role="row" aria-level="2" aria-posinset="1" aria-setsize="2" class="hidden">
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+    <tr role="row" aria-level="2" aria-posinset="1" aria-setsize="2" class="hidden">
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+      <td role="gridcell">x</td>
+    </tr>
+  </tbody>
+</table>

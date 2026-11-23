@@ -6,7 +6,8 @@
 // The uses already there are counted per file in scripts/check-realms.json: a file may have
 // fewer, not more. Run with `--update` after removing some, to lower the counts.
 //
-// Found line by line with regular expressions, outside lines that start a comment.
+// Found line by line with regular expressions, outside lines that start a comment and outside
+// quoted strings.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +38,9 @@ for (const file of sources(agent)) {
   let count = 0;
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (/^\s*(\/\/|\/?\*)/.test(line)) continue;
-    for (const pattern of PATTERNS) count += line.match(pattern)?.length ?? 0;
+    // A word in a string, such as the ARIA role "document", is not code.
+    const code = line.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
+    for (const pattern of PATTERNS) count += code.match(pattern)?.length ?? 0;
   }
   if (count) counts[rel] = count;
 }

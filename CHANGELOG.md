@@ -2,7 +2,20 @@
 
 All packages share one version and are released together (see DEV.md, "Releasing to npm"). Each release says first which Chrome its DevTools frontend comes from; the versioning rules are in DEV.md too. Changes are listed under `Unreleased` as they land, and moved under the version when it is released. The Chinese version is [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md); the two say the same.
 
-## Unreleased
+## 0.5.0
+
+Based on Chrome 159 (159.0.8154.13).
+
+- The DevTools frontend now comes from Chrome 159 (it was Chrome 158), with that version's panels and UI; the browser default styles shown in Styles follow Chrome 159 too.
+- The accessibility tree is computed by the project's own code instead of dom-accessibility-api, and follows Chrome much more closely. `accessibility.js` grows from about 29 KB to about 80 KB.
+  - Roles, names, descriptions, values and properties follow Chrome's rules: all of the about 1,800 cases imported from dom-accessibility-api's tests and from web-platform-tests match Chrome, layout tables, image map areas and CSS counters in generated content included.
+  - The tree has the nodes Chrome has without a DOM node the page can see: a select's popup and options, a text field's placeholder and inner editor, an input button's text, a color well's swatch, and list markers with their text, in every predefined counter style and in `@counter-style` rules read from the page. A list marker has the backend id of its `::marker`, and `::before` and `::after` those of their pseudo-elements; the other such nodes get ids below 0, which `getChildAXNodes` takes.
+  - The tree's shape follows Chrome: generic containers, hidden subtrees, white space text, the body, shadow trees and slots, aria-owns, svg and generated content are kept, ignored or left out as Chrome does, and `getFullAXTree` lists the nodes in Chrome's order. The whole-tree comparison with Chrome differs on 29 of 223 groups; what is left, such as localized names and media controls, is listed in the limitations.
+- The Accessibility pane refreshes by itself when the page changes: `Accessibility.nodesUpdated` is sent as in Chrome, while the domain is enabled, for the nodes the client was given by `getChildAXNodes` or `getAXNodeAndAncestors`, those changed in one frame in one event. Changes are seen through a mutation observer; style changes it cannot see (the CSSOM, `:hover`, media queries) are sent with the next DOM change (see the limitations). `loadComplete` is not sent, as the agent starts in a loaded page.
+- `devtools-anywhere` has no runtime dependencies any more: snapDOM was already built into `dist/snapdom.js` and is now a development dependency, and dom-accessibility-api is gone.
+- Frames report the security origin Chrome 159 gives them, in the frame tree and the frame events: a frame on `about:blank` or `srcdoc` has the origin it inherits from the document that created it, and a sandboxed frame without `allow-same-origin` has an opaque origin.
+- A Content Security Policy issue raised without a source file, such as by markup a script inserted, no longer points at the document's URL at line -1: it has no source location, as in Chrome.
+- A deprecation issue still points at the page's URL, where Chrome 159 points at the script that called the deprecated API: the page is not told where the call was made (see the limitations).
 
 ## 0.4.0
 
@@ -41,7 +54,7 @@ Based on Chrome 158 (158.0.8127.37).
 Public API, as in `packages/*/etc/*.public.api.md`: unchanged since 0.3.0.
 
 - `devtools-anywhere` ships two more files in `dist/`, loaded on first use: `accessibility.js` (exported as `./accessibility.js`, with its source map `accessibility.js.map`) and `chromium-html.css`; self-hosted, serve them with the bundle. `chromium-html.css` is under the LGPL (2.0 or later), the package's only file that is not MIT or BSD; its license ships as `chromium-html.LICENSE.txt`, and leaving both out only drops the user agent stylesheet rules. It depends on `dom-accessibility-api` now.
-- The probe grows from 18948 to 27489 bytes minified (raw bytes, not gzip; 25409 before the functions the agent calls on the page were saved with it), mostly for the Animations panel's hooks, the `matchMedia()` hooks, the browser functions saved for them and for the vision deficiency mask, and the functions the agent calls (an internal interface of the probe, not public API).
+- The probe grows from 18948 to 27643 bytes minified (raw bytes, not gzip; 25409 before the functions the agent calls on the page were saved with it), mostly for the Animations panel's hooks, the `matchMedia()` hooks, the browser functions saved for them and for the vision deficiency mask, and the functions the agent and the accessibility tree call (an internal interface of the probe, not public API).
 - In shell mode the Service Worker keeps its `debugger` rewrite record in the Cache API, under `devtools-anywhere-service-worker-rewrites`; it is deleted when a new worker activates, when shell mode ends, and when a page outside shell mode unregisters a left-over shell worker.
 - The messages between the probe in a cross-origin iframe and its parent gained the internal event `DevtoolsAnywhere.scrollParent`: use the same version of the probe on both sides.
 

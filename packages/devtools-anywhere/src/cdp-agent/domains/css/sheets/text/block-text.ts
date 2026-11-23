@@ -1,7 +1,7 @@
 // The text the page wrote a rule's declarations in, found in the text its sheet or the rule itself was written
 // in: what the browser serializes of a block is not always the block (a shorthand whose value has a var() or an
 // env(), once a longhand is set after it, reads as longhands with no value), and the emulation rewrites such a
-// block from what was written (domains/emulation/rewrite.ts). The rules are paired with the text as the CSS domain
+// block from what was written (domains/emulation/rewrite/rewrite.ts). The rules are paired with the text as the CSS domain
 // pairs them (pair.ts), which reads them through the functions the page has (docs/limitations.md, page wrappers).
 import { isCssom, isHtml, isSvg } from '../../../../core/realm';
 import { ROOT } from '../parse/css-outline';

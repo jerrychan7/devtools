@@ -8,8 +8,7 @@ This package contains the third-party code below, with its copyright notices and
 | --- | --- | --- | --- | --- |
 | [es-module-lexer (ported code)](https://github.com/guybedford/es-module-lexer) | 3.0.4 | MIT | Guy Bedford | devtools-anywhere |
 | [snapDOM (@zumer/snapdom)](https://github.com/zumerlab/snapdom) | 3.3.5 | MIT | ZumerLab | devtools-anywhere |
-| [dom-accessibility-api](https://github.com/eps1lon/dom-accessibility-api) | 0.7.1 | MIT | Sebastian Silbermann | devtools-anywhere |
-| [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css) | Chrome 158.0.8127.37 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
+| [Chromium's default style sheet (html.css)](https://chromium.googlesource.com/chromium/src/+/refs/tags/159.0.8154.13/third_party/blink/renderer/core/html/resources/html.css) | Chrome 159.0.8154.13 | LGPL-2.0-or-later | Lars Knoll; Apple Inc. | devtools-anywhere |
 
 ### es-module-lexer (ported code)
 
@@ -66,45 +65,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### dom-accessibility-api
-
-- Version: 0.7.1
-- License: MIT
-- Copyright: Sebastian Silbermann
-- Source: https://github.com/eps1lon/dom-accessibility-api
-- Included in: devtools-anywhere
-- Notes: Bundled as dist/accessibility.js, loaded on demand for the Accessibility domain.
-
-```text
-MIT License
-
-Copyright (c) 2020 Sebastian Silbermann
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### Chromium's default style sheet (html.css)
 
-- Version: Chrome 158.0.8127.37
+- Version: Chrome 159.0.8154.13
 - License: LGPL-2.0-or-later
 - Copyright: Lars Knoll; Apple Inc.
-- Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css
+- Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/159.0.8154.13/third_party/blink/renderer/core/html/resources/html.css
 - Included in: devtools-anywhere
 - Notes: Shipped unmodified as dist/chromium-html.css, with this license as dist/chromium-html.LICENSE.txt; loaded on demand for the Styles pane. It is the only file under this license: deleting both leaves out the user agent stylesheet rules and nothing else.
 

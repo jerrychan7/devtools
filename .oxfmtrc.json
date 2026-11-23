@@ -13,6 +13,7 @@
     "packages/devtools-frontend/src/**",
     "packages/devtools-frontend/patches/**",
     "experiments/**",
-    "packages/devtools-anywhere/src/cdp-agent/domains/css/user-agent/html.css"
+    "packages/devtools-anywhere/src/cdp-agent/domains/css/user-agent/html.css",
+    "packages/devtools-anywhere/src/cdp-agent/domains/accessibility/conformance/cases/**"
   ]
 }

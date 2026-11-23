@@ -1,6 +1,6 @@
 {
   "name": "@devtools-anywhere/remote-server",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Relay that lets Chrome DevTools on one machine inspect a page running on another device",
   "keywords": [
     "cdp",
@@ -63,5 +63,5 @@
   "engines": {
     "node": ">=22.18"
   },
-  "chrome": "158.0.8127.37"
+  "chrome": "159.0.8154.13"
 }

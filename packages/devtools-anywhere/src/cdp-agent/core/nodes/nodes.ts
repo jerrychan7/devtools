@@ -67,7 +67,7 @@ export function closestOwn(node: Node): boolean {
 /** Pseudo-classes forced on an element (CSS.forcePseudoState); hidden from the client. */
 export const FORCE_ATTRIBUTE = 'data-devtools-anywhere-force';
 /**
- * What forced colors (domains/emulation/forced-colors.ts) does to an element, as tokens: `kept` when it
+ * What forced colors (domains/emulation/paint/forced-colors.ts) does to an element, as tokens: `kept` when it
  * keeps its colors (forced-color-adjust: none), `canvas` or `canvas-<percent>` when its background is the
  * canvas, and `no-image` when its generated background images are taken away. Hidden from the client.
  */

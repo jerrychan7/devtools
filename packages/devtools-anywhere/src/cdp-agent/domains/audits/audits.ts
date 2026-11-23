@@ -59,9 +59,16 @@ export function registerAudits({ session, nodes, frames }: Context) {
       isReportOnly: event.disposition === 'report',
       contentSecurityPolicyViolationType:
         event.blockedURI === 'eval' ? 'kEvalViolation' : inline ? 'kInlineViolation' : 'kURLViolation',
-      sourceCodeLocation: event.sourceFile
-        ? { url: event.sourceFile, lineNumber: event.lineNumber - 1, columnNumber: event.columnNumber - 1 }
-        : { url: win.location.href, lineNumber: -1, columnNumber: -1 },
+      // Without a source file Chrome 159 gives no location.
+      ...(event.sourceFile
+        ? {
+            sourceCodeLocation: {
+              url: event.sourceFile,
+              lineNumber: event.lineNumber - 1,
+              columnNumber: event.columnNumber - 1,
+            },
+          }
+        : {}),
       ...(element && inline ? { violatingNodeId: nodes.backendIdOf(element) } : {}),
     };
     add(`csp ${found.length}`, {

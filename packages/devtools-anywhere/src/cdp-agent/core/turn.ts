@@ -2,8 +2,8 @@
  * The turn of the page's script that the agent's writes into the page are made in, and the frames a write waits
  * for. A page may answer a write of the agent's with a change of its own in the same turn (a mutation observer
  * that puts back what it had, or adds something for each change it sees), which the agent's observer would answer
- * in turn, for ever: the emulation's rewrites of attributes (domains/emulation/rewrite.ts) and its scans of new
- * elements (domains/emulation/inject.ts) tell such answers by the turn, and wait for frames before they write
+ * in turn, for ever: the emulation's rewrites of attributes (domains/emulation/rewrite/rewrite.ts) and its scans of new
+ * elements (domains/emulation/inject/inject.ts) tell such answers by the turn, and wait for frames before they write
  * again.
  *
  * The frames, timers and clock are the probe's (windowOf), not the page's: a page may replace them (a fake clock,

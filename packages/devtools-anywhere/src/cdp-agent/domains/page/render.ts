@@ -1,5 +1,5 @@
 import { isOwn } from '../../core/nodes/nodes';
-import { visionFilter } from '../emulation/vision';
+import { visionFilter } from '../emulation/paint/vision';
 
 /** A rectangle in page (document) coordinates, CSS pixels. */
 export interface PageRect {

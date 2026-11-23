@@ -2,8 +2,8 @@
 // once against its CSSOM, made unknown or kept up to date as the page and the CSS domain change
 // the sheet, and paired with its rules when asked for (pair.ts, updated in place by splice.ts).
 import { isHtml } from '../../../../core/realm';
-import { unwrapSafeArea } from '../../../emulation/safe-area';
-import { mediaLists, shownCssText, shownMedia, styles } from '../../../emulation/shown-style';
+import { unwrapSafeArea } from '../../../emulation/safe-area/safe-area';
+import { mediaLists, shownCssText, shownMedia, styles } from '../../../emulation/rewrite/shown-style';
 import { forgetSheet, ownEdit, ownStyle, recordPageChanges, type RuleChange, settle } from '../watch/cssom-watch';
 import { type SheetSource, childRules, pair, tagOf } from './pair';
 import { Tok, tokenize } from '../parse/css-lexer';
@@ -49,7 +49,7 @@ function sameRules(parsed: CSSRuleList, rules: CSSRule[]): boolean {
 
 /**
  * Whether `rule` is the rule `parsed` was read as. The emulation rewrites the values of some declarations and
- * the media of some rules (domains/emulation/rewrite.ts), so a rule it rewrote is compared by what the page
+ * the media of some rules (domains/emulation/rewrite/rewrite.ts), so a rule it rewrote is compared by what the page
  * wrote (shownCssText, shownMedia), and the rules nested in it by this same test: two values the page wrote may
  * be rewritten to the same text, and a change of the page that the rewrite hides, in a declaration or in a
  * nested rule, is not taken as no change. So a rule the emulation holds a record for is never taken as the same by

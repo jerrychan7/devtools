@@ -1,6 +1,6 @@
 import { Tok, tokenize } from '../css/sheets/parse/css-lexer';
-import { asciiLower, decodeEscapes, mapDeclarations } from './css-tokens';
-import type { Rewrite } from './rewrite';
+import { asciiLower, decodeEscapes, mapDeclarations } from './rewrite/css-tokens';
+import type { Rewrite } from './rewrite/rewrite';
 
 /** The color scheme of the emulated `prefers-color-scheme`. */
 export type Preference = 'light' | 'dark';

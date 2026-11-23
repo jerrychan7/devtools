@@ -32,7 +32,7 @@ Tests that need the DevTools frontend are skipped until it is built (next step).
 
 ### Build the DevTools frontend (once)
 
-The frontend is built from the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) sources with Chromium's tooling. It needs about 3 GB of disk (2 GB checkout without history, 0.3 GB build output, 0.8 GB depot_tools) and a fast connection the first time.
+The frontend is built from the official [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) sources with Chromium's tooling. It needs about 4 GB of disk (2 GB checkout without history, 1.1 GB emscripten toolchain that upstream's DEPS fetches and the build does not use, 0.3 GB build output, 0.8 GB depot_tools) and a fast connection the first time.
 
 ```bash
 # depot_tools: Chromium's gclient/gn/autoninja (directories ending in .ignore are git-ignored);

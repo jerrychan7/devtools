@@ -1,14 +1,14 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
-import { setForcedColors } from './forced-colors';
-import { injectOwnStyle } from './inject';
-import { matchMediaRewrite } from './match-media';
+import { setForcedColors } from './paint/forced-colors';
+import { injectOwnStyle } from './inject/inject';
+import { matchMediaRewrite } from './rewrite/match-media';
 import { MediaEmulation } from './media';
-import { onMediaRewriteChange, rewriteColorScheme, rewriteMedia, rewriteValues, useFetch } from './rewrite';
-import { safeAreaCss, safeAreaRewrite } from './safe-area';
-import { useShadowRoots } from './trees';
-import { VISION, setVision, useVisionContext } from './vision';
+import { onMediaRewriteChange, rewriteColorScheme, rewriteMedia, rewriteValues, useFetch } from './rewrite/rewrite';
+import { safeAreaCss, safeAreaRewrite } from './safe-area/safe-area';
+import { useShadowRoots } from './inject/trees';
+import { VISION, setVision, useVisionContext } from './paint/vision';
 
 /**
  * What each emulation is set to by which session: like Chrome's, it is the page's, the last
@@ -61,7 +61,7 @@ export function registerEmulation(ctx: Context) {
   const stopMatchMedia = onMediaRewriteChange(() => ctx.probe.media?.set(matchMediaRewrite()));
   session.register('Emulation', {
     // Done by rewriting the media queries of the page's style sheets, the `media` of its <source> elements
-    // and the `sizes` of its images (domains/emulation/rewrite.ts), and for forced colors by the palette and
+    // and the `sizes` of its images (domains/emulation/rewrite/rewrite.ts), and for forced colors by the palette and
     // the marks of forced-colors.ts.
     setEmulatedMedia(params: Protocol.Emulation.SetEmulatedMediaRequest) {
       rewriteMedia('media', media.set(session, params));
