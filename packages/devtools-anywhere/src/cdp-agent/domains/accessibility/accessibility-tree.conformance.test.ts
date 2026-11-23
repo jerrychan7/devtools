@@ -63,12 +63,6 @@ const TODO: Record<string, string[]> = {
     'manual: wpt accname/manual/name_test_case_565-manual.html',
     'manual: wpt accname/manual/name_test_case_566-manual.html',
     'manual: wpt accname/manual/name_test_case_604-manual.html',
-    'manual: wpt accname/manual/name_test_case_661-manual.html',
-    'manual: wpt accname/manual/name_test_case_662-manual.html',
-    'manual: wpt accname/manual/name_test_case_754-manual.html',
-    'manual: wpt accname/manual/name_test_case_755-manual.html',
-    'manual: wpt accname/manual/name_test_case_759-manual.html',
-    'manual: wpt accname/manual/name_test_case_760-manual.html',
   ],
   'ListMarker nodes differ; other nodes differ': [
     'roles: wpt wai-aria/role/role_none_conflict_resolution_spec_ambiguities.tentative.html',

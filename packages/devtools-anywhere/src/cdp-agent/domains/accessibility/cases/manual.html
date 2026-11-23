@@ -939,6 +939,13 @@ The licenses in full: LICENSES in this directory.
   .gca5::before { content: "x" attr(data-a) / "y / z"; }
 </style>
 <div id="gca" data-ax-tree="gca"><p class="gca1">slash in a string</p><p class="gca2">alternative text</p><p class="gca3">escaped quote and slash in a string</p><p class="gca4">slash without spaces</p><p class="gca5" data-a=" / q">slash in an attribute and in the alternative text</p></div>
+<!-- group: devtools-anywhere generated content in labels -->
+<style>
+  .gcl label::before { content: "pre "; }
+  .gcl label::after { content: " post"; }
+  .gcl label.gcl-alt::before { content: "pre " / "alt"; }
+</style>
+<div class="gcl" id="gcl" data-ax-tree="gcl"><label>no control</label> <label for="gcl-text">text field</label><input id="gcl-text"> <label for="gcl-check">checkbox</label><input type="checkbox" id="gcl-check"> <label for="gcl-title" title="t">with a title</label><input type="checkbox" id="gcl-title"> <label for="gcl-alt" class="gcl-alt">alternative text</label><input type="checkbox" id="gcl-alt"></div>
 <!-- group: devtools-anywhere body kept: none -->
 <p id="body-none" data-ax-case="body-none">plain body</p>
 <!-- group: devtools-anywhere body kept: aria attribute -->

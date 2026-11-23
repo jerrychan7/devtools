@@ -25,6 +25,7 @@ import {
   isFocused,
   isInternalRole,
   isMenuList,
+  isRedundantLabel,
   isSvgLink,
   matches,
   query,
@@ -668,11 +669,20 @@ export function createAXTree(
     } else if (content && pseudoHidden(host, pseudo))
       node = new VirtualNode(host, key, 'none', { kind: 'ignored', reason: 'notVisible' });
     else if (content) {
+      // A label that only repeats its checkbox's or radio's name has its inline text ignored, as
+      // its own text is.
+      const textInclusion: Inclusion =
+        content.box === 'inline' && isRedundantLabel(host)
+          ? { kind: 'ignored', reason: 'presentationalRole' }
+          : { kind: 'included' };
       const parts = content.parts.map((part, i) => {
         if (part.kind === 'image') return new VirtualNode(host, `${key}:${i}`, 'image', { kind: 'included' });
-        const text = new VirtualNode(host, `${key}:${i}${part.kind === 'quote' ? ':0' : ''}`, 'StaticText', {
-          kind: 'included',
-        });
+        const text = new VirtualNode(
+          host,
+          `${key}:${i}${part.kind === 'quote' ? ':0' : ''}`,
+          'StaticText',
+          textInclusion
+        );
         text.text = part.text;
         if (part.kind !== 'quote') return text;
         const quote = new VirtualNode(host, `${key}:${i}`, 'none', UNINTERESTING, [text]);
