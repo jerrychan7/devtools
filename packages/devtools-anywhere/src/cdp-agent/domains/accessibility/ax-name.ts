@@ -419,14 +419,16 @@ const owns = (el: Element) => hasAttr(el, 'aria-owns') && isVisible(el);
 
 /**
  * The children of an element as the tree has them: without those aria-owns moved elsewhere, with
- * those it owns after its own.
+ * those it owns after its own (ownedOf).
  */
 function childrenOf(el: Element): Node[] {
   const children = domChildren(el).filter(child => !(isElement(child) && ownerOf(child)));
-  if (owns(el))
-    for (const owned of targetsOf(el, 'aria-owns'))
-      if (ownerOf(owned) === el && !children.includes(owned)) children.push(owned);
-  return children;
+  return [...children, ...ownedOf(el).filter(owned => !children.includes(owned))];
+}
+
+/** The elements an element's aria-owns moves to it, which come after its ::after, as in Chrome. */
+function ownedOf(el: Element): Element[] {
+  return owns(el) ? targetsOf(el, 'aria-owns').filter(owned => ownerOf(owned) === el) : [];
 }
 
 /** The element whose aria-owns moves an element, if any: its owner in the tree (ownersOf). */
@@ -472,9 +474,11 @@ function textFromDescendants(el: Element, root: Root, c: Computation): string {
   const before = generatedText(el, '::before');
   const hasAlt = (pseudo: string) => /\s\/\s/.test(styleOf(el, pseudo).content);
   if (before) pieces.push({ pseudo: '::before', text: before, alt: hasAlt('::before') });
-  pieces.push(...childrenOf(el));
+  const owned = ownedOf(el);
+  pieces.push(...childrenOf(el).filter(child => !owned.includes(child as Element)));
   const after = generatedText(el, '::after');
   if (after) pieces.push({ pseudo: '::after', text: after, alt: hasAlt('::after') });
+  pieces.push(...owned);
 
   const actions = targetsOf(el, 'aria-actions');
   // The white space between a row's cells is not in the tree.

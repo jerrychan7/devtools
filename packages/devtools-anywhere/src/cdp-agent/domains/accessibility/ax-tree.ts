@@ -1096,6 +1096,11 @@ export class TreeShape {
     return domChildren(node);
   }
 
+  /** The elements aria-owns moves to an element, in its aria-owns order. */
+  ownedBy(el: Element): Element[] {
+    return this.owned.get(el) ?? [];
+  }
+
   /** A host's VirtualNodes (ax-virtual.ts), built once: null for an element without. */
   virtualChildren(el: Element): VirtualNode[] | null {
     let top = this.virtuals.get(el);

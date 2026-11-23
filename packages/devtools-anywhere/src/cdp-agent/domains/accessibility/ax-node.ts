@@ -752,7 +752,17 @@ export function createAXTree(
     const marker = markerOf(node);
     const before = generatedOf(node, '::before');
     const after = generatedOf(node, '::after');
-    return [...(marker ? [marker.node] : []), ...(before ? [before] : []), ...own, ...(after ? [after] : [])];
+    // What aria-owns moves here comes after the ::after, as in Chrome.
+    const moved = shape.ownedBy(node);
+    const inPlace = moved.length ? own.filter(c => !moved.includes(c as Element)) : own;
+    const movedIn = moved.length ? own.filter(c => moved.includes(c as Element)) : [];
+    return [
+      ...(marker ? [marker.node] : []),
+      ...(before ? [before] : []),
+      ...inPlace,
+      ...(after ? [after] : []),
+      ...movedIn,
+    ];
   };
   const parent = (node: AXRef): AXRef | null =>
     isMarker(node) || isGenerated(node) ? node.parent : shape.parent(node);
