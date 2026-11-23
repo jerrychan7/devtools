@@ -568,7 +568,19 @@ interface Marker {
   node: VirtualNode;
   /** The reason of an ignored marker: in a summary, or in a list item hidden or not visible. */
   ignoredBy: 'presentationalRole' | 'ariaHiddenSubtree' | 'notVisible' | null;
+  /**
+   * A list item of a native list given another role (`<ul role="tablist"><li>`): Chrome makes its
+   * marker an ignored node of no role, whose text children are StaticText nodes in the tree.
+   */
+  textOnly: boolean;
 }
+
+/** Whether an element is a list item of a ul, ol or menu with a role attribute other than list. */
+const inRoledList = (el: Element) =>
+  el.localName === 'li' &&
+  /^(ul|ol|menu)$/.test(el.parentElement?.localName ?? '') &&
+  // Chrome compares the role attribute as written, as for the item's own inclusion (ax-tree.ts).
+  !/^(|list|directory)$/.test((el.parentElement && attr(el.parentElement, 'role')) ?? '');
 
 const PRESENTATIONAL: Inclusion = { kind: 'ignored', reason: 'presentationalRole' };
 
@@ -595,15 +607,21 @@ export function createAXTree(
     const hidden = inclusion.kind === 'ignored' && /^(ariaHidden|notVisible)/.test(inclusion.reason);
     if (!text || (inclusion.kind === 'ignored' && inclusion.reason === 'ariaHiddenSubtree')) marker = null;
     else {
+      const textOnly = !hidden && !text.alt && inRoledList(host);
       const ignoredBy = hidden
         ? inclusion.reason === 'notVisible'
           ? 'notVisible'
           : 'ariaHiddenSubtree'
-        : roleOf(host) === 'DisclosureTriangle'
+        : textOnly || roleOf(host) === 'DisclosureTriangle'
           ? 'presentationalRole'
           : null;
       const parts = (hidden || text.alt ? [] : text.parts).map((part, i) => {
-        const child = new VirtualNode(host, `marker:${i}`, 'StaticText', PRESENTATIONAL);
+        const child = new VirtualNode(
+          host,
+          `marker:${i}`,
+          'StaticText',
+          textOnly ? { kind: 'included' } : PRESENTATIONAL
+        );
         child.text = part;
         return child;
       });
@@ -615,7 +633,7 @@ export function createAXTree(
         parts
       );
       for (const part of parts) part.parent = node;
-      marker = { text, node, ignoredBy };
+      marker = { text, node, ignoredBy, textOnly };
     }
     markers.set(host, marker);
     return marker;
@@ -659,6 +677,18 @@ export function createAXTree(
       queried
         ? { role: roleValue(role), name: { type: 'computedString' as const, value } }
         : { role: roleValue('none') };
+    if (node !== marker.node && marker.textOnly)
+      return links(node, {
+        nodeId: id(node),
+        ignored: false,
+        role: roleValue('StaticText'),
+        name: {
+          type: 'computedString',
+          value: node.text,
+          sources: [{ type: 'contents', value: { type: 'computedString', value: node.text } }],
+        },
+        properties: [],
+      });
     if (node !== marker.node)
       return links(node, {
         nodeId: id(node),
@@ -678,7 +708,7 @@ export function createAXTree(
         nodeId: id(node),
         ignored: true,
         ignoredReasons: [{ name: marker.ignoredBy, value }],
-        ...as('ListMarker', marker.text.name),
+        ...(marker.textOnly ? { role: roleValue('none') } : as('ListMarker', marker.text.name)),
       });
     }
     const value = marker.text.name;

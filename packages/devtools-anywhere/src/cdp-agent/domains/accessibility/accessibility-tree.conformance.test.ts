@@ -93,12 +93,9 @@ const TODO: Record<string, string[]> = {
   ],
   'ListMarker nodes differ; other nodes differ': [
     'roles: wpt html-aam/roles-generic.tentative.html',
-    'roles: wpt wai-aria/role/listbox-roles.html',
     'roles: wpt wai-aria/role/role_none_conflict_resolution_spec_ambiguities.tentative.html',
-    'roles: wpt wai-aria/role/tab-roles.html',
     'roles: wpt wai-aria/role/tree-roles.html',
     'names: wpt html-aam/summary.html',
-    'manual: devtools-anywhere role attribute tokens',
   ],
   'ListMarker nodes differ; select MenuListPopup and options differ; input inner nodes differ; other nodes differ': [
     'names: dom-accessibility-api names',
