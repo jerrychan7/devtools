@@ -234,7 +234,8 @@ export class HiddenKeeper {
     return false;
   }
 
-  private isReferenced(el: Element): boolean {
+  /** Whether an element is the target of an aria-labelledby or aria-describedby in its scope. */
+  isReferenced(el: Element): boolean {
     const scope = scopeOf(el);
     return !!scope && this.referencedIn(scope).has(el);
   }

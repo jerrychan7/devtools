@@ -670,6 +670,12 @@ export function renderedText(text: Text): string {
 /** Whether an element is a child of a drop-down select, in its popup, which is not laid out. */
 const inPopup = (el: Node | null): boolean => !!el && isMenuList(domParent(el) as Element | null);
 
+/** The roles named from their content (ax-name.ts), whose display: contents descendants Chrome keeps. */
+const NAME_FROM_CONTENTS = wordSet(
+  'button cell checkbox columnheader gridcell heading link menuitem menuitemcheckbox menuitemradio option radio ' +
+    'rowheader switch tab tooltip treeitem DisclosureTriangle LayoutTableCell term'
+);
+
 /** Generic elements Chrome keeps whatever their box: the table parts, sections and the like. */
 const KEPT_GENERIC = new Set('section summary aside header footer th td thead tbody tfoot tr area'.split(' '));
 
@@ -769,17 +775,10 @@ function genericInclusion(el: Element): Inclusion {
   if (!inline || generated || hasAttr(el, 'lang') || (el.id && !hasDocumentId(el))) return ignored('uninteresting');
   // A details' child is assigned to one of its user-agent slots, which keeps it.
   if (isHtml(el.parentNode, 'details')) return ignored('uninteresting');
-  // An inline element but a span right in a label (but for display: contents elements between) is kept too.
-  if (display !== 'contents' && el.localName !== 'span' && isHtml(labelParent(el), 'label'))
+  // An inline element but a span right in a label is kept too.
+  if (display !== 'contents' && el.localName !== 'span' && isHtml(domParent(el), 'label'))
     return ignored('uninteresting');
   return lifted('uninteresting');
-}
-
-/** An element's parent in the tree's DOM, past display: contents elements but a label. */
-function labelParent(el: Element): Node | null {
-  let p = domParent(el);
-  while (p && isElement(p) && !isHtml(p, 'label') && styleOf(p).display === 'contents') p = domParent(p);
-  return p;
 }
 
 /** The inclusions, built once (included) or by kind. */
@@ -883,7 +882,8 @@ export class TreeShape {
         // What aria-owns moves stays too (its owner shows), hidden or not.
         if (
           (this.owner.has(node as Element) && (raised || !!this.hidden.hiding(node as Element))) ||
-          ((raised || unseen) && isElement(node) && generatesMarker(node))
+          ((raised || unseen) && isElement(node) && generatesMarker(node)) ||
+          (raised && inclusion.reason === 'uninteresting' && this.inNameSource(node))
         )
           inclusion = ignored(inclusion.reason);
       }
@@ -895,6 +895,20 @@ export class TreeShape {
   /** Whether a hidden element is kept in the tree without its subtree (ax-hidden.ts). */
   keptAlone(el: Element): boolean {
     return this.hidden.keepsAlone(el);
+  }
+
+  /**
+   * Whether a display: contents element (a slot, by default) is where Chrome keeps it, ignored, as
+   * part of a name's source: in a label or an aria-labelledby or aria-describedby target, or under
+   * an element named from its content, with only ignored or lifted nodes between them.
+   */
+  private inNameSource(node: Node): boolean {
+    if (!isElement(node) || styleOf(node).display !== 'contents') return false;
+    for (let p = domParent(node); p && isElement(p); p = domParent(p)) {
+      if (isHtml(p, 'label') || this.hidden.isReferenced(p)) return true;
+      if (this.inclusion(p).kind === 'included') return NAME_FROM_CONTENTS.has(roleOf(p));
+    }
+    return false;
   }
 
   /** How a node takes part in the tree, wherever aria-owns puts it. */
