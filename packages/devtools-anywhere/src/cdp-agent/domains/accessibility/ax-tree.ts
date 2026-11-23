@@ -830,9 +830,12 @@ function ownerTable(scope: Document | ShadowRoot): Map<Element, Element> {
   const owner = new Map<Element, Element>();
   // As in Chrome, a hidden owner owns nothing but where inert alone hides it, and nothing owns an
   // element without a box (display: none) or aria-hidden itself; their DOM ancestors are read here.
-  const hidden = new HiddenKeeper(isDocument(scope) ? scope : scope.ownerDocument);
+  const doc = isDocument(scope) ? scope : scope.ownerDocument;
+  const hidden = new HiddenKeeper(doc);
+  // An owner an earlier owner moved out of an aria-hidden subtree shows again, and owns.
+  const owners = new HiddenKeeper(doc, el => owner.get(el));
   for (const el of queryAll(scope, '[aria-owns]')) {
-    const mode = hidden.hiding(el)?.mode;
+    const mode = owners.hiding(el)?.mode;
     if (mode && mode !== 'inert') continue;
     for (const id of attr(el, 'aria-owns')?.trim().split(/\s+/) ?? []) {
       const target = byId(scope, id);
