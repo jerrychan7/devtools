@@ -430,7 +430,7 @@ devtools-anywhere 做不到的事，以及有意与 Chrome 不同的行为。接
 Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree`、`getFullAXTree`、`queryAXTree`、`getRootAXNode`、`getChildAXNodes`、`getAXNodeAndAncestors`：在页面里由 DOM、ARIA 属性和计算样式算出，与 Chrome 对照过。由 `accessibility.js`（约 58 KB）计算，首次使用时从 bundle 旁边加载：自托管时要放在同一目录。
 
 - **Chrome**：在浏览器里计算，含 InlineTextBox、列表标记和 UA shadow 树里的节点。
-- **devtools-anywhere**：没有 InlineTextBox。UA shadow 树里的节点（select 的弹出层和 slot、文本框的占位符和内部编辑区、input 按钮的文字、取色框的色块、details 的 slot）和列表标记及其文字，在没有 DOM 节点的情况下重建：它们没有 `backendDOMNodeId`，id 为负数，在会话内保持不变；列表标记例外，与 Chrome 一样用其 `::marker` 的 backend id。`::marker` content 里有引号的列表标记不像 Chrome 那样拆分，`@counter-style` 样式按 decimal 写出。input 的默认名称（如 "Submit"）是英文。没有 summary 的 details 不生成 Chrome 的默认 summary：它的文字是浏览器语言的「详细信息」，页面拿不到。
+- **devtools-anywhere**：没有 InlineTextBox。UA shadow 树里的节点（select 的弹出层和 slot、文本框的占位符和内部编辑区、input 按钮的文字、取色框的色块、details 的 slot）和列表标记及其文字，在没有 DOM 节点的情况下重建：它们没有 `backendDOMNodeId`，id 为负数，在会话内保持不变；列表标记例外，与 Chrome 一样用其 `::marker` 的 backend id。`::marker` content 里有引号的列表标记不像 Chrome 那样拆分，`@counter-style` 样式按 decimal 写出。input 的默认名称（如 "Submit"）是英文。没有 summary 的 details 不生成 Chrome 的默认 summary：它的文字是浏览器语言的「详细信息」，页面拿不到。video 和 audio 没有 Chrome 在媒体无法播放时给的名称（浏览器语言的「无法播放媒体。」），也没有其媒体控件 shadow 树里那些被忽略的节点：它们随浏览器版本和媒体状态而变。
 - **事件**：与 Chrome 一样，在域启用期间，对客户端经 `getChildAXNodes` 或 `getAXNodeAndAncestors` 拿到过、节点又变了的发 `nodesUpdated`，同一帧的合成一个事件。变化由 MutationObserver 观察 DOM、属性和文本得知：class 或 `style` 属性引起的样式变化能看到；经 CSSOM 的修改、`:hover` 等状态、媒体查询、动画或图片加载引起的，要等下一次 DOM 变化才发出（命令总是读当前的树）。Chrome 还会发出变化节点的父节点，即使其节点没变；这里只发确实不同的节点。不发 `loadComplete`：它在文档加载完成时发出，早于 agent 运行，enable 时也不发。
 
 <a id="application-issues-console"></a>
