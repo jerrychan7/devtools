@@ -3,7 +3,7 @@
 `html.css` is Chromium's default style sheet for HTML, unchanged, from
 `third_party/blink/renderer/core/html/resources/html.css` at the tag of the Chrome version in
 `CHROME_VERSION` (that of the `chrome` field of `packages/devtools-anywhere/package.json`):
-<https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.37/third_party/blink/renderer/core/html/resources/html.css>.
+<https://chromium.googlesource.com/chromium/src/+/refs/tags/159.0.8154.13/third_party/blink/renderer/core/html/resources/html.css>.
 
 License: GNU Library General Public License, version 2 or later, as its header says (Copyright
 Lars Knoll, Apple Inc.). It is shipped as a separate file (`dist/chromium-html.css`), which the
