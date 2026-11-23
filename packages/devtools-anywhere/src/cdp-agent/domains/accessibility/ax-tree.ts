@@ -840,6 +840,11 @@ export class TreeShape {
     return inclusion;
   }
 
+  /** Whether a hidden element is kept in the tree without its subtree (ax-hidden.ts). */
+  keptAlone(el: Element): boolean {
+    return this.hidden.keepsAlone(el);
+  }
+
   /** How a node takes part in the tree, wherever aria-owns puts it. */
   private ownInclusion(node: Node): Inclusion {
     if (node === this.doc) return INCLUDED;

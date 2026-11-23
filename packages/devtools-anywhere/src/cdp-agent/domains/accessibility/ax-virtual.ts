@@ -22,7 +22,7 @@ import {
   roleOf,
   type Inclusion,
 } from './ax-tree';
-import { isElement, isHtml, styleOf } from '../../core/realm';
+import { isElement, isHtml, isText, styleOf } from '../../core/realm';
 
 /** A node of the tree or its DOM node. */
 export type AXRef = Node | VirtualNode;
@@ -172,20 +172,19 @@ function nameReads(el: Element): boolean {
  * rest of its children, none while it is closed (its content is not rendered then). A summary is
  * not made when the details has none: Chrome's default one has the browser's localized "Details"
  * as its text, which the page cannot know. In an open flex details, the content slot is a generic.
+ * The content slot is not made when nothing is assigned to it: no element or text but the summary
+ * (a comment is not assigned), as Chrome leaves an empty slot out.
  */
 function detailsChildren(el: HTMLDetailsElement): VirtualNode[] {
   const children = domChildren(el);
   const summary = children.find(c => isHtml(c, 'summary'));
   const flex = el.open && /\bflex\b/.test(styleOf(el).display);
+  const content = children.filter(c => c !== summary && (isElement(c) || isText(c)));
+  const summarySlot = new VirtualNode(el, 'summary-slot', 'generic', UNINTERESTING, summary ? [summary] : []);
+  if (!content.length) return [summarySlot];
   return [
-    new VirtualNode(el, 'summary-slot', 'generic', UNINTERESTING, summary ? [summary] : []),
-    new VirtualNode(
-      el,
-      'content-slot',
-      'generic',
-      flex ? INCLUDED : UNINTERESTING,
-      el.open ? children.filter(c => c !== summary) : []
-    ),
+    summarySlot,
+    new VirtualNode(el, 'content-slot', 'generic', flex ? INCLUDED : UNINTERESTING, el.open ? content : []),
   ];
 }
 

@@ -2,8 +2,10 @@
 // most of it is left out of the tree, but some elements stay in it, ignored, with their own
 // subtree: form fields, labels, the targets of aria-labelledby and aria-describedby, and under
 // aria-hidden buttons and links too; and what display: none or aria-hidden hides in a label or such
-// a target. The hidden elements around them give their place to them.
-import { isElement, isHtml, styleOf } from '../../core/realm';
+// a target, and what visibility: hidden hides there too. The hidden elements around them give
+// their place to them. The parts of an HTML table (the table, its row groups, rows and cells) stay
+// too, ignored, but without the rest of their subtree.
+import { isElement, isHtml, isHtmlElement, styleOf } from '../../core/realm';
 import { nativeCall } from '../../core/natives';
 import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf, type IgnoredReason } from './ax-tree';
 
@@ -22,6 +24,37 @@ const isField = (el: Element) => isHtml(el, 'input') && FIELD_TYPES.has(el.type)
 
 /** The elements keeps may keep but for aria-labelledby and aria-describedby targets. */
 const KEPT_ELEMENTS = 'select, textarea, input, label, meter, button, a[href]';
+
+/** The table parts a hidden one may be kept among. */
+const KEPT_ALONE = 'table, tbody, thead, tfoot, tr, td, th';
+
+/**
+ * Whether a hidden element is a table part Chrome keeps, ignored, without the rest of its
+ * subtree: a table; a row group of a table; a row of a table or row group; a cell of a row, but
+ * for one in a hidden thead or tfoot. A caption or col is not kept.
+ */
+function isTablePart(el: Element, isHidden: (el: Element) => boolean): boolean {
+  if (!isHtmlElement(el)) return false;
+  const parent = el.parentElement;
+  const is = (e: Element | null, names: string) => isHtmlElement(e) && names.split(' ').includes(e.localName);
+  switch (el.localName) {
+    case 'table':
+      return true;
+    case 'tbody':
+    case 'thead':
+    case 'tfoot':
+      return is(parent, 'table');
+    case 'tr':
+      return is(parent, 'table tbody thead tfoot');
+    case 'td':
+    case 'th': {
+      const group = parent?.parentElement ?? null;
+      if (!is(parent, 'tr')) return false;
+      return !group || !is(group, 'thead tfoot') || !isHidden(group);
+    }
+  }
+  return false;
+}
 
 /** Whether an element or one under it is a shadow host or a slot: its DOM subtree is not its tree's. */
 function hasShadow(el: Element): boolean {
@@ -114,8 +147,27 @@ export class HiddenKeeper {
     );
   }
 
-  /** Whether a hidden node is kept: it, or a hidden ancestor of it, is one Chrome keeps. */
+  /**
+   * Whether a hidden node is kept: it, or a hidden ancestor of it, is one Chrome keeps; or it is a
+   * table part Chrome keeps (not its text or other elements under it).
+   */
   isKept(node: Node): boolean {
+    if (isElement(node) && this.isKeptAlone(node)) return true;
+    return this.keepsSubtree(node);
+  }
+
+  /** Whether a hidden element is kept without its subtree: a table part Chrome keeps alone. */
+  keepsAlone(el: Element): boolean {
+    return this.isKeptAlone(el) && !this.keepsSubtree(el);
+  }
+
+  /** Whether a hidden element is a table part kept without the rest of its subtree (isTablePart). */
+  private isKeptAlone(el: Element): boolean {
+    return !!this.hiding(el) && isTablePart(el, e => !!this.hiding(e));
+  }
+
+  /** Whether a hidden node is kept with its subtree: it, or a hidden ancestor of it, is one Chrome keeps. */
+  private keepsSubtree(node: Node): boolean {
     const el = isElement(node) ? node : domParent(node);
     if (!el || !isElement(el)) return false;
     let kept = this.keptCache.get(el);
@@ -127,9 +179,7 @@ export class HiddenKeeper {
         (this.keeps(el, hiding.mode) ||
           (!!parent &&
             isElement(parent) &&
-            (this.hiding(parent)
-              ? this.isKept(parent)
-              : (hiding.mode === 'none' || hiding.mode === 'aria') && this.inNameSource(parent))));
+            (this.hiding(parent) ? this.keepsSubtree(parent) : hiding.mode !== 'inert' && this.inNameSource(parent))));
       this.keptCache.set(el, kept);
     }
     return kept;
@@ -152,10 +202,11 @@ export class HiddenKeeper {
           ...queryAll(el, KEPT_ELEMENTS),
           ...(scope ? [...this.referencedIn(scope)].filter(r => r !== el && contains(el, r)) : []),
         ];
-        holds = candidates.some(c => {
-          const hiding = this.hiding(c);
-          return !!hiding && this.keeps(c, hiding.mode);
-        });
+        holds =
+          candidates.some(c => {
+            const hiding = this.hiding(c);
+            return !!hiding && this.keeps(c, hiding.mode);
+          }) || queryAll(el, KEPT_ALONE).some(c => this.isKeptAlone(c));
       } else
         holds = domChildren(el).some(
           child => isElement(child) && (!this.hiding(child) || this.isKept(child) || this.holdsKept(child))

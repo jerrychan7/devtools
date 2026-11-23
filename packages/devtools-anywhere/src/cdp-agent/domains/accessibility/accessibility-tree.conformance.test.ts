@@ -36,13 +36,7 @@ const TODO: Record<string, string[]> = {
     'roles: wpt wai-aria/role/role_none_conflict_resolution.tentative.html',
     'names: dom-accessibility-api script and shadow roots',
     'names: wpt accname/aria-owns.html',
-    'names: wpt accname/name/comp_labelledby_hidden_nodes.html',
     'names: wpt accname/name/comp_name_from_content_display_contents.html',
-    'names: wpt html-aam/names.html',
-    'manual: wpt accname/manual/description_from_content_of_describedby_element-manual.html',
-    'manual: wpt accname/manual/name_from_content-manual.html',
-    'manual: wpt accname/manual/name_from_content_of_label-manual.html',
-    'manual: wpt accname/manual/name_from_content_of_labelledby_element-manual.html',
     'manual: wpt accname/manual/name_test_case_544-manual.html',
     'manual: wpt accname/manual/name_test_case_546-manual.html',
     'manual: wpt accname/manual/name_test_case_547-manual.html',
@@ -65,7 +59,6 @@ const TODO: Record<string, string[]> = {
   ],
   'ListMarker nodes differ; other nodes differ': [
     'roles: wpt wai-aria/role/role_none_conflict_resolution_spec_ambiguities.tentative.html',
-    'roles: wpt wai-aria/role/tree-roles.html',
     'names: wpt html-aam/summary.html',
   ],
   'input inner nodes differ; other nodes differ': [

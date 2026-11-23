@@ -661,9 +661,23 @@ export function createAXTree(
     if (known !== undefined) return known;
     let node: VirtualNode | null = null;
     const inclusion = shape.inclusion(host);
-    const hidden = inclusion.kind === 'ignored' && /^(ariaHidden|notVisible)/.test(inclusion.reason);
-    const content = shape.inTree(host) && !hidden ? generatedContent(host, pseudo) : null;
-    if (content && 'alt' in content) {
+    const hidden = inclusion.kind === 'ignored' && /^(ariaHidden|notVisible|notRendered)/.test(inclusion.reason);
+    // A table part kept alone keeps a pseudo-element's node too, ignored and empty, but where it
+    // has no box.
+    const alone = inclusion.kind === 'ignored' && shape.inTree(host) && shape.keptAlone(host);
+    const content = shape.inTree(host) && (alone || !hidden) ? generatedContent(host, pseudo) : null;
+    if (alone) {
+      // Hidden as what is under its host: an aria-hidden host is its aria-hidden root.
+      if (content && inclusion.reason !== 'notRendered')
+        node = new VirtualNode(
+          host,
+          key,
+          'none',
+          inclusion.reason === 'ariaHiddenElement'
+            ? { kind: 'ignored', reason: 'ariaHiddenSubtree', hiddenRoot: host }
+            : { ...inclusion }
+        );
+    } else if (content && 'alt' in content) {
       node = new VirtualNode(host, key, 'StaticText', { kind: 'included' });
       node.text = content.alt;
     } else if (content && pseudoHidden(host, pseudo))
@@ -787,13 +801,22 @@ export function createAXTree(
   };
   /** The AXNode of a ::before or ::after or of one of its children (ax-generated.ts). */
   const generatedNode = (node: VirtualNode): AXNode => {
-    if (node.inclusion.kind === 'ignored')
+    if (node.inclusion.kind === 'ignored') {
+      const root = node.inclusion.reason === 'ariaHiddenSubtree' ? node.inclusion.hiddenRoot : undefined;
       return links(node, {
         nodeId: id(node),
         ignored: true,
-        ignoredReasons: [{ name: node.inclusion.reason, value: { type: 'boolean', value: true } }],
+        ignoredReasons: [
+          {
+            name: node.inclusion.reason,
+            value: root
+              ? { type: 'idref', relatedNodes: [{ backendDOMNodeId: idOf(root), ...(root.id && { idref: root.id }) }] }
+              : { type: 'boolean', value: true },
+          },
+        ],
         role: roleValue('none'),
       });
+    }
     const text = node.role === 'StaticText';
     const alt = node.key === 'before' || node.key === 'after';
     return links(node, {
