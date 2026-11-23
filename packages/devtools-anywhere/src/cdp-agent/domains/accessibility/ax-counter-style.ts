@@ -2,7 +2,7 @@
 // sheets (CSSCounterStyleRule): a counter's text by the rule's system, symbols, additive-symbols,
 // range, pad, negative and fallback, and a list marker's prefix and suffix. Part of
 // accessibility.js (ax-counter.ts).
-import { unescape } from './ax-counter';
+import { markerSuffix, unescape } from './ax-counter';
 
 /** A @counter-style rule's descriptors, as the CSSOM gives them ("" when not set). */
 interface CounterStyleRule {
@@ -24,35 +24,110 @@ const RESERVED = /^(decimal|disc|square|circle|disclosure-open|disclosure-closed
 /** The rules of each document by name, kept while one command works on the tree. */
 const cache = new WeakMap<Document, Map<string, CounterStyleRule>>();
 
-function collect(rules: CSSRuleList, out: Map<string, CounterStyleRule>): void {
+/**
+ * A cascade layer: its sublayers in layer order. A rule's rank is the indexes of its layers
+ * among their siblings, ended by Infinity: the rules of no sublayer win over those of the
+ * sublayers, and the unlayered rules ([Infinity]) over all layered ones.
+ */
+interface Layer {
+  children: Map<string, Layer>;
+}
+
+/** The layer `name` (dotted, as `@layer a.b`) under `parent`, made when new, with its rank prefix. */
+function layerOf(parent: { layer: Layer; rank: number[] }, name: string): { layer: Layer; rank: number[] } {
+  let current = parent;
+  for (const part of name.split('.')) {
+    const { children } = current.layer;
+    let child = children.get(part);
+    if (!child) children.set(part, (child = { children: new Map() }));
+    current = {
+      layer: child,
+      rank: [...current.rank, [...children.keys()].indexOf(part)],
+    };
+  }
+  return current;
+}
+
+function laterRank(a: number[], b: number[]): boolean {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? -1;
+    const y = b[i] ?? -1;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+type Ranked = Map<string, { rule: CounterStyleRule; rank: number[] }>;
+
+/** Whether a media query list matches in the document's window ("" and "all" do). */
+function mediaMatches(doc: Document, media: MediaList | null | undefined): boolean {
+  const text = media?.mediaText ?? '';
+  if (!text || text === 'all') return true;
+  return doc.defaultView?.matchMedia(text).matches ?? true;
+}
+
+/** Whether a supports condition holds in the document's window. */
+const supports = (doc: Document, condition: string) => doc.defaultView?.CSS.supports(condition) ?? true;
+
+let anonymous = 0;
+
+function collect(doc: Document, rules: CSSRuleList, out: Ranked, scope: { layer: Layer; rank: number[] }): void {
+  const add = (rule: CounterStyleRule, at: { layer: Layer; rank: number[] }) => {
+    const rank = [...at.rank, Infinity];
+    const old = out.get(rule.name);
+    if (!old || laterRank(rank, old.rank)) out.set(rule.name, { rule, rank });
+  };
+  // By the rules' type numbers, as the rules may be of another realm.
   for (const rule of rules) {
-    // CSSRule.COUNTER_STYLE_RULE; by number, as the rule may be of another realm.
-    if (rule.type === 11) {
-      const r = rule as unknown as CounterStyleRule;
-      out.set(r.name, r);
-    } else if ('cssRules' in rule) {
-      try {
-        collect((rule as CSSGroupingRule).cssRules, out);
-      } catch {
-        // Not readable.
+    try {
+      if (rule.type === 11) {
+        add(rule as unknown as CounterStyleRule, scope);
+      } else if (rule.type === 3) {
+        // @import: its sheet, when its media and supports() conditions hold, in its layer.
+        const r = rule as CSSImportRule & { supportsText?: string | null };
+        if (!r.styleSheet || !mediaMatches(doc, r.media)) continue;
+        if (r.supportsText && !supports(doc, r.supportsText)) continue;
+        const at =
+          r.layerName === null || r.layerName === undefined ? scope : layerOf(scope, r.layerName || `\0${anonymous++}`);
+        collect(doc, r.styleSheet.cssRules, out, at);
+      } else if (rule.type === 4) {
+        const r = rule as CSSMediaRule;
+        if (mediaMatches(doc, r.media)) collect(doc, r.cssRules, out, scope);
+      } else if (rule.type === 12) {
+        const r = rule as CSSSupportsRule;
+        if (supports(doc, r.conditionText)) collect(doc, r.cssRules, out, scope);
+      } else if ('nameList' in rule) {
+        // @layer a, b;: the order of the layers.
+        for (const name of (rule as CSSLayerStatementRule).nameList) layerOf(scope, name);
+      } else if ('cssRules' in rule) {
+        const name =
+          'name' in rule && rule.constructor.name === 'CSSLayerBlockRule' ? (rule as CSSLayerBlockRule).name : null;
+        const at = name === null ? scope : layerOf(scope, name || `\0${anonymous++}`);
+        collect(doc, (rule as CSSGroupingRule).cssRules, out, at);
       }
+    } catch {
+      // Not readable.
     }
   }
 }
 
-/** The @counter-style rule named `name` in a document, the last one when several are. */
+/** The @counter-style rule named `name` in a document that wins the cascade. */
 function ruleOf(doc: Document, name: string): CounterStyleRule | undefined {
   if (RESERVED.test(name)) return undefined;
   let rules = cache.get(doc);
   if (!rules) {
-    rules = new Map();
+    const ranked: Ranked = new Map();
+    const root = { layer: { children: new Map() }, rank: [] };
     for (const sheet of [...doc.styleSheets, ...(doc.adoptedStyleSheets ?? [])]) {
+      // A disabled sheet, or one of a <link> or <style> whose media do not match, applies no rule.
+      if (sheet.disabled || !mediaMatches(doc, sheet.media)) continue;
       try {
-        collect(sheet.cssRules, rules);
+        collect(doc, sheet.cssRules, ranked, root);
       } catch {
         // A style sheet of another origin cannot be read.
       }
     }
+    rules = new Map([...ranked].map(([key, { rule }]) => [key, rule]));
     cache.set(doc, rules);
     queueMicrotask(() => cache.delete(doc));
   }
@@ -99,7 +174,8 @@ function resolve(doc: Document, name: string, seen = new Set<string>()): Resolve
       additive: [],
       negative: ['-', ''],
       prefix: '',
-      suffix: '. ',
+      // The extended style's own suffix: " " for disc, "、" for the CJK styles, and so on.
+      suffix: markerSuffix(arg),
       range: null,
       pad: null,
       fallback: 'decimal',
@@ -215,11 +291,21 @@ export function customCounterText(
     seen.add(name);
     return customCounterText(doc, style.fallback, n, predefined, seen) ?? predefined(n, style.fallback);
   };
-  if (style.predefined !== undefined) return predefined(n, style.predefined);
-  if (!inRange(n, style)) return fallback();
-  const negative = n < 0 && usesNegative(style.system);
-  const text = initial(negative ? -n : n, style);
-  if (text === null) return fallback();
+  let negative: boolean;
+  let text: string | null;
+  if (style.predefined !== undefined) {
+    // The predefined style writes the number (in its own range, with its own fallback); the
+    // rule's range, negative and pad still apply around it.
+    if (style.range && !inRange(n, style)) return fallback();
+    const raw = predefined(n, style.predefined);
+    negative = n < 0 && raw.startsWith('-');
+    text = negative ? raw.slice(1) : raw;
+  } else {
+    if (!inRange(n, style)) return fallback();
+    negative = n < 0 && usesNegative(style.system);
+    text = initial(negative ? -n : n, style);
+    if (text === null) return fallback();
+  }
   let out = text;
   if (style.pad) {
     const [count, symbol] = style.pad;

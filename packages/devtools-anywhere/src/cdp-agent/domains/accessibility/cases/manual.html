@@ -831,6 +831,33 @@ The licenses in full: LICENSES in this directory.
   .cx .v123456789::before { counter-reset: s 123456789; }
 </style>
 <div class="cx"><button class="vm12" id="cnt-style-m12" data-ax-case="cnt-style-m12">x</button><button class="v0" id="cnt-style-0" data-ax-case="cnt-style-0">x</button><button class="v1" id="cnt-style-1" data-ax-case="cnt-style-1">x</button><button class="v15" id="cnt-style-15" data-ax-case="cnt-style-15">x</button><button class="v99" id="cnt-style-99" data-ax-case="cnt-style-99">x</button><button class="v1001" id="cnt-style-1001" data-ax-case="cnt-style-1001">x</button><button class="v10010" id="cnt-style-10010" data-ax-case="cnt-style-10010">x</button><button class="v12345" id="cnt-style-12345" data-ax-case="cnt-style-12345">x</button><button class="v1000100" id="cnt-style-1000100" data-ax-case="cnt-style-1000100">x</button><button class="v10001000" id="cnt-style-10001000" data-ax-case="cnt-style-10001000">x</button><button class="v123456789" id="cnt-style-123456789" data-ax-case="cnt-style-123456789">x</button></div>
+<style>
+  @import url("data:text/css,@counter-style cr-import { system: cyclic; symbols: 'I'; }");
+  @counter-style cr-layer { system: cyclic; symbols: "U"; }
+  @layer cr-x, cr-y;
+  @layer cr-y { @counter-style cr-layers { system: cyclic; symbols: "Y"; } }
+  @layer cr-x { @counter-style cr-layers { system: cyclic; symbols: "X"; } @counter-style cr-layer { system: cyclic; symbols: "L"; } }
+  @counter-style cr-pad { system: extends decimal; pad: 3 "0"; }
+  @counter-style cr-pad2 { system: extends cr-pad; }
+  @counter-style cr-range { system: extends lower-alpha; range: 1 3; }
+  @counter-style cr-neg { system: extends decimal; negative: "(" ")"; }
+  @counter-style cr-disc { system: extends disc; }
+  @counter-style cr-cjk { system: extends cjk-decimal; }
+  @counter-style cr-media { system: cyclic; symbols: "A"; }
+  @media (max-width: 1px) { @counter-style cr-media { system: cyclic; symbols: "M"; } }
+  @media (min-width: 1px) { @counter-style cr-media-on { system: cyclic; symbols: "N"; } }
+  @counter-style cr-supports { system: cyclic; symbols: "A"; }
+  @supports (not (display: block)) { @counter-style cr-supports { system: cyclic; symbols: "S"; } }
+  @counter-style cr-sheet { system: cyclic; symbols: "A"; }
+  .cr2 button::before { content: "" / counter(s, cr-pad) "|" counter(s, cr-pad2) "|" counter(s, cr-range) "|" counter(s, cr-neg) "|" counter(s, cr-import) "|" counter(s, cr-layer) "|" counter(s, cr-layers) "|" counter(s, cr-media) "|" counter(s, cr-media-on) "|" counter(s, cr-supports) "|" counter(s, cr-sheet) "|" counter(s, none) "|" counters(s, ".", none) "|"; }
+  .cr2 .v1::before { counter-reset: s 1; }
+  .cr2 .v5::before { counter-reset: s 5; }
+  .cr2 .vm1::before { counter-reset: s -1; }
+</style>
+<style media="print">@counter-style cr-sheet { system: cyclic; symbols: "P"; }</style>
+<link rel="stylesheet" disabled href="data:text/css,@counter-style cr-sheet { system: cyclic; symbols: 'D'; }">
+<div class="cr2"><button class="v1" id="cnt-rule-1" data-ax-case="cnt-rule-1">x</button><button class="v5" id="cnt-rule-5" data-ax-case="cnt-rule-5">x</button><button class="vm1" id="cnt-rule-m1" data-ax-case="cnt-rule-m1">x</button></div>
+<ol id="cnt-rule-markers" data-ax-tree="cnt-rule-markers"><li style="list-style-type:cr-disc">disc</li><li style="list-style-type:cr-cjk">cjk</li><li style="list-style-type:cr-pad">pad</li><li style="list-style-type:cr-range" value="5">range</li><li style="list-style-type:cr-neg" value="-1">negative</li></ol>
 <!-- group: devtools-anywhere list markers -->
 <style>
   .lm-c1::marker { content: "abc"; }

@@ -349,7 +349,7 @@ export function markerAffixes(style: string, doc: Document): [string, string] {
 }
 
 /** What a list marker writes after its number in a list style, as Chrome does (". " for the styles not known). */
-function markerSuffix(style: string): string {
+export function markerSuffix(style: string): string {
   if (SYMBOLS[style]) return ' ';
   if (/^(cjk-|hiragana|katakana|japanese-|simp-chinese|trad-chinese)/.test(style)) return '、';
   if (style.startsWith('korean-')) return ', ';
