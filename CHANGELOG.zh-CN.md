@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+基于 Chrome 159（159.0.8154.13）。
+
+- DevTools 前端改为来自 Chrome 159（原为 Chrome 158），面板和界面随之更新；Styles 里显示的浏览器默认样式也改为 Chrome 159 的。
 - 无障碍树不再使用 dom-accessibility-api：角色、label 文字和描述改由项目自己的代码计算，并用从该库的测试和 web-platform-tests 导入的用例与 Chrome 对照。更多节点的角色与 Chrome 一致（`role` 首个 token 无效时回退到下一个，`del`、`em`、`time`、`abbr`、`canvas` 等元素给出 Chrome 自己的角色），名称、描述、value 和 properties 也按 Chrome 的规则计算：导入的约 1800 条用例全部与 Chrome 一致，包括布局表格、图像热区和生成内容里的 CSS 计数器。`accessibility.js` 从约 29 KB 增至约 44 KB。
 - 页面变化时 Accessibility 窗格会自己刷新：与 Chrome 一样，在域启用期间，对客户端经 `getChildAXNodes` 或 `getAXNodeAndAncestors` 拿到过的节点发 `Accessibility.nodesUpdated`，同一帧里变化的合成一个事件。变化由 MutationObserver 得知；它看不到的样式变化（CSSOM、`:hover`、媒体查询）在下一次 DOM 变化时发出（见能力边界）。不发 `loadComplete`，因为 agent 在已加载的页面里启动。
 - 无障碍树补上了 Chrome 有、而页面看不到 DOM 节点的那些节点：select 的弹出层和选项、文本框的占位符和内部编辑区、input 按钮的文字、取色框的色块，以及列表标记和其文字（所有预定义计数样式都按 Chrome 写出）。svg 里的树也与 Chrome 一致。列表标记用其 `::marker` 的 backend id，其余这类节点的 id 为负数，`getChildAXNodes` 接受这些 id。`accessibility.js` 从约 44 KB 增至约 58 KB。
