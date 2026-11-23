@@ -82,8 +82,9 @@ export class HiddenKeeper {
     if (up?.mode === 'none') return up;
     // The ancestors have a box (the parent is not 'none'), so only the element's own style counts.
     const box = el.isConnected ? ownBox(el) : 'notRendered';
-    if (box === 'notRendered') return { mode: 'none', reason: 'notRendered' };
     const inert = hasAttr(el, 'inert') || up?.mode === 'inert';
+    // What has no box under inert is still ignored as inert, as in Chrome.
+    if (box === 'notRendered') return { mode: 'none', reason: inert ? 'inertElement' : 'notRendered' };
     // The closest aria-hidden element: this one, or the parent's.
     const aria: Element | null =
       attr(el, 'aria-hidden') === 'true' ? el : up?.mode === 'aria' ? (up.hiddenRoot ?? (parent as Element)) : null;
@@ -149,7 +150,7 @@ export class HiddenKeeper {
         const scope = scopeOf(el);
         const candidates = [
           ...queryAll(el, KEPT_ELEMENTS),
-          ...(mode !== 'inert' && scope ? [...this.referencedIn(scope)].filter(r => r !== el && contains(el, r)) : []),
+          ...(scope ? [...this.referencedIn(scope)].filter(r => r !== el && contains(el, r)) : []),
         ];
         holds = candidates.some(c => {
           const hiding = this.hiding(c);
