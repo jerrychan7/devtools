@@ -6,7 +6,7 @@
 // tree being built, could change what it finds, or make it throw.
 import { isDocument, isElement, isHtml, isShadowRoot, isText, styleOf } from '../../core/realm';
 import { nativeCall, nativeGet } from '../../core/natives';
-import { type IgnoredReason } from './ax-ignored';
+import { type IgnoredReason } from './tree/ax-ignored';
 
 /** An element's attribute, or null (`getAttribute`). */
 export const attr = (el: Element, name: string) => nativeCall<string | null>(el, 'getAttribute', name);

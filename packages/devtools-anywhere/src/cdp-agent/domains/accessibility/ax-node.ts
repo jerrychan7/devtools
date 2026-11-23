@@ -11,10 +11,10 @@ import {
   targetsOf,
   textNameOf,
   type IdOf,
-} from './ax-name';
-import { inDisplayNone } from './ax-text';
-import { markerText, type MarkerText } from './ax-marker';
-import { generatedContent, preservesSpace, pseudoHidden, type GeneratedPseudo } from './ax-generated';
+} from './name/ax-name';
+import { inDisplayNone } from './name/ax-text';
+import { markerText, type MarkerText } from './marker/ax-marker';
+import { generatedContent, preservesSpace, pseudoHidden, type GeneratedPseudo } from './name/ax-generated';
 import {
   attr,
   byId,
@@ -30,13 +30,13 @@ import {
   scopeOf,
   textOf,
 } from './ax-dom';
-import { type Inclusion } from './ax-ignored';
+import { type Inclusion } from './tree/ax-ignored';
 import { isFocusable, isInternalRole, isRedundantLabel, isSvgLink, roleOf } from './ax-role';
-import { meterOf } from './ax-generic';
-import { TreeShape } from './ax-tree';
+import { meterOf } from './tree/ax-generic';
+import { TreeShape } from './tree/ax-tree';
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import type { Probe } from '../../probe/types';
-import { isVirtual, VirtualNode, type AXRef } from './ax-virtual';
+import { isVirtual, VirtualNode, type AXRef } from './tree/ax-virtual';
 
 // This script has its own copy of core/natives.ts, which found the page's functions when it loaded, on
 // demand: the agent gives it those it uses instead (accessibility.ts).

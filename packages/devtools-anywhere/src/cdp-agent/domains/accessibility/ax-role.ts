@@ -2,7 +2,7 @@
 // of its tag, type and place (tables, sections, svg). Part of accessibility.js (ax-node.ts).
 import { isElement, isHtml, isHtmlElement, isText, styleOf } from '../../core/realm';
 import { nativeGet } from '../../core/natives';
-import { inDisplayNone } from './ax-text';
+import { inDisplayNone } from './name/ax-text';
 import {
   attr,
   attrNames,
@@ -22,8 +22,8 @@ import {
   textOf,
   words,
 } from './ax-dom';
-import { excluded, ignored, INCLUDED, type Inclusion, lifted } from './ax-ignored';
-import { ownersOf } from './ax-owns';
+import { excluded, ignored, INCLUDED, type Inclusion, lifted } from './tree/ax-ignored';
+import { ownersOf } from './tree/ax-owns';
 
 /** Whether a role is one of Chrome's own, not an ARIA role (reported as `internalRole`). */
 export const isInternalRole = (role: string) => /^[A-Z]/.test(role);

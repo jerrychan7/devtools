@@ -7,8 +7,8 @@
 import { appendFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, setUpAndTearDown } from '../../../../test-support/conformance.ts';
-import type { Env, TestPage } from '../../../../test-support/conformance.ts';
+import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
 import {
   MANUAL_SETUPS,
   fullTree,
@@ -18,7 +18,7 @@ import {
   setBody,
   treeDiff,
   treeDiffKind,
-} from '../../../../test-support/accessibility.ts';
+} from '../../../../../test-support/accessibility.ts';
 
 // Known differences that stay: a details without a summary has Chrome's default summary, whose
 // text is the browser's localized "Details", which the page cannot know; a video or audio has

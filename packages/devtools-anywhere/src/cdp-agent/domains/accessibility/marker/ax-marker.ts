@@ -2,10 +2,10 @@
 // a ListMarker node, its host's first child, named after the marker's text and with one ignored
 // child per run of that text; a quote is an ignored node over a StaticText of its own instead.
 // Not part of the host's name. Part of accessibility.js (ax-node.ts).
-import { styleOf } from '../../core/realm';
+import { styleOf } from '../../../core/realm';
 import { contentText, counterText, counterValues, markerAffixes, unescape } from './ax-counter';
-import { attr } from './ax-dom';
-import { generatesMarker } from './ax-role';
+import { attr } from '../ax-dom';
+import { generatesMarker } from '../ax-role';
 
 /** A marker's text: its name, the texts of its children, and whether it is alternative text only. */
 export interface MarkerText {

@@ -1,11 +1,11 @@
 // Whether Chrome keeps a generic element (genericInclusion) and the layout and text helpers that
 // decide it. Part of accessibility.js (ax-node.ts).
-import { isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
-import { nativeGet } from '../../core/natives';
-import { generatedContent } from './ax-generated';
-import { attr, attrNames, domChildren, domParent, hasAttr, isMenuList, rootOf, wordSet } from './ax-dom';
+import { isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../../core/realm';
+import { nativeGet } from '../../../core/natives';
+import { generatedContent } from '../name/ax-generated';
+import { attr, attrNames, domChildren, domParent, hasAttr, isMenuList, rootOf, wordSet } from '../ax-dom';
 import { ignored, INCLUDED, type Inclusion, lifted } from './ax-ignored';
-import { implicitRole, isFocusable } from './ax-role';
+import { implicitRole, isFocusable } from '../ax-role';
 
 /** The element a text node's rendering depends on. */
 const displayOf = (node: Node | null) => (node && isElement(node) ? styleOf(node).display : '');

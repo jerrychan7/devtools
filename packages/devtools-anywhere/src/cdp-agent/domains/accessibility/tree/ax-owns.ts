@@ -1,9 +1,9 @@
 // aria-owns: which element owns which in a document or shadow root (ownerTable), cached for one
 // pass over the tree (ownersOf). Part of accessibility.js (ax-node.ts).
-import { isDocument, isElement, isHtml } from '../../core/realm';
+import { isDocument, isElement, isHtml } from '../../../core/realm';
 import { HiddenKeeper } from './ax-hidden';
 import { isTextFieldHost } from './ax-virtual';
-import { attr, byId, domParent, queryAll } from './ax-dom';
+import { attr, byId, domParent, queryAll } from '../ax-dom';
 import { meterOf } from './ax-generic';
 
 /** Owner tables, kept for one synchronous pass over the tree like dataTables. */

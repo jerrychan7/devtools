@@ -6,8 +6,8 @@
 // name is simplified at the end (AXObject::SimplifyName). The text of a text node is its rendered
 // text (ax-text.ts).
 import type { Protocol } from 'devtools-protocol';
-import { isElement, isHtml, isHtmlElement, isNode, isText, styleOf } from '../../core/realm';
-import { contentText } from './ax-counter';
+import { isElement, isHtml, isHtmlElement, isNode, isText, styleOf } from '../../../core/realm';
+import { contentText } from '../marker/ax-counter';
 import { preservesSpace, trimmedEnds } from './ax-generated';
 import {
   attr,
@@ -25,11 +25,11 @@ import {
   scopeOf,
   textOf,
   wordSet,
-} from './ax-dom';
-import { OPAQUE } from './ax-ignored';
-import { isFocusable, roleOf, SVG_NS } from './ax-role';
-import { inPopup } from './ax-generic';
-import { ownersOf } from './ax-owns';
+} from '../ax-dom';
+import { OPAQUE } from '../tree/ax-ignored';
+import { isFocusable, roleOf, SVG_NS } from '../ax-role';
+import { inPopup } from '../tree/ax-generic';
+import { ownersOf } from '../tree/ax-owns';
 import {
   droppedSpace,
   hasLayout,

@@ -5,8 +5,8 @@
 // which a page cannot read: these rules redo the common cases from the DOM and computed styles,
 // checked against Chrome's getFullAXTree (accessibility.conformance.test.ts). The role mapping is
 // Chrome's: ARIA roles where it gives them, its own (capitalized) roles elsewhere.
-import { isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../core/realm';
-import { spaceShows } from './ax-text';
+import { isElement, isHtml, isHtmlElement, isShadowRoot, isText, styleOf } from '../../../core/realm';
+import { spaceShows } from '../name/ax-text';
 import { HiddenKeeper } from './ax-hidden';
 import { isVirtual, selectOf, virtualChildrenOf, type AXRef, type VirtualNode } from './ax-virtual';
 import {
@@ -21,7 +21,7 @@ import {
   isMenuList,
   rootOf,
   scopeOf,
-} from './ax-dom';
+} from '../ax-dom';
 import { excluded, hidden, ignored, INCLUDED, type Inclusion, lifted, NOT_RENDERED, OPAQUE } from './ax-ignored';
 import {
   areasOf,
@@ -34,7 +34,7 @@ import {
   roleOf,
   SVG_NS,
   svgInclusion,
-} from './ax-role';
+} from '../ax-role';
 import {
   bodyKept,
   genericInclusion,

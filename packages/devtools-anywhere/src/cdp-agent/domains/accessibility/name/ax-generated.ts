@@ -6,9 +6,9 @@
 // tree. Laid out as a box (inline-block, block, floated or positioned) it is a generic over its
 // items instead, not in the tree when a block without text; as a flex or grid container, an ignored
 // node over the generic of its anonymous item. Part of accessibility.js (ax-node.ts).
-import { styleOf } from '../../core/realm';
-import { contentText } from './ax-counter';
-import { OPAQUE } from './ax-ignored';
+import { styleOf } from '../../../core/realm';
+import { contentText } from '../marker/ax-counter';
+import { OPAQUE } from '../tree/ax-ignored';
 import { lineEdge } from './ax-text';
 
 export type GeneratedPseudo = '::before' | '::after';

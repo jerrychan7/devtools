@@ -7,7 +7,7 @@ import { documentOf, isNode } from '../../core/realm';
 import { resolveNode } from '../dom/dom';
 import { PseudoElement } from '../../core/nodes/nodes';
 import type { AccessibilityModule, AXTree } from './ax-node';
-import type { AXRef } from './ax-virtual';
+import type { AXRef } from './tree/ax-virtual';
 
 /**
  * Loads accessibility.js (ax-node.ts), which computes the tree: it is large, and only the

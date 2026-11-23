@@ -5,9 +5,9 @@
 // visibility: hidden or aria-hidden hides in a label or such a target. The hidden elements around
 // them give their place to them. The parts of an HTML table (the table, its row groups, rows and
 // cells) stay too, ignored, but without the rest of their subtree, and so do elements with aria-owns.
-import { isElement, isHtml, isHtmlElement, styleOf } from '../../core/realm';
-import { nativeCall } from '../../core/natives';
-import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf } from './ax-dom';
+import { isElement, isHtml, isHtmlElement, styleOf } from '../../../core/realm';
+import { nativeCall } from '../../../core/natives';
+import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf } from '../ax-dom';
 import { type IgnoredReason } from './ax-ignored';
 import { inPopup } from './ax-generic';
 

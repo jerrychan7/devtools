@@ -19,11 +19,11 @@ import {
   scopeOf,
   isMenuList,
   matches,
-} from './ax-dom';
+} from '../ax-dom';
 import { type Inclusion } from './ax-ignored';
-import { roleOf } from './ax-role';
+import { roleOf } from '../ax-role';
 import { layoutOf } from './ax-generic';
-import { isElement, isHtml, isText, styleOf } from '../../core/realm';
+import { isElement, isHtml, isText, styleOf } from '../../../core/realm';
 
 /** A node of the tree or its DOM node. */
 export type AXRef = Node | VirtualNode;

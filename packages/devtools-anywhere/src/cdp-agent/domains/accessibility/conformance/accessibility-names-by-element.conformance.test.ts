@@ -4,8 +4,8 @@
 // html-aam/scripts/html-aam-accname-utils.js builds them (buildNameComputationTest), compared with
 // real Chrome one element at a time. The expected values are Chrome's, not WPT's.
 // The licenses in full: cases/LICENSES.
-import { describeCases } from '../../../../test-support/accessibility.ts';
-import type { CaseGroup } from '../../../../test-support/accessibility.ts';
+import { describeCases } from '../../../../../test-support/accessibility.ts';
+import type { CaseGroup } from '../../../../../test-support/accessibility.ts';
 
 interface Properties {
   descendants?: string[];

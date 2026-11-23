@@ -2,9 +2,9 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
 import type { CDPSession } from 'puppeteer-core';
-import { launch, setUpAndTearDown } from '../../../../test-support/conformance.ts';
-import type { Env, TestPage } from '../../../../test-support/conformance.ts';
-import { openAxPage, setBody } from '../../../../test-support/accessibility.ts';
+import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import type { Env, TestPage } from '../../../../../test-support/conformance.ts';
+import { openAxPage, setBody } from '../../../../../test-support/accessibility.ts';
 
 let env: Env | undefined;
 let t: TestPage;

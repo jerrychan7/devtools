@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Protocol } from 'devtools-protocol';
-import { launch, setUpAndTearDown } from '../../../../test-support/conformance.ts';
-import type { Env, Side, TestPage } from '../../../../test-support/conformance.ts';
-import { comparable, nodeIdOf, openAxPage, outline } from '../../../../test-support/accessibility.ts';
+import { launch, setUpAndTearDown } from '../../../../../test-support/conformance.ts';
+import type { Env, Side, TestPage } from '../../../../../test-support/conformance.ts';
+import { comparable, nodeIdOf, openAxPage, outline } from '../../../../../test-support/accessibility.ts';
 
 let env: Env | undefined;
 let t: TestPage;
