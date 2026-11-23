@@ -83,8 +83,24 @@ async function find(selector: string, text?: string): Promise<ElementHandle<Elem
   });
 }
 
-/** The computed `property` of #e2e, and the text of the sheet holding `.e2e`, from the frontend. */
+/**
+ * The computed `property` of #e2e, and the text of the sheet holding `.e2e`, from the frontend.
+ * Read again while a step fails, for up to 15 s: the frontend may be refreshing its own nodes
+ * then. The last failure is thrown.
+ */
 async function state(property: string) {
+  const start = Date.now();
+  for (;;) {
+    try {
+      return await readState(property);
+    } catch (error) {
+      if (Date.now() - start > 15000) throw error;
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+}
+
+async function readState(property: string) {
   const computed = await page.evaluate(p => {
     const el = document.getElementById('e2e');
     return el ? getComputedStyle(el).getPropertyValue(p) : '';
@@ -106,17 +122,19 @@ async function state(property: string) {
     ).modules['core/host/host.js']();
     const host = InspectorFrontendHost.InspectorFrontendHostInstance;
     // The session the frontend uses, asked directly, with ids out of the frontend's range.
-    const pending = new Map<number, (result: unknown) => void>();
+    const pending = new Map<number, (result: unknown, error: unknown) => void>();
     host.events.addEventListener(InspectorFrontendHostAPI.Events.DispatchMessage, ({ data }) => {
-      const msg: { id?: number; result?: unknown } = typeof data === 'string' ? JSON.parse(data) : {};
-      if (msg.id) pending.get(msg.id)?.(msg.result);
+      const msg: { id?: number; result?: unknown; error?: unknown } = typeof data === 'string' ? JSON.parse(data) : {};
+      if (msg.id) pending.get(msg.id)?.(msg.result, msg.error);
     });
     let id = 9e8 + Math.floor(Math.random() * 1e6);
-    // A failed step throws, naming it, rather than reading as an empty sheet.
+    // A failed step throws, naming it and the agent's error, rather than reading as an empty sheet.
     const call = (method: string, params: object) =>
       new Promise<Record<string, unknown>>((resolve, reject) => {
-        pending.set(++id, result =>
-          result && typeof result === 'object' ? resolve({ ...result }) : reject(new Error(`${method} failed`))
+        pending.set(++id, (result, error) =>
+          result && typeof result === 'object'
+            ? resolve({ ...result })
+            : reject(new Error(`${method} failed: ${JSON.stringify(error)}`))
         );
         host.sendMessageToBackend(JSON.stringify({ id, method, params }));
       });
