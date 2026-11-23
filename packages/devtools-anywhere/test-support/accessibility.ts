@@ -18,9 +18,9 @@ export async function openAxPage(env: Env, html = ''): Promise<TestPage> {
       loadAccessibility: () => import(base + '/packages/devtools-anywhere/dist/accessibility.js'),
     });
   }, env.baseUrl);
-  await setBody(t, html);
-  // Chrome's whole-tree commands need the domain enabled.
+  // Chrome's whole-tree commands need the domain enabled, setBody's included.
   await Promise.all([t.ours.send('Accessibility.enable'), t.chrome.send('Accessibility.enable')]);
+  await setBody(t, html);
   return t;
 }
 
@@ -28,16 +28,40 @@ export async function openAxPage(env: Env, html = ''): Promise<TestPage> {
  * Replaces the body; declarative shadow roots in `html` are attached. What a group's setup put on
  * the body itself (attributes, click handlers) is taken off first, as it decides whether Chrome
  * keeps the body.
+ *
+ * aria-owns attributes are put back one at a time, in document order, Chrome's tree brought up to
+ * date after each. When owns conflict (a cycle, two owners of one node), Chrome keeps the one it
+ * processes first, and with a whole body inserted at once that order is not the document's: it
+ * changes with what the page held before, so the winner of a cycle changed with the groups run
+ * earlier. Added in document order, the first owner in the document wins, as in ours.
  */
 export async function setBody(t: TestPage, html: string): Promise<void> {
-  await t.page.evaluate(html => {
+  const owners = await t.page.evaluate(html => {
     const body = document.body;
     for (const name of body.getAttributeNames()) body.removeAttribute(name);
     body.onclick = body.onmousedown = body.onmouseup = null;
     body.setHTMLUnsafe(html);
     // The fixture's own focus would differ between the sides' runs.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const owners = [...document.body.querySelectorAll('[aria-owns]')];
+    window.__axOwners = owners.map(el => {
+      const value = el.getAttribute('aria-owns') ?? '';
+      el.removeAttribute('aria-owns');
+      return [el, value] as const;
+    });
+    return owners.length;
   }, html);
+  if (owners) {
+    await t.chrome.send('Accessibility.getFullAXTree', {});
+    for (let i = 0; i < owners; i++) {
+      await t.page.evaluate(i => {
+        const [el, value] = window.__axOwners?.[i] ?? [];
+        el?.setAttribute('aria-owns', value ?? '');
+      }, i);
+      await t.chrome.send('Accessibility.getFullAXTree', {});
+    }
+    await t.page.evaluate(() => delete window.__axOwners);
+  }
   // An image still loading would change its node (a broken image's name, its size) mid-comparison.
   await t.page.evaluate(() =>
     Promise.all(
