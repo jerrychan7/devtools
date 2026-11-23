@@ -19,6 +19,7 @@ import {
   inInert,
   isFocusable,
   isMenuList,
+  inPopup,
   innerTextOf,
   ownersOf,
   query,
@@ -818,10 +819,22 @@ export function nameOf(
   const name = isHtml(el, 'br') ? text : simplifyName(text);
   const description = descriptionOf(el, name);
   return {
-    // A slot lists no sources: it cannot be named.
-    name: { ...computed(name), ...(!isHtml(el, 'slot') && { sources }) },
+    // A slot lists no sources: it cannot be named; nor does an element a drop-down's popup holds
+    // under display: none or visibility: hidden, as in Chrome.
+    name: { ...computed(name), ...(!isHtml(el, 'slot') && !styleHiddenInPopup(el) && { sources }) },
     ...(description && description !== name && { description: computed(description) }),
   };
+}
+
+/**
+ * Whether an element in a drop-down's popup, other than an option or a group, is display: none or
+ * in one, or visibility: hidden.
+ */
+function styleHiddenInPopup(el: Element): boolean {
+  if (isHtml(el, 'option') || isHtml(el, 'optgroup') || !inPopup(el)) return false;
+  for (let n: Node | null = el; n && isElement(n) && !isMenuList(n); n = domParent(n))
+    if (styleOf(n).display === 'none') return true;
+  return /^(hidden|collapse)$/.test(styleOf(el).visibility);
 }
 
 /** The document's name: aria-label on the root element, or the title. */

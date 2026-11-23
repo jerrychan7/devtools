@@ -7,7 +7,7 @@
 // cells) stay too, ignored, but without the rest of their subtree, and so do elements with aria-owns.
 import { isElement, isHtml, isHtmlElement, styleOf } from '../../core/realm';
 import { nativeCall } from '../../core/natives';
-import { attr, byId, hasAttr, domChildren, domParent, queryAll, scopeOf, type IgnoredReason } from './ax-tree';
+import { attr, byId, hasAttr, domChildren, domParent, inPopup, queryAll, scopeOf, type IgnoredReason } from './ax-tree';
 
 /** What hides a node, its first cause from the outermost: no box, not painted, inert or aria-hidden. */
 type HiddenMode = 'none' | 'visibility' | 'inert' | 'aria';
@@ -122,7 +122,9 @@ export class HiddenKeeper {
     // what visibility: hidden or inert hides stays hidden.
     if (up?.mode === 'aria' && this.ownerOf(el)) up = null;
     // The ancestors have a box (the parent is not 'none'), so only the element's own style counts.
-    const box = el.isConnected ? ownBox(el) : 'notRendered';
+    // A drop-down's popup is not laid out: display and visibility hide nothing in it, as in Chrome.
+    let box = el.isConnected ? ownBox(el) : 'notRendered';
+    if (box && el.isConnected && inPopup(el)) box = null;
     const inert = hasAttr(el, 'inert') || up?.mode === 'inert';
     // What has no box under inert is still ignored as inert, as in Chrome.
     if (box === 'notRendered') return { mode: 'none', reason: inert ? 'inertElement' : 'notRendered' };

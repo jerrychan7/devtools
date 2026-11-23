@@ -673,8 +673,11 @@ function meterOf(node: Node): Element | null {
   return null;
 }
 
-/** Whether an element is a child of a drop-down select, in its popup, which is not laid out. */
-const inPopup = (el: Node | null): boolean => !!el && isMenuList(domParent(el) as Element | null);
+/** Whether a node is under a drop-down select, at any depth: in its popup, which is not laid out. */
+export function inPopup(node: Node | null): boolean {
+  for (let p = node && domParent(node); p && isElement(p); p = domParent(p)) if (isMenuList(p)) return true;
+  return false;
+}
 
 /** The roles named from their content (ax-name.ts), whose display: contents descendants Chrome keeps. */
 const NAME_FROM_CONTENTS = wordSet(
@@ -938,9 +941,7 @@ export class TreeShape {
       // In an svg, only its text elements draw text.
       if (isElement(parent) && parent.namespaceURI === SVG_NS && !/^(text|tspan|textPath)$/.test(parent.localName))
         return excluded('notRendered');
-      let hiding = this.hidden.hiding(node);
-      // The popup is not laid out: display: none on an element in it hides nothing.
-      if (hiding?.mode === 'none' && inPopup(parent)) hiding = null;
+      const hiding = this.hidden.hiding(node);
       if (hiding) {
         // What aria-hidden hides in an svg is left out of the tree.
         if (hiding.mode !== 'none' && (parent as Element).namespaceURI === SVG_NS) return excluded(hiding.reason);
