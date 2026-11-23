@@ -1,6 +1,6 @@
 // The nodes Chrome's tree has under a control without a DOM node the page can see: those of the
 // user-agent shadow tree (a select's popup, the slot of a list box or an optgroup, a text field's
-// placeholder and inner editor with its text, an input button's text, a color well's swatch, a
+// placeholder and inner editor with its text, an input button's text, a meter's bar, a color well's swatch, a
 // details element's slots). Each is a
 // VirtualNode, found again by its host element and a key unique in that host: the Accessibility
 // domain gives it an id of its own (accessibility.ts), apart from the DOM nodes' backend ids.
@@ -14,6 +14,7 @@ import {
   domChildren,
   domParent,
   hasAttr,
+  hiddenReason,
   queryAll,
   scopeOf,
   isMenuList,
@@ -83,7 +84,7 @@ export function selectOf(el: Element): HTMLSelectElement | null {
 /**
  * The VirtualNodes Chrome puts between a host and its children, null for an element without:
  * a drop-down select's MenuListPopup and a list box's slot over the options, an optgroup's slot,
- * a text field's nodes, an input button's text, a color well's swatch, a details element's slots. `fieldText`: the text a field or button shows.
+ * a text field's nodes, an input button's text, a meter's bar, a color well's swatch, a details element's slots. `fieldText`: the text a field or button shows.
  */
 export function virtualChildrenOf(el: Element, fieldText: (el: Element) => string): VirtualNode[] | null {
   if (!isElement(el)) return null;
@@ -96,6 +97,16 @@ export function virtualChildrenOf(el: Element, fieldText: (el: Element) => strin
     const text = fieldText(el);
     return text ? [textNode(el, 'text', 'StaticText', text, false)] : [];
   }
+  // A meter's bar, in its two wrappers: its own content is not rendered. None while the meter
+  // has no box shown, or is hidden from the tree by aria-hidden.
+  if (isHtml(el, 'meter'))
+    return !shown(el)
+      ? []
+      : [
+          new VirtualNode(el, 'inner', 'generic', INCLUDED, [
+            new VirtualNode(el, 'bar', 'generic', INCLUDED, [new VirtualNode(el, 'value', 'generic', UNINTERESTING)]),
+          ]),
+        ];
   // A color well's swatch, in its wrapper.
   if (isHtml(el, 'input') && el.type === 'color')
     return [
@@ -104,6 +115,14 @@ export function virtualChildrenOf(el: Element, fieldText: (el: Element) => strin
       ]),
     ];
   return null;
+}
+
+/** Whether an element has a box that is painted, outside any aria-hidden subtree. */
+function shown(el: Element): boolean {
+  if (hiddenReason(el) || styleOf(el).display === 'contents') return false;
+  for (let n: Node | null = el; n && isElement(n); n = domParent(n))
+    if (attr(n, 'aria-hidden') === 'true') return false;
+  return true;
 }
 
 /**

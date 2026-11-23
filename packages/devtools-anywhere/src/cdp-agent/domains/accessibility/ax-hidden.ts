@@ -101,9 +101,9 @@ export class HiddenKeeper {
   /** Whether a hidden element is one Chrome keeps, ignored, with its subtree. */
   private keeps(el: Element, mode: HiddenMode): boolean {
     if (mode !== 'inert' && this.isReferenced(el)) return true;
-    if (isHtml(el, 'select') || isHtml(el, 'textarea') || isField(el)) return true;
+    if (isHtml(el, 'select') || isHtml(el, 'textarea') || isField(el) || isHtml(el, 'meter')) return true;
     if (mode === 'visibility') return false;
-    if (isHtml(el, 'label') || isHtml(el, 'meter')) return true;
+    if (isHtml(el, 'label')) return true;
     if (mode === 'none') return false;
     if (isHtml(el, 'input') && BUTTON_TYPES.has(el.type)) return true;
     if (mode === 'inert') return false;

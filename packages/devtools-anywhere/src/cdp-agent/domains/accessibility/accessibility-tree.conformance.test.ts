@@ -33,7 +33,6 @@ const TODO: Record<string, string[]> = {
     'names: dom-accessibility-api names',
     'roles: wpt html-aam/optgroup-role.tentative.html',
     'roles: wpt html-aam/roles-contextual.html',
-    'roles: wpt html-aam/roles.html',
     'roles: wpt wai-aria/role/role_none_conflict_resolution.tentative.html',
     'names: dom-accessibility-api script and shadow roots',
     'names: wpt accname/aria-owns.html',
