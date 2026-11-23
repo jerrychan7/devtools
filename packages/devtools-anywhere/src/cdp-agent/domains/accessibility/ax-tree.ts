@@ -586,6 +586,15 @@ export function domParent(node: Node): Node | null {
 /** The element a text node's rendering depends on. */
 const displayOf = (node: Node | null) => (node && isElement(node) ? styleOf(node).display : '');
 
+/** Whether Chrome keeps the body as a generic node rather than ignoring it. */
+function bodyKept(body: Element): boolean {
+  return (
+    attrNames(body).some(n => n.startsWith('aria-') || n === 'role' || n === 'id' || n === 'contenteditable') ||
+    !!attr(body, 'title') ||
+    ['onclick', 'onmousedown', 'onmouseup'].some(name => !!nativeGet<unknown>(body, name))
+  );
+}
+
 /** A text node's text as rendered: white space collapsed, and trimmed at the edges of its block. */
 export function renderedText(text: Text): string {
   let value = text.data.replace(/[ \t\n\r\f]+/g, ' ');
@@ -824,7 +833,11 @@ export class TreeShape {
         (node.localName === 'embed' && !hasAttr(node, 'src') && !hasAttr(node, 'type')))
     )
       return excluded('notRendered');
-    if (node === this.doc.documentElement || node === this.doc.body) return ignored('uninteresting');
+    if (node === this.doc.documentElement) return ignored('uninteresting');
+    // The body is ignored unless something makes it worth a node: a role or ARIA attribute, a
+    // title, an id, contenteditable, or a click, mousedown or mouseup handler (on* properties only: listeners
+    // added with addEventListener are not seen here). A tabindex or scrolling does not keep it.
+    if (node === this.doc.body && !bodyKept(node)) return ignored('uninteresting');
     // A tbody without a role, ARIA attribute, title, id (a possible link target) or tabindex is ignored;
     // thead and tfoot are kept.
     if (
