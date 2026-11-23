@@ -115,8 +115,17 @@ for (const [file, setups] of files)
         // Then the nodes as getFullAXTree lists them, in Chrome's order, with the pseudo-elements
         // whose backend ids list markers and generated content carry. In the same test: setting a
         // group's body again changes how Chrome breaks aria-owns cycles.
-        const [listedOurs, listedChrome] = await Promise.all([listedTree(t.ours, true), listedTree(t.chrome, false)]);
-        assert.deepEqual(listedOurs, listedChrome, 'listed order and pseudo-element ids');
+        // Asked again while they differ: Chrome may still be settling a node (a summary's generic
+        // was seen to turn ignored between two calls on a busy runner), while ours does not change.
+        for (let attempt = 1; ; attempt++) {
+          const [listedOurs, listedChrome] = await Promise.all([listedTree(t.ours, true), listedTree(t.chrome, false)]);
+          if (attempt < 3 && JSON.stringify(listedOurs) !== JSON.stringify(listedChrome)) {
+            await new Promise(r => setTimeout(r, 200));
+            continue;
+          }
+          assert.deepEqual(listedOurs, listedChrome, 'listed order and pseudo-element ids');
+          break;
+        }
       });
     }
   });
