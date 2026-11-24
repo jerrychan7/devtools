@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
+import { windowOf } from '../../core/natives';
 import { CdpError } from '../../core/session';
 
 type VersionStatus = Protocol.ServiceWorker.ServiceWorkerVersionStatus;
@@ -37,6 +38,36 @@ const idOf = (o: object) => {
 
 /** A worker's state in the protocol's names: the page sees a fetched script as `parsed`. */
 const statusOf = (state: ServiceWorkerState): VersionStatus => (state === 'parsed' ? 'new' : state);
+
+/** `navigator.onLine` by the browser's getter, not an override on the page's navigator (Network emulation's). */
+const onLineGetter: (() => boolean) | undefined =
+  typeof Navigator === 'undefined'
+    ? undefined
+    : (Object.getOwnPropertyDescriptor(Navigator.prototype, 'onLine')?.get as (() => boolean) | undefined);
+const isOnline = (nav: Navigator) => (onLineGetter ? Reflect.apply(onLineGetter, nav, []) : nav.onLine);
+
+/** `target.addEventListener(type, fn)` by the browser's function, past a wrapper of the page's. */
+const listen = (target: EventTarget, type: string, fn: (e: Event) => void) =>
+  void Reflect.apply(windowOf().listen, target, [type, fn]);
+
+/** Told of each registration the page makes through `register`, whichever way it is called. */
+const registered = new Set<(reg: ServiceWorkerRegistration) => void>();
+let hooked = false;
+/**
+ * Wraps `register` on the container's prototype, once for all sessions: on the instance, it would
+ * show among the page's own properties and miss `ServiceWorkerContainer.prototype.register.call`.
+ */
+function hookRegister(container: ServiceWorkerContainer) {
+  if (hooked) return;
+  hooked = true;
+  const proto = Object.getPrototypeOf(container) as ServiceWorkerContainer;
+  const original = proto.register;
+  proto.register = async function (this: ServiceWorkerContainer, ...args: Parameters<typeof original>) {
+    const reg = await Reflect.apply(original, this, args);
+    registered.forEach(fn => fn(reg));
+    return reg;
+  };
+}
 
 const workersOf = (reg: ServiceWorkerRegistration) => [reg.installing, reg.waiting, reg.active].filter(w => w !== null);
 
@@ -102,7 +133,7 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
         registrationOf.set(worker, reg);
         if (watched.has(worker)) continue;
         watched.add(worker);
-        worker.addEventListener('statechange', () => {
+        listen(worker, 'statechange', () => {
           if (!enabled) return;
           session.emit('ServiceWorker.workerVersionUpdated', { versions: [version(reg, worker)] });
         });
@@ -110,7 +141,7 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     };
     if (!watched.has(reg)) {
       watched.add(reg);
-      reg.addEventListener('updatefound', () => {
+      listen(reg, 'updatefound', () => {
         watchWorkers();
         report(reg);
       });
@@ -140,12 +171,10 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
 
   // Registrations the page makes while the view is open show up as they happen.
   if (container) {
-    const { register } = container;
-    container.register = async function (this: ServiceWorkerContainer, ...args: Parameters<typeof register>) {
-      const reg = await register.apply(this, args);
+    hookRegister(container);
+    registered.add(reg => {
       if (enabled) void inTurn(() => watch(reg, known.has(reg)));
-      return reg;
-    };
+    });
   }
 
   // Another tab's registrations and unregistrations reach the page through no event: they are
@@ -155,7 +184,7 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     const lookAgain = () => {
       if (enabled) void refresh();
     };
-    container.addEventListener('controllerchange', () => {
+    listen(container, 'controllerchange', () => {
       const before = controller;
       controller = container.controller;
       if (!enabled) return;
@@ -171,8 +200,8 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
         if (versions.length) session.emit('ServiceWorker.workerVersionUpdated', { versions });
       });
     });
-    win.addEventListener('focus', lookAgain);
-    win.document.addEventListener('visibilitychange', () => {
+    listen(win, 'focus', lookAgain);
+    listen(win.document, 'visibilitychange', () => {
       if (win.document.visibilityState === 'visible') lookAgain();
     });
   }
@@ -234,7 +263,7 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       const { sync } = reg as ServiceWorkerRegistration & { sync?: { register(tag: string): Promise<void> } };
       if (!sync) throw new CdpError('Not supported in the page: this browser has no Background Sync (SyncManager)');
       // The browser would hold the sync until it is online again; Chrome's fires at once.
-      if (!navigator.onLine) {
+      if (!isOnline(navigator)) {
         throw new CdpError(
           'Not supported in the page: the browser is offline, so the sync would wait until it is online'
         );
