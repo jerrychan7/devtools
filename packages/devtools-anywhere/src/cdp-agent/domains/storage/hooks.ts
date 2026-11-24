@@ -9,8 +9,11 @@ export type StorageWrite =
   | { bucket: string; databaseName: string; objectStoreName: string }
   | { bucket: string; cacheName: string }
   | { buckets: true }
-  /** A Cache Storage write has begun: it is reported once done, and a snapshot read meanwhile may miss it. */
-  | { pending: true };
+  /**
+   * A write has begun (true) or settled, reported or failed (false): a write is reported once done,
+   * and a snapshot read while one is in flight may or may not have it (`writesInFlight`).
+   */
+  | { pending: boolean };
 
 /** The sessions tracking something. */
 export const listeners = new Set<(write: StorageWrite) => void>();
@@ -25,6 +28,22 @@ const databaseBuckets = new WeakMap<IDBDatabase, string | undefined>();
 const databaseBucket = (db: IDBDatabase) => (databaseBuckets.has(db) ? databaseBuckets.get(db) : '');
 
 const notify = (write: StorageWrite) => listeners.forEach(fn => fn(write));
+
+let inFlight = 0;
+/** The writes begun and not settled yet: Cache Storage's, and IndexedDB's opens and deletions. */
+export const writesInFlight = () => inFlight;
+/** Marks a write as begun; the function returned marks it settled, once however often it is called. */
+function begin() {
+  inFlight++;
+  notify({ pending: true });
+  let settled = false;
+  return () => {
+    if (settled) return;
+    settled = true;
+    inFlight--;
+    notify({ pending: false });
+  };
+}
 
 /** Replaces `proto[name]` with `wrap(original)`. */
 function patch<T extends object, K extends keyof T>(proto: T, name: K, wrap: (original: T[K]) => T[K]) {
@@ -132,10 +151,22 @@ export function hookWrites() {
       function (this: IDBFactory, ...args: Parameters<IDBFactory['open']>) {
         const req = original.apply(this, args);
         const bucket = bucketOf(this);
-        req.addEventListener('success', () => databaseBuckets.set(req.result, bucket), { once: true });
-        req.addEventListener('upgradeneeded', () => req.addEventListener('success', listChanged(bucket)), {
-          once: true,
-        });
+        // It may create or upgrade the database: in flight until it succeeds (after its report),
+        // fails or is blocked, which may last.
+        const settle = begin();
+        let upgraded = false;
+        req.addEventListener('upgradeneeded', () => (upgraded = true), { once: true });
+        req.addEventListener(
+          'success',
+          () => {
+            databaseBuckets.set(req.result, bucket);
+            if (upgraded) listChanged(bucket)();
+            settle();
+          },
+          { once: true }
+        );
+        req.addEventListener('error', settle, { once: true });
+        req.addEventListener('blocked', settle, { once: true });
         return req;
       }
   );
@@ -145,7 +176,18 @@ export function hookWrites() {
     original =>
       function (this: IDBFactory, ...args: Parameters<IDBFactory['deleteDatabase']>) {
         const req = original.apply(this, args);
-        req.addEventListener('success', listChanged(bucketOf(this)));
+        const changed = listChanged(bucketOf(this));
+        const settle = begin();
+        req.addEventListener(
+          'success',
+          () => {
+            changed();
+            settle();
+          },
+          { once: true }
+        );
+        req.addEventListener('error', settle, { once: true });
+        req.addEventListener('blocked', settle, { once: true });
         return req;
       }
   );
@@ -157,12 +199,16 @@ export function hookWrites() {
     original =>
       async function (this: CacheStorage, cacheName: string) {
         const bucket = bucketOf(this);
-        notify({ pending: true });
-        const isNew = !(await hasCacheOf(this, cacheName));
-        const cache = await original.call(this, cacheName);
-        cacheNames.set(cache, { bucket, name: cacheName });
-        if (isNew && bucket !== undefined) notify({ bucket, list: 'cache' });
-        return cache;
+        const settle = begin();
+        try {
+          const isNew = !(await hasCacheOf(this, cacheName));
+          const cache = await original.call(this, cacheName);
+          cacheNames.set(cache, { bucket, name: cacheName });
+          if (isNew && bucket !== undefined) notify({ bucket, list: 'cache' });
+          return cache;
+        } finally {
+          settle();
+        }
       }
   );
   patch(
@@ -170,11 +216,15 @@ export function hookWrites() {
     'delete',
     original =>
       async function (this: CacheStorage, cacheName: string) {
-        notify({ pending: true });
-        const deleted = await original.call(this, cacheName);
-        const bucket = bucketOf(this);
-        if (deleted && bucket !== undefined) notify({ bucket, list: 'cache' });
-        return deleted;
+        const settle = begin();
+        try {
+          const deleted = await original.call(this, cacheName);
+          const bucket = bucketOf(this);
+          if (deleted && bucket !== undefined) notify({ bucket, list: 'cache' });
+          return deleted;
+        } finally {
+          settle();
+        }
       }
   );
   // A cache opened before the hooks has no known name: every cache of the default bucket is
@@ -189,10 +239,14 @@ export function hookWrites() {
   };
   const reported = <A extends unknown[], R>(original: (this: Cache, ...args: A) => Promise<R>) =>
     async function (this: Cache, ...args: A) {
-      notify({ pending: true });
-      const result = await original.apply(this, args);
-      if (result !== false) await cacheWrite(this);
-      return result;
+      const settle = begin();
+      try {
+        const result = await original.apply(this, args);
+        if (result !== false) await cacheWrite(this);
+        return result;
+      } finally {
+        settle();
+      }
     };
   patch(Cache.prototype, 'put', reported);
   patch(Cache.prototype, 'add', reported);

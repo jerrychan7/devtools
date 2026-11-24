@@ -2,7 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import { windowOf } from '../../core/natives';
 import type { CdpSession } from '../../core/session';
 import { bucketNames, cacheNamesOf, databasesOf, existingBucket, openedQuotas } from './buckets';
-import { hookWrites, listeners, type StorageWrite } from './hooks';
+import { hookWrites, listeners, writesInFlight, type StorageWrite } from './hooks';
 import { diff, takeSnapshot, type Change, type Snapshot } from './snapshot';
 
 /**
@@ -27,7 +27,7 @@ async function hasBucket() {
 }
 
 /** The key under which a change the hooks reported is kept from being reported again by the snapshots. */
-function keyOf(change: Exclude<StorageWrite, { buckets: true } | { pending: true }> | Change): string {
+function keyOf(change: Exclude<StorageWrite, { buckets: true } | { pending: boolean }> | Change): string {
   if ('list' in change) return `${change.list}|${change.bucket}`;
   if ('databaseName' in change) return '';
   if ('cacheName' in change) return `cache|${change.bucket}|${change.cacheName}`;
@@ -116,8 +116,10 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   let snapshot: Snapshot | undefined;
   /** The changes the hooks reported since the last snapshot, which it must not report again. */
   const reported = new Set<string>();
-  /** Counts the hooks' reports: a snapshot read while one came is not used. */
+  /** Counts the hooks' reports, a write's start and end included: a snapshot read while one came is not used. */
   let writes = 0;
+  /** Whether a snapshot was dropped for a write in flight: read again once none is. */
+  let waiting = false;
   let checking = false;
   let again = false;
   /** Whether a check after the page's own writes is waiting (`SETTLE_MS`). */
@@ -168,7 +170,13 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
         const before = writes;
         const now = await takeSnapshot(trackCache).catch(() => undefined);
         if (!now || !active()) break;
-        // Read while the hooks reported a write, it may not have that write: read again.
+        // Read while a write of this window was in flight, it may have it or not, and the hook
+        // reports it once done: it is read again when none is. Read while the hooks reported a
+        // write, it may not have that write: read again.
+        if (writesInFlight() > 0) {
+          waiting = true;
+          break;
+        }
         if (writes !== before) {
           again = true;
           continue;
@@ -211,7 +219,13 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   const onWrite = (write: StorageWrite) => {
     if ('buckets' in write) return void check();
     writes++;
-    if ('pending' in write) return;
+    if ('pending' in write) {
+      if (!write.pending && waiting && !writesInFlight()) {
+        waiting = false;
+        checkSoon();
+      }
+      return;
+    }
     const key = keyOf(write);
     if (key) {
       reported.add(key);
@@ -239,6 +253,7 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
       listen(false);
       timer++;
       snapshot = undefined;
+      waiting = false;
       reported.clear();
     }
   };
