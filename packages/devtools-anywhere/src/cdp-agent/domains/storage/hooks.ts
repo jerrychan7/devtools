@@ -8,7 +8,8 @@ export type StorageWrite =
   | { bucket: string; list: 'idb' | 'cache' }
   | { bucket: string; databaseName: string; objectStoreName: string }
   | { bucket: string; cacheName: string }
-  | { buckets: true }
+  /** `opened`: the bucket this window opened (made, if it was missing). */
+  | { buckets: true; opened?: string | undefined }
   /**
    * A write has begun (true) or settled, reported or failed (false): a write is reported once done,
    * and a snapshot read while one is in flight may or may not have it (`writesInFlight`).
@@ -29,18 +30,34 @@ const databaseBucket = (db: IDBDatabase) => (databaseBuckets.has(db) ? databaseB
 
 const notify = (write: StorageWrite) => listeners.forEach(fn => fn(write));
 
-let inFlight = 0;
-/** The writes begun and not settled yet: Cache Storage's, and IndexedDB's opens and deletions. */
-export const writesInFlight = () => inFlight;
+/**
+ * How long a write counts as in flight at most. Some never settle, or not for long: an IndexedDB
+ * open queued behind a blocked upgrade (it fires no `blocked`), `cache.add()` of a URL that never
+ * answers, `cache.put()` of an endless stream. Past this, the snapshots are used again.
+ */
+const IN_FLIGHT_MS = 10_000;
+/** When each write begun and not settled yet began. */
+const inFlight = new Set<{ since: number }>();
+/** The writes begun and not settled yet, for less than `IN_FLIGHT_MS`: Cache Storage's, and IndexedDB's opens and deletions. */
+export const writesInFlight = () => {
+  const now = performance.now();
+  let count = 0;
+  for (const write of inFlight) {
+    if (now - write.since < IN_FLIGHT_MS) count++;
+    else inFlight.delete(write);
+  }
+  return count;
+};
 /** Marks a write as begun; the function returned marks it settled, once however often it is called. */
 function begin() {
-  inFlight++;
+  const write = { since: performance.now() };
+  inFlight.add(write);
   notify({ pending: true });
   let settled = false;
   return () => {
     if (settled) return;
     settled = true;
-    inFlight--;
+    inFlight.delete(write);
     notify({ pending: false });
   };
 }
@@ -84,7 +101,7 @@ function hookBuckets() {
         openedQuotas.set(bucketName, typeof quota === 'number' ? quota : undefined);
       }
       if (name === 'delete' && typeof bucketName === 'string') openedQuotas.delete(bucketName);
-      notify({ buckets: true });
+      notify({ buckets: true, opened: name === 'open' && typeof bucketName === 'string' ? bucketName : undefined });
       return result;
     };
   }
@@ -152,7 +169,8 @@ export function hookWrites() {
         const req = original.apply(this, args);
         const bucket = bucketOf(this);
         // It may create or upgrade the database: in flight until it succeeds (after its report),
-        // fails or is blocked, which may last.
+        // fails or is blocked, which may last. A snapshot used after `blocked` may report the new
+        // list before the success does again: a second list event, for not waiting on a blocked one.
         const settle = begin();
         let upgraded = false;
         req.addEventListener('upgradeneeded', () => (upgraded = true), { once: true });

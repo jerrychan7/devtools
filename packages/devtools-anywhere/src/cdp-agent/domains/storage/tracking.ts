@@ -183,11 +183,13 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
         // Read while a write of this window was in flight, it may have it or not, and the hook
         // reports it once done: it is read again when none is. Read while the hooks reported a
         // write, it may not have that write: read again.
+        // On the last round it is used anyway, so that a page writing all the time does not keep
+        // the writes made elsewhere from being seen: what the hooks reported is not sent again.
         if (writesInFlight() > 0) {
           waiting = true;
           break;
         }
-        if (writes !== before) {
+        if (writes !== before && rounds < 4) {
           again = true;
           continue;
         }
@@ -227,8 +229,13 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   // ---- writes of this window: hooks ----
 
   const onWrite = (write: StorageWrite) => {
-    if ('buckets' in write) return void check();
-    writes++;
+    if ('buckets' in write) {
+      // A bucket this window opens exists again: its writes are reported from now on.
+      if (write.opened) deleted.delete(write.opened);
+      return void check();
+    }
+    // A database's content is not in the snapshots: a write to it does not make one stale.
+    if (!('databaseName' in write)) writes++;
     if ('pending' in write) {
       if (!write.pending && waiting && !writesInFlight()) {
         waiting = false;
