@@ -78,9 +78,14 @@ async function seen(side: Side) {
   return names;
 }
 
-/** Runs `write` in the page, then waits for its events to stop coming and clears them. */
-async function cleanUp(write: () => Promise<unknown>) {
+/**
+ * Runs `write` in the page, waits on both sides for each event it must cause (so that none comes
+ * late into the next test), then for the rest to stop coming, and clears them.
+ */
+async function cleanUp(write: () => Promise<unknown>, ...events: EventName[]) {
+  await clear();
   await t.page.evaluate(write);
+  for (const event of events) await waitForBoth(t, event, 1, 10_000);
   await settle(800);
   await clear();
 }
@@ -136,7 +141,8 @@ test('IndexedDB writes', async () => {
     () =>
       new Promise(resolve => {
         indexedDB.deleteDatabase('tracked').onsuccess = resolve;
-      })
+      }),
+    'Storage.indexedDBListUpdated'
   );
 });
 
@@ -222,12 +228,16 @@ test('writes made by another tab are reported', async () => {
   await waitForBoth(t, 'Storage.cacheStorageContentUpdated', 1, 10_000);
   await waitForBoth(t, 'Storage.indexedDBListUpdated', 1, 10_000);
   await sameEvents(seenByBucket);
-  await cleanUp(async () => {
-    await caches.delete('other-tab');
-    await new Promise(resolve => {
-      indexedDB.deleteDatabase('other-tab').onsuccess = resolve;
-    });
-  });
+  await cleanUp(
+    async () => {
+      await caches.delete('other-tab');
+      await new Promise(resolve => {
+        indexedDB.deleteDatabase('other-tab').onsuccess = resolve;
+      });
+    },
+    'Storage.cacheStorageListUpdated',
+    'Storage.indexedDBListUpdated'
+  );
 });
 
 test('named buckets: listed, reported and read', async () => {
@@ -280,7 +290,7 @@ test('named buckets: listed, reported and read', async () => {
     t.chrome.send('CacheStorage.requestCacheNames', { storageBucket: { storageKey } }),
   ]);
   assert.deepEqual(oursDefault, chromeDefault);
-  await cleanUp(() => navigator.storageBuckets.delete('b1'));
+  await cleanUp(() => navigator.storageBuckets.delete('b1'), 'Storage.storageBucketDeleted');
 });
 
 test('a missing named bucket or cache fails without being made', async () => {
@@ -308,7 +318,8 @@ test('a missing named bucket or cache fails without being made', async () => {
   const ours2 = await calls(t.ours);
   assert.equal(await t.page.evaluate(() => caches.has('missing-cache')), false);
   assert.deepEqual(ours2, await calls(t.chrome));
-  await cleanUp(() => caches.delete('missing-cache'));
+  // Chrome's requestEntries made the cache: deleting it changes the list.
+  await cleanUp(() => caches.delete('missing-cache'), 'Storage.cacheStorageListUpdated');
 });
 
 test('deleting a named bucket', async () => {
@@ -350,7 +361,7 @@ test('a bucket made by another tab is reported', async () => {
   const info = (event: typeof ours) => ({ ...event?.bucketInfo, id: undefined });
   assert.deepEqual(info(ours), info(chrome));
   await sameEvents(seenByBucket);
-  await cleanUp(() => navigator.storageBuckets.delete('elsewhere'));
+  await cleanUp(() => navigator.storageBuckets.delete('elsewhere'), 'Storage.storageBucketDeleted');
 });
 
 test('untracking stops the events', async () => {
