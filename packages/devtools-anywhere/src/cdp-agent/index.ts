@@ -186,7 +186,7 @@ export function createCdpSession(options: CdpSessionOptions = {}): CdpSession {
   registerOverlay(ctx);
   registerCss(ctx);
   registerStorage(ctx);
-  registerServiceWorker(ctx.session);
+  registerServiceWorker(ctx);
   registerDomDebugger(ctx);
   registerDebugger(ctx);
   const render = options.loadSnapdom && createRender(options.loadSnapdom);

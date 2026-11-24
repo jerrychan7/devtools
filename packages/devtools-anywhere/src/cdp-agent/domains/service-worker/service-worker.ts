@@ -1,5 +1,6 @@
 import type { Protocol } from 'devtools-protocol';
-import { CdpError, type CdpSession } from '../../core/session';
+import type { Context } from '../../core/context';
+import { CdpError } from '../../core/session';
 
 type VersionStatus = Protocol.ServiceWorker.ServiceWorkerVersionStatus;
 
@@ -33,10 +34,12 @@ const workersOf = (reg: ServiceWorkerRegistration) => [reg.installing, reg.waiti
  * The ServiceWorker domain from the page's registrations (`navigator.serviceWorker`): the
  * Application panel's Service workers view lists them and can update and unregister them. The
  * page cannot see whether a worker runs, so one is shown running until it is redundant, nor the
- * clients it controls, nor the times its script was fetched. Changes made by other tabs are seen
- * when the view is opened again.
+ * clients it controls, nor the times its script was fetched. Changes made by other tabs, which the
+ * page is not told of, are looked for when its controller changes and when it comes back into view
+ * or focus.
  */
-export function registerServiceWorker(session: CdpSession) {
+export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) {
+  const { session } = ctx;
   // Reading it throws a SecurityError in a document of an opaque origin (a sandboxed iframe's).
   let container: ServiceWorkerContainer | undefined;
   try {
@@ -99,16 +102,20 @@ export function registerServiceWorker(session: CdpSession) {
     if (!reported) report(reg);
   };
 
-  /** Reports registrations added since, and removed ones as deleted. */
-  const refresh = async () => {
-    const current = await registrations();
-    for (const reg of known) {
-      if (current.includes(reg)) continue;
-      known.delete(reg);
-      report(reg, true);
-    }
-    for (const reg of current) watch(reg, known.has(reg));
-  };
+  /** Reports registrations added since, and removed ones as deleted; one look at a time. */
+  let looking: Promise<void> = Promise.resolve();
+  const refresh = () =>
+    (looking = looking
+      .then(async () => {
+        const current = await registrations();
+        for (const reg of known) {
+          if (current.includes(reg)) continue;
+          known.delete(reg);
+          report(reg, true);
+        }
+        for (const reg of current) watch(reg, known.has(reg));
+      })
+      .catch(() => {}));
 
   // Registrations the page makes while the view is open show up as they happen.
   if (container) {
@@ -118,6 +125,20 @@ export function registerServiceWorker(session: CdpSession) {
       if (enabled) watch(reg);
       return reg;
     };
+  }
+
+  // Another tab's registrations and unregistrations reach the page through no event: they are
+  // looked for when the user is likely to look again, or when the page's own controller changes.
+  if (container) {
+    const win = ctx.frames.top.window;
+    const lookAgain = () => {
+      if (enabled) void refresh();
+    };
+    container.addEventListener('controllerchange', lookAgain);
+    win.addEventListener('focus', lookAgain);
+    win.document.addEventListener('visibilitychange', () => {
+      if (win.document.visibilityState === 'visible') lookAgain();
+    });
   }
 
   session.register('ServiceWorker', {
