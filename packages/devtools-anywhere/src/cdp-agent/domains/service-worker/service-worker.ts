@@ -163,6 +163,7 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       // page on the new controller and no more on the one before.
       void inTurn(async () => {
         await look();
+        if (!enabled) return;
         const versions = [before, controller].flatMap(w => {
           const reg = w && registrationOf.get(w);
           return reg ? [version(reg, w)] : [];
@@ -183,6 +184,8 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       // In turn with the looks: one started while this lists would report the registrations again.
       await inTurn(async () => {
         const current = await registrations();
+        // Disabled meanwhile: reports nothing.
+        if (!enabled) return;
         // Chrome reports the lists at once, empty ones too.
         session.emit('ServiceWorker.workerRegistrationUpdated', {
           registrations: current.map(reg => ({ registrationId: idOf(reg), scopeURL: reg.scope, isDeleted: false })),
@@ -201,8 +204,11 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       const reg = await find(scopeURL);
       if (!reg) return;
       await reg.unregister();
-      known.delete(reg);
-      report(reg, true);
+      // In turn: a look that read the registrations before this would report it live again after.
+      // Unless that look found it gone, and reported it deleted, already.
+      await inTurn(() => {
+        if (known.delete(reg)) report(reg, true);
+      });
     },
     async updateRegistration({ scopeURL }: Protocol.ServiceWorker.UpdateRegistrationRequest) {
       // Chrome answers before the update is done; a failed one shows in the worker's states.
