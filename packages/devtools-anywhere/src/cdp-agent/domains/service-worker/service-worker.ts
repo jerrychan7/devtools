@@ -10,11 +10,13 @@ const UNSUPPORTED: Record<string, string> = {
   startWorker: 'service workers are started by the browser',
   stopWorker: 'service workers are stopped by the browser',
   stopAllWorkers: 'service workers are stopped by the browser',
-  skipWaiting: 'only the service worker can skip waiting',
   deliverPushMessage: 'push messages are delivered by the browser',
   // The page could only ask through periodicSync.register, which needs an installed app.
   dispatchPeriodicSyncEvent: 'periodic sync events are dispatched by the browser',
 };
+
+/** How long skipWaiting waits for the waiting worker to activate. */
+const SKIP_WAITING_TIMEOUT = 3000;
 
 /** Ids of registrations and workers, kept for as long as the objects are. */
 const ids = new WeakMap<object, string>();
@@ -209,6 +211,39 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
         await sync.register(tag);
       } catch (e) {
         throw new CdpError(`The page could not register the sync: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    /**
+     * Asks the waiting worker to skip waiting with `postMessage({type: 'SKIP_WAITING'})`, Workbox's
+     * convention: only a worker that listens for it can act on it. Chrome makes any waiting worker
+     * skip waiting and answers at once; here the answer comes once the worker activates, and a
+     * worker that does not within a few seconds fails the command. Like Chrome, an unknown scope or
+     * a registration with no waiting worker succeeds without effect.
+     */
+    async skipWaiting({ scopeURL }: Protocol.ServiceWorker.SkipWaitingRequest) {
+      const waiting = (await find(scopeURL))?.waiting;
+      if (!waiting) return;
+      const skipped = () => waiting.state === 'activating' || waiting.state === 'activated';
+      const done = new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => finish(false), SKIP_WAITING_TIMEOUT);
+        const onChange = () => {
+          if (skipped()) finish(true);
+          // Replaced by a newer worker: it no longer waits, though it never activated.
+          else if (waiting.state === 'redundant') finish(true);
+        };
+        const finish = (ok: boolean) => {
+          clearTimeout(timer);
+          waiting.removeEventListener('statechange', onChange);
+          resolve(ok);
+        };
+        waiting.addEventListener('statechange', onChange);
+      });
+      waiting.postMessage({ type: 'SKIP_WAITING' });
+      if (!(await done)) {
+        throw new CdpError(
+          "Not supported in the page: the waiting worker did not skip waiting on the page's request " +
+            "(it must call skipWaiting() on {type: 'SKIP_WAITING'})"
+        );
       }
     },
     // Not forcing is what the page does already, and the frontend says so on every connection.

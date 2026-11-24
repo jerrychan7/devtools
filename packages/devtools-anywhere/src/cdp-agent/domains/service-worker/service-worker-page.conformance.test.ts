@@ -119,3 +119,35 @@ test('dispatchSyncEvent fires a sync event in the worker', async () => {
     /the browser decides whether a sync event is the last chance/
   );
 });
+
+test('skipWaiting activates a waiting worker that listens for SKIP_WAITING', async () => {
+  const waitFor = (src: string) =>
+    t.page.evaluate(
+      async (src, s) => {
+        const reg = await navigator.serviceWorker.register(src, { scope: s });
+        while (!reg.waiting || !reg.waiting.scriptURL.endsWith(src.slice(src.lastIndexOf('/')))) {
+          await new Promise(r => setTimeout(r, 50));
+        }
+      },
+      src,
+      scope
+    );
+  const activeScript = () =>
+    t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.active?.scriptURL, scope);
+  // Like Chrome, an unknown scope succeeds without effect.
+  await t.ours.send('ServiceWorker.skipWaiting', { scopeURL: 'https://unknown.example/' });
+  const listening = scope + 'sw-events.js?v=2';
+  await waitFor(listening);
+  await t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope });
+  assert.equal(await activeScript(), listening);
+  // No waiting worker left: succeeds without effect.
+  await t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope });
+  // A worker that ignores the message cannot be made to skip waiting from the page.
+  const deaf = scope + 'sw-events.js?v=3&listen=0';
+  await waitFor(deaf);
+  await assert.rejects(
+    t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope }),
+    /the waiting worker did not skip waiting on the page's request/
+  );
+  assert.equal(await activeScript(), listening);
+});
