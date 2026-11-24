@@ -154,13 +154,28 @@ function cacheIdOf(at: CacheAt) {
   return cacheId;
 }
 
-/** The cache an id names; one not given out here is read as a cache of the default bucket. */
-const cacheOf = (cacheId: string): CacheAt =>
-  cachesById.get(cacheId) ?? { bucket: '', name: cacheId.slice(cacheId.indexOf('|') + 1) };
+/**
+ * The cache an id names. One not given out here is read in Chrome's form: two parts after the
+ * storage key name a bucket and a cache (a bucket's name has no `|`), one a cache of the default bucket.
+ */
+function cacheOf(cacheId: string): CacheAt {
+  const known = cachesById.get(cacheId);
+  if (known) return known;
+  const prefix = storageKey() + '|';
+  if (!cacheId.startsWith(prefix)) throw new CdpError('Invalid cache id');
+  const rest = cacheId.slice(prefix.length);
+  const bar = rest.indexOf('|');
+  return bar < 0 ? { bucket: '', name: rest } : { bucket: rest.slice(0, bar), name: rest.slice(bar + 1) };
+}
 
-async function openCache(cacheId: string) {
+/**
+ * An existing cache, undefined for a missing one, which `open()` would make. Opened through the
+ * hooks, so that an entry deleted from it is reported as in this cache.
+ */
+async function openCache(cacheId: string): Promise<Cache | undefined> {
   const { bucket, name } = cacheOf(cacheId);
-  return (await cachesOf(bucket)).open(name);
+  const storage = await cachesOf(bucket);
+  return (await storage.has(name)) ? storage.open(name) : undefined;
 }
 /** Fetch's `Response.type` in the protocol's names: opaque ones differ. */
 const responseTypeOf = (type: ResponseType): Protocol.CacheStorage.CachedResponseType =>
@@ -391,6 +406,8 @@ export function registerStorage(ctx: Context) {
       params: Protocol.CacheStorage.RequestEntriesRequest
     ): Promise<Protocol.CacheStorage.RequestEntriesResponse> {
       const cache = await openCache(params.cacheId);
+      // Chrome lists a missing cache as empty.
+      if (!cache) return { cacheDataEntries: [], returnCount: 0 };
       let requests = await cache.keys();
       const filter = params.pathFilter;
       if (filter) requests = requests.filter(r => new URL(r.url).pathname.includes(filter));
@@ -419,9 +436,8 @@ export function registerStorage(ctx: Context) {
     async requestCachedResponse(
       params: Protocol.CacheStorage.RequestCachedResponseRequest
     ): Promise<Protocol.CacheStorage.RequestCachedResponseResponse> {
-      const cache = await openCache(params.cacheId);
-      const res = await cache.match(params.requestURL);
-      if (!res) throw new CdpError('Entry not found');
+      const res = await (await openCache(params.cacheId))?.match(params.requestURL);
+      if (!res) throw new CdpError('Unable to read cached response: not found.');
       return { response: { body: toBase64(await res.arrayBuffer()) } };
     },
 
@@ -432,7 +448,8 @@ export function registerStorage(ctx: Context) {
 
     async deleteEntry(params: Protocol.CacheStorage.DeleteEntryRequest) {
       const cache = await openCache(params.cacheId);
-      await cache.delete(params.request);
+      // Chrome fails alike for a missing cache and a missing entry.
+      if (!cache || !(await cache.delete(params.request))) throw new CdpError('Error deleting cache entry: not found.');
     },
   });
 
