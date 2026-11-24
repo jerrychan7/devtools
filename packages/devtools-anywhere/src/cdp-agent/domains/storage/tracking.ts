@@ -122,8 +122,12 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   // ---- writes elsewhere: snapshots ----
 
   let snapshot: Snapshot | undefined;
-  /** The changes the hooks reported since the last snapshot, which it must not report again. */
-  const reported = new Set<string>();
+  /**
+   * The changes the hooks reported since the last snapshot, which it must not report again, with
+   * the count of `writes` they came at: one that came during a snapshot's read may not be in it, and
+   * is kept from the next one too.
+   */
+  const reported = new Map<string, number>();
   /** Counts the hooks' reports, a write's start and end included: a snapshot read while one came is not used. */
   let writes = 0;
   /** Whether a snapshot was dropped for a write in flight: read again once none is. */
@@ -200,7 +204,7 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
             if (!reported.has(keyOf(change))) inTurn(() => report(change));
           }
         }
-        reported.clear();
+        for (const [key, at] of reported) if (at <= before) reported.delete(key);
       } while (again && ++rounds < 5);
     } finally {
       checking = false;
@@ -245,7 +249,7 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
     }
     const key = keyOf(write);
     if (key) {
-      reported.add(key);
+      reported.set(key, writes);
       // Compared soon, so the mark does not hide for long a write made elsewhere in the same place.
       checkSoon();
     }
