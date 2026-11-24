@@ -247,29 +247,35 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
      * a registration with no waiting worker succeeds without effect.
      */
     async skipWaiting({ scopeURL }: Protocol.ServiceWorker.SkipWaitingRequest) {
-      const waiting = (await find(scopeURL))?.waiting;
-      if (!waiting) return;
-      const skipped = () => waiting.state === 'activating' || waiting.state === 'activated';
-      const done = new Promise<boolean>(resolve => {
-        const timer = setTimeout(() => finish(false), SKIP_WAITING_TIMEOUT);
-        const onChange = () => {
-          if (skipped()) finish(true);
-          // Replaced by a newer worker: it no longer waits, though it never activated.
-          else if (waiting.state === 'redundant') finish(true);
-        };
-        const finish = (ok: boolean) => {
-          clearTimeout(timer);
-          waiting.removeEventListener('statechange', onChange);
-          resolve(ok);
-        };
-        waiting.addEventListener('statechange', onChange);
-      });
-      waiting.postMessage({ type: 'SKIP_WAITING' });
-      if (!(await done)) {
-        throw new CdpError(
-          "Not supported in the page: the waiting worker did not skip waiting on the page's request " +
-            "(it must call skipWaiting() on {type: 'SKIP_WAITING'})"
-        );
+      const reg = await find(scopeURL);
+      const deadline = Date.now() + SKIP_WAITING_TIMEOUT;
+      // A waiting worker replaced by a newer one goes redundant while the newer one waits: ask that
+      // one too, and succeed only once nothing waits any more.
+      for (let waiting = reg?.waiting; waiting; waiting = reg?.waiting) {
+        const worker = waiting;
+        const settled = await new Promise<boolean>(resolve => {
+          const timer = setTimeout(() => finish(false), Math.max(0, deadline - Date.now()));
+          const onChange = () => {
+            if (worker.state === 'activating' || worker.state === 'activated' || worker.state === 'redundant') {
+              finish(true);
+            }
+          };
+          const finish = (ok: boolean) => {
+            clearTimeout(timer);
+            worker.removeEventListener('statechange', onChange);
+            resolve(ok);
+          };
+          worker.addEventListener('statechange', onChange);
+          // The state may have changed since it was read, with no event left to come.
+          onChange();
+          worker.postMessage({ type: 'SKIP_WAITING' });
+        });
+        if (!settled) {
+          throw new CdpError(
+            "Not supported in the page: the waiting worker did not skip waiting on the page's request " +
+              "(it must call skipWaiting() on {type: 'SKIP_WAITING'})"
+          );
+        }
       }
     },
     // Not forcing is what the page does already, and the frontend says so on every connection.
