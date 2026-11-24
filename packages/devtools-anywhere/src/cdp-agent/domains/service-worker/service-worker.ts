@@ -34,7 +34,8 @@ const workersOf = (reg: ServiceWorkerRegistration) => [reg.installing, reg.waiti
  * The ServiceWorker domain from the page's registrations (`navigator.serviceWorker`): the
  * Application panel's Service workers view lists them and can update and unregister them. The
  * page cannot see whether a worker runs, so one is shown running until it is redundant, nor the
- * clients it controls, nor the times its script was fetched. Changes made by other tabs, which the
+ * times its script was fetched; of the clients a worker controls it knows only itself, listed on
+ * its controller as Chrome does, by its target id. Changes made by other tabs, which the
  * page is not told of, are looked for when its controller changes and when it comes back into view
  * or focus.
  */
@@ -51,6 +52,10 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
   /** The registrations reported, with the workers already listened to. */
   const known = new Set<ServiceWorkerRegistration>();
   const watched = new WeakSet<object>();
+  /** The registration of each worker reported. */
+  const registrationOf = new WeakMap<ServiceWorker, ServiceWorkerRegistration>();
+  /** The page's controller as last reported. */
+  let controller = container?.controller ?? null;
 
   const registrations = async (): Promise<readonly ServiceWorkerRegistration[]> =>
     container ? container.getRegistrations() : [];
@@ -67,7 +72,8 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     status: statusOf(worker.state),
     scriptLastModified: 0,
     scriptResponseTime: 0,
-    controlledClients: [],
+    // The page's own target, whose id is its top frame's (Target domain).
+    controlledClients: worker === container?.controller ? [ctx.frames.top.id] : [],
   });
 
   const report = (reg: ServiceWorkerRegistration, isDeleted = false) => {
@@ -83,6 +89,7 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     known.add(reg);
     const watchWorkers = () => {
       for (const worker of workersOf(reg)) {
+        registrationOf.set(worker, reg);
         if (watched.has(worker)) continue;
         watched.add(worker);
         worker.addEventListener('statechange', () => {
@@ -134,7 +141,19 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     const lookAgain = () => {
       if (enabled) void refresh();
     };
-    container.addEventListener('controllerchange', lookAgain);
+    container.addEventListener('controllerchange', () => {
+      // Chrome lists the page on the new controller, and no more on the one before.
+      const before = controller;
+      controller = container.controller;
+      if (enabled) {
+        const versions = [before, controller].flatMap(w => {
+          const reg = w && registrationOf.get(w);
+          return reg ? [version(reg, w)] : [];
+        });
+        if (versions.length) session.emit('ServiceWorker.workerVersionUpdated', { versions });
+      }
+      lookAgain();
+    });
     win.addEventListener('focus', lookAgain);
     win.document.addEventListener('visibilitychange', () => {
       if (win.document.visibilityState === 'visible') lookAgain();

@@ -43,3 +43,30 @@ test('a registration made in another tab shows when the page gets focus', async 
   await t.page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await until(async () => (await scopesOf(t.ours)).includes(`${assets} false`), 'our report');
 });
+
+/** The clients each side last listed on the worker of `script`, by the side's own target id. */
+const clientsOf = async (side: TestPage['ours'], script: string) => {
+  const own = (await side.send('Target.getTargetInfo')).targetInfo.targetId;
+  const versions = (await side.events('ServiceWorker.workerVersionUpdated')).flatMap(e => e.versions);
+  const last = versions.filter(v => v.scriptURL === script).at(-1);
+  return last?.controlledClients?.map(id => (id === own ? 'self' : id));
+};
+
+test('the page is listed on the worker that controls it, by its target id', async () => {
+  await both(side => side.clear());
+  const script = scope + 'sw-events.js?v=1';
+  await t.page.evaluate(
+    async (src, s) => {
+      await navigator.serviceWorker.register(src, { scope: s });
+      while (!navigator.serviceWorker.controller) await new Promise(r => setTimeout(r, 50));
+    },
+    script,
+    scope
+  );
+  for (const side of [t.chrome, t.ours]) {
+    await until(
+      async () => (await clientsOf(side, script))?.[0] === 'self',
+      `${side === t.ours ? 'our' : "Chrome's"} list`
+    );
+  }
+});
