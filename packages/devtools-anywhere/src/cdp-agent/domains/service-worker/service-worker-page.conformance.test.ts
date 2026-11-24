@@ -43,6 +43,7 @@ test('a registration made in another tab shows when the page gets focus', async 
   await other.close();
   await t.page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await until(async () => (await scopesOf(t.ours)).includes(`${assets} false`), 'our report');
+  await t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.unregister(), assets);
 });
 
 /** The clients each side last listed on the worker of `script`, by the side's own target id. */
