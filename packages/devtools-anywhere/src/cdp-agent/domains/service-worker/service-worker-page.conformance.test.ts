@@ -195,19 +195,26 @@ test('dispatchSyncEvent offline: Chrome fires it at once, the page fails rather 
 
 test('dispatchSyncEvent on a registration with no active worker succeeds without effect', async () => {
   const held = scope + 'held/';
-  const HOLD = 3000;
   await collect();
-  // Installing for HOLD ms: the registration has no active worker meanwhile.
-  const start = Date.now();
+  // Installing for 3s: the registration has no active worker meanwhile.
   await t.page.evaluate(
     (src, s) => navigator.serviceWorker.register(src, { scope: s }).then(() => {}),
-    `${scope}sw-events.js?hold=${HOLD}`,
+    `${scope}sw-events.js?hold=3000`,
     held
   );
   await reported(held);
-  await dispatchSync(t.chrome, held, 'held-chrome');
-  await dispatchSync(t.ours, held, 'held-ours');
-  assert.ok(Date.now() - start < HOLD, 'the syncs were asked for while the worker was installing');
+  const installing = () =>
+    t.page.evaluate(async s => {
+      const reg = await navigator.serviceWorker.getRegistration(s);
+      return !!reg?.installing && !reg.active;
+    }, held);
+  for (const [side, tag] of [
+    [t.chrome, 'held-chrome'],
+    [t.ours, 'held-ours'],
+  ] as const) {
+    assert.ok(await installing(), `the worker was still installing before ${tag}`);
+    await dispatchSync(side, held, tag);
+  }
   // Once active, the worker gets neither: none was kept for it.
   await t.page.evaluate(async s => {
     const reg = await navigator.serviceWorker.getRegistration(s);
