@@ -8,7 +8,7 @@
 
 - Application 面板的 IndexedDB 和 Cache Storage 视图现在也会随页面窗口之外的写入刷新：页面的 Service Worker（比如 Workbox 写入 Cache Storage）、其他 worker 和其他标签页。面板跟踪存储期间，代理比较每个存储桶的数据库（名称和版本）和缓存（名称和请求 URL）：页面可见时每三秒一次、窗口获得焦点或变为可见时，以及页面自己写入后 300 毫秒。数据库里的内容不做比较，所以别处写入的 IndexedDB 内容要刷新才能看到。DevTools 断开后跟踪随之停止。
 - Application 面板列出具名存储桶（`navigator.storageBuckets`，仅 Chromium），按 Chrome 159 的方式报告，带数字 id、过期时间、持久化和配额，删除也会报告。指明存储桶的 IndexedDB 和 CacheStorage 命令读写该桶，缓存 id 采用 Chrome 的格式。不会创建不存在的桶：CacheStorage 返回 Chrome 的错误，IndexedDB 在 Chrome 不应答的情况下返回错误。
-- CacheStorage 命令不再创建不存在的缓存：`requestEntries` 将其列为空，`requestCachedResponse` 和 `deleteEntry` 返回 Chrome 的错误信息。
+- 对不存在的缓存，CacheStorage 命令的行为与 Chrome 159 一致：`requestEntries` 创建它并列为空，`deleteEntry` 创建它后按条目不存在报错，`requestCachedResponse` 报错且不创建；错误信息和列表事件都与 Chrome 相同。
 - Service workers 视图在页面获得焦点、变为可见或 controller 变化时，显示其他标签页改动的注册；当前页会列为控制它的 worker 的客户端。
 - Sync 按钮（`ServiceWorker.dispatchSyncEvent`）通过 Background Sync 触发真实的 `sync` 事件。注册 id 按 Chrome 的方式解析；未知的注册或没有活动 worker 的注册与 Chrome 一样无效果地成功。浏览器离线时，以及要求 `lastChance` 时（页面设不了）返回错误。
 - `ServiceWorker.skipWaiting` 向等待中的 worker 发送 `{type: 'SKIP_WAITING'}`（Workbox 的约定），worker 激活后返回成功；不因此跳过等待的 worker 约三秒后显式报错。未知 scope 或没有等待中的 worker 时与 Chrome 一样静默成功。

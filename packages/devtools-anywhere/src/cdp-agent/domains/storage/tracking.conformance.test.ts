@@ -293,7 +293,7 @@ test('named buckets: listed, reported and read', async () => {
   await cleanUp(() => navigator.storageBuckets.delete('b1'), 'Storage.storageBucketDeleted');
 });
 
-test('a missing named bucket or cache fails without being made', async () => {
+test('a missing named bucket fails without being made, a missing cache as in Chrome', async () => {
   const storageBucket = { storageKey, name: 'missing' };
   const [ours, chrome] = await Promise.allSettled([
     t.ours.send('CacheStorage.requestCacheNames', { storageBucket }),
@@ -303,23 +303,46 @@ test('a missing named bucket or cache fails without being made', async () => {
   assert.equal(chrome.status, 'rejected');
   assert.equal((await t.page.evaluate(() => navigator.storageBuckets.keys())).includes('missing'), false);
 
-  // Ours first, which must not make the cache: Chrome's requestEntries makes it.
-  const cacheId = `${storageKey}|missing-cache`;
-  const calls = (side: Side) =>
-    Promise.allSettled([
-      side.send('CacheStorage.deleteEntry', { cacheId, request: `${storageKey}x` }),
-      side.send('CacheStorage.requestCachedResponse', { cacheId, requestURL: `${storageKey}x`, requestHeaders: [] }),
-      side.send('CacheStorage.requestEntries', { cacheId, skipCount: 0, pageSize: 10 }),
-    ]).then(results =>
-      results.map(r =>
-        r.status === 'fulfilled' ? r.value : (r.reason as Error).message.replace(/^.*\): /, '').split('\n')[0]
-      )
+  // Each side on a cache of its own: the page's storage is shared. deleteEntry makes the cache and
+  // fails as for a missing entry; requestCachedResponse fails; requestEntries lists it, empty, and
+  // makes it when alone. Each made cache changes the list once: a snapshot turn adds nothing.
+  const calls = async (side: Side, name: string) => {
+    const cacheId = `${storageKey}|${name}`;
+    const settled = async (call: Promise<unknown>) =>
+      call.then(
+        value => value,
+        (error: Error) => error.message.replace(/^.*\): /, '').split('\n')[0]
+      );
+    await clear();
+    const failed = [
+      await settled(side.send('CacheStorage.deleteEntry', { cacheId, request: `${storageKey}x` })),
+      await settled(
+        side.send('CacheStorage.requestCachedResponse', { cacheId, requestURL: `${storageKey}x`, requestHeaders: [] })
+      ),
+    ];
+    const made = await t.page.evaluate(n => caches.has(n), name);
+    const listed = await settled(side.send('CacheStorage.requestEntries', { cacheId, skipCount: 0, pageSize: 10 }));
+    await settle(POLL);
+    const events = (await side.events('Storage.cacheStorageListUpdated')).length;
+    await clear();
+    const alone = `${storageKey}|${name}-alone`;
+    const listedAlone = await settled(
+      side.send('CacheStorage.requestEntries', { cacheId: alone, skipCount: 0, pageSize: 10 })
     );
-  const ours2 = await calls(t.ours);
-  assert.equal(await t.page.evaluate(() => caches.has('missing-cache')), false);
-  assert.deepEqual(ours2, await calls(t.chrome));
-  // Chrome's requestEntries made the cache: deleting it changes the list.
-  await cleanUp(() => caches.delete('missing-cache'), 'Storage.cacheStorageListUpdated');
+    await settle(POLL);
+    const eventsAlone = (await side.events('Storage.cacheStorageListUpdated')).length;
+    const madeAlone = await t.page.evaluate(n => caches.has(n), `${name}-alone`);
+    return { failed, made, listed, events, listedAlone, eventsAlone, madeAlone };
+  };
+  assert.deepEqual(await calls(t.ours, 'missing-ours'), await calls(t.chrome, 'missing-chrome'));
+  assert.equal(await t.page.evaluate(() => caches.has('missing-ours')), true);
+  await cleanUp(
+    () =>
+      Promise.all(
+        ['missing-ours', 'missing-chrome', 'missing-ours-alone', 'missing-chrome-alone'].map(n => caches.delete(n))
+      ),
+    'Storage.cacheStorageListUpdated'
+  );
 });
 
 test('deleting a named bucket', async () => {

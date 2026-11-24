@@ -169,13 +169,14 @@ function cacheOf(cacheId: string): CacheAt {
 }
 
 /**
- * An existing cache, undefined for a missing one, which `open()` would make. Opened through the
- * hooks, so that an entry deleted from it is reported as in this cache.
+ * The cache an id names, opened through the hooks, so that an entry deleted from it is reported
+ * as in this cache. A missing one is undefined, unless `make`: then it is made, as Chrome's
+ * `requestEntries` and `deleteEntry` make it, and the hooks report the list's change, as Chrome does.
  */
-async function openCache(cacheId: string): Promise<Cache | undefined> {
+async function openCache(cacheId: string, make = false): Promise<Cache | undefined> {
   const { bucket, name } = cacheOf(cacheId);
   const storage = await cachesOf(bucket);
-  return (await storage.has(name)) ? storage.open(name) : undefined;
+  return make || (await storage.has(name)) ? storage.open(name) : undefined;
 }
 /** Fetch's `Response.type` in the protocol's names: opaque ones differ. */
 const responseTypeOf = (type: ResponseType): Protocol.CacheStorage.CachedResponseType =>
@@ -405,8 +406,8 @@ export function registerStorage(ctx: Context) {
     async requestEntries(
       params: Protocol.CacheStorage.RequestEntriesRequest
     ): Promise<Protocol.CacheStorage.RequestEntriesResponse> {
-      const cache = await openCache(params.cacheId);
-      // Chrome lists a missing cache as empty.
+      // Chrome makes a missing cache, and lists it as empty.
+      const cache = await openCache(params.cacheId, true);
       if (!cache) return { cacheDataEntries: [], returnCount: 0 };
       let requests = await cache.keys();
       const filter = params.pathFilter;
@@ -447,8 +448,8 @@ export function registerStorage(ctx: Context) {
     },
 
     async deleteEntry(params: Protocol.CacheStorage.DeleteEntryRequest) {
-      const cache = await openCache(params.cacheId);
-      // Chrome fails alike for a missing cache and a missing entry.
+      // Chrome makes a missing cache, then fails as for a missing entry.
+      const cache = await openCache(params.cacheId, true);
       if (!cache || !(await cache.delete(params.request))) throw new CdpError('Error deleting cache entry: not found.');
     },
   });
