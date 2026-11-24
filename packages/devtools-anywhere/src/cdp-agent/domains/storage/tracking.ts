@@ -10,15 +10,24 @@ import { diff, takeSnapshot, type Change, type Snapshot } from './snapshot';
  * when the window gets the focus or becomes visible: writes elsewhere show within this time.
  */
 const POLL_MS = 3000;
+/** How long after the page's own writes their area is compared, so that a run of writes makes one read. */
+const SETTLE_MS = 300;
 
-/** Whether the page has stored something in IndexedDB or Cache Storage, which makes its bucket. */
+/**
+ * Whether the page has stored something in IndexedDB or Cache Storage, which makes its bucket.
+ * Where the page may not use them (an opaque origin throws a SecurityError) it has not.
+ */
 async function hasBucket() {
-  if (typeof indexedDB !== 'undefined' && (await indexedDB.databases()).length) return true;
-  return typeof caches !== 'undefined' && (await caches.keys()).length > 0;
+  try {
+    if (typeof indexedDB?.databases === 'function' && (await indexedDB.databases()).length) return true;
+    return typeof caches !== 'undefined' && (await caches.keys()).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** The key under which a change the hooks reported is kept from being reported again by the snapshots. */
-function keyOf(change: Exclude<StorageWrite, { buckets: true }> | Change): string {
+function keyOf(change: Exclude<StorageWrite, { buckets: true } | { pending: true }> | Change): string {
   if ('list' in change) return `${change.list}|${change.bucket}`;
   if ('databaseName' in change) return '';
   if ('cacheName' in change) return `cache|${change.bucket}|${change.cacheName}`;
@@ -64,14 +73,17 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   async function bucketInfo(name: string): Promise<Protocol.Storage.StorageBucketInfo | undefined> {
     const info = { id: idOf(name), expiration: 0, quota: 0, persistent: false, durability: 'relaxed' as const };
     if (!name) return { bucket: { storageKey }, ...info };
-    const bucket = await existingBucket(name);
+    const bucket = await existingBucket(name).catch(() => undefined);
     if (!bucket) return undefined;
-    const [expires, persistent, own, all] = await Promise.all([
+    // A bucket deleted meanwhile rejects these: it is not reported (its deletion is, if it was).
+    const read = await Promise.all([
       bucket.expires(),
       bucket.persisted(),
       bucket.estimate(),
       navigator.storage.estimate(),
-    ]);
+    ]).catch(() => undefined);
+    if (!read) return undefined;
+    const [expires, persistent, own, all] = read;
     // Chrome says the quota the bucket was opened with, 0 for none. For one opened elsewhere it is
     // not known: the bucket's estimate gives it, or a cap of the browser's own.
     const quota = openedQuotas.has(name)
@@ -108,6 +120,19 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   let writes = 0;
   let checking = false;
   let again = false;
+  /** Whether a check after the page's own writes is waiting (`SETTLE_MS`). */
+  let settling = false;
+  const checkSoon = () => {
+    if (settling) return;
+    settling = true;
+    Reflect.apply(windowOf().timeout, globalThis, [
+      () => {
+        settling = false;
+        void check();
+      },
+      SETTLE_MS,
+    ]);
+  };
 
   const report = (change: Change) => {
     switch (change.kind) {
@@ -165,7 +190,8 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   let timer = 0;
   const tick = (run: number) => () => {
     if (run !== timer) return;
-    void check();
+    // A hidden page is compared again as it becomes visible.
+    if (document.visibilityState !== 'hidden') void check();
     Reflect.apply(windowOf().timeout, globalThis, [tick(run), POLL_MS]);
   };
   // The top page's window and document are meant: its storage is the one tracked.
@@ -184,11 +210,12 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   const onWrite = (write: StorageWrite) => {
     if ('buckets' in write) return void check();
     writes++;
+    if ('pending' in write) return;
     const key = keyOf(write);
     if (key) {
       reported.add(key);
-      // Compared at once, so the mark does not hide for long a write made elsewhere in the same place.
-      void check();
+      // Compared soon, so the mark does not hide for long a write made elsewhere in the same place.
+      checkSoon();
     }
     const { bucket } = write;
     if ('list' in write) inTurn(() => sendList(write.list, bucket));
@@ -220,6 +247,14 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
     set(on);
     update();
   };
+  // A client that goes leaves nothing tracked: the next one starts afresh.
+  session.onReset(() => {
+    trackBuckets = trackIdb = trackCache = false;
+    sent.clear();
+    ids.clear();
+    nextId = 1;
+    update();
+  });
   const idb = (on: boolean) => (trackIdb = on);
   const cache = (on: boolean) => (trackCache = on);
 

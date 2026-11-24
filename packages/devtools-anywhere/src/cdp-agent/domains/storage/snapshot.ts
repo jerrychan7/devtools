@@ -1,4 +1,4 @@
-import { bucketNames, existingBucket } from './buckets';
+import { bucketNames, openBucket, openCacheOf } from './buckets';
 
 /**
  * What can be compared cheaply of a bucket's IndexedDB and Cache Storage, to see the writes the
@@ -21,13 +21,18 @@ export type Change =
 
 async function snapshotOf(factory: IDBFactory | undefined, storage: CacheStorage | undefined): Promise<BucketSnapshot> {
   const databases = new Map<string, number>();
-  for (const { name, version } of (await factory?.databases()) ?? []) if (name) databases.set(name, version ?? 0);
+  // Without `databases()` (Firefox before 126) the databases cannot be listed: the caches still are.
+  const listed = typeof factory?.databases === 'function' ? await factory.databases() : [];
+  for (const { name, version } of listed) if (name) databases.set(name, version ?? 0);
   const caches = new Map<string, Set<string>>();
-  for (const name of (await storage?.keys()) ?? []) {
-    // `open()` makes a cache deleted since `keys()` again; `has()` narrows that window.
-    if (!(await storage?.has(name))) continue;
-    const cache = await storage?.open(name);
-    caches.set(name, new Set((await cache?.keys())?.map(request => request.url)));
+  if (!storage) return { databases, caches };
+  // Each cache's whole list of requests is read: the API has no cheaper way to tell a change, not
+  // even a count. `open()` makes a cache deleted since `keys()` again, and nothing tells it from
+  // one still there: `has()` just before narrows that window to a few microtasks.
+  for (const name of await storage.keys()) {
+    if (!(await storage.has(name))) continue;
+    const cache = await openCacheOf(storage, name);
+    caches.set(name, new Set((await cache.keys()).map(request => request.url)));
   }
   return { databases, caches };
 }
@@ -42,8 +47,9 @@ export async function takeSnapshot(): Promise<Snapshot> {
       typeof caches === 'undefined' ? undefined : caches
     )
   );
+  // The names were just listed: each is opened without listing them again.
   for (const name of await bucketNames()) {
-    const bucket = await existingBucket(name);
+    const bucket = await openBucket(name);
     if (bucket) snapshot.set(name, await snapshotOf(bucket.indexedDB, bucket.caches));
   }
   return snapshot;

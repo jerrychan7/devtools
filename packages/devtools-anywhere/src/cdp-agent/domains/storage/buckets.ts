@@ -34,9 +34,37 @@ const managerOpen: StorageBucketManager['open'] | undefined = Reflect.get(global
  */
 export const openedQuotas = new Map<string, number | undefined>();
 
-/** The names of the page's named buckets, none without the API. */
+/**
+ * `CacheStorage.prototype.open`, taken before the hooks wrap it, for the agent's own reads: the
+ * page's wrapper does not see them, nor do the hooks report them.
+ */
+const cacheOpen: CacheStorage['open'] | undefined =
+  typeof CacheStorage === 'undefined' ? undefined : CacheStorage.prototype.open;
+
+/** Opens a cache through the browser's own `open()`. */
+export const openCacheOf = (storage: CacheStorage, name: string): Promise<Cache> =>
+  Reflect.apply(cacheOpen ?? storage.open, storage, [name]);
+
+/**
+ * The names of the page's named buckets: none without the API, or where the page may not use it
+ * (an opaque origin throws a SecurityError).
+ */
 export async function bucketNames(): Promise<string[]> {
-  return (await bucketManager()?.keys()) ?? [];
+  try {
+    return (await bucketManager()?.keys()) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Opens a bucket known to exist through the browser's own `open()`, which would make a missing one. */
+export async function openBucket(name: string): Promise<StorageBucket | undefined> {
+  const manager = bucketManager();
+  if (!manager) return undefined;
+  const bucket: StorageBucket = await Reflect.apply(managerOpen ?? manager.open, manager, [name]);
+  registerBucketOf(bucket.indexedDB, name);
+  registerBucketOf(bucket.caches, name);
+  return bucket;
 }
 
 /** The bucket each IndexedDB factory and Cache Storage of a named bucket belongs to (`registerBucketOf`). */
@@ -56,12 +84,7 @@ export const registerBucketOf = (store: object, name: string) => bucketOfStore.s
  * one deleted between the two calls is made again, which the API leaves no way to avoid.
  */
 export async function existingBucket(name: string): Promise<StorageBucket | undefined> {
-  const manager = bucketManager();
-  if (!manager || !(await manager.keys()).includes(name)) return undefined;
-  const bucket: StorageBucket = await Reflect.apply(managerOpen ?? manager.open, manager, [name]);
-  registerBucketOf(bucket.indexedDB, name);
-  registerBucketOf(bucket.caches, name);
-  return bucket;
+  return (await bucketNames()).includes(name) ? openBucket(name) : undefined;
 }
 
 /** The IndexedDB of a bucket (`''` or none: the default one). */

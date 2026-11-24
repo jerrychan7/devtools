@@ -8,7 +8,9 @@ export type StorageWrite =
   | { bucket: string; list: 'idb' | 'cache' }
   | { bucket: string; databaseName: string; objectStoreName: string }
   | { bucket: string; cacheName: string }
-  | { buckets: true };
+  | { buckets: true }
+  /** A Cache Storage write has begun: it is reported once done, and a snapshot read meanwhile may miss it. */
+  | { pending: true };
 
 /** The sessions tracking something. */
 export const listeners = new Set<(write: StorageWrite) => void>();
@@ -155,6 +157,7 @@ export function hookWrites() {
     original =>
       async function (this: CacheStorage, cacheName: string) {
         const bucket = bucketOf(this);
+        notify({ pending: true });
         const isNew = !(await this.has(cacheName));
         const cache = await original.call(this, cacheName);
         cacheNames.set(cache, { bucket, name: cacheName });
@@ -167,6 +170,7 @@ export function hookWrites() {
     'delete',
     original =>
       async function (this: CacheStorage, cacheName: string) {
+        notify({ pending: true });
         const deleted = await original.call(this, cacheName);
         const bucket = bucketOf(this);
         if (deleted && bucket !== undefined) notify({ bucket, list: 'cache' });
@@ -185,6 +189,7 @@ export function hookWrites() {
   };
   const reported = <A extends unknown[], R>(original: (this: Cache, ...args: A) => Promise<R>) =>
     async function (this: Cache, ...args: A) {
+      notify({ pending: true });
       const result = await original.apply(this, args);
       if (result !== false) await cacheWrite(this);
       return result;
