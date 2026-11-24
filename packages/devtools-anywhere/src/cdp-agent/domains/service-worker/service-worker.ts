@@ -16,6 +16,12 @@ const UNSUPPORTED: Record<string, string> = {
   dispatchPeriodicSyncEvent: 'periodic sync events are dispatched by the browser',
 };
 
+const notSkipped = () =>
+  new CdpError(
+    "Not supported in the page: the waiting worker did not skip waiting on the page's request " +
+      "(it must call skipWaiting() on {type: 'SKIP_WAITING'})"
+  );
+
 /** How long skipWaiting waits for the waiting worker to activate. */
 const SKIP_WAITING_TIMEOUT = 3000;
 
@@ -49,6 +55,10 @@ const isOnline = (nav: Navigator) => (onLineGetter ? Reflect.apply(onLineGetter,
 /** `target.addEventListener(type, fn)` by the browser's function, past a wrapper of the page's. */
 const listen = (target: EventTarget, type: string, fn: (e: Event) => void) =>
   void Reflect.apply(windowOf().listen, target, [type, fn]);
+
+/** `worker.postMessage` by the browser's function, as found when this module loads. */
+const postMessage: ServiceWorker['postMessage'] | undefined =
+  typeof ServiceWorker === 'undefined' ? undefined : ServiceWorker.prototype.postMessage;
 
 /** Told of each registration the page makes through `register`, whichever way it is called. */
 const registered = new Set<(reg: ServiceWorkerRegistration) => void>();
@@ -299,25 +309,22 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
           };
           const finish = (ok: boolean) => {
             clearTimeout(timer);
-            worker.removeEventListener('statechange', onChange);
+            Reflect.apply(windowOf().unlisten, worker, ['statechange', onChange]);
             resolve(ok);
           };
-          worker.addEventListener('statechange', onChange);
+          listen(worker, 'statechange', onChange);
           // The state may have changed since it was read, with no event left to come.
           onChange();
-          worker.postMessage({ type: 'SKIP_WAITING' });
+          Reflect.apply(postMessage ?? worker.postMessage, worker, [{ type: 'SKIP_WAITING' }]);
         });
-        if (!settled) {
-          throw new CdpError(
-            "Not supported in the page: the waiting worker did not skip waiting on the page's request " +
-              "(it must call skipWaiting() on {type: 'SKIP_WAITING'})"
-          );
-        }
+        if (!settled) throw notSkipped();
         // A worker replaced by a newer one goes redundant before the registration shows the newer
         // one waiting: the page is told of the two in turn.
         while (worker.state === 'redundant' && reg?.waiting === worker && Date.now() < deadline) {
           await new Promise(resolve => setTimeout(resolve, 10));
         }
+        // Out of time with the registration not caught up: what waits next is not known.
+        if (reg?.waiting === worker) throw notSkipped();
       }
     },
     // Not forcing is what the page does already, and the frontend says so on every connection.
