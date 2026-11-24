@@ -1,6 +1,7 @@
 // The ServiceWorker domain where the page itself takes part: registrations other tabs make, the
 // page as a controlled client, and the commands the page carries out through its registration.
 import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
 
@@ -69,4 +70,52 @@ test('the page is listed on the worker that controls it, by its target id', asyn
       `${side === t.ours ? 'our' : "Chrome's"} list`
     );
   }
+});
+
+test('dispatchSyncEvent fires a sync event in the worker', async () => {
+  const origin = new URL(scope).origin;
+  const idOn = async (side: TestPage['ours']) =>
+    (await side.events('ServiceWorker.workerRegistrationUpdated'))
+      .flatMap(e => e.registrations)
+      .findLast(r => r.scopeURL === scope)?.registrationId ?? '';
+  type Page = { syncs: string[] };
+  await t.page.evaluate(() => {
+    const page = window as unknown as Page;
+    page.syncs = [];
+    navigator.serviceWorker.addEventListener('message', e => page.syncs.push(JSON.stringify(e.data)));
+  });
+  for (const [side, tag] of [
+    [t.chrome, 'chrome'],
+    [t.ours, 'ours'],
+  ] as const) {
+    await side.send('ServiceWorker.dispatchSyncEvent', {
+      origin,
+      registrationId: await idOn(side),
+      tag,
+      lastChance: false,
+    });
+  }
+  const want = ['chrome', 'ours'].map(tag => JSON.stringify({ sync: tag, lastChance: false }));
+  await until(async () => {
+    const syncs = await t.page.evaluate(() => (window as unknown as Page).syncs);
+    return want.every(w => syncs.includes(w));
+  }, 'both sync events');
+  // An unknown registration succeeds without effect on both; an id that is no number fails on both.
+  for (const side of [t.chrome, t.ours]) {
+    await side.send('ServiceWorker.dispatchSyncEvent', { origin, registrationId: '9999', tag: 'x', lastChance: false });
+    await assert.rejects(
+      side.send('ServiceWorker.dispatchSyncEvent', { origin, registrationId: 'x', tag: 'x', lastChance: false }),
+      /Invalid version ID/
+    );
+  }
+  // Only the browser can make a sync the last chance.
+  await assert.rejects(
+    t.ours.send('ServiceWorker.dispatchSyncEvent', {
+      origin,
+      registrationId: await idOn(t.ours),
+      tag: 'l',
+      lastChance: true,
+    }),
+    /the browser decides whether a sync event is the last chance/
+  );
 });

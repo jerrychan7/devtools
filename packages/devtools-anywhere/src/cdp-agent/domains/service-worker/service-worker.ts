@@ -12,8 +12,8 @@ const UNSUPPORTED: Record<string, string> = {
   stopAllWorkers: 'service workers are stopped by the browser',
   skipWaiting: 'only the service worker can skip waiting',
   deliverPushMessage: 'push messages are delivered by the browser',
-  dispatchSyncEvent: 'sync events are dispatched by the browser',
-  dispatchPeriodicSyncEvent: 'sync events are dispatched by the browser',
+  // The page could only ask through periodicSync.register, which needs an installed app.
+  dispatchPeriodicSyncEvent: 'periodic sync events are dispatched by the browser',
 };
 
 /** Ids of registrations and workers, kept for as long as the objects are. */
@@ -189,6 +189,27 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       // Chrome answers before the update is done; a failed one shows in the worker's states.
       (await find(scopeURL))?.update().catch(() => {});
       void refresh();
+    },
+    /**
+     * Asks for a Background Sync (`registration.sync.register(tag)`), which the browser answers with
+     * a real `sync` event in the worker. Like Chrome, the origin is not checked, an unknown
+     * registration succeeds without effect and an id that is no number fails.
+     */
+    async dispatchSyncEvent({ registrationId, tag, lastChance }: Protocol.ServiceWorker.DispatchSyncEventRequest) {
+      if (!/^\d+$/.test(registrationId)) throw new CdpError('Invalid version ID');
+      const reg = (await registrations()).find(r => idOf(r) === registrationId);
+      if (!reg) return;
+      // The browser alone decides it; a sync the page asks for is never the last chance.
+      if (lastChance) {
+        throw new CdpError('Not supported in the page: the browser decides whether a sync event is the last chance');
+      }
+      const { sync } = reg as ServiceWorkerRegistration & { sync?: { register(tag: string): Promise<void> } };
+      if (!sync) throw new CdpError('Not supported in the page: this browser has no Background Sync (SyncManager)');
+      try {
+        await sync.register(tag);
+      } catch (e) {
+        throw new CdpError(`The page could not register the sync: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
     // Not forcing is what the page does already, and the frontend says so on every connection.
     setForceUpdateOnPageLoad({ forceUpdateOnPageLoad }: Protocol.ServiceWorker.SetForceUpdateOnPageLoadRequest) {
