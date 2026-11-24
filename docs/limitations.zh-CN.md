@@ -442,8 +442,9 @@ Elements 面板的 Accessibility 窗格，以及 `Accessibility.getPartialAXTree
 
 ### Application 面板
 
-- **IndexedDB 和 Cache Storage**：Chrome 的视图跟随整个源（包括 worker、其他窗口）的写入。这里视图只在本窗口写入时刷新（worker 和其他窗口的看不到）；存储桶是页面的默认桶。
-- **Service Worker**：能列出、更新、注销。看不到是否在运行，所以在变成 redundant 之前都显示为运行中；调试、启动、停止 worker 返回错误。
+- **IndexedDB 和 Cache Storage**：Chrome 的视图在整个源的每次写入发生时更新。这里，本窗口的写入立即显示。worker、Service Worker 和其他标签页的写入靠比较快照发现：页面可见时约三秒内显示，或在窗口获得焦点、变为可见时显示。快照只看数据库名称和版本、缓存名称和每个缓存里的请求 URL，不看数据库里的内容：别处写入的 IndexedDB 内容要刷新才能看到。页面自己写入后 300 毫秒内，别处对同一缓存或列表的写入可能不会单独产生事件。Chrome 会随写入重复发送存储桶事件；这里在跟踪期间每个桶只报告一次。对不存在的缓存调用 `requestEntries` 时列为空但不创建它，而 Chrome 会创建。
+- **存储桶**：浏览器有 `navigator.storageBuckets` 时，具名存储桶可以列出、读取和写入；否则只有默认桶。持久性（durability）总是报 "relaxed"，与 Chrome 一致。在本窗口之外打开的桶，配额用的是它的估算值，可能是浏览器定的上限，而 Chrome 报 0。跟踪开始前页面取到的桶的 IndexedDB 或 caches，经由它们的写入要等下一次比较才显示。清除站点数据只清默认桶。IndexedDB 命令指向不存在的桶时返回错误，而 Chrome 不应答。别处恰好在快照读取的那一刻删除某个缓存或桶时，快照可能把它重新创建：这个 API 没有「仅在存在时才打开」的方式。
+- **Service Worker**：能列出、更新、注销。看不到是否在运行，所以在变成 redundant 之前都显示为运行中。其他标签页改动的注册在页面获得焦点、变为可见或 controller 变化时显示，不是即时的。受控客户端只列当前页，不含其他标签页。Sync 通过 Background Sync 触发真实的 `sync` 事件，但离线时和要求 `lastChance` 时返回错误，同一 tag 仍在等待时浏览器会合并成一次事件。`skipWaiting` 只对收到 `{type: 'SKIP_WAITING'}` 消息时会调用 `self.skipWaiting()` 的 worker 有效，并在 worker 激活后才返回，而 Chrome 立即返回并能激活任意等待中的 worker；其他 worker 约三秒后报错。调试、启动、停止 worker，周期性同步和推送消息返回错误。
 
 <a id="issues-panel"></a>
 

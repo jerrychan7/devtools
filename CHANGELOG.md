@@ -2,6 +2,17 @@
 
 All packages share one version and are released together (see DEV.md, "Releasing to npm"). Each release says first which Chrome its DevTools frontend comes from; the versioning rules are in DEV.md too. Changes are listed under `Unreleased` as they land, and moved under the version when it is released. The Chinese version is [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md); the two say the same.
 
+## Unreleased
+
+Based on Chrome 159 (159.0.8154.13).
+
+- The Application panel's IndexedDB and Cache Storage views now refresh for writes made outside the page's window: by its service worker (such as Workbox filling Cache Storage), other workers and other tabs. While the panel tracks storage, the agent compares each bucket's databases (names and versions) and caches (names and request URLs) every three seconds while the page is visible, when the window gets the focus or becomes visible, and 300 ms after the page's own writes. What a database holds is not compared, so IndexedDB content written elsewhere shows on a refresh only. Tracking stops when DevTools disconnects.
+- Named storage buckets (`navigator.storageBuckets`, Chromium only) are listed in the Application panel, reported as in Chrome 159 with numeric ids, expiration, persistence and quota, and their deletion too. IndexedDB and CacheStorage commands that name a bucket read and write that bucket, and cache ids take Chrome's form. A missing bucket is never created: CacheStorage fails with Chrome's error, and IndexedDB fails where Chrome leaves the command unanswered.
+- CacheStorage commands no longer create a missing cache: `requestEntries` lists it as empty, and `requestCachedResponse` and `deleteEntry` fail with Chrome's messages.
+- The Service workers view shows registrations changed in other tabs when the page gets the focus, becomes visible or changes its controller, and lists the page among the clients of the worker that controls it.
+- The Sync button (`ServiceWorker.dispatchSyncEvent`) fires a real `sync` event through Background Sync. Registration ids are read as Chrome reads them; an unknown registration, or one without an active worker, succeeds without effect, as in Chrome. It fails while the browser is offline and for `lastChance`, which the page cannot set.
+- `ServiceWorker.skipWaiting` posts `{type: 'SKIP_WAITING'}` to the waiting worker (Workbox's convention) and succeeds once it activates; a worker that does not skip waiting on it fails with an explicit error after about three seconds. An unknown scope, or a registration without a waiting worker, succeeds silently, as in Chrome.
+
 ## 0.5.0
 
 Based on Chrome 159 (159.0.8154.13).
