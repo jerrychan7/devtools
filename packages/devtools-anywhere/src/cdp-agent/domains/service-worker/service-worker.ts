@@ -257,8 +257,10 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       const deadline = Date.now() + SKIP_WAITING_TIMEOUT;
       // A waiting worker replaced by a newer one goes redundant while the newer one waits: ask that
       // one too, and succeed only once nothing waits any more.
-      for (let waiting = reg?.waiting; waiting; waiting = reg?.waiting) {
-        const worker = waiting;
+      // The worker just followed is never asked again, so the loop cannot spin on a settled one.
+      let followed: ServiceWorker | undefined;
+      for (let waiting = reg?.waiting; waiting && waiting !== followed; waiting = reg?.waiting) {
+        const worker = (followed = waiting);
         const settled = await new Promise<boolean>(resolve => {
           const timer = setTimeout(() => finish(false), Math.max(0, deadline - Date.now()));
           const onChange = () => {
