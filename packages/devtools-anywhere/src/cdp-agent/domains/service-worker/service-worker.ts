@@ -313,6 +313,11 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
               "(it must call skipWaiting() on {type: 'SKIP_WAITING'})"
           );
         }
+        // A worker replaced by a newer one goes redundant before the registration shows the newer
+        // one waiting: the page is told of the two in turn.
+        while (worker.state === 'redundant' && reg?.waiting === worker && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
       }
     },
     // Not forcing is what the page does already, and the frontend says so on every connection.
