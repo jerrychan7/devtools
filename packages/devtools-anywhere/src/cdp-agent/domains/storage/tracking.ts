@@ -101,14 +101,22 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
     if (info) session.emit('Storage.storageBucketCreatedOrUpdated', { bucketInfo: info });
     else sent.delete(name);
   };
+  /**
+   * The named buckets whose deletion was reported, until a snapshot sees them made again. A write
+   * queued before the deletion is not reported then: its bucket's id is gone, and a new one would
+   * name a bucket the client was never told of. One made again in between has its lists reported
+   * by the snapshot that sees it.
+   */
+  const deleted = new Set<string>();
   const at = (bucket: string) => ({ origin, storageKey, bucketId: idOf(bucket) });
   const sendList = async (list: 'idb' | 'cache', bucket: string) => {
-    if (list === 'idb' ? !trackIdb : !trackCache) return;
+    if ((list === 'idb' ? !trackIdb : !trackCache) || deleted.has(bucket)) return;
     await sendBucket(bucket);
     session.emit(list === 'idb' ? 'Storage.indexedDBListUpdated' : 'Storage.cacheStorageListUpdated', at(bucket));
   };
   const sendCache = (bucket: string, cacheName: string) => {
-    if (trackCache) session.emit('Storage.cacheStorageContentUpdated', { ...at(bucket), cacheName });
+    if (trackCache && !deleted.has(bucket))
+      session.emit('Storage.cacheStorageContentUpdated', { ...at(bucket), cacheName });
   };
 
   // ---- writes elsewhere: snapshots ----
@@ -140,11 +148,13 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
   const report = (change: Change) => {
     switch (change.kind) {
       case 'bucketCreated':
+        deleted.delete(change.bucket);
         return sendBucket(change.bucket);
       case 'bucketDeleted':
         if (trackBuckets) session.emit('Storage.storageBucketDeleted', { bucketId: idOf(change.bucket) });
         ids.delete(change.bucket);
         sent.delete(change.bucket);
+        if (change.bucket) deleted.add(change.bucket);
         return;
       case 'idbList':
         return sendList('idb', change.bucket);
@@ -235,9 +245,13 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
     const { bucket } = write;
     if ('list' in write) inTurn(() => sendList(write.list, bucket));
     else if ('cacheName' in write) inTurn(() => sendCache(bucket, write.cacheName));
-    else if (trackIdb) {
+    else {
       const { databaseName, objectStoreName } = write;
-      inTurn(() => session.emit('Storage.indexedDBContentUpdated', { ...at(bucket), databaseName, objectStoreName }));
+      // Checked when its turn comes: tracking may have stopped, or the client gone, meanwhile.
+      inTurn(() => {
+        if (trackIdb && !deleted.has(bucket))
+          session.emit('Storage.indexedDBContentUpdated', { ...at(bucket), databaseName, objectStoreName });
+      });
     }
   };
   /** Starts or stops reporting writes as what is tracked changes. */
@@ -268,6 +282,7 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
     trackBuckets = trackIdb = trackCache = false;
     sent.clear();
     ids.clear();
+    deleted.clear();
     nextId = 1;
     update();
   });
