@@ -111,27 +111,31 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     if (!reported) report(reg);
   };
 
-  /** Reports registrations added since, and removed ones as deleted; one look at a time. */
+  /**
+   * Runs `look` after the looks before it: each reads the registrations, then reports what changed
+   * since the one before, so that none reports a registration twice.
+   */
   let looking: Promise<void> = Promise.resolve();
-  const refresh = () =>
-    (looking = looking
-      .then(async () => {
-        const current = await registrations();
-        for (const reg of known) {
-          if (current.includes(reg)) continue;
-          known.delete(reg);
-          report(reg, true);
-        }
-        for (const reg of current) watch(reg, known.has(reg));
-      })
-      .catch(() => {}));
+  const inTurn = (look: () => Promise<void> | void) => (looking = looking.then(look).catch(() => {}));
+
+  /** Reports registrations added since, and removed ones as deleted. */
+  const look = async () => {
+    const current = await registrations();
+    for (const reg of known) {
+      if (current.includes(reg)) continue;
+      known.delete(reg);
+      report(reg, true);
+    }
+    for (const reg of current) watch(reg, known.has(reg));
+  };
+  const refresh = () => inTurn(look);
 
   // Registrations the page makes while the view is open show up as they happen.
   if (container) {
     const { register } = container;
     container.register = async function (this: ServiceWorkerContainer, ...args: Parameters<typeof register>) {
       const reg = await register.apply(this, args);
-      if (enabled) watch(reg);
+      if (enabled) void inTurn(() => watch(reg, known.has(reg)));
       return reg;
     };
   }
@@ -144,17 +148,19 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
       if (enabled) void refresh();
     };
     container.addEventListener('controllerchange', () => {
-      // Chrome lists the page on the new controller, and no more on the one before.
       const before = controller;
       controller = container.controller;
-      if (enabled) {
+      if (!enabled) return;
+      // After a look, which finds the new controller's registration and workers, Chrome lists the
+      // page on the new controller and no more on the one before.
+      void inTurn(async () => {
+        await look();
         const versions = [before, controller].flatMap(w => {
           const reg = w && registrationOf.get(w);
           return reg ? [version(reg, w)] : [];
         });
         if (versions.length) session.emit('ServiceWorker.workerVersionUpdated', { versions });
-      }
-      lookAgain();
+      });
     });
     win.addEventListener('focus', lookAgain);
     win.document.addEventListener('visibilitychange', () => {
@@ -166,15 +172,18 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     async enable() {
       enabled = true;
       if (!container) return;
-      const current = await registrations();
-      // Chrome reports the lists at once, empty ones too.
-      session.emit('ServiceWorker.workerRegistrationUpdated', {
-        registrations: current.map(reg => ({ registrationId: idOf(reg), scopeURL: reg.scope, isDeleted: false })),
+      // In turn with the looks: one started while this lists would report the registrations again.
+      await inTurn(async () => {
+        const current = await registrations();
+        // Chrome reports the lists at once, empty ones too.
+        session.emit('ServiceWorker.workerRegistrationUpdated', {
+          registrations: current.map(reg => ({ registrationId: idOf(reg), scopeURL: reg.scope, isDeleted: false })),
+        });
+        session.emit('ServiceWorker.workerVersionUpdated', {
+          versions: current.flatMap(reg => workersOf(reg).map(w => version(reg, w))),
+        });
+        for (const reg of current) watch(reg, true);
       });
-      session.emit('ServiceWorker.workerVersionUpdated', {
-        versions: current.flatMap(reg => workersOf(reg).map(w => version(reg, w))),
-      });
-      for (const reg of current) watch(reg, true);
     },
     disable() {
       enabled = false;
