@@ -128,7 +128,8 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
     Reflect.apply(windowOf().timeout, globalThis, [
       () => {
         settling = false;
-        void check();
+        // Tracking may have stopped meanwhile: no read then.
+        if (active()) void check();
       },
       SETTLE_MS,
     ]);

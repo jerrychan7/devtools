@@ -24,7 +24,10 @@ interface StorageBucketManager {
 export const bucketManager = (): StorageBucketManager | undefined =>
   (Reflect.get(navigator, 'storageBuckets') as StorageBucketManager | undefined) ?? undefined;
 
-/** The manager's `open()`, taken before the hooks wrap it (`hooks.ts`), for the agent's own calls. */
+/**
+ * The manager's `open()` as the bundle found it, before the agent's hooks wrap it (`hooks.ts`), for
+ * the agent's own calls. A page's wrapper put there before the bundle loaded is the one taken.
+ */
 const managerOpen: StorageBucketManager['open'] | undefined = Reflect.get(globalThis, 'StorageBucketManager')?.prototype
   ?.open;
 
@@ -35,8 +38,9 @@ const managerOpen: StorageBucketManager['open'] | undefined = Reflect.get(global
 export const openedQuotas = new Map<string, number | undefined>();
 
 /**
- * `CacheStorage.prototype.open`, taken before the hooks wrap it, for the agent's own reads: the
- * page's wrapper does not see them, nor do the hooks report them.
+ * `CacheStorage.prototype.open` as the bundle found it, before the agent's hooks wrap it, for the
+ * agent's own reads: the hooks do not report them, nor does a wrapper the page puts there later
+ * see them. A page's wrapper put there before the bundle loaded is the one taken.
  */
 const cacheOpen: CacheStorage['open'] | undefined =
   typeof CacheStorage === 'undefined' ? undefined : CacheStorage.prototype.open;
