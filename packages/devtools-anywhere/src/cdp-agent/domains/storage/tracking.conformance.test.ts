@@ -45,6 +45,31 @@ setUpAndTearDown(
 
 const settle = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms));
 const clear = () => Promise.all([t.ours.clear(), t.chrome.clear()]);
+
+/** How many events of `EVENTS` each side has had. */
+const counts = async (page = t) =>
+  Promise.all(
+    [page.ours, page.chrome].map(async side => {
+      let n = 0;
+      for (const method of EVENTS) n += (await side.events(method)).length;
+      return n;
+    })
+  );
+/**
+ * Waits until neither side has had a new event for `ms` (up to `timeout`), so that nothing of the
+ * last write comes into what follows: longer than the gap between a write's events.
+ */
+async function quiet(ms = 1000, timeout = 15_000) {
+  const start = Date.now();
+  let last = String(await counts());
+  let since = Date.now();
+  while (Date.now() - since < ms) {
+    if (Date.now() - start > timeout) throw new Error(`events still coming after ${timeout}ms`);
+    await settle(100);
+    const now = String(await counts());
+    if (now !== last) [last, since] = [now, Date.now()];
+  }
+}
 /** One turn of the snapshots' timer and a little more. */
 const POLL = 3500;
 
@@ -86,7 +111,7 @@ async function cleanUp(write: () => Promise<unknown>, ...events: EventName[]) {
   await clear();
   await t.page.evaluate(write);
   for (const event of events) await waitForBoth(t, event, 1, 10_000);
-  await settle(800);
+  await quiet();
   await clear();
 }
 
@@ -135,8 +160,7 @@ test('IndexedDB writes', async () => {
       })
   );
   await waitForBoth(t, 'Storage.indexedDBContentUpdated');
-  await settle(800);
-  sameCounted(await seen(t.ours), await seen(t.chrome));
+  await sameEvents(seen);
   await cleanUp(
     () =>
       new Promise(resolve => {
@@ -148,12 +172,11 @@ test('IndexedDB writes', async () => {
 
 test('deleting a database updates the list', async () => {
   await t.page.evaluate(makeDatabase, 'to-delete');
-  await settle(800);
+  await quiet();
   await clear();
   await t.page.evaluate(dropDatabase, 'to-delete');
   await waitForBoth(t, 'Storage.indexedDBListUpdated');
-  await settle(800);
-  sameCounted(await seen(t.ours), await seen(t.chrome));
+  await sameEvents(seen);
 });
 
 test('Cache Storage writes', async () => {
@@ -168,8 +191,7 @@ test('Cache Storage writes', async () => {
     await caches.delete('tracked');
   });
   await waitForBoth(t, 'Storage.cacheStorageContentUpdated');
-  await settle(800);
-  sameCounted(await seen(t.ours), await seen(t.chrome));
+  await sameEvents(seen);
 });
 
 /** The list and Cache Storage events, by bucket name: what snapshots can tell (not a database's content). */
@@ -193,7 +215,10 @@ async function seenByBucket(side: Side) {
   return lines;
 }
 
-/** Waits until `ours` has seen every line Chrome has (the snapshots run on a timer), then compares them. */
+/**
+ * Waits until `ours` has seen every line Chrome has (the snapshots run on a timer), then for no
+ * more to come on either side, and compares them.
+ */
 async function sameEvents(read: (side: Side) => Promise<string[]>) {
   const chrome = await read(t.chrome);
   let ours = await read(t.ours);
@@ -201,7 +226,8 @@ async function sameEvents(read: (side: Side) => Promise<string[]>) {
     await settle(100);
     ours = await read(t.ours);
   }
-  sameCounted(ours, chrome);
+  await quiet();
+  sameCounted(await read(t.ours), await read(t.chrome));
 }
 
 /** Runs `write` in another tab of the page's origin, which the page's hooks do not see. */
@@ -313,6 +339,9 @@ test('a missing named bucket fails without being made, a missing cache as in Chr
         value => value,
         (error: Error) => error.message.replace(/^.*\): /, '').split('\n')[0]
       );
+    // The list events name no cache: what the other side's run made must have been reported
+    // (by ours' snapshots, too) before this side's are counted.
+    await quiet(POLL);
     await clear();
     const failed = [
       await settled(side.send('CacheStorage.deleteEntry', { cacheId, request: `${storageKey}x` })),
@@ -349,29 +378,133 @@ test('deleting a named bucket', async () => {
   await t.page.evaluate(async () => {
     await (await (await navigator.storageBuckets.open('to-delete')).caches.open('c')).put('/d', new Response('d'));
   });
-  await settle(800);
+  await quiet();
   await clear();
   // The order of the events across methods, from a session of Chrome's own tracking too.
   const session = await t.page.createCDPSession();
-  const chromeOrder: string[] = [];
-  for (const method of EVENTS) session.on(method, () => chromeOrder.push(method));
-  await session.send('Storage.trackIndexedDBForStorageKey', { storageKey });
-  await session.send('Storage.trackCacheStorageForStorageKey', { storageKey });
-  await session.send('Storage.setStorageBucketTracking', { storageKey, enable: true });
-  await settle(300);
-  chromeOrder.length = 0;
-  await clear();
-  await t.page.evaluate(() => navigator.storageBuckets.delete('to-delete'));
-  await waitForBoth(t, 'Storage.storageBucketDeleted', 1, 10_000);
-  await settle(800);
-  await session.detach();
-  const oursOrder = await t.page.evaluate(() =>
-    window.__ours.map(e => e.method).filter(method => method.startsWith('Storage.'))
-  );
-  // The lists come before the deletion; Chrome sends the two lists in either order.
-  const shape = (order: string[]) => [...order.slice(0, -1).sort(), order.at(-1)];
-  assert.equal(chromeOrder.at(-1), 'Storage.storageBucketDeleted');
-  assert.deepEqual(shape(oursOrder), shape(chromeOrder));
+  try {
+    const chromeOrder: string[] = [];
+    for (const method of EVENTS) session.on(method, () => chromeOrder.push(method));
+    await session.send('Storage.trackIndexedDBForStorageKey', { storageKey });
+    await session.send('Storage.trackCacheStorageForStorageKey', { storageKey });
+    await session.send('Storage.setStorageBucketTracking', { storageKey, enable: true });
+    await settle(300);
+    chromeOrder.length = 0;
+    await clear();
+    await t.page.evaluate(() => navigator.storageBuckets.delete('to-delete'));
+    await waitForBoth(t, 'Storage.storageBucketDeleted', 1, 10_000);
+    await quiet();
+    const oursOrder = await t.page.evaluate(() =>
+      window.__ours.map(e => e.method).filter(method => method.startsWith('Storage.'))
+    );
+    // The lists come before the deletion; Chrome sends the two lists in either order.
+    const shape = (order: string[]) => [...order.slice(0, -1).sort(), order.at(-1)];
+    assert.equal(chromeOrder.at(-1), 'Storage.storageBucketDeleted');
+    assert.deepEqual(shape(oursOrder), shape(chromeOrder));
+  } finally {
+    await session.detach();
+    // Gone already unless the test failed before deleting it; deleting a missing bucket is no error.
+    await t.page.evaluate(() => navigator.storageBuckets.delete('to-delete'));
+    await quiet();
+    await clear();
+  }
+});
+
+test('the snapshots call no wrapper of the page and make no deleted bucket again', async () => {
+  await t.page.evaluate(async () => {
+    await (await navigator.storageBuckets.open('gone-a')).caches.open('c');
+    await navigator.storageBuckets.open('gone-z');
+  });
+  await quiet();
+  try {
+    // The page wraps the methods the snapshots read with; the wrapper of a cache's keys() deletes
+    // the bucket the snapshot would open next, as another tab may at that moment. A snapshot
+    // calling the wrappers, or opening each bucket after reading the ones before, fails here.
+    await t.page.evaluate(() => {
+      const w = window as unknown as { wrapped: Record<string, number>; unwrap: (() => void)[] };
+      w.wrapped = {};
+      w.unwrap = [];
+      const wrap = (proto: object, name: string, before?: () => Promise<unknown>) => {
+        const original = Reflect.get(proto, name) as (...args: unknown[]) => unknown;
+        Reflect.set(proto, name, async function (this: unknown, ...args: unknown[]) {
+          w.wrapped[name] = (w.wrapped[name] ?? 0) + 1;
+          await before?.();
+          return Reflect.apply(original, this, args);
+        });
+        w.unwrap.push(() => Reflect.set(proto, name, original));
+      };
+      const manager = Reflect.get(globalThis, 'StorageBucketManager').prototype as object;
+      const remove = Reflect.get(manager, 'delete') as (name: string) => Promise<void>;
+      wrap(CacheStorage.prototype, 'keys');
+      wrap(CacheStorage.prototype, 'has');
+      // Once the buckets are listed: a cache read then is one of a named bucket.
+      let listed = false;
+      wrap(Cache.prototype, 'keys', async () => {
+        if (listed) await Reflect.apply(remove, navigator.storageBuckets, ['gone-z']);
+        listed = false;
+      });
+      wrap(IDBFactory.prototype, 'databases');
+      wrap(manager, 'keys', async () => (listed = true));
+      // A snapshot now, besides the timer's.
+      window.dispatchEvent(new Event('focus'));
+    });
+    await settle(POLL);
+    const wrapped = await t.page.evaluate(() => {
+      const w = window as unknown as { wrapped: Record<string, number>; unwrap: (() => void)[] };
+      w.unwrap.forEach(fn => fn());
+      return w.wrapped;
+    });
+    assert.deepEqual(wrapped, {});
+    // Deleted elsewhere, it stays deleted through the timer's turns.
+    await inOtherTab(() => navigator.storageBuckets.delete('gone-z'));
+    await settle(2 * POLL);
+    assert.equal((await t.page.evaluate(() => navigator.storageBuckets.keys())).includes('gone-z'), false);
+  } finally {
+    await t.page.evaluate(async () => {
+      for (const name of ['gone-a', 'gone-z']) await navigator.storageBuckets.delete(name);
+    });
+    await quiet();
+    await clear();
+  }
+});
+
+test('a client that goes gets no more events', async () => {
+  // A page of its own: its session is reset, as when the client goes, and tracks nothing then.
+  const own = await openPage(env as Env, [...EVENTS]);
+  try {
+    for (const method of ['Storage.trackIndexedDBForStorageKey', 'Storage.trackCacheStorageForStorageKey'] as const)
+      await own.ours.send(method, { storageKey });
+    await own.ours.send('Storage.setStorageBucketTracking', { storageKey, enable: true });
+    await own.page.evaluate(async () => {
+      // A write whose events are queued as the session is reset.
+      const open = indexedDB.open('reset', 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('s');
+      await new Promise(resolve => (open.onsuccess = resolve));
+      open.result.transaction('s', 'readwrite').objectStore('s').put(1, 'a');
+      window.__session.reset();
+      window.__ours.push({ method: 'reset', params: {} });
+      open.result.close();
+    });
+    await own.page.evaluate(async () => (await caches.open('existing')).put('/r', new Response('r')));
+    await inOtherTab(async () => (await caches.open('reset-elsewhere')).put('/r', new Response('r')));
+    // Long enough for a turn of the snapshots' timer.
+    await settle(POLL);
+    const after = await own.page.evaluate(() =>
+      window.__ours.slice(window.__ours.findIndex(e => e.method === 'reset') + 1).map(e => e.method)
+    );
+    assert.deepEqual(
+      after.filter(method => method.startsWith('Storage.')),
+      []
+    );
+  } finally {
+    await own.page.evaluate(async () => {
+      await caches.delete('reset-elsewhere');
+      await new Promise(resolve => (indexedDB.deleteDatabase('reset').onsuccess = resolve));
+    });
+    await own.page.close();
+    await quiet();
+    await clear();
+  }
 });
 
 test('a bucket made by another tab is reported', async () => {
@@ -396,5 +529,7 @@ test('untracking stops the events', async () => {
   await settle(POLL);
   assert.deepEqual(await t.ours.events('Storage.cacheStorageContentUpdated'), []);
   assert.deepEqual(await t.chrome.events('Storage.cacheStorageContentUpdated'), []);
-  await t.page.evaluate(() => caches.delete('existing'));
+  for (const side of [t.ours, t.chrome]) await side.send('Storage.trackCacheStorageForStorageKey', { storageKey });
+  await quiet();
+  await cleanUp(() => caches.delete('existing'), 'Storage.cacheStorageListUpdated');
 });
