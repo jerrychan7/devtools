@@ -57,9 +57,10 @@ const counts = async (page = t) =>
   );
 /**
  * Waits until neither side has had a new event for `ms` (up to `timeout`), so that nothing of the
- * last write comes into what follows: longer than the gap between a write's events.
+ * last write comes into what follows: a turn of ours' snapshot timer, as a write made elsewhere is
+ * reported up to that long after Chrome's event.
  */
-async function quiet(ms = 1000, timeout = 15_000) {
+async function quiet(ms = POLL, timeout = 20_000) {
   const start = Date.now();
   let last = String(await counts());
   let since = Date.now();
