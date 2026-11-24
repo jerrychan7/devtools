@@ -1,6 +1,6 @@
 // The ServiceWorker domain where the page itself takes part: registrations other tabs make, the
 // page as a controlled client, and the commands the page carries out through its registration.
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { launch, openPage, setUpAndTearDown } from '../../../../test-support/conformance.ts';
 import type { Env, TestPage } from '../../../../test-support/conformance.ts';
@@ -33,6 +33,25 @@ const scopesOf = async (side: TestPage['ours']) =>
     e.registrations.map(r => `${r.scopeURL} ${r.isDeleted}`)
   );
 
+/** Unregisters every registration under the fixture's directory, so that no test sees another's. */
+const unregisterAll = () =>
+  t.page.evaluate(async s => {
+    const all = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(all.filter(r => r.scope.startsWith(s)).map(r => r.unregister()));
+  }, scope);
+afterEach(() => unregisterAll());
+
+/** Starts collecting what the page's workers post to it, in `window.posted`. */
+const collect = () =>
+  t.page.evaluate(() => {
+    const page = window as unknown as { posted: string[] };
+    if (page.posted) return;
+    page.posted = [];
+    navigator.serviceWorker.addEventListener('message', e => page.posted.push(JSON.stringify(e.data)));
+  });
+const posted = () => t.page.evaluate(() => (window as unknown as { posted: string[] }).posted);
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 test('a registration made in another tab shows when the page gets focus', async () => {
   await both(side => side.clear());
   const other = await env.browser.newPage();
@@ -49,12 +68,21 @@ test('a registration made in another tab shows when the page gets focus', async 
   }
 });
 
-/** Registers `script` for the fixture's directory and waits until it controls the page. */
+/**
+ * Registers `script` for the fixture's directory and waits until it, and no other script, controls
+ * the page. A registration left by a test before is taken over: the new script, which waits behind
+ * the active one, is asked to skip waiting.
+ */
 const control = (script: string) =>
   t.page.evaluate(
     async (src, s) => {
-      await navigator.serviceWorker.register(src, { scope: s });
-      while (!navigator.serviceWorker.controller) await new Promise(r => setTimeout(r, 50));
+      const reg = await navigator.serviceWorker.register(src, { scope: s });
+      const start = Date.now();
+      while (navigator.serviceWorker.controller?.scriptURL !== src) {
+        if (Date.now() - start > 10000) throw new Error(`timed out waiting for ${src} to control the page`);
+        if (reg.waiting?.scriptURL === src) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        await new Promise(r => setTimeout(r, 50));
+      }
     },
     script,
     scope
@@ -89,31 +117,33 @@ const idOn = async (side: TestPage['ours'], s: string) => {
   return id;
 };
 
+/** Sends dispatchSyncEvent for the registration of `s` as `side` reported it. */
+const dispatchSync = async (side: TestPage['ours'], s: string, tag: string, lastChance = false) =>
+  side.send('ServiceWorker.dispatchSyncEvent', {
+    origin: new URL(scope).origin,
+    registrationId: await idOn(side, s),
+    tag,
+    lastChance,
+  });
+const syncOf = (tag: string, lastChance = false) => JSON.stringify({ sync: tag, lastChance });
+/** Waits until both sides last reported `s` live. */
+const reported = (s: string) =>
+  until(async () => {
+    const last = async (side: TestPage['ours']) => (await scopesOf(side)).findLast(x => x.startsWith(s + ' '));
+    return (await last(t.ours)) === `${s} false` && (await last(t.chrome)) === `${s} false`;
+  }, `reports of ${s}`);
+
 test('dispatchSyncEvent fires a sync event in the worker', async () => {
   const origin = new URL(scope).origin;
   await control(scope + 'sw-events.js?v=1');
-  await until(async () => (await scopesOf(t.ours)).length > 0 && (await scopesOf(t.chrome)).length > 0, 'reports');
-  type Page = { syncs: string[] };
-  await t.page.evaluate(() => {
-    const page = window as unknown as Page;
-    page.syncs = [];
-    navigator.serviceWorker.addEventListener('message', e => page.syncs.push(JSON.stringify(e.data)));
-  });
-  for (const [side, tag] of [
-    [t.chrome, 'chrome'],
-    [t.ours, 'ours'],
-  ] as const) {
-    await side.send('ServiceWorker.dispatchSyncEvent', {
-      origin,
-      registrationId: await idOn(side, scope),
-      tag,
-      lastChance: false,
-    });
-  }
-  const want = ['chrome', 'ours'].map(tag => JSON.stringify({ sync: tag, lastChance: false }));
+  await reported(scope);
+  await collect();
+  await dispatchSync(t.chrome, scope, 'chrome');
+  await dispatchSync(t.ours, scope, 'ours');
+  const want = [syncOf('chrome'), syncOf('ours')];
   await until(async () => {
-    const syncs = await t.page.evaluate(() => (window as unknown as Page).syncs);
-    return want.every(w => syncs.includes(w));
+    const all = await posted();
+    return want.every(w => all.includes(w));
   }, 'both sync events');
   // An unknown registration succeeds without effect on both; an id that is no 64-bit integer
   // fails on both.
@@ -129,72 +159,129 @@ test('dispatchSyncEvent fires a sync event in the worker', async () => {
       );
     }
   }
-  // Only the browser can make a sync the last chance.
+});
+
+test('dispatchSyncEvent with lastChance: Chrome fires it as the last chance, the page cannot', async () => {
+  await control(scope + 'sw-events.js?v=1');
+  await reported(scope);
+  await collect();
+  await dispatchSync(t.chrome, scope, 'last-chrome', true);
+  await until(async () => (await posted()).includes(syncOf('last-chrome', true)), "Chrome's last-chance sync");
   await assert.rejects(
-    t.ours.send('ServiceWorker.dispatchSyncEvent', {
-      origin,
-      registrationId: await idOn(t.ours, scope),
-      tag: 'l',
-      lastChance: true,
-    }),
+    dispatchSync(t.ours, scope, 'last-ours', true),
     /the browser decides whether a sync event is the last chance/
   );
+  await sleep(500);
+  assert.ok(!(await posted()).some(p => p.includes('last-ours')));
+});
+
+test('dispatchSyncEvent offline: Chrome fires it at once, the page fails rather than wait', async () => {
+  await control(scope + 'sw-events.js?v=1');
+  await reported(scope);
+  await collect();
+  await t.page.setOfflineMode(true);
+  try {
+    assert.equal(await t.page.evaluate(() => navigator.onLine), false);
+    await dispatchSync(t.chrome, scope, 'offline-chrome');
+    await until(async () => (await posted()).includes(syncOf('offline-chrome')), "Chrome's sync while offline");
+    await assert.rejects(dispatchSync(t.ours, scope, 'offline-ours'), /the browser is offline/);
+  } finally {
+    await t.page.setOfflineMode(false);
+  }
+  // Nothing was registered, so nothing fires once online again.
+  await sleep(500);
+  assert.ok(!(await posted()).some(p => p.includes('offline-ours')));
 });
 
 test('dispatchSyncEvent on a registration with no active worker succeeds without effect', async () => {
-  const origin = new URL(scope).origin;
   const held = scope + 'held/';
-  // Installing for 3s: the registration has no active worker meanwhile.
+  const HOLD = 3000;
+  await collect();
+  // Installing for HOLD ms: the registration has no active worker meanwhile.
+  const start = Date.now();
   await t.page.evaluate(
     (src, s) => navigator.serviceWorker.register(src, { scope: s }).then(() => {}),
-    scope + 'sw-events.js?hold=3000',
+    `${scope}sw-events.js?hold=${HOLD}`,
     held
   );
-  await until(async () => {
-    const [ours, chrome] = [await scopesOf(t.ours), await scopesOf(t.chrome)];
-    return ours.includes(`${held} false`) && chrome.includes(`${held} false`);
-  }, 'reports');
+  await reported(held);
+  await dispatchSync(t.chrome, held, 'held-chrome');
+  await dispatchSync(t.ours, held, 'held-ours');
+  assert.ok(Date.now() - start < HOLD, 'the syncs were asked for while the worker was installing');
+  // Once active, the worker gets neither: none was kept for it.
+  await t.page.evaluate(async s => {
+    const reg = await navigator.serviceWorker.getRegistration(s);
+    while (!reg?.active) await new Promise(r => setTimeout(r, 50));
+  }, held);
+  await sleep(1000);
+  assert.deepEqual(
+    (await posted()).filter(p => p.includes('held-')),
+    []
+  );
+});
+
+/** Registers `src` for the fixture's directory and waits until it is the waiting worker. */
+const waitFor = (src: string) =>
+  t.page.evaluate(
+    async (src, s) => {
+      const reg = await navigator.serviceWorker.register(src, { scope: s });
+      const start = Date.now();
+      while (reg.waiting?.scriptURL !== src) {
+        if (Date.now() - start > 10000) throw new Error(`timed out waiting for ${src} to wait`);
+        await new Promise(r => setTimeout(r, 50));
+      }
+    },
+    src,
+    scope
+  );
+const registered = (which: 'active' | 'waiting') =>
+  t.page.evaluate(
+    async (s, w) => (await navigator.serviceWorker.getRegistration(s))?.[w]?.scriptURL ?? null,
+    scope,
+    which
+  );
+
+test('skipWaiting with nothing waiting succeeds without effect, as in Chrome', async () => {
   for (const side of [t.chrome, t.ours]) {
-    await side.send('ServiceWorker.dispatchSyncEvent', {
-      origin,
-      registrationId: await idOn(side, held),
-      tag: 'held',
-      lastChance: false,
-    });
+    await side.send('ServiceWorker.skipWaiting', { scopeURL: 'https://unknown.example/' });
+    await side.send('ServiceWorker.skipWaiting', { scopeURL: scope + 'nothing-here/' });
   }
-  await t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.unregister(), held);
+  const active = scope + 'sw-events.js?v=1';
+  await control(active);
+  for (const side of [t.chrome, t.ours]) await side.send('ServiceWorker.skipWaiting', { scopeURL: scope });
+  assert.equal(await registered('active'), active);
 });
 
 test('skipWaiting activates a waiting worker that listens for SKIP_WAITING', async () => {
-  const waitFor = (src: string) =>
-    t.page.evaluate(
-      async (src, s) => {
-        const reg = await navigator.serviceWorker.register(src, { scope: s });
-        const start = Date.now();
-        while (!reg.waiting || !reg.waiting.scriptURL.endsWith(src.slice(src.lastIndexOf('/')))) {
-          if (Date.now() - start > 10000) throw new Error(`timed out waiting for ${src} to wait`);
-          await new Promise(r => setTimeout(r, 50));
-        }
-      },
-      src,
-      scope
-    );
-  const activeScript = () =>
-    t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.active?.scriptURL, scope);
-  // Like Chrome, an unknown scope succeeds without effect.
-  await t.ours.send('ServiceWorker.skipWaiting', { scopeURL: 'https://unknown.example/' });
+  await control(scope + 'sw-events.js?v=1');
   const listening = scope + 'sw-events.js?v=2';
   await waitFor(listening);
   await t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope });
-  assert.equal(await activeScript(), listening);
-  // No waiting worker left: succeeds without effect.
-  await t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope });
-  // A worker that ignores the message cannot be made to skip waiting from the page.
+  assert.equal(await registered('active'), listening);
+});
+
+test('skipWaiting follows a newer worker that replaces the waiting one', async () => {
+  await control(scope + 'sw-events.js?v=1');
+  // One that ignores the message waits; while the command waits, one that listens replaces it.
+  await waitFor(scope + 'sw-events.js?v=4&listen=0');
+  const skipping = t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope });
+  const newer = scope + 'sw-events.js?v=5';
+  await t.page.evaluate((src, s) => navigator.serviceWorker.register(src, { scope: s }).then(() => {}), newer, scope);
+  await skipping;
+  assert.equal(await registered('active'), newer);
+  assert.equal(await registered('waiting'), null);
+});
+
+test('skipWaiting on a worker that ignores SKIP_WAITING: Chrome forces it, the page cannot', async () => {
+  const active = scope + 'sw-events.js?v=1';
+  await control(active);
   const deaf = scope + 'sw-events.js?v=3&listen=0';
   await waitFor(deaf);
   await assert.rejects(
     t.ours.send('ServiceWorker.skipWaiting', { scopeURL: scope }),
     /the waiting worker did not skip waiting on the page's request/
   );
-  assert.equal(await activeScript(), listening);
+  assert.equal(await registered('active'), active);
+  await t.chrome.send('ServiceWorker.skipWaiting', { scopeURL: scope });
+  await until(async () => (await registered('active')) === deaf, "Chrome's activation of the waiting worker");
 });
