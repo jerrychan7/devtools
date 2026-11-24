@@ -43,8 +43,25 @@ setUpAndTearDown(
   () => env?.close()
 );
 
-const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+const settle = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms));
 const clear = () => Promise.all([t.ours.clear(), t.chrome.clear()]);
+/** One turn of the snapshots' timer and a little more. */
+const POLL = 3500;
+
+/**
+ * Compares two lists of event lines with their counts: ours has each line Chrome has, none it has
+ * not, and no more of one than Chrome (Chrome sends some more than once, such as a list per write).
+ */
+function sameCounted(ours: string[], chrome: string[]) {
+  const count = (lines: string[]) => {
+    const counts = new Map<string, number>();
+    for (const line of lines) counts.set(line, (counts.get(line) ?? 0) + 1);
+    return counts;
+  };
+  const [o, c] = [count(ours), count(chrome)];
+  assert.deepEqual([...o.keys()].sort(), [...c.keys()].sort());
+  for (const [line, n] of o) assert.ok(n <= (c.get(line) ?? 0), `${line}: ours ${n}, Chrome ${c.get(line)}`);
+}
 
 /** What each event names, without the bucket ids, which are the implementation's own. */
 async function seen(side: Side) {
@@ -53,11 +70,19 @@ async function seen(side: Side) {
     for (const params of await side.events(method)) {
       const { origin, storageKey: key, ...rest }: Record<string, unknown> = { ...params };
       delete rest['bucketId'];
-      if ('bucketInfo' in rest) rest['bucketInfo'] = 'bucket';
+      // Chrome announces the bucket again with writes, ours once while tracking.
+      if ('bucketInfo' in rest) continue;
       names.push(`${method} ${JSON.stringify({ origin, key, ...rest })}`);
     }
   }
-  return [...new Set(names)].sort();
+  return names;
+}
+
+/** Runs `write` in the page, then waits for its events to stop coming and clears them. */
+async function cleanUp(write: () => Promise<unknown>) {
+  await t.page.evaluate(write);
+  await settle(800);
+  await clear();
 }
 
 test('setStorageBucketTracking reports the existing bucket', async () => {
@@ -65,6 +90,21 @@ test('setStorageBucketTracking reports the existing bucket', async () => {
   assert.equal(ours?.bucketInfo.bucket.storageKey, chrome?.bucketInfo.bucket.storageKey);
   assert.equal(ours?.bucketInfo.bucket.name, undefined);
 });
+
+/** Makes database `name` with a store `s`, version 1, from the page or another tab. */
+const makeDatabase = (name: string) =>
+  new Promise<void>(resolve => {
+    const open = indexedDB.open(name, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('s');
+    open.onsuccess = () => {
+      open.result.close();
+      resolve();
+    };
+  });
+const dropDatabase = (name: string) =>
+  new Promise(resolve => {
+    indexedDB.deleteDatabase(name).onsuccess = resolve;
+  });
 
 test('IndexedDB writes', async () => {
   await clear();
@@ -90,21 +130,24 @@ test('IndexedDB writes', async () => {
       })
   );
   await waitForBoth(t, 'Storage.indexedDBContentUpdated');
-  await settle();
-  assert.deepEqual(await seen(t.ours), await seen(t.chrome));
-});
-
-test('deleting a database updates the list', async () => {
-  await clear();
-  await t.page.evaluate(
+  await settle(800);
+  sameCounted(await seen(t.ours), await seen(t.chrome));
+  await cleanUp(
     () =>
       new Promise(resolve => {
         indexedDB.deleteDatabase('tracked').onsuccess = resolve;
       })
   );
+});
+
+test('deleting a database updates the list', async () => {
+  await t.page.evaluate(makeDatabase, 'to-delete');
+  await settle(800);
+  await clear();
+  await t.page.evaluate(dropDatabase, 'to-delete');
   await waitForBoth(t, 'Storage.indexedDBListUpdated');
-  await settle();
-  assert.deepEqual(await seen(t.ours), await seen(t.chrome));
+  await settle(800);
+  sameCounted(await seen(t.ours), await seen(t.chrome));
 });
 
 test('Cache Storage writes', async () => {
@@ -119,8 +162,8 @@ test('Cache Storage writes', async () => {
     await caches.delete('tracked');
   });
   await waitForBoth(t, 'Storage.cacheStorageContentUpdated');
-  await settle();
-  assert.deepEqual(await seen(t.ours), await seen(t.chrome));
+  await settle(800);
+  sameCounted(await seen(t.ours), await seen(t.chrome));
 });
 
 /** The list and Cache Storage events, by bucket name: what snapshots can tell (not a database's content). */
@@ -141,7 +184,7 @@ async function seenByBucket(side: Side) {
       lines.push(`${method} ${names.get(params.bucketId ?? '') ?? '(default)'} ${cacheName ?? ''}`);
     }
   }
-  return [...new Set(lines)].sort();
+  return lines;
 }
 
 /** Waits until `ours` has seen every line Chrome has (the snapshots run on a timer), then compares them. */
@@ -149,17 +192,23 @@ async function sameEvents(read: (side: Side) => Promise<string[]>) {
   const chrome = await read(t.chrome);
   let ours = await read(t.ours);
   for (let i = 0; i < 80 && chrome.some(line => !ours.includes(line)); i++) {
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await settle(100);
     ours = await read(t.ours);
   }
-  assert.deepEqual(ours, chrome);
+  sameCounted(ours, chrome);
+}
+
+/** Runs `write` in another tab of the page's origin, which the page's hooks do not see. */
+async function inOtherTab(write: () => Promise<unknown>) {
+  const other = await t.page.browser().newPage();
+  await other.goto(t.page.url());
+  await other.evaluate(write);
+  await other.close();
 }
 
 test('writes made by another tab are reported', async () => {
   await clear();
-  const other = await t.page.browser().newPage();
-  await other.goto(t.page.url());
-  await other.evaluate(async () => {
+  await inOtherTab(async () => {
     await (await caches.open('other-tab')).put('/o', new Response('o'));
     await new Promise<void>(resolve => {
       const open = indexedDB.open('other-tab', 1);
@@ -170,10 +219,15 @@ test('writes made by another tab are reported', async () => {
       };
     });
   });
-  await other.close();
   await waitForBoth(t, 'Storage.cacheStorageContentUpdated', 1, 10_000);
   await waitForBoth(t, 'Storage.indexedDBListUpdated', 1, 10_000);
   await sameEvents(seenByBucket);
+  await cleanUp(async () => {
+    await caches.delete('other-tab');
+    await new Promise(resolve => {
+      indexedDB.deleteDatabase('other-tab').onsuccess = resolve;
+    });
+  });
 });
 
 test('named buckets: listed, reported and read', async () => {
@@ -226,9 +280,10 @@ test('named buckets: listed, reported and read', async () => {
     t.chrome.send('CacheStorage.requestCacheNames', { storageBucket: { storageKey } }),
   ]);
   assert.deepEqual(oursDefault, chromeDefault);
+  await cleanUp(() => navigator.storageBuckets.delete('b1'));
 });
 
-test('a missing named bucket fails without being made', async () => {
+test('a missing named bucket or cache fails without being made', async () => {
   const storageBucket = { storageKey, name: 'missing' };
   const [ours, chrome] = await Promise.allSettled([
     t.ours.send('CacheStorage.requestCacheNames', { storageBucket }),
@@ -236,41 +291,76 @@ test('a missing named bucket fails without being made', async () => {
   ]);
   assert.equal(ours.status, 'rejected');
   assert.equal(chrome.status, 'rejected');
-  assert.deepEqual(await t.page.evaluate(() => navigator.storageBuckets.keys()), ['b1']);
+  assert.equal((await t.page.evaluate(() => navigator.storageBuckets.keys())).includes('missing'), false);
+
+  // Ours first, which must not make the cache: Chrome's requestEntries makes it.
+  const cacheId = `${storageKey}|missing-cache`;
+  const calls = (side: Side) =>
+    Promise.allSettled([
+      side.send('CacheStorage.deleteEntry', { cacheId, request: `${storageKey}x` }),
+      side.send('CacheStorage.requestCachedResponse', { cacheId, requestURL: `${storageKey}x`, requestHeaders: [] }),
+      side.send('CacheStorage.requestEntries', { cacheId, skipCount: 0, pageSize: 10 }),
+    ]).then(results =>
+      results.map(r =>
+        r.status === 'fulfilled' ? r.value : (r.reason as Error).message.replace(/^.*\): /, '').split('\n')[0]
+      )
+    );
+  const ours2 = await calls(t.ours);
+  assert.equal(await t.page.evaluate(() => caches.has('missing-cache')), false);
+  assert.deepEqual(ours2, await calls(t.chrome));
+  await cleanUp(() => caches.delete('missing-cache'));
 });
 
 test('deleting a named bucket', async () => {
+  await t.page.evaluate(async () => {
+    await (await (await navigator.storageBuckets.open('to-delete')).caches.open('c')).put('/d', new Response('d'));
+  });
+  await settle(800);
   await clear();
-  await t.page.evaluate(() => navigator.storageBuckets.delete('b1'));
+  // The order of the events across methods, from a session of Chrome's own tracking too.
+  const session = await t.page.createCDPSession();
+  const chromeOrder: string[] = [];
+  for (const method of EVENTS) session.on(method, () => chromeOrder.push(method));
+  await session.send('Storage.trackIndexedDBForStorageKey', { storageKey });
+  await session.send('Storage.trackCacheStorageForStorageKey', { storageKey });
+  await session.send('Storage.setStorageBucketTracking', { storageKey, enable: true });
+  await settle(300);
+  chromeOrder.length = 0;
+  await clear();
+  await t.page.evaluate(() => navigator.storageBuckets.delete('to-delete'));
   await waitForBoth(t, 'Storage.storageBucketDeleted', 1, 10_000);
-  const [ours, chrome] = await Promise.all([
-    t.ours.events('Storage.storageBucketDeleted'),
-    t.chrome.events('Storage.storageBucketDeleted'),
-  ]);
-  assert.equal(ours.length, chrome.length);
+  await settle(800);
+  await session.detach();
+  const oursOrder = await t.page.evaluate(() =>
+    window.__ours.map(e => e.method).filter(method => method.startsWith('Storage.'))
+  );
+  // The lists come before the deletion; Chrome sends the two lists in either order.
+  const shape = (order: string[]) => [...order.slice(0, -1).sort(), order.at(-1)];
+  assert.equal(chromeOrder.at(-1), 'Storage.storageBucketDeleted');
+  assert.deepEqual(shape(oursOrder), shape(chromeOrder));
 });
 
 test('a bucket made by another tab is reported', async () => {
   await clear();
-  const other = await t.page.browser().newPage();
-  await other.goto(t.page.url());
-  await other.evaluate(async () => {
+  await inOtherTab(async () => {
     const bucket = await navigator.storageBuckets.open('elsewhere', { quota: 1_000_000 });
     await (await bucket.caches.open('ec')).put('/e', new Response('e'));
   });
-  await other.close();
   const [[ours], [chrome]] = await waitForBoth(t, 'Storage.storageBucketCreatedOrUpdated', 1, 10_000);
   const info = (event: typeof ours) => ({ ...event?.bucketInfo, id: undefined });
   assert.deepEqual(info(ours), info(chrome));
   await sameEvents(seenByBucket);
-  await t.page.evaluate(() => navigator.storageBuckets.delete('elsewhere'));
+  await cleanUp(() => navigator.storageBuckets.delete('elsewhere'));
 });
 
 test('untracking stops the events', async () => {
   for (const side of [t.ours, t.chrome]) await side.send('Storage.untrackCacheStorageForStorageKey', { storageKey });
   await clear();
   await t.page.evaluate(async () => (await caches.open('existing')).put('/b', new Response('b')));
-  await settle();
+  await inOtherTab(async () => (await caches.open('existing')).put('/c', new Response('c')));
+  // Long enough for a turn of the snapshots' timer.
+  await settle(POLL);
   assert.deepEqual(await t.ours.events('Storage.cacheStorageContentUpdated'), []);
   assert.deepEqual(await t.chrome.events('Storage.cacheStorageContentUpdated'), []);
+  await t.page.evaluate(() => caches.delete('existing'));
 });
