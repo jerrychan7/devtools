@@ -167,7 +167,9 @@ test('skipWaiting activates a waiting worker that listens for SKIP_WAITING', asy
     t.page.evaluate(
       async (src, s) => {
         const reg = await navigator.serviceWorker.register(src, { scope: s });
+        const start = Date.now();
         while (!reg.waiting || !reg.waiting.scriptURL.endsWith(src.slice(src.lastIndexOf('/')))) {
+          if (Date.now() - start > 10000) throw new Error(`timed out waiting for ${src} to wait`);
           await new Promise(r => setTimeout(r, 50));
         }
       },
