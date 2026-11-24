@@ -46,6 +46,17 @@ test('a registration made in another tab shows when the page gets focus', async 
   await t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.unregister(), assets);
 });
 
+/** Registers `script` for the fixture's directory and waits until it controls the page. */
+const control = (script: string) =>
+  t.page.evaluate(
+    async (src, s) => {
+      await navigator.serviceWorker.register(src, { scope: s });
+      while (!navigator.serviceWorker.controller) await new Promise(r => setTimeout(r, 50));
+    },
+    script,
+    scope
+  );
+
 /** The clients each side last listed on the worker of `script`, by the side's own target id. */
 const clientsOf = async (side: TestPage['ours'], script: string) => {
   const own = (await side.send('Target.getTargetInfo')).targetInfo.targetId;
@@ -57,14 +68,7 @@ const clientsOf = async (side: TestPage['ours'], script: string) => {
 test('the page is listed on the worker that controls it, by its target id', async () => {
   await both(side => side.clear());
   const script = scope + 'sw-events.js?v=1';
-  await t.page.evaluate(
-    async (src, s) => {
-      await navigator.serviceWorker.register(src, { scope: s });
-      while (!navigator.serviceWorker.controller) await new Promise(r => setTimeout(r, 50));
-    },
-    script,
-    scope
-  );
+  await control(script);
   for (const side of [t.chrome, t.ours]) {
     await until(
       async () => (await clientsOf(side, script))?.[0] === 'self',
@@ -73,12 +77,19 @@ test('the page is listed on the worker that controls it, by its target id', asyn
   }
 });
 
+/** The id each side gave the registration of `s`. */
+const idOn = async (side: TestPage['ours'], s: string) => {
+  const id = (await side.events('ServiceWorker.workerRegistrationUpdated'))
+    .flatMap(e => e.registrations)
+    .findLast(r => r.scopeURL === s)?.registrationId;
+  assert.ok(id, `no registration reported for ${s}`);
+  return id;
+};
+
 test('dispatchSyncEvent fires a sync event in the worker', async () => {
   const origin = new URL(scope).origin;
-  const idOn = async (side: TestPage['ours']) =>
-    (await side.events('ServiceWorker.workerRegistrationUpdated'))
-      .flatMap(e => e.registrations)
-      .findLast(r => r.scopeURL === scope)?.registrationId ?? '';
+  await control(scope + 'sw-events.js?v=1');
+  await until(async () => (await scopesOf(t.ours)).length > 0 && (await scopesOf(t.chrome)).length > 0, 'reports');
   type Page = { syncs: string[] };
   await t.page.evaluate(() => {
     const page = window as unknown as Page;
@@ -91,7 +102,7 @@ test('dispatchSyncEvent fires a sync event in the worker', async () => {
   ] as const) {
     await side.send('ServiceWorker.dispatchSyncEvent', {
       origin,
-      registrationId: await idOn(side),
+      registrationId: await idOn(side, scope),
       tag,
       lastChance: false,
     });
@@ -101,24 +112,54 @@ test('dispatchSyncEvent fires a sync event in the worker', async () => {
     const syncs = await t.page.evaluate(() => (window as unknown as Page).syncs);
     return want.every(w => syncs.includes(w));
   }, 'both sync events');
-  // An unknown registration succeeds without effect on both; an id that is no number fails on both.
+  // An unknown registration succeeds without effect on both; an id that is no 64-bit integer
+  // fails on both.
   for (const side of [t.chrome, t.ours]) {
-    await side.send('ServiceWorker.dispatchSyncEvent', { origin, registrationId: '9999', tag: 'x', lastChance: false });
-    await assert.rejects(
-      side.send('ServiceWorker.dispatchSyncEvent', { origin, registrationId: 'x', tag: 'x', lastChance: false }),
-      /Invalid version ID/
-    );
+    for (const registrationId of ['9999', '-1', '+9223372036854775807', '-9223372036854775808']) {
+      await side.send('ServiceWorker.dispatchSyncEvent', { origin, registrationId, tag: 'x', lastChance: false });
+    }
+    for (const registrationId of ['x', '', ' 1', '1.0', '9223372036854775808', '-9223372036854775809']) {
+      await assert.rejects(
+        side.send('ServiceWorker.dispatchSyncEvent', { origin, registrationId, tag: 'x', lastChance: false }),
+        /Invalid version ID/,
+        JSON.stringify(registrationId)
+      );
+    }
   }
   // Only the browser can make a sync the last chance.
   await assert.rejects(
     t.ours.send('ServiceWorker.dispatchSyncEvent', {
       origin,
-      registrationId: await idOn(t.ours),
+      registrationId: await idOn(t.ours, scope),
       tag: 'l',
       lastChance: true,
     }),
     /the browser decides whether a sync event is the last chance/
   );
+});
+
+test('dispatchSyncEvent on a registration with no active worker succeeds without effect', async () => {
+  const origin = new URL(scope).origin;
+  const held = scope + 'held/';
+  // Installing for 3s: the registration has no active worker meanwhile.
+  await t.page.evaluate(
+    (src, s) => navigator.serviceWorker.register(src, { scope: s }).then(() => {}),
+    scope + 'sw-events.js?hold=3000',
+    held
+  );
+  await until(async () => {
+    const [ours, chrome] = [await scopesOf(t.ours), await scopesOf(t.chrome)];
+    return ours.includes(`${held} false`) && chrome.includes(`${held} false`);
+  }, 'reports');
+  for (const side of [t.chrome, t.ours]) {
+    await side.send('ServiceWorker.dispatchSyncEvent', {
+      origin,
+      registrationId: await idOn(side, held),
+      tag: 'held',
+      lastChance: false,
+    });
+  }
+  await t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.unregister(), held);
 });
 
 test('skipWaiting activates a waiting worker that listens for SKIP_WAITING', async () => {

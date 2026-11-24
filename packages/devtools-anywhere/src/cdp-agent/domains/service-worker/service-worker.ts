@@ -18,6 +18,14 @@ const UNSUPPORTED: Record<string, string> = {
 /** How long skipWaiting waits for the waiting worker to activate. */
 const SKIP_WAITING_TIMEOUT = 3000;
 
+const INT64 = 2n ** 63n;
+/** A registration id as Chrome reads it (base::StringToInt64): an optional sign, then digits. */
+const int64 = (text: string) => {
+  if (!/^[+-]?\d+$/.test(text)) return undefined;
+  const n = BigInt(text);
+  return n >= -INT64 && n < INT64 ? n : undefined;
+};
+
 /** Ids of registrations and workers, kept for as long as the objects are. */
 const ids = new WeakMap<object, string>();
 let nextId = 0;
@@ -203,19 +211,28 @@ export function registerServiceWorker(ctx: Pick<Context, 'session' | 'frames'>) 
     },
     /**
      * Asks for a Background Sync (`registration.sync.register(tag)`), which the browser answers with
-     * a real `sync` event in the worker. Like Chrome, the origin is not checked, an unknown
-     * registration succeeds without effect and an id that is no number fails.
+     * a real `sync` event in the worker. Like Chrome, the origin is not checked; an id that is no
+     * 64-bit integer fails, and an unknown registration or one with no active worker succeeds
+     * without effect. Unlike Chrome's, a sync with the tag of one still pending is merged into it
+     * by the browser, and fires only once.
      */
     async dispatchSyncEvent({ registrationId, tag, lastChance }: Protocol.ServiceWorker.DispatchSyncEventRequest) {
-      if (!/^\d+$/.test(registrationId)) throw new CdpError('Invalid version ID');
-      const reg = (await registrations()).find(r => idOf(r) === registrationId);
-      if (!reg) return;
+      const id = int64(registrationId);
+      if (id === undefined) throw new CdpError('Invalid version ID');
+      const reg = (await registrations()).find(r => BigInt(idOf(r)) === id);
+      if (!reg?.active) return;
       // The browser alone decides it; a sync the page asks for is never the last chance.
       if (lastChance) {
         throw new CdpError('Not supported in the page: the browser decides whether a sync event is the last chance');
       }
       const { sync } = reg as ServiceWorkerRegistration & { sync?: { register(tag: string): Promise<void> } };
       if (!sync) throw new CdpError('Not supported in the page: this browser has no Background Sync (SyncManager)');
+      // The browser would hold the sync until it is online again; Chrome's fires at once.
+      if (!navigator.onLine) {
+        throw new CdpError(
+          'Not supported in the page: the browser is offline, so the sync would wait until it is online'
+        );
+      }
       try {
         await sync.register(tag);
       } catch (e) {
