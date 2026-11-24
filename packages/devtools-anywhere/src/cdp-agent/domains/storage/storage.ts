@@ -2,6 +2,7 @@ import type { Protocol } from 'devtools-protocol';
 import type { Context } from '../../core/context';
 import { CdpError } from '../../core/session';
 import { deleteCookie, parseCookies } from '../network/network';
+import { cachesOf, indexedDBOf } from './buckets';
 import { registerStorageTracking } from './tracking';
 
 const storageKey = () => location.origin + '/';
@@ -53,18 +54,25 @@ const request = <T>(req: IDBRequest<T>) =>
  * only finishes once that connection closes; it is queued by then, so that counts as done
  * rather than leaving the command waiting.
  */
-const deleteDatabase = (name: string) =>
+const deleteDatabase = (name: string, factory: IDBFactory = indexedDB) =>
   new Promise<void>((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(name);
+    const req = factory.deleteDatabase(name);
     req.onsuccess = req.onblocked = () => resolve();
     req.onerror = () => reject(req.error);
   });
 
+/** What names a database: the IndexedDB commands' bucket (the default one without) and its name. */
+interface DatabaseAt {
+  storageBucket?: Protocol.Storage.StorageBucket;
+  databaseName: string;
+}
+
 /** Opens an existing database; never creates one. */
-async function openDatabase(name: string): Promise<IDBDatabase> {
-  const names = (await indexedDB.databases()).map(d => d.name);
+async function openDatabase({ storageBucket, databaseName: name }: DatabaseAt): Promise<IDBDatabase> {
+  const factory = await indexedDBOf(storageBucket?.name);
+  const names = (await factory.databases()).map(d => d.name);
   if (!names.includes(name)) throw new CdpError(`Database not found: ${name}`);
-  return request(indexedDB.open(name));
+  return request(factory.open(name));
 }
 
 /**
@@ -115,12 +123,12 @@ function toKeyRange(range?: Protocol.IndexedDB.KeyRange): IDBKeyRange | undefine
 }
 
 async function withStore<T>(
-  databaseName: string,
+  at: DatabaseAt,
   storeName: string,
   mode: IDBTransactionMode,
   fn: (store: IDBObjectStore) => Promise<T>
 ) {
-  const db = await openDatabase(databaseName);
+  const db = await openDatabase(at);
   try {
     return await fn(db.transaction(storeName, mode).objectStore(storeName));
   } finally {
@@ -130,13 +138,30 @@ async function withStore<T>(
 
 // ---- Cache Storage helpers ----
 
-function cacheStorage(): CacheStorage {
-  if (typeof caches === 'undefined') throw new CdpError('Cache Storage is not available in this context');
-  return caches;
+/** A cache: its bucket's name (`''` for the default one) and its own. */
+interface CacheAt {
+  bucket: string;
+  name: string;
 }
 
-const cacheIdOf = (name: string) => `${location.origin}|${name}`;
-const cacheNameOf = (cacheId: string) => cacheId.slice(cacheId.indexOf('|') + 1);
+/** The caches each id given out names: a cache name may hold the `|` the id joins its parts with. */
+const cachesById = new Map<string, CacheAt>();
+
+/** A cache's id in Chrome's form: the storage key, the bucket's name for a named one, the cache's name. */
+function cacheIdOf(at: CacheAt) {
+  const cacheId = [storageKey(), ...(at.bucket ? [at.bucket] : []), at.name].join('|');
+  cachesById.set(cacheId, at);
+  return cacheId;
+}
+
+/** The cache an id names; one not given out here is read as a cache of the default bucket. */
+const cacheOf = (cacheId: string): CacheAt =>
+  cachesById.get(cacheId) ?? { bucket: '', name: cacheId.slice(cacheId.indexOf('|') + 1) };
+
+async function openCache(cacheId: string) {
+  const { bucket, name } = cacheOf(cacheId);
+  return (await cachesOf(bucket)).open(name);
+}
 /** Fetch's `Response.type` in the protocol's names: opaque ones differ. */
 const responseTypeOf = (type: ResponseType): Protocol.CacheStorage.CachedResponseType =>
   type === 'opaque' ? 'opaqueResponse' : type === 'opaqueredirect' ? 'opaqueRedirect' : type;
@@ -248,15 +273,17 @@ export function registerStorage(ctx: Context) {
     enable: () => {},
     disable: () => {},
 
-    async requestDatabaseNames(): Promise<Protocol.IndexedDB.RequestDatabaseNamesResponse> {
-      const databases = await indexedDB.databases();
+    async requestDatabaseNames(
+      params: Protocol.IndexedDB.RequestDatabaseNamesRequest
+    ): Promise<Protocol.IndexedDB.RequestDatabaseNamesResponse> {
+      const databases = await (await indexedDBOf(params.storageBucket?.name)).databases();
       return { databaseNames: databases.flatMap(d => (d.name ? [d.name] : [])) };
     },
 
     async requestDatabase(
       params: Protocol.IndexedDB.RequestDatabaseRequest
     ): Promise<Protocol.IndexedDB.RequestDatabaseResponse> {
-      const db = await openDatabase(params.databaseName);
+      const db = await openDatabase(params);
       try {
         const names = Array.from(db.objectStoreNames);
         const objectStores = names.length
@@ -288,7 +315,7 @@ export function registerStorage(ctx: Context) {
     },
 
     async requestData(params: Protocol.IndexedDB.RequestDataRequest): Promise<Protocol.IndexedDB.RequestDataResponse> {
-      return withStore(params.databaseName, params.objectStoreName, 'readonly', store => {
+      return withStore(params, params.objectStoreName, 'readonly', store => {
         const source = params.indexName ? store.index(params.indexName) : store;
         const cursorRequest = source.openCursor(toKeyRange(params.keyRange));
         const entries: Protocol.IndexedDB.DataEntry[] = [];
@@ -316,37 +343,45 @@ export function registerStorage(ctx: Context) {
     },
 
     async getMetadata(params: Protocol.IndexedDB.GetMetadataRequest): Promise<Protocol.IndexedDB.GetMetadataResponse> {
-      return withStore(params.databaseName, params.objectStoreName, 'readonly', async store => ({
+      return withStore(params, params.objectStoreName, 'readonly', async store => ({
         entriesCount: await request(store.count()),
         keyGeneratorValue: store.autoIncrement ? await keyGeneratorValue(store) : 0,
       }));
     },
 
     async clearObjectStore(params: Protocol.IndexedDB.ClearObjectStoreRequest) {
-      await withStore(params.databaseName, params.objectStoreName, 'readwrite', store => request(store.clear()));
+      await withStore(params, params.objectStoreName, 'readwrite', store => request(store.clear()));
     },
 
     async deleteObjectStoreEntries(params: Protocol.IndexedDB.DeleteObjectStoreEntriesRequest) {
-      await withStore(params.databaseName, params.objectStoreName, 'readwrite', store =>
+      await withStore(params, params.objectStoreName, 'readwrite', store =>
         request(store.delete(required(toKeyRange(params.keyRange), 'keyRange')))
       );
     },
 
     async deleteDatabase(params: Protocol.IndexedDB.DeleteDatabaseRequest) {
-      await deleteDatabase(params.databaseName);
+      await deleteDatabase(params.databaseName, await indexedDBOf(params.storageBucket?.name));
     },
   });
 
   // ---- CacheStorage ----
 
   session.register('CacheStorage', {
-    async requestCacheNames(): Promise<Protocol.CacheStorage.RequestCacheNamesResponse> {
-      const names = await cacheStorage().keys();
+    async requestCacheNames(
+      params: Protocol.CacheStorage.RequestCacheNamesRequest
+    ): Promise<Protocol.CacheStorage.RequestCacheNamesResponse> {
+      const bucket = params.storageBucket?.name ?? '';
+      const names = await (await cachesOf(bucket)).keys();
+      // Chrome names the bucket in each cache when it was asked for one.
+      const storageBucket = params.storageBucket && {
+        storageBucket: { storageKey: storageKey(), ...(bucket ? { name: bucket } : {}) },
+      };
       return {
         caches: names.map(cacheName => ({
-          cacheId: cacheIdOf(cacheName),
+          cacheId: cacheIdOf({ bucket, name: cacheName }),
           securityOrigin: location.origin,
           storageKey: storageKey(),
+          ...storageBucket,
           cacheName,
         })),
       };
@@ -355,7 +390,7 @@ export function registerStorage(ctx: Context) {
     async requestEntries(
       params: Protocol.CacheStorage.RequestEntriesRequest
     ): Promise<Protocol.CacheStorage.RequestEntriesResponse> {
-      const cache = await cacheStorage().open(cacheNameOf(params.cacheId));
+      const cache = await openCache(params.cacheId);
       let requests = await cache.keys();
       const filter = params.pathFilter;
       if (filter) requests = requests.filter(r => new URL(r.url).pathname.includes(filter));
@@ -384,18 +419,19 @@ export function registerStorage(ctx: Context) {
     async requestCachedResponse(
       params: Protocol.CacheStorage.RequestCachedResponseRequest
     ): Promise<Protocol.CacheStorage.RequestCachedResponseResponse> {
-      const cache = await cacheStorage().open(cacheNameOf(params.cacheId));
+      const cache = await openCache(params.cacheId);
       const res = await cache.match(params.requestURL);
       if (!res) throw new CdpError('Entry not found');
       return { response: { body: toBase64(await res.arrayBuffer()) } };
     },
 
     async deleteCache(params: Protocol.CacheStorage.DeleteCacheRequest) {
-      await cacheStorage().delete(cacheNameOf(params.cacheId));
+      const { bucket, name } = cacheOf(params.cacheId);
+      await (await cachesOf(bucket)).delete(name);
     },
 
     async deleteEntry(params: Protocol.CacheStorage.DeleteEntryRequest) {
-      const cache = await cacheStorage().open(cacheNameOf(params.cacheId));
+      const cache = await openCache(params.cacheId);
       await cache.delete(params.request);
     },
   });
