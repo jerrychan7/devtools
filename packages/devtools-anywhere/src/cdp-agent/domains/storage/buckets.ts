@@ -28,8 +28,9 @@ export const bucketManager = (): StorageBucketManager | undefined =>
  * The manager's `open()` as the bundle found it, before the agent's hooks wrap it (`hooks.ts`), for
  * the agent's own calls. A page's wrapper put there before the bundle loaded is the one taken.
  */
-const managerOpen: StorageBucketManager['open'] | undefined = Reflect.get(globalThis, 'StorageBucketManager')?.prototype
-  ?.open;
+const managerProto: StorageBucketManager | undefined = Reflect.get(globalThis, 'StorageBucketManager')?.prototype;
+const managerOpen = managerProto?.open;
+const managerKeys = managerProto?.keys;
 
 /**
  * The quota each bucket was opened with in this window since the hooks (none: opened without one).
@@ -44,10 +45,31 @@ export const openedQuotas = new Map<string, number | undefined>();
  */
 const cacheOpen: CacheStorage['open'] | undefined =
   typeof CacheStorage === 'undefined' ? undefined : CacheStorage.prototype.open;
+// The same for the reads the snapshots make every few seconds (`snapshot.ts`): a page's wrapper
+// put there later neither sees them nor breaks them.
+const cacheStorageKeys = typeof CacheStorage === 'undefined' ? undefined : CacheStorage.prototype.keys;
+const cacheStorageHas = typeof CacheStorage === 'undefined' ? undefined : CacheStorage.prototype.has;
+const cacheKeys = typeof Cache === 'undefined' ? undefined : Cache.prototype.keys;
+const factoryDatabases: IDBFactory['databases'] | undefined =
+  typeof IDBFactory === 'undefined' ? undefined : IDBFactory.prototype.databases;
 
 /** Opens a cache through the browser's own `open()`. */
 export const openCacheOf = (storage: CacheStorage, name: string): Promise<Cache> =>
   Reflect.apply(cacheOpen ?? storage.open, storage, [name]);
+/** The names of a Cache Storage's caches, through the browser's own `keys()`. */
+export const cacheNamesOf = (storage: CacheStorage): Promise<string[]> =>
+  Reflect.apply(cacheStorageKeys ?? storage.keys, storage, []);
+/** Whether a Cache Storage has a cache, through the browser's own `has()`. */
+export const hasCacheOf = (storage: CacheStorage, name: string): Promise<boolean> =>
+  Reflect.apply(cacheStorageHas ?? storage.has, storage, [name]);
+/** The requests of a cache, through the browser's own `keys()`. */
+export const requestsOf = (cache: Cache): Promise<readonly Request[]> =>
+  Reflect.apply(cacheKeys ?? cache.keys, cache, []);
+/** The databases of a factory, through the browser's own `databases()`; none where it has none (Firefox before 126). */
+export const databasesOf = async (factory: IDBFactory): Promise<IDBDatabaseInfo[]> => {
+  const databases = factoryDatabases ?? factory.databases;
+  return typeof databases === 'function' ? Reflect.apply(databases, factory, []) : [];
+};
 
 /**
  * The names of the page's named buckets: none without the API, or where the page may not use it
@@ -55,13 +77,17 @@ export const openCacheOf = (storage: CacheStorage, name: string): Promise<Cache>
  */
 export async function bucketNames(): Promise<string[]> {
   try {
-    return (await bucketManager()?.keys()) ?? [];
+    const manager = bucketManager();
+    return manager ? await Reflect.apply(managerKeys ?? manager.keys, manager, []) : [];
   } catch {
     return [];
   }
 }
 
-/** Opens a bucket known to exist through the browser's own `open()`, which would make a missing one. */
+/**
+ * Opens a bucket known to exist through the browser's own `open()`, which would make a missing one.
+ * The call is made before the first `await`: a caller can start several in the same turn.
+ */
 export async function openBucket(name: string): Promise<StorageBucket | undefined> {
   const manager = bucketManager();
   if (!manager) return undefined;

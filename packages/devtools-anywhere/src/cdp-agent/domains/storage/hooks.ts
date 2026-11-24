@@ -1,4 +1,4 @@
-import { bucketOf, openedQuotas, registerBucketOf } from './buckets';
+import { bucketOf, cacheNamesOf, hasCacheOf, openedQuotas, registerBucketOf } from './buckets';
 
 /**
  * A change of the page's IndexedDB or Cache Storage, as the Storage domain's events tell it, in a
@@ -158,7 +158,7 @@ export function hookWrites() {
       async function (this: CacheStorage, cacheName: string) {
         const bucket = bucketOf(this);
         notify({ pending: true });
-        const isNew = !(await this.has(cacheName));
+        const isNew = !(await hasCacheOf(this, cacheName));
         const cache = await original.call(this, cacheName);
         cacheNames.set(cache, { bucket, name: cacheName });
         if (isNew && bucket !== undefined) notify({ bucket, list: 'cache' });
@@ -185,7 +185,7 @@ export function hookWrites() {
       if (known.bucket !== undefined) notify({ bucket: known.bucket, cacheName: known.name });
       return;
     }
-    for (const cacheName of await caches.keys()) notify({ bucket: '', cacheName });
+    for (const cacheName of await cacheNamesOf(caches)) notify({ bucket: '', cacheName });
   };
   const reported = <A extends unknown[], R>(original: (this: Cache, ...args: A) => Promise<R>) =>
     async function (this: Cache, ...args: A) {

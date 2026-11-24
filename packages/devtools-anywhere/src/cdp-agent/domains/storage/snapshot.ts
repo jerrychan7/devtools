@@ -1,4 +1,4 @@
-import { bucketNames, openBucket, openCacheOf } from './buckets';
+import { bucketNames, cacheNamesOf, databasesOf, hasCacheOf, openBucket, openCacheOf, requestsOf } from './buckets';
 
 /**
  * What can be compared cheaply of a bucket's IndexedDB and Cache Storage, to see the writes the
@@ -7,7 +7,8 @@ import { bucketNames, openBucket, openCacheOf } from './buckets';
  */
 export interface BucketSnapshot {
   databases: Map<string, number>;
-  caches: Map<string, Set<string>>;
+  /** Each cache's request URLs; undefined where they were not read (Cache Storage not tracked). */
+  caches: Map<string, Set<string> | undefined>;
 }
 
 /** The snapshot of each bucket, by name (`''`: the default one). */
@@ -19,38 +20,56 @@ export type Change =
   | { kind: 'idbList' | 'cacheList'; bucket: string }
   | { kind: 'cacheContent'; bucket: string; cacheName: string };
 
-async function snapshotOf(factory: IDBFactory | undefined, storage: CacheStorage | undefined): Promise<BucketSnapshot> {
+/**
+ * The browser's own methods are called (`buckets.ts`): a page's wrapper neither sees these reads,
+ * made every few seconds, nor breaks them. `contents`: whether each cache's requests are read.
+ */
+async function snapshotOf(
+  factory: IDBFactory | undefined,
+  storage: CacheStorage | undefined,
+  contents: boolean
+): Promise<BucketSnapshot> {
   const databases = new Map<string, number>();
   // Without `databases()` (Firefox before 126) the databases cannot be listed: the caches still are.
-  const listed = typeof factory?.databases === 'function' ? await factory.databases() : [];
-  for (const { name, version } of listed) if (name) databases.set(name, version ?? 0);
-  const caches = new Map<string, Set<string>>();
+  for (const { name, version } of factory ? await databasesOf(factory) : [])
+    if (name) databases.set(name, version ?? 0);
+  const caches = new Map<string, Set<string> | undefined>();
   if (!storage) return { databases, caches };
-  // Each cache's whole list of requests is read: the API has no cheaper way to tell a change, not
-  // even a count. `open()` makes a cache deleted since `keys()` again, and nothing tells it from
-  // one still there: `has()` just before narrows that window to a few microtasks.
-  for (const name of await storage.keys()) {
-    if (!(await storage.has(name))) continue;
+  for (const name of await cacheNamesOf(storage)) {
+    if (!contents) {
+      caches.set(name, undefined);
+      continue;
+    }
+    // Each cache's whole list of requests is read: the API has no cheaper way to tell a change, not
+    // even a count. `open()` makes a cache deleted since `keys()` again, and nothing tells it from
+    // one still there: `has()` just before narrows that window to a few microtasks.
+    if (!(await hasCacheOf(storage, name))) continue;
     const cache = await openCacheOf(storage, name);
-    caches.set(name, new Set((await cache.keys()).map(request => request.url)));
+    caches.set(name, new Set((await requestsOf(cache)).map(request => request.url)));
   }
   return { databases, caches };
 }
 
-/** Reads the default bucket and every named one. */
-export async function takeSnapshot(): Promise<Snapshot> {
+/** Reads the default bucket and every named one; each cache's requests only if `contents`. */
+export async function takeSnapshot(contents: boolean): Promise<Snapshot> {
+  // The named buckets are all opened in the turn their names come in, before anything is read:
+  // `open()` makes a missing bucket, so one deleted elsewhere while earlier ones were read would be
+  // made again, every few seconds. What is left is the time between the browser answering `keys()`
+  // and these `open()` calls reaching it, which the API leaves no way to close.
+  const names = await bucketNames();
+  const opened = names.map(name => openBucket(name).catch(() => undefined));
   const snapshot: Snapshot = new Map();
   snapshot.set(
     '',
     await snapshotOf(
       typeof indexedDB === 'undefined' ? undefined : indexedDB,
-      typeof caches === 'undefined' ? undefined : caches
+      typeof caches === 'undefined' ? undefined : caches,
+      contents
     )
   );
-  // The names were just listed: each is opened without listing them again.
-  for (const name of await bucketNames()) {
-    const bucket = await openBucket(name);
-    if (bucket) snapshot.set(name, await snapshotOf(bucket.indexedDB, bucket.caches));
+  for (const [i, name] of names.entries()) {
+    const bucket = await opened[i];
+    if (bucket) snapshot.set(name, await snapshotOf(bucket.indexedDB, bucket.caches, contents));
   }
   return snapshot;
 }
@@ -74,8 +93,9 @@ export function diff(before: Snapshot, after: Snapshot): Change[] {
     const old = was ?? empty;
     if (!sameKeys(old.caches, now.caches, () => true)) changes.push({ kind: 'cacheList', bucket });
     for (const [cacheName, urls] of now.caches) {
-      const oldUrls = old.caches.get(cacheName) ?? new Set();
-      if (!sameSet(oldUrls, urls)) changes.push({ kind: 'cacheContent', bucket, cacheName });
+      // Contents not read on either side are not compared; a new cache's are, against none.
+      const oldUrls = old.caches.has(cacheName) ? old.caches.get(cacheName) : new Set<string>();
+      if (urls && oldUrls && !sameSet(oldUrls, urls)) changes.push({ kind: 'cacheContent', bucket, cacheName });
     }
     if (!sameKeys(old.databases, now.databases, (x, y) => x === y)) changes.push({ kind: 'idbList', bucket });
   }

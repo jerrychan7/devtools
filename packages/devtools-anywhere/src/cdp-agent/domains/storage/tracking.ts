@@ -1,7 +1,7 @@
 import type { Protocol } from 'devtools-protocol';
 import { windowOf } from '../../core/natives';
 import type { CdpSession } from '../../core/session';
-import { bucketNames, existingBucket, openedQuotas } from './buckets';
+import { bucketNames, cacheNamesOf, databasesOf, existingBucket, openedQuotas } from './buckets';
 import { hookWrites, listeners, type StorageWrite } from './hooks';
 import { diff, takeSnapshot, type Change, type Snapshot } from './snapshot';
 
@@ -19,8 +19,8 @@ const SETTLE_MS = 300;
  */
 async function hasBucket() {
   try {
-    if (typeof indexedDB?.databases === 'function' && (await indexedDB.databases()).length) return true;
-    return typeof caches !== 'undefined' && (await caches.keys()).length > 0;
+    if (typeof indexedDB !== 'undefined' && (await databasesOf(indexedDB)).length) return true;
+    return typeof caches !== 'undefined' && (await cacheNamesOf(caches)).length > 0;
   } catch {
     return false;
   }
@@ -166,7 +166,7 @@ export function registerStorageTracking(session: CdpSession, storageKey: string)
       do {
         again = false;
         const before = writes;
-        const now = await takeSnapshot().catch(() => undefined);
+        const now = await takeSnapshot(trackCache).catch(() => undefined);
         if (!now || !active()) break;
         // Read while the hooks reported a write, it may not have that write: read again.
         if (writes !== before) {
