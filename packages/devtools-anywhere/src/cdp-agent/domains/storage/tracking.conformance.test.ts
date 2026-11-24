@@ -46,12 +46,17 @@ setUpAndTearDown(
 const settle = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms));
 const clear = () => Promise.all([t.ours.clear(), t.chrome.clear()]);
 
-/** How many events of `EVENTS` each side has had. */
+/**
+ * How many events of `EVENTS` each side has had. Chrome announces a named bucket again each time
+ * it is opened, which ours' snapshots do on every turn: those announcements are not counted.
+ */
 const counts = async (page = t) =>
   Promise.all(
     [page.ours, page.chrome].map(async side => {
       let n = 0;
-      for (const method of EVENTS) n += (await side.events(method)).length;
+      for (const method of EVENTS)
+        if (side === page.ours || method !== 'Storage.storageBucketCreatedOrUpdated')
+          n += (await side.events(method)).length;
       return n;
     })
   );
