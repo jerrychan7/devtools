@@ -39,11 +39,14 @@ test('a registration made in another tab shows when the page gets focus', async 
   await other.goto(scope + 'fixture.html');
   const assets = scope + 'assets/';
   await other.evaluate(s => navigator.serviceWorker.register(s + 'sw.js', { scope: s }).then(() => {}), assets);
-  await until(async () => (await scopesOf(t.chrome)).includes(`${assets} false`), "Chrome's report");
-  await other.close();
-  await t.page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await until(async () => (await scopesOf(t.ours)).includes(`${assets} false`), 'our report');
-  await t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.unregister(), assets);
+  try {
+    await until(async () => (await scopesOf(t.chrome)).includes(`${assets} false`), "Chrome's report");
+    await other.close();
+    await t.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await until(async () => (await scopesOf(t.ours)).includes(`${assets} false`), 'our report');
+  } finally {
+    await t.page.evaluate(async s => (await navigator.serviceWorker.getRegistration(s))?.unregister(), assets);
+  }
 });
 
 /** Registers `script` for the fixture's directory and waits until it controls the page. */
